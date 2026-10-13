@@ -150,6 +150,9 @@ describe('schema guard', () => {
     // the paths x and x.x split a chain of x in fib(n) ways: 30 levels took 64 ms, and each level adds 60 %.
     const xx = recursive({ properties: { x: { $ref: '#/$defs/a' } }, allOf: [{ properties: { x: { properties: { x: { $ref: '#/$defs/a' } } } } }] });
     expect(prepareSchema(xx)).toMatchObject({ ok: false, reason: expect.stringContaining('exponentially') });
+    // additionalProperties of one branch also applies to x, because that branch has no properties.
+    const anyKey = recursive({ allOf: [{ properties: { x: { $ref: '#/$defs/a' } } }, { additionalProperties: { $ref: '#/$defs/a' } }] });
+    expect(prepareSchema(anyKey)).toMatchObject({ ok: false, reason: expect.stringContaining('exponentially') });
     expect(prepareSchema(recursive({ allOf: [{ $ref: '#/$defs/a' }] }))).toMatchObject({ ok: false, reason: expect.stringContaining('does not end') });
     // a reference to the root counts the same.
     const root = { properties: { a: { $ref: '#' } } };
