@@ -75,6 +75,37 @@ describe('parted secret store', () => {
     expect(entries.size).toBe(0);
   });
 
+  it('deletes the head first, so a stop during a delete never leaves a head without its parts', async () => {
+    const { entries, backend } = fakeKeyring();
+    const store = createPartedStore(backend);
+    const remove = backend.delete;
+    for (let done = 0; done < 4; done++) {
+      await store.set('t', tokens);
+      // the process stops after this many deletes, so each later delete fails.
+      let deletes = 0;
+      backend.delete = async (ref) => {
+        if (deletes++ >= done) throw new Error('the process stopped');
+        await remove(ref);
+      };
+      await store.delete('t').catch(() => {});
+      backend.delete = remove;
+      const value = await store.get('t');
+      expect(value === tokens || value === undefined).toBe(true);
+      expect(entries.has('t')).toBe(done === 0);
+      entries.clear();
+    }
+  });
+
+  it('reads a head whose parts are gone as no value, so a new sign-in can replace it', async () => {
+    const { entries, backend } = fakeKeyring();
+    const store = createPartedStore(backend);
+    await store.set('t', tokens);
+    for (const key of [...entries.keys()]) if (key !== 't') entries.delete(key);
+    expect(await store.get('t')).toBeUndefined();
+    await store.set('t', 'new tokens');
+    expect(await store.get('t')).toBe('new tokens');
+  });
+
   it('finds a damaged value instead of giving wrong text', async () => {
     const { entries, backend } = fakeKeyring();
     const store = createPartedStore(backend);

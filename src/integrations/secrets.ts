@@ -50,6 +50,8 @@ function parseHead(text: string): Head | undefined {
 
 const partRef = (ref: string, generation: string, index: number) => `${ref}#${generation}.${index}`;
 
+class MissingPart extends Error {}
+
 // a value in parts is written in this order: the parts under a new generation, then the head, then the delete of the
 // parts of the old generation. so a crash at any point leaves the old value or the new value, never a mix, and two
 // processes that write at the same time each write their own parts. the hash in the head finds a damaged value.
@@ -67,7 +69,7 @@ export function createPartedStore(backend: KeyringBackend): SecretStore {
     const parts: string[] = [];
     for (let i = 0; i < head.count; i++) {
       const part = await backend.get(partRef(ref, head.generation, i));
-      if (part === null) throw new Error(`part ${i} of the secret ${ref} is missing`);
+      if (part === null) throw new MissingPart(`part ${i} of the secret ${ref} is missing`);
       parts.push(part);
     }
     const value = parts.join('');
@@ -82,7 +84,14 @@ export function createPartedStore(backend: KeyringBackend): SecretStore {
         value = await read(ref);
       } catch {
         // a writer can replace the head and delete the old parts during the read. a second read sees the new value.
-        value = await read(ref);
+        try {
+          value = await read(ref);
+        } catch (err) {
+          // a head whose parts are gone holds no value. without this, each read fails, and a new sign-in that would
+          // write a new value never starts.
+          if (!(err instanceof MissingPart)) throw err;
+          value = undefined;
+        }
       }
       registerSecret(value);
       return value;
@@ -100,10 +109,11 @@ export function createPartedStore(backend: KeyringBackend): SecretStore {
       }
       await deleteParts(ref, old);
     },
+    // the head goes first, the reverse of set. a crash then leaves only parts that nothing reads.
     async delete(ref) {
       const text = await backend.get(ref);
-      await deleteParts(ref, text === null ? undefined : parseHead(text));
       await backend.delete(ref);
+      await deleteParts(ref, text === null ? undefined : parseHead(text));
     },
   };
 }
