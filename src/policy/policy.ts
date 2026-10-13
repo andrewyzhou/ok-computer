@@ -10,7 +10,7 @@ const ruleSchema = z.object({
   tool: z.string().min(1),
   session: z.string().min(1).optional(),
   // each key is a top-level field of the tool input. an object value matches against its json text. a list
-  // matches an allow rule only when each item matches.
+  // matches an allow rule only when each item matches. a deny pattern matches anywhere in the text.
   args: z.record(z.string(), z.string()).optional(),
   effect: z.enum(['allow', 'deny']),
   note: z.string().optional(),
@@ -112,11 +112,13 @@ function matches(rule: Rule, input: PolicyInput): boolean {
   return Object.entries(rule.args).every(([key, pattern]) => {
     const value = fields[key];
     if (value === undefined) return false;
+    // a deny rule matches its pattern anywhere in the text of the value, also in the json text of a list or an
+    // object. so "Eve <eve@evil.example>", a trailing dot, or a list in one string cannot get past "*@evil.example".
+    // a deny rule that matches too much stops a good call, but a deny rule that matches too little lets a bad call out.
+    if (rule.effect === 'deny') return glob(`*${pattern}*`, text(value));
+    // an allow rule must match the whole value, and each item of a list, so one good recipient cannot carry a bad one.
     if (!Array.isArray(value)) return glob(pattern, text(value));
-    // an allow rule must match each item of a list, so one good recipient cannot carry a bad one. a deny rule
-    // matches when one item or the json text of the list matches.
-    if (rule.effect === 'allow') return value.every((item) => glob(pattern, text(item)));
-    return glob(pattern, text(value)) || value.some((item) => glob(pattern, text(item)));
+    return value.every((item) => glob(pattern, text(item)));
   });
 }
 

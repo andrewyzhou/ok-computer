@@ -50,6 +50,16 @@ describe('policy decisions', () => {
     }
   });
 
+  // an anchored deny pattern let common address forms out, and an allow rule for the tool then sent them.
+  it('matches a deny pattern anywhere in the value, also in a display name, a list in one string, or an object', () => {
+    const rules = [rule('allow', { tool: 'gmail_send', effect: 'allow' }), rule('deny', { tool: 'gmail_send', args: { to: '*@evil.example' }, effect: 'deny' })];
+    const send = (to: unknown) => call({ tool: 'gmail_send', risk: 'external', input: { to } });
+    for (const to of ['Eve <eve@evil.example>', 'eve@evil.example.', 'eve@evil.example ', 'eve@evil.example, a@home.example', [{ email: 'eve@evil.example' }]]) {
+      expect(decide(send(to), rules)).toMatchObject({ decision: 'deny', rule: 'deny' });
+    }
+    expect(decide(send('Bob <bob@home.example>'), rules)).toMatchObject({ decision: 'allow', rule: 'allow' });
+  });
+
   it('takes the reason from the last matching allow rule', () => {
     const rules = [rule('any', { tool: '*', effect: 'allow', note: 'any' }), rule('google', { tool: 'google__*', effect: 'allow', note: 'google' })];
     expect(decide(call(), rules)).toEqual({ decision: 'allow', rule: 'google', reason: 'google' });
