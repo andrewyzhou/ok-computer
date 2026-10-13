@@ -7,7 +7,11 @@ import { silentLogger } from '../observability/logger.js';
 import { createRunQueue } from './queue.js';
 import { createRouter } from './router.js';
 
-function setup(agent: (input: RunInput) => Promise<RunResult>, isOwner = () => true) {
+function setup(
+  agent: (input: RunInput) => Promise<RunResult>,
+  isOwner = () => true,
+  approvals?: (id: number, decision: string, via: string) => Promise<string>,
+) {
   const db = openDb(':memory:');
   const sent: string[] = [];
   const channel: ChannelAdapter = {
@@ -27,6 +31,7 @@ function setup(agent: (input: RunInput) => Promise<RunResult>, isOwner = () => t
     channels: new Map([['cli', channel]]),
     agent,
     isOwner,
+    ...(approvals ? { approvals } : {}),
   });
   return { db, router, sent };
 }
@@ -67,6 +72,36 @@ describe('router', () => {
       slot: 'main',
       events: [{ type: 'user_message', payload: { text: 'hello', channel: 'cli', chatId: 'c1' } }],
     });
+  });
+
+  it('resolves approvals only from a button or a command, never from free text', async () => {
+    const agent = vi.fn(async (): Promise<RunResult> => ({ runId: 'r', status: 'completed', text: 'ok' }));
+    const approvals = vi.fn(async (id: number, decision: string) => `${decision} ${id}`);
+    const { router, sent } = setup(agent, () => true, approvals);
+    await router.handle(message('yes'));
+    await router.handle(message('approve 1'));
+    expect(approvals).not.toHaveBeenCalled();
+    expect(agent).toHaveBeenCalledTimes(2);
+
+    await router.handle(message('/approve 1'));
+    await router.handle(message('/deny #2'));
+    await router.handle({ ...message('1'), button: 'approval:3:approve' });
+    await router.handle({ ...message('2'), button: 'something else' });
+    expect(approvals.mock.calls).toEqual([
+      [1, 'approve', 'command'],
+      [2, 'deny', 'command'],
+      [3, 'approve', 'button'],
+    ]);
+    expect(agent).toHaveBeenCalledTimes(2);
+    expect(sent).toEqual(['ok', 'ok', 'approve 1', 'deny 2', 'approve 3']);
+  });
+
+  it('refuses an approval command from an unknown sender', async () => {
+    const approvals = vi.fn(async () => 'approved');
+    const { router, sent } = setup(vi.fn(), () => false, approvals);
+    await router.handle(message('/approve 1'));
+    expect(approvals).not.toHaveBeenCalled();
+    expect(sent).toEqual(['Sorry, I only talk with my owner.']);
   });
 
   it('runs one message at a time in the main session', async () => {

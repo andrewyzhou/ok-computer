@@ -1,6 +1,6 @@
 import { createInterface, type Interface } from 'node:readline';
 import type { Clock } from '../time.js';
-import type { ChannelAdapter } from './types.js';
+import type { Button, ChannelAdapter } from './types.js';
 
 export const CLI_CHAT_ID = 'local';
 
@@ -18,6 +18,7 @@ export function createCliChannel(options: CliOptions = {}): ChannelAdapter {
   const clock = options.clock ?? (() => new Date());
   let rl: Interface | undefined;
   let sent = 0;
+  let choices: Button[] = [];
 
   return {
     id: 'cli',
@@ -26,7 +27,17 @@ export function createCliChannel(options: CliOptions = {}): ChannelAdapter {
       rl.on('line', (line) => {
         const text = line.trim();
         if (!text) return;
-        onMessage({ channel: 'cli', senderId: 'owner', chatId: CLI_CHAT_ID, text, receivedAt: clock().toISOString() });
+        // a number right after a message with choices presses that button.
+        const choice = /^\d+$/.test(text) ? choices[Number(text) - 1] : undefined;
+        choices = [];
+        onMessage({
+          channel: 'cli',
+          senderId: 'owner',
+          chatId: CLI_CHAT_ID,
+          text,
+          receivedAt: clock().toISOString(),
+          ...(choice ? { button: choice.data } : {}),
+        });
       });
       rl.on('close', () => options.onClose?.());
     },
@@ -36,8 +47,10 @@ export function createCliChannel(options: CliOptions = {}): ChannelAdapter {
     },
     async send(out) {
       // the terminal cannot show buttons, so the cli shows them as numbered choices.
-      const choices = (out.buttons ?? []).flat().map((button, i) => `  ${i + 1}. ${button.text}`);
-      output.write(`\nokc> ${out.text}\n${choices.length ? choices.join('\n') + '\n' : ''}\n`);
+      const buttons = (out.buttons ?? []).flat();
+      if (buttons.length) choices = buttons;
+      const lines = buttons.map((button, i) => `  ${i + 1}. ${button.text}`);
+      output.write(`\nokc> ${out.text}\n${lines.length ? lines.join('\n') + '\n' : ''}\n`);
       return { messageId: String(++sent) };
     },
   };

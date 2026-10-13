@@ -1,4 +1,5 @@
 import type { RunInput, RunResult } from '../agent/loop.js';
+import { parseApprovalButton, type Decision, type ResolvedVia } from '../approvals/store.js';
 import type { ChannelAdapter, InboundMessage } from '../channels/types.js';
 import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
@@ -19,8 +20,14 @@ export interface RouterDeps {
   channels: Map<string, ChannelAdapter>;
   agent: (input: RunInput) => Promise<RunResult>;
   isOwner: (message: InboundMessage) => boolean;
+  // the router saves the chat of each owner message, so proactive messages go to the chat that the owner used last.
+  rememberOwnerChat?: (chat: { channel: string; chatId: string }) => void;
+  // resolve gives the text of the reply to the owner.
+  approvals?: (id: number, decision: Decision, via: ResolvedVia) => Promise<string>;
   signal?: AbortSignal;
 }
+
+const APPROVAL_COMMAND = /^\/(approve|deny)\s+#?(\d+)$/i;
 
 export interface Router {
   handle(message: InboundMessage): Promise<void>;
@@ -48,6 +55,22 @@ export function createRouter(deps: RouterDeps): Router {
       if (!deps.isOwner(message)) {
         logger.warn('message from an unknown sender', { channel: message.channel, senderId: message.senderId });
         await reply('Sorry, I only talk with my owner.');
+        return;
+      }
+      deps.rememberOwnerChat?.({ channel: message.channel, chatId: message.chatId });
+
+      // only a button or an explicit command resolves an approval. free text such as "yes" goes to the model.
+      if (message.button !== undefined) {
+        const pressed = parseApprovalButton(message.button);
+        if (pressed && deps.approvals) await reply(await deps.approvals(pressed.id, pressed.decision, 'button'));
+        else logger.warn('unknown button', { data: message.button });
+        return;
+      }
+      const command = APPROVAL_COMMAND.exec(message.text.trim());
+      if (command) {
+        if (!deps.approvals) return reply('Approvals are not available.');
+        const decision = command[1]!.toLowerCase() === 'approve' ? 'approve' : 'deny';
+        await reply(await deps.approvals(Number(command[2]), decision, 'command'));
         return;
       }
 

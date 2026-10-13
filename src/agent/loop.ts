@@ -156,22 +156,24 @@ async function runTool(
   const started = performance.now();
   const ctx = { runId, sessionKey: input.sessionKey, timeZone: deps.config.timeZone, clock: deps.clock, signal };
   const output = await deps.tools.run(call, input.allowedTools, ctx);
-  deps.db
-    .prepare(
-      `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      runId,
-      call.id,
-      call.name,
-      redactedJson(call.input),
-      redactedJson(output),
-      output.isError ? 1 : 0,
-      Math.round(performance.now() - started),
-      deps.clock().toISOString(),
-    );
+  recordToolCall(deps.db, runId, call, output, Math.round(performance.now() - started), deps.clock());
   return output;
+}
+
+export function recordToolCall(db: Db, runId: string, call: ToolCall, output: ToolOutput, durationMs: number, now: Date): void {
+  db.prepare(
+    `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    runId,
+    call.id,
+    call.name,
+    redactedJson(call.input),
+    redactedJson(output),
+    output.isError ? 1 : 0,
+    durationMs,
+    now.toISOString(),
+  );
 }
 
 function abortReason(signal: AbortSignal): string | undefined {

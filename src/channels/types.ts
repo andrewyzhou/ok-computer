@@ -4,6 +4,8 @@ export interface InboundMessage {
   chatId: string;
   text: string;
   replyToMessageId?: string;
+  // the data of the button that the owner pressed. a message with a button never goes to the model.
+  button?: string;
   receivedAt: string;
 }
 

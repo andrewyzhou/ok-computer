@@ -59,6 +59,35 @@ describe('tool registry', () => {
     expect(result).toEqual({ content: 'unknown tool: echo', isError: true });
   });
 
+  it('sends a tool that needs approval to the gate and runs it only through runApproved', async () => {
+    let ran = 0;
+    const send = defineTool({
+      name: 'send',
+      description: 'Send.',
+      input: z.object({ to: z.string() }),
+      risk: 'external',
+      async run({ to }) {
+        ran++;
+        return { content: `sent to ${to}` };
+      },
+    });
+    const gated: unknown[] = [];
+    const withGate = createToolRegistry([send], {
+      gate: async (tool, input) => {
+        gated.push([tool.name, input]);
+        return { content: 'pending' };
+      },
+    });
+    expect(await withGate.run({ id: '1', name: 'send', input: { to: 'bob' } }, ['send'], ctx)).toEqual({ content: 'pending' });
+    expect(gated).toEqual([['send', { to: 'bob' }]]);
+    expect(ran).toBe(0);
+    expect(await withGate.runApproved('send', { to: 'bob' }, ctx)).toEqual({ content: 'sent to bob' });
+
+    const noGate = createToolRegistry([send]);
+    expect((await noGate.run({ id: '1', name: 'send', input: { to: 'bob' } }, ['send'], ctx)).isError).toBe(true);
+    expect(ran).toBe(1);
+  });
+
   it('gives the time in the owner time zone', async () => {
     const result = await registry.run({ id: '1', name: 'now', input: {} }, allowed, ctx);
     expect(result.content).toBe('Monday, October 12, 2026 at 20:15 PDT (2026-10-13T03:15:00.000Z)');

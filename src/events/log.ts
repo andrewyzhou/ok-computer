@@ -8,6 +8,8 @@ export interface EventPayloads {
   tool_result: { toolCallId: string; name: string; content: string; isError: boolean };
   // the volatile part of the system prompt, recorded at the start of each run.
   context: { text: string };
+  // a message from the system, not from the owner: an automation prompt, a check-in, or an approval result.
+  system_event: { text: string };
   note: { text: string };
   session_reset: Record<string, never>;
 }

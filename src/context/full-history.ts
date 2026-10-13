@@ -36,6 +36,9 @@ export function renderEvents(events: StoredEvent[]): ModelMessage[] {
       case 'note':
         pushUser({ type: 'text', text: `<note>\n${event.payload.text}\n</note>` });
         break;
+      case 'system_event':
+        pushUser({ type: 'text', text: `<system_event>\n${event.payload.text}\n</system_event>` });
+        break;
       case 'tool_result':
         pushUser({
           type: 'tool_result',
