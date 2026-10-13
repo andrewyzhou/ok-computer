@@ -26,12 +26,15 @@ export function createResultReadTool(deps: { db: Db; blobs: BlobStore }) {
     }),
     risk: 'read',
     async run({ handle, query, from, length }) {
-      const row = deps.db.prepare('SELECT rawResultBlob, untrustedSource FROM tool_calls WHERE resultHandle = ?').get(handle);
+      const row = deps.db.prepare('SELECT rawResultBlob, untrustedSource, isError FROM tool_calls WHERE resultHandle = ?').get(handle);
       const text = row?.rawResultBlob ? deps.blobs.read(String(row.rawResultBlob)) : undefined;
       if (text === undefined) return { content: `no stored result has the handle ${handle}`, isError: true };
       const source = row?.untrustedSource ? { untrustedSource: String(row.untrustedSource) } : {};
+      // a part of an error keeps the error mark. an error can quote the call of the model, and the exfiltration guard
+      // does not count the text of an error as read from outside (urlSeen).
+      const error = row?.isError ? { isError: true } : {};
       const content = query ? search(text, handle, query) : page(text, handle, from, length);
-      return { content, ...source };
+      return { content, ...source, ...error };
     },
   });
 }

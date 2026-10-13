@@ -112,8 +112,10 @@ function toolNameOf(db: Db, name: string, runId: string | null, toolCallId: stri
 // a url that the session already read carries no new data. only text from outside counts: a successful tool result
 // with an untrusted source. text of the agent does not count, also when it is wrapped as untrusted, because an
 // injected model can put a data url in it: a hold or an error that quotes the call, an unknown tool name, or the
-// answer of a sub-agent (delegate). a system event does not count, because it is model text too, for example the task
-// of a sub-agent or the result of an automation. the newest 2,000 events bound the work of one check. the payload is
+// answer of a sub-agent. the source of that answer starts with "sub:", and result_read copies the source, so the
+// answer does not count when the model reads it again through its handle. a system event does not count, because it
+// is model text too, for example the task of a sub-agent or the result of an automation. the newest 2,000 events
+// bound the work of one check. the payload is
 // redacted json text, so a url with a secret or an escaped character does not match, and goes to review. the url must
 // end where the read url ends, so the model cannot send a part of a longer url and choose where the part ends.
 export function urlSeen(db: Db, sessionKey: string, url: string): boolean {
@@ -125,7 +127,7 @@ export function urlSeen(db: Db, sessionKey: string, url: string): boolean {
            AND seq > (SELECT COALESCE(MAX(seq), 0) FROM events WHERE sessionKey = ? AND type = 'session_reset')
          ORDER BY seq DESC LIMIT 2000)
        WHERE json_extract(payload, '$.untrustedSource') IS NOT NULL AND json_extract(payload, '$.isError') = 0
-         AND json_extract(payload, '$.name') <> 'delegate' AND instr(payload, ?) > 0`,
+         AND json_extract(payload, '$.untrustedSource') NOT LIKE 'sub:%' AND instr(payload, ?) > 0`,
     )
     .all(sessionKey, sessionKey, url);
   return rows.some((row) => {

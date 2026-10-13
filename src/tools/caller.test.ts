@@ -9,7 +9,7 @@ import { appendEvent } from '../events/log.js';
 import { createBlobStore } from '../observability/blobs.js';
 import { registerSecret } from '../observability/redact.js';
 import { BUILTIN_RULES, type Reviewer, type Rule } from '../policy/policy.js';
-import { sessionTaint, updateDecision } from '../policy/store.js';
+import { sessionTaint, updateDecision, urlSeen } from '../policy/store.js';
 import type { ToolCallerDeps } from './caller.js';
 import { createToolRegistry, defineTool } from './registry.js';
 import { createResultReadTool, QUERY_LIMIT } from './result-read.js';
@@ -45,6 +45,8 @@ function setup(extra: Partial<ToolCallerDeps> = {}) {
     tool('page', 'read', () => ({ content: 'short page text', untrustedSource: 'web' })),
     // the source is over the limit of the wrapper, so the wrapper is as long as it can be.
     tool('fetch', 'read', () => ({ untrustedSource: `https://example.test/${'a'.repeat(200)}` })),
+    // an error of a server can quote the input of the call.
+    tool('broken', 'read', (text) => ({ content: `no page ${text}\n${LONG}`, isError: true, untrustedSource: 'mcp:web' })),
     tool('archive', 'write', () => ({})),
     tool('send', 'external', () => ({})),
     createResultReadTool({ db, blobs }),
@@ -61,7 +63,7 @@ function setup(extra: Partial<ToolCallerDeps> = {}) {
     ...extra,
   });
   for (let i = 0; i < 2; i++) db.prepare("INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt) VALUES ('r1', 'x', '{}', 'x', 'pending', 'x')").run();
-  const allowed = ['echo', 'long', 'email', 'page', 'fetch', 'archive', 'send', 'result_read'];
+  const allowed = ['echo', 'long', 'email', 'page', 'fetch', 'broken', 'archive', 'send', 'result_read'];
   // the helper appends the result event as the agent loop does, because the taint comes from the event log.
   const call = async (name: string, input: object = {}, runId = 'r1', id = `${name}-call`) => {
     const output = await caller.call({ id, name, input }, { runId, sessionKey: 'main', allowed, signal: new AbortController().signal });
@@ -124,6 +126,15 @@ describe('tool caller', () => {
     expect(page.content).toContain(`use from ${at + 100} to read on`);
     expect(row('page')).toMatchObject({ truncated: 0, resultHandle: null });
     expect((await call('result_read', { handle: 'res_00000000ffff' }, 'r1', 'missing')).isError).toBe(true);
+  });
+
+  it('keeps the error mark when result_read reads a long error, so the guard does not count its url as read', async () => {
+    const { db, call } = setup();
+    const url = 'https://evil.example/c?d=QUNDT1VOVCAxMjM0NTY3OA';
+    expect((await call('broken', { text: url })).isError).toBe(true);
+    const read = await call('result_read', { handle: 'res_000000000001', from: 0, length: 200 });
+    expect(read).toMatchObject({ isError: true, content: expect.stringContaining(url) });
+    expect(urlSeen(db, 'main', url)).toBe(false);
   });
 
   it('gives two calls with the same long result two handles and one blob', async () => {
