@@ -23,6 +23,8 @@ export const HEARTBEAT_PREFIX = 'heartbeat:';
 const CHECKLIST = 'heartbeat_checklist';
 const CHECKLIST_TAINT = 'heartbeat_checklist_taint';
 const SYNCED_EVERY = 'heartbeat_synced_every_ms';
+// the last heartbeat runs whose message to the owner failed. the list keeps as many runs as the recent notifications.
+const UNSENT_RUNS = 'heartbeat_unsent_runs';
 const RECENT_LIMIT = 5;
 
 export const HEARTBEAT_INSTRUCTIONS = `This is a heartbeat run. The owner does not see this session. Check the items of the heartbeat checklist against the context that you have. Then call heartbeat_respond one time. Use notify true with a short message only when something needs the owner's attention now. Use notify false in all other cases. Do not repeat a recent notification. After heartbeat_respond, reply NO_REPLY.`;
@@ -85,11 +87,15 @@ function responses(db: Db, sql: string, ...params: string[]): Respond[] {
     .map((row) => JSON.parse(String(row.input)) as Respond);
 }
 
+// a message that did not reach the owner is not a recent notification. the next heartbeat would see it as sent, and
+// it could then keep back the signal that the failed message was about.
 export function recentNotifications(db: Db): string[] {
   return responses(
     db,
     `SELECT input FROM tool_calls WHERE name = 'heartbeat_respond' AND isError = 0
-       AND json_extract(input, '$.notify') = 1 ORDER BY id DESC LIMIT ${RECENT_LIMIT}`,
+       AND json_extract(input, '$.notify') = 1 AND runId NOT IN (SELECT value FROM json_each(?))
+       ORDER BY id DESC LIMIT ${RECENT_LIMIT}`,
+    JSON.stringify(getSetting<string[]>(db, UNSENT_RUNS) ?? []),
   ).map((respond) => respond.text ?? '');
 }
 
@@ -196,21 +202,25 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
 
     // the answer comes from the event log, because one failed trace write must not drop the owner's notification.
     const answer = succeededCalls(db, sessionKey, runId, 'heartbeat_respond').at(-1) as Respond | undefined;
-    if (answer?.notify && answer.text) {
-      await owner.send(answer.text);
+    const message = answer?.notify ? answer.text : undefined;
+    const notified = !!message && (await owner.send(message));
+    if (message && !notified) {
+      const unsent = [runId, ...(getSetting<string[]>(db, UNSENT_RUNS) ?? [])].slice(0, RECENT_LIMIT);
+      setSetting(db, UNSENT_RUNS, unsent, clock());
     }
     // the mark comes after the send. a crash between the two shows the signals again, and the recent notifications
     // tell the next heartbeat not to repeat itself. a lost deadline is worse than a repeated one. a run that gave no
-    // heartbeat_respond did not decide about the signals, so they stay open for the next heartbeat. the digest closes
-    // them as stale after some days, so a model that never answers cannot hold them for ever. the filtered signals
+    // heartbeat_respond did not decide about the signals, and a message that did not reach the owner did not tell
+    // about them, so in both cases they stay open for the next heartbeat. the digest closes them as stale after some
+    // days, so a model that never answers or a channel that stays down cannot hold them for ever. the filtered signals
     // need no decision.
-    const notified = !!(answer?.notify && answer.text);
-    if (digest) deps.signals!.finish(answer ? digest : { ...digest, shown: [] }, runId, notified, clock());
-    if (answer?.notify && answer.text) {
+    if (digest) deps.signals!.finish(answer && !!message === notified ? digest : { ...digest, shown: [] }, runId, notified, clock());
+    if (message && !notified) return { status: 'completed', runId, error: 'the message to the owner failed, so the signals stay open' };
+    if (message && notified) {
       // the notification can repeat untrusted content that the heartbeat read, so it carries that taint, and its text
       // is wrapped.
       const taint = sessionTaint(db, sessionKey);
-      const text = `The heartbeat sent this message to the owner:\n${wrapIfTainted(taint, answer.text)}`;
+      const text = `The heartbeat sent this message to the owner:\n${wrapIfTainted(taint, message)}`;
       await queue.enqueue(MAIN_SESSION, async () => {
         appendEvent(
           db,
