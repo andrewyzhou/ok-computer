@@ -1,11 +1,10 @@
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { fileURLToPath } from 'node:url';
 
 export type Db = DatabaseSync;
 
-const MIGRATIONS_DIR = fileURLToPath(new URL('./migrations/', import.meta.url));
+const MIGRATIONS_DIR = join(import.meta.dirname, 'migrations');
 
 export function openDb(path: string, migrationsDir = MIGRATIONS_DIR): Db {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });

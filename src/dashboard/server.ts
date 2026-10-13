@@ -1,7 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono, type Context } from 'hono';
@@ -47,7 +46,7 @@ export interface DashboardDeps {
   webDir?: string;
 }
 
-const WEB_DIR = fileURLToPath(new URL('../../web/dist/', import.meta.url));
+const WEB_DIR = join(import.meta.dirname, '../../web/dist');
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
 const enabledBody = z.object({ enabled: z.boolean() });
