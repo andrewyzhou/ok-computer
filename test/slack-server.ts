@@ -45,6 +45,8 @@ export interface SlackFake {
   };
   // the time of the fake slack in unix seconds.
   now: () => number;
+  // the time zone of the user. the search reads the day of after:<day> in it, and the profile answer names it.
+  timeZone: string;
 }
 
 const text = (value: string, isError = false) => ({ content: [{ type: 'text' as const, text: value }], ...(isError ? { isError: true } : {}) });
@@ -59,6 +61,7 @@ export function createSlackFake(now: () => number): SlackFake {
     calls: [],
     faults: { format: 'markdown', newestFirst: false, errors: 0, hold: undefined },
     now,
+    timeZone: 'UTC',
     server() {
       const server = new Server({ name: 'slack-mcp', version: '1.0.0' }, { capabilities: { tools: {} } });
       server.setRequestHandler('tools/list', async () => ({
@@ -115,7 +118,7 @@ export function createSlackFake(now: () => number): SlackFake {
         fake.calls.push(request.params.name);
         switch (request.params.name) {
           case 'slack_read_user_profile':
-            return text(`## Profile\nName: Owner\nUser ID: ${SELF}\nTimezone: America/Los_Angeles`);
+            return text(`## Profile\nName: Owner\nUser ID: ${SELF}\nTimezone: ${fake.timeZone}`);
           case 'slack_read_channel':
             return text(fake.messages.filter((m) => m.channel === args.channel_id).map((m) => `${m.user}: ${m.text}`).join('\n') || 'No messages.');
           case 'slack_read_thread':
@@ -149,7 +152,7 @@ async function search(fake: SlackFake, args: Record<string, unknown>) {
   if (!filters && !keywords.length) return text('Require at least one of keywords or filters.', true);
   if (fake.faults.format === 'garbage') return text('The search service has a new look! Your messages are in a widget now.');
   const types = String(args.channel_types ?? 'public_channel,private_channel,mpim,im').split(',');
-  // slack reads the day of after: in the time zone of the user. the fake reads it in utc.
+  // slack reads the day of after: in the time zone of the user, and gives only the later days.
   const afterDay = /after:(\d{4}-\d{2}-\d{2})/.exec(filters)?.[1];
   const after = Number(args.after ?? 0);
   const asc = args.sort === 'timestamp' && args.sort_dir === 'asc' && !fake.faults.newestFirst;
@@ -158,7 +161,7 @@ async function search(fake: SlackFake, args: Record<string, unknown>) {
       (m) =>
         types.includes(kindOf(m.channel)) &&
         Number(m.ts) >= after &&
-        (afterDay === undefined || new Date(Number(m.ts) * 1000).toISOString().slice(0, 10) > afterDay) &&
+        (afterDay === undefined || new Date(Number(m.ts) * 1000).toLocaleDateString('en-CA', { timeZone: fake.timeZone }) > afterDay) &&
         (m.indexedAt ?? 0) <= fake.now() &&
         keywords.every((word) => m.text.toLowerCase().includes(word.toLowerCase())),
     )

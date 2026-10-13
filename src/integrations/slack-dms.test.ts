@@ -129,7 +129,7 @@ describe('slack dm poll', () => {
     const t = await setup();
     await t.poll();
     expect(t.fake.searches[0]).toEqual({
-      filters: 'after:2026-10-11',
+      filters: 'after:2026-10-10',
       channel_types: 'im,mpim',
       after: String(t.nowS() - FIRST_LOOKBACK_S),
       sort: 'timestamp',
@@ -153,6 +153,21 @@ describe('slack dm poll', () => {
     await t.poll();
     expect(Number(t.fake.searches.at(-1)!.after)).toBe(Math.floor(Number(shown.ts)) - OVERLAP_S);
     expect(t.signals().map((signal) => signal.externalId)).toContain(`${DM_ALICE}:${late.ts}`);
+  });
+
+  it('finds an evening dm of a user west of utc, whose slack reads the day of the filter in local time', async () => {
+    const t = await setup();
+    t.fake.timeZone = 'America/Los_Angeles';
+    // 18:00 pdt on 10-13 is 01:00 utc on 10-14. one day of margin gave after:2026-10-13 here, which in los angeles
+    // leaves out the whole evening of 10-13.
+    t.advance(9 * 60 * 60_000);
+    t.dm(300, 'five to six pm');
+    expect(await t.poll()).toEqual({ status: 'completed' });
+    t.advance(POLL_MS);
+    t.dm(300, 'ten past six pm');
+    expect(await t.poll()).toEqual({ status: 'completed' });
+    expect(t.signals().map((signal) => String(signal.summary).replace(/^.*: /, ''))).toEqual(['five to six pm', 'ten past six pm']);
+    expect(t.fake.searches.at(-1)!.filters).toBe('after:2026-10-12');
   });
 
   it('reads a burst of 45 dms over pages in one poll', async () => {

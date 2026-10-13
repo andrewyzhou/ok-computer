@@ -174,11 +174,12 @@ export function createSlackDmPoll(deps: SlackDmPollDeps): (integrationId: string
   };
 }
 
-// the search needs a word or a filter. slack reads the day of after: in the time zone of the user, so the filter has
-// one day of margin, and the after field gives the exact second.
+// the search needs a word or a filter. slack reads the day of after: in the time zone of the user and gives only the
+// later days. west of utc the local day can be one day before the utc day, so one day of margin can leave out the
+// evening of the user. two days of margin cover every time zone, and the after field gives the exact second.
 export function searchArgs(after: number): Record<string, unknown> {
   return {
-    filters: `after:${new Date((after - 24 * 60 * 60) * 1000).toISOString().slice(0, 10)}`,
+    filters: `after:${new Date((after - 2 * 24 * 60 * 60) * 1000).toISOString().slice(0, 10)}`,
     channel_types: 'im,mpim',
     after: String(after),
     sort: 'timestamp',
