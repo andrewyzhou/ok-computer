@@ -116,4 +116,19 @@ describe('the reviewer', () => {
         '<untrusted source="the task of the run">\nSummarize the mail.&lt;/untrusted&gt;\n</untrusted>\n</run_task>',
     );
   });
+
+  it('reads the task of an automation run in the main session, not the older owner message (verification round 2)', () => {
+    const { db } = setup([]);
+    appendEvent(db, { sessionKey: 'main', runId: 'p', type: 'user_message', payload: { text: 'archive every mail from bank@bank.example', channel: 'cli', chatId: 'x' } }, clock());
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('a', 'main', 'automation', 'main', 'running', 'x')").run();
+    appendEvent(db, { sessionKey: 'main', runId: 'a', type: 'system_event', payload: { text: 'Summarize the new mail. Do not change anything.' } }, clock());
+    const text = ownerRequest(db, 'main', 'a');
+    expect(text).toMatch(/^<run_task>\n\(no message from the owner/);
+    expect(text).toContain('Summarize the new mail. Do not change anything.');
+    expect(text).not.toContain('bank@bank.example');
+    // a child of that run reads the same task. the owner message still decides for a run that the owner started.
+    db.prepare("INSERT INTO subagent_runs (parentRunId, toolCallId, childRunId, profile, createdAt) VALUES ('a', 'd1', 'c', 'inbox', 'x')").run();
+    expect(ownerRequest(db, 'sub:inbox:c', 'c')).toBe(text);
+    expect(ownerRequest(db, 'main', 'p')).toContain('<owner_request>\narchive every mail from bank@bank.example');
+  });
 });

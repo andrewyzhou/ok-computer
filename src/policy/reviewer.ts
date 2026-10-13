@@ -81,7 +81,7 @@ export function reviewRequest(db: Db, request: ReviewRequest): ModelRequest {
     throw new Error(`the input has ${input.length} characters, over the review limit of ${REVIEW_INPUT_LIMIT}`);
   }
   const text = [
-    ownerRequest(db, request.sessionKey),
+    ownerRequest(db, request.sessionKey, request.runId),
     // only the names of the sources. the untrusted text itself never reaches the reviewer, so it cannot instruct it.
     `<untrusted_sources>${request.taint.length ? escapeText(request.taint.join(', ')) : 'none'}</untrusted_sources>`,
     `<policy_reason>${escapeText(request.reason)}</policy_reason>`,
@@ -93,34 +93,43 @@ export function reviewRequest(db: Db, request: ReviewRequest): ModelRequest {
 // the owner's request comes from the session that the owner talks to. a child has only the task that its parent
 // model wrote, and an injection in the parent can write that task. so a child uses the session of its parent. a
 // session without an owner message, such as an automation run, gives the first system event as the task of the run.
-// a model can have written that text too, so it is marked and wrapped.
-export function ownerRequest(db: Db, sessionKey: string): string {
-  const key = sessionKey.startsWith('sub:') ? parentSession(db, sessionKey) : sessionKey;
-  if (key === undefined) return '<owner_request>(no request from the owner was found)</owner_request>';
+// a model can have written that text too, so it is marked and wrapped. an automation or a heartbeat can also run in
+// the main session. the last owner message there is older than the run and is not its task, so such a run gives its
+// own first system event.
+export function ownerRequest(db: Db, sessionKey: string, runId?: string): string {
+  const scope = sessionKey.startsWith('sub:') ? parentRun(db, sessionKey) : { key: sessionKey, runId };
+  if (scope === undefined) return '<owner_request>(no request from the owner was found)</owner_request>';
+  const { key } = scope;
+  const trigger = scope.runId === undefined ? undefined : db.prepare('SELECT trigger FROM runs WHERE id = ?').get(scope.runId)?.trigger;
+  const ownRun = trigger !== undefined && trigger !== 'message' && trigger !== 'system';
   const reset = '(SELECT COALESCE(MAX(seq), 0) FROM events WHERE sessionKey = ? AND type = ?)';
-  const owner = db
-    .prepare(
-      `SELECT json_extract(payload, '$.text') AS text FROM events
-       WHERE sessionKey = ? AND type = 'user_message' AND seq > ${reset} ORDER BY seq DESC LIMIT 1`,
-    )
-    .get(key, key, 'session_reset');
-  if (owner) return `<owner_request>\n${escapeText(headOf(String(owner.text), REQUEST_LIMIT))}\n</owner_request>`;
-  const start = db
-    .prepare(
-      `SELECT json_extract(payload, '$.text') AS text FROM events
-       WHERE sessionKey = ? AND type = 'system_event' AND seq > ${reset} ORDER BY seq LIMIT 1`,
-    )
-    .get(key, key, 'session_reset');
+  if (!ownRun) {
+    const owner = db
+      .prepare(
+        `SELECT json_extract(payload, '$.text') AS text FROM events
+         WHERE sessionKey = ? AND type = 'user_message' AND seq > ${reset} ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(key, key, 'session_reset');
+    if (owner) return `<owner_request>\n${escapeText(headOf(String(owner.text), REQUEST_LIMIT))}\n</owner_request>`;
+  }
+  const start = ownRun
+    ? db.prepare(`SELECT json_extract(payload, '$.text') AS text FROM events WHERE runId = ? AND type = 'system_event' ORDER BY seq LIMIT 1`).get(scope.runId!)
+    : db
+        .prepare(
+          `SELECT json_extract(payload, '$.text') AS text FROM events
+           WHERE sessionKey = ? AND type = 'system_event' AND seq > ${reset} ORDER BY seq LIMIT 1`,
+        )
+        .get(key, key, 'session_reset');
   if (!start) return '<owner_request>(no request from the owner was found)</owner_request>';
   const task = wrapUntrusted('the task of the run', escapeText(headOf(String(start.text), REQUEST_LIMIT)));
   return `<run_task>\n(no message from the owner; the run started with this system text)\n${task}\n</run_task>`;
 }
 
-function parentSession(db: Db, sessionKey: string): string | undefined {
+function parentRun(db: Db, sessionKey: string): { key: string; runId: string } | undefined {
   const row = db
-    .prepare('SELECT runs.sessionKey FROM subagent_runs JOIN runs ON runs.id = subagent_runs.parentRunId WHERE childRunId = ?')
+    .prepare('SELECT runs.sessionKey, runs.id FROM subagent_runs JOIN runs ON runs.id = subagent_runs.parentRunId WHERE childRunId = ?')
     .get(sessionKey.slice(sessionKey.lastIndexOf(':') + 1));
-  return row ? String(row.sessionKey) : undefined;
+  return row ? { key: String(row.sessionKey), runId: String(row.id) } : undefined;
 }
 
 // json escapes for < and > keep the text valid json and keep a closing tag in it from ending the block. the other
