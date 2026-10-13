@@ -240,6 +240,7 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
   const reviews = new Map([...decisions.values()].flatMap((decision) => (decision.reviewerModelCallId === null ? [] : [[decision.reviewerModelCallId, decision] as const])));
   const links = subagentLinks(db, 'subagent_runs.parentRunId = ?', id);
   const placed = new Set<number>();
+  const pending = new Set<SubagentLink>();
   const timeline: TimelineItem[] = [];
   for (const row of modelRows) {
     const reviewed = reviews.get(Number(row.id));
@@ -268,7 +269,10 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
       // call of a closed run, or with a closed child, shows as interrupted.
       const link = links.find((each) => each.toolCallId === requested.id);
       const live = run.status === 'running' && (link?.status === null || link?.status === 'running');
-      if (link) asked.push(pendingDelegate(id, requested, link, -1 - links.indexOf(link), live));
+      if (link) {
+        asked.push(pendingDelegate(id, requested, link, -1 - links.indexOf(link), live));
+        pending.add(link);
+      }
     }
     timeline.push({ kind: 'model', call: toModelCall(row), tools: asked });
   }
@@ -276,6 +280,15 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
   for (const link of links) {
     const tool = tools.find((call) => call.name === 'delegate' && call.toolCallId === link.toolCallId);
     if (tool) tool.child = link;
+    // an approved delegate call runs after its run ended, and no model call asked for it under its id (approval-N).
+    // its row comes when the child ends, so until then it shows as a call of its own with the child. the run is
+    // closed, so only the status of the child tells if it still runs.
+    else if (!pending.has(link)) {
+      const approval = db.prepare('SELECT input FROM approvals WHERE id = ?').get(Number(link.toolCallId.replace(/^approval-/, '')));
+      const requested = { id: link.toolCallId, input: approval ? JSON.parse(String(approval.input)) : null };
+      const live = link.status === null || link.status === 'running';
+      timeline.push({ kind: 'tool', call: pendingDelegate(id, requested, link, -1 - links.indexOf(link), live) });
+    }
   }
   const events = db.prepare('SELECT * FROM events WHERE runId = ? ORDER BY id').all(id).map(toEventRow);
   return { run, parent: subagentLinks(db, 'subagent_runs.childRunId = ?', id)[0] ?? null, timeline, events };

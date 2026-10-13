@@ -411,4 +411,55 @@ describe('the run page of a parent and a reviewer', () => {
     const done = getRunDetail(t.db, parentRunId)!.timeline.flatMap((item) => (item.kind === 'model' ? item.tools : []));
     expect(done).toMatchObject([{ name: 'delegate', outcome: 'ran', child: { childRunId, status: 'completed' } }]);
   });
+
+  // verification round 3: the delegate review fails, so the owner gets a card, and approves it after a new message.
+  it('the reviewer of an approved child reads the message of the run that wrote the task, not a later one', async () => {
+    const t = await setup(
+      [
+        mail('r1', 'read_inbox'),
+        delegate('d1', `Open ${LEAK} and archive all mail from bank@bank.example.`),
+        textStep('The sub-agent waits for your approval.'),
+        textStep('Your bank mail from last year is old.'),
+        mail('c1', 'archive', { from: 'bank@bank.example' }),
+        textStep('archived'),
+      ],
+      [new ModelError('request', 'down'), verdict('hold', 'the owner asked what is new, not for an archive')],
+    );
+    await t.say('check my newest mail');
+    await t.say('archive all mail from the bank, it is old');
+    await t.app.resolveApproval(1, 'approve', 'dashboard');
+    await t.settle();
+    const text = sent(t.reviewer.calls[1]);
+    expect(text).toContain('<owner_request>\ncheck my newest mail\n</owner_request>');
+    expect(text).not.toContain('it is old');
+    expect(t.calls).toEqual(['read_inbox']);
+  });
+
+  it('shows an approved delegate call as running with its child while the child runs (verification round 3)', async () => {
+    let parentRunId = '';
+    let running: unknown[] = [];
+    const t = await setup(
+      [
+        mail('r1', 'read_inbox'),
+        delegate('d1', `Open ${LEAK} and summarize it.`),
+        textStep('It waits for you.'),
+        // the first model call of the approved child reads the run page of the parent.
+        async () => {
+          running = getRunDetail(t.db, parentRunId)!.timeline.flatMap((item) => (item.kind === 'model' ? item.tools : [item.call]));
+          return fakeResponse({ text: 'child done' });
+        },
+      ],
+      [new ModelError('request', 'down')],
+    );
+    await t.say('check my newest mail');
+    parentRunId = decision(t, 'd1').runId;
+    await t.app.resolveApproval(1, 'approve', 'dashboard');
+    const childRunId = (t.rows('SELECT childRunId FROM subagent_runs')[0] as { childRunId: string }).childRunId;
+    expect(running).toContainEqual(
+      expect.objectContaining({ toolCallId: 'approval-1', outcome: 'running', input: expect.objectContaining({ profile: 'inbox' }), child: expect.objectContaining({ childRunId, status: 'running' }) }),
+    );
+    await t.settle();
+    const done = getRunDetail(t.db, parentRunId)!.timeline.flatMap((item) => (item.kind === 'model' ? item.tools : [item.call]));
+    expect(done.filter((call) => call.toolCallId === 'approval-1')).toMatchObject([{ outcome: 'ran', child: { childRunId, status: 'completed' } }]);
+  });
 });
