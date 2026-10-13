@@ -18,6 +18,20 @@ It runs on this PC. Its persona files (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, an
 - **Big observability UI:** every turn, tool call, model, token count, cost and error is logged and browsable in a web dashboard.
 - **Language:** TypeScript on Node.js.
 
+## Running it
+
+`scripts/okc.ps1 install` adds an `okc` command, an "OK Computer" desktop shortcut, and a logon task that starts the agent in the background.
+
+| Command | What it does |
+|---|---|
+| `okc` | Build if needed, start in the background, open the dashboard |
+| `okc stop` / `okc restart` | Stop or restart the agent |
+| `okc status` | Show whether it runs, the dashboard URL, and recent restarts |
+| `okc logs` | Follow the agent log |
+| `okc open` | Open the dashboard at http://127.0.0.1:4317 |
+
+A small supervisor restarts the agent if it stops. The logon task means it runs whenever you are signed in to Windows.
+
 ## Phases
 
 1. **Core coach (done):** Telegram adapter, agent loop, workspace files, scheduler (automations + heartbeat), 3-goals routine, daily notes + nightly consolidation into weekly trends, run logging, first version of the observability dashboard.
