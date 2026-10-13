@@ -122,9 +122,9 @@ export const configSchema = z.object({
   dashboard: z
     .object({
       port: z.number().int().min(1).max(65535).default(4317),
-      // the address of the dashboard on another device, for example a tailscale serve url. /dashboard sends it, and
-      // the server accepts its host name when DASHBOARD_TOKEN is set.
-      url: z.url({ protocol: /^https?$/ }).optional(),
+      // the https address of the dashboard on another device, for example a tailscale serve url. /dashboard sends a
+      // sign-in link to it, and the server accepts its host name only when DASHBOARD_TOKEN is set.
+      publicUrl: z.url({ protocol: /^https$/ }).optional(),
     })
     .prefault({}),
 });

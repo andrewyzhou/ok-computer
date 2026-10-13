@@ -38,6 +38,7 @@ import {
   toMcpMessage,
 } from './queries.js';
 import { integrationDetail, summaryOf } from './integrations.js';
+import { LOGIN_PAGE, type LoginCodes } from './login.js';
 import { createFeed } from './stream.js';
 import type { ContextView, MemoryFile, Meta } from './types.js';
 
@@ -50,6 +51,8 @@ export interface DashboardDeps {
   // with a token, every api request must give it. the browser gives it in the query, because EventSource has no
   // headers.
   token?: string;
+  // the codes that /dashboard sends. without them, only the token signs in.
+  codes?: LoginCodes;
   pollMs?: number;
   webDir?: string;
 }
@@ -67,16 +70,8 @@ function same(given: string | undefined, expected: string | undefined): boolean 
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-const loginPage = (error: string) => `<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>OK Computer</title></head>
-<body style="font-family: system-ui, sans-serif; max-width: 22rem; margin: 4rem auto; padding: 0 1rem">
-<h1 style="font-size: 1.3rem">OK Computer</h1>
-<form method="post" action="/login">
-<label>Dashboard token<br><input name="token" type="password" autocomplete="current-password" required style="width: 100%; padding: .4rem"></label>
-<p style="color: #b00020">${error}</p>
-<button type="submit" style="padding: .4rem 1rem">Sign in</button>
-</form></body></html>`;
-
+// a login gives a code from /dashboard or the token. the body is json, so a form on another site cannot send it.
+const loginBody = z.union([z.object({ code: z.string().min(1).max(64) }).strict(), z.object({ token: z.string().min(1).max(512) }).strict()]);
 const enabledBody = z.object({ enabled: z.boolean() });
 const checklistBody = z.object({ checklist: z.string().max(10_000) });
 const decisionBody = z.object({ decision: z.enum(['approve', 'deny']) });
@@ -95,7 +90,8 @@ export function createDashboard(deps: DashboardDeps): Hono {
   const session = deps.token ? createHmac('sha256', deps.token).update('okc dashboard session').digest('hex') : undefined;
   // tailscale serve forwards the requests of the tailnet name. that name is accepted only with a token, so the
   // dashboard is never open on the tailnet without one.
-  const remoteHost = deps.token && config.dashboard.url ? new URL(config.dashboard.url).hostname : undefined;
+  const remoteHost = deps.token && config.dashboard.publicUrl ? new URL(config.dashboard.publicUrl).hostname : undefined;
+  if (config.dashboard.publicUrl && !deps.token) logger.warn('dashboard.publicUrl is ignored, because DASHBOARD_TOKEN is not set');
 
   // a web page in the browser can send requests to a loopback port. the host check stops dns rebinding, and the
   // json check makes the browser ask for cors permission before a write, which this server never gives.
@@ -103,9 +99,11 @@ export function createDashboard(deps: DashboardDeps): Hono {
     const host = new URL(c.req.url).hostname;
     if (!LOOPBACK.has(host) && host !== remoteHost) return c.text('forbidden', 403);
     if (c.req.path.startsWith('/api/')) {
+      // the login is the one api request that comes before a sign-in. it checks its own code or token.
+      const open = c.req.path === '/api/login';
       const given = c.req.header('authorization')?.replace(/^Bearer /, '') ?? c.req.query('token');
       const signedIn = (given !== undefined && same(given, deps.token)) || same(getCookie(c, SESSION_COOKIE), session);
-      if (deps.token && !signedIn) return c.json({ error: 'unauthorized' }, 401);
+      if (deps.token && !signedIn && !open) return c.json({ error: 'unauthorized' }, 401);
       const write = c.req.method !== 'GET' && c.req.method !== 'HEAD';
       if (write && !c.req.header('content-type')?.startsWith('application/json')) {
         return c.json({ error: 'send a json body' }, 415);
@@ -120,16 +118,22 @@ export function createDashboard(deps: DashboardDeps): Hono {
   };
   const notFound = (c: Context, what: string) => c.json({ error: `${what} not found` }, 404);
 
-  // the owner gives the token one time in a form. the token then never goes into a url, a bookmark or the history.
-  server.get('/login', (c) => (session ? c.html(loginPage('')) : c.redirect('/')));
-  server.post('/login', async (c) => {
-    const form = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
-    const token = typeof form.token === 'string' ? form.token : '';
-    if (!session || !same(token, deps.token)) return c.html(loginPage('That token is wrong.'), 401);
-    const https = c.req.header('x-forwarded-proto') === 'https' || new URL(c.req.url).protocol === 'https:';
+  // the owner signs in one time with a code or the token. the token then never goes into a url, a bookmark or the
+  // history.
+  server.get('/login', (c) => (session ? c.html(LOGIN_PAGE) : c.redirect('/')));
+  server.post('/api/login', async (c) => {
+    const given = await body(c, loginBody);
+    const host = new URL(c.req.url).hostname;
+    const valid = given !== undefined && ('code' in given ? deps.codes?.spend(given.code) === true : same(given.token, deps.token));
+    if (!session || !given || !valid) {
+      logger.warn('dashboard login refused', { host });
+      return c.json({ error: 'that code or token does not work' }, 401);
+    }
+    // tailscale serve forwards plain http, so the public host or the forwarded protocol tells that the browser uses https.
+    const https = host === remoteHost || c.req.header('x-forwarded-proto') === 'https' || new URL(c.req.url).protocol === 'https:';
     setCookie(c, SESSION_COOKIE, session, { httpOnly: true, sameSite: 'Strict', path: '/', maxAge: SESSION_SECONDS, secure: https });
-    logger.info('dashboard login', { host: new URL(c.req.url).hostname });
-    return c.redirect('/', 303);
+    logger.info('dashboard login', { host, via: 'code' in given ? 'code' : 'token' });
+    return c.json({ ok: true });
   });
 
   server.get('/api/meta', (c) => c.json({ timeZone: tz, now: clock().toISOString() } satisfies Meta));

@@ -32,14 +32,18 @@ The dashboard listens only on `127.0.0.1:4317` on the PC. Tailscale Serve makes 
 4. **Tell OK Computer the address.** In `okc.config.json`:
 
    ```json
-   { "dashboard": { "url": "https://my-pc.tail1234.ts.net" } }
+   { "dashboard": { "publicUrl": "https://my-pc.tail1234.ts.net" } }
    ```
 
-   The dashboard accepts that host name only while `DASHBOARD_TOKEN` is set. `/dashboard` in Telegram sends this link.
+   The address must start with `https://`. The dashboard accepts that host name only while `DASHBOARD_TOKEN` is set. Without the token, the log says that `publicUrl` is ignored.
 
 5. **Restart:** `okc restart`.
 
-6. **Sign in once on each device.** With Tailscale on, open the address. The page sends you to `/login`. Paste the token. The browser keeps a sign-in cookie for 30 days. The cookie holds a value made from the token, not the token itself.
+6. **Sign in once on each device.** With Tailscale on, send `/dashboard` to the bot in Telegram. It answers with a sign-in link. Open it and press **Sign in**. The link works one time, for 5 minutes. Opening the page does not use it up, so a link preview in Telegram does no harm; only the button signs you in.
+
+   On a device without Telegram, open the address. The page sends you to `/login`. Paste the token and press **Sign in**.
+
+   The browser keeps a sign-in cookie for 30 days. The cookie holds a value made from the token, not the token itself.
 
 The dashboard on the PC (`http://127.0.0.1:4317`) asks for the token too while `DASHBOARD_TOKEN` is set.
 
@@ -57,7 +61,9 @@ tailscale serve reset
 
 | You see | Why | Fix |
 |---|---|---|
-| `forbidden` | The host name is not `127.0.0.1` or the host of `dashboard.url`, or `DASHBOARD_TOKEN` is not set | Check step 2 and step 4, then restart |
+| `forbidden` | The host name is not `127.0.0.1` or the host of `dashboard.publicUrl`, or `DASHBOARD_TOKEN` is not set | Check step 2 and step 4, then restart |
+| `/dashboard` explains what to set instead of a link | `DASHBOARD_TOKEN` or `dashboard.publicUrl` is missing | Check step 2 and step 4, then restart |
+| "This link does not work any more" | The link is older than 5 minutes, was used already, or the agent restarted | Send `/dashboard` again |
 | The login page again after you sign in | The browser did not keep the cookie | Allow cookies for the `ts.net` address |
 | The page does not load at all | Tailscale is off on the device, or Serve is not running | Turn Tailscale on; run `tailscale serve status` on the PC |
 

@@ -1,4 +1,5 @@
 import type { Button } from '../channels/types.js';
+import type { LoginCodes } from '../dashboard/login.js';
 import type { Db } from '../db/index.js';
 import { formatGoal, listGoals } from '../goals/store.js';
 import { headOf } from '../text.js';
@@ -19,17 +20,28 @@ export interface RunState {
   queued?: number;
 }
 
+const NO_LINK = (url: string) =>
+  [
+    `The dashboard: ${url}`,
+    'A sign-in link for another device needs DASHBOARD_TOKEN in .env and dashboard.publicUrl in okc.config.json, then a restart.',
+    'docs/setup/tailscale.md shows the steps.',
+  ].join('\n');
+
 export interface CommandDeps {
   db: Db;
   clock: Clock;
   timeZone: string;
   dashboardUrl: string;
   approvalCard: (id: number) => Card;
+  // signInLink gives a link to the public dashboard with a new code. without it, /dashboard says what to set.
+  signInLink?: () => string;
   // the state of each integration, for /status.
   integrations?: () => Array<{ id: string; state: { status: string } }>;
 }
 
 const MAX_CARDS = 10;
+
+export const signInLink = (publicUrl: string, codes: LoginCodes) => () => `${new URL('/login', publicUrl).href}?code=${codes.issue()}`;
 
 // these commands read the database and answer in code. they need no model call, and they work while a run is busy.
 // a command name that is not here goes to the model as text.
@@ -81,7 +93,7 @@ export function createCommands(deps: CommandDeps) {
         return ids.length > MAX_CARDS ? [...cards, { text: `${ids.length - MAX_CARDS} more wait on the dashboard: ${deps.dashboardUrl}` }] : cards;
       }
       case '/dashboard':
-        return [{ text: deps.dashboardUrl }];
+        return [{ text: deps.signInLink ? `${deps.signInLink()}\nThe link signs you in one time and works for 5 minutes.` : NO_LINK(deps.dashboardUrl) }];
       default:
         return undefined;
     }

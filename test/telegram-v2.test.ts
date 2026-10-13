@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { InMemoryTransport, type Transport } from '@modelcontextprotocol/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { COMMANDS, createTelegramChannel } from '../src/channels/telegram.js';
+import { createLoginCodes, type LoginCodes } from '../src/dashboard/login.js';
+import { createDashboard } from '../src/dashboard/server.js';
 import { listEvents } from '../src/events/log.js';
 import { parseIntegrations } from '../src/integrations/config.js';
 import { fakeResponse, textStep, toolStep, type FakeStep } from '../src/models/fake.js';
@@ -17,7 +19,7 @@ const OWNER = 777;
 const start = '2026-10-13T09:00:00-07:00';
 
 // the whole app with telegram as its only channel, a fake model, and an in-memory server whose add_note is external.
-function setup(steps: FakeStep[], options: { integrations?: boolean; policyPath?: string; config?: Record<string, unknown> } = {}) {
+function setup(steps: FakeStep[], options: { integrations?: boolean; policyPath?: string; config?: Record<string, unknown>; loginCodes?: LoginCodes } = {}) {
   const telegram = createFakeTelegram();
   const entries = options.integrations
     ? parseIntegrations({
@@ -38,6 +40,7 @@ function setup(steps: FakeStep[], options: { integrations?: boolean; policyPath?
       ownerIds: { telegram: String(OWNER) },
       ...(entries ? { integrations: entries.value, mcpTransport: transport } : {}),
       ...(options.policyPath ? { policyPath: options.policyPath } : {}),
+      ...(options.loginCodes ? { loginCodes: options.loginCodes } : {}),
     },
   });
   return { ...t, telegram };
@@ -196,19 +199,48 @@ describe('telegram v2 acceptance', () => {
   });
 
   it('answers /status, /goals, /approvals and /dashboard in code', async () => {
-    const t = setup([], { config: { dashboard: { url: 'https://okc-pc.example.ts.net' } } });
+    const t = setup([]);
     apps.push(t);
     await t.app.start();
     for (const command of ['/status', '/goals', '/approvals', '/dashboard']) owner(t, command);
     await until(() => of(t, 'sendMessage').length === 4);
     expect(of(t, 'sendMessage').map((m) => m.text)).toEqual([
-      'Nothing runs now.\nNo approval waits for you.\nDashboard: https://okc-pc.example.ts.net',
+      'Nothing runs now.\nNo approval waits for you.\nDashboard: http://127.0.0.1:4317',
       'No goals for today yet.',
       'No approval waits for you.',
-      'https://okc-pc.example.ts.net',
+      [
+        'The dashboard: http://127.0.0.1:4317',
+        'A sign-in link for another device needs DASHBOARD_TOKEN in .env and dashboard.publicUrl in okc.config.json, then a restart.',
+        'docs/setup/tailscale.md shows the steps.',
+      ].join('\n'),
     ]);
     expect(t.model.calls).toHaveLength(0);
     expect(listEvents(t.db, 'main')).toEqual([]);
+  });
+
+  it('sends a one-time sign-in link for the dashboard over tailscale', async () => {
+    const publicUrl = 'https://okc-pc.example.ts.net';
+    const codes = createLoginCodes(() => t.clock());
+    const t = setup([], { config: { dashboard: { publicUrl } }, loginCodes: codes });
+    apps.push(t);
+    await t.app.start();
+    owner(t, '/dashboard');
+    await until(() => of(t, 'sendMessage').length === 1);
+    const [link, note] = String(of(t, 'sendMessage')[0]!.text).split('\n');
+    expect(note).toBe('The link signs you in one time and works for 5 minutes.');
+    const url = new URL(link!);
+    expect(`${url.origin}${url.pathname}`).toBe(`${publicUrl}/login`);
+
+    const server = createDashboard({ db: t.db, config: t.config, clock: t.clock, logger: silentLogger, app: t.app, token: 'secret-token', codes });
+    const signIn = () =>
+      server.request(`${publicUrl}/api/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code: url.searchParams.get('code') }),
+      });
+    expect((await server.request(link!)).status).toBe(200);
+    expect((await signIn()).status).toBe(200);
+    expect((await signIn()).status).toBe(401);
   });
 
   it('shows the arguments of an approval in an expandable quote, and lists pending cards with /approvals', async () => {

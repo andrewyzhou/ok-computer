@@ -6,6 +6,7 @@ import { createAlwaysAllow } from './approvals/always.js';
 import { approvalNote, createApprovalFlow, type ApprovalFlow } from './approvals/flow.js';
 import { expireApprovals, type Approval } from './approvals/store.js';
 import type { ChannelAdapter } from './channels/types.js';
+import type { LoginCodes } from './dashboard/login.js';
 import type { Config } from './config/schema.js';
 import { sinceLastReset } from './context/full-history.js';
 import { createTrimAndCompact } from './context/trim-and-compact.js';
@@ -44,7 +45,7 @@ import {
 import { AUTOMATION_TOOLS, createJobRunner } from './scheduler/jobs.js';
 import { createScheduler, type Scheduler, type SetTimer } from './scheduler/scheduler.js';
 import { createAutomationTools } from './scheduler/tools.js';
-import { createCommands } from './sessions/commands.js';
+import { createCommands, signInLink } from './sessions/commands.js';
 import { createOwnerMessenger } from './sessions/owner.js';
 import { createRunQueue } from './sessions/queue.js';
 import { createRouter, MAIN_SESSION, MAIN_TOOLS } from './sessions/router.js';
@@ -78,6 +79,9 @@ export interface AppDeps {
   connectIntegrations?: boolean;
   // the policy file that "always allow" writes. without it, approval cards have no "always allow" button.
   policyPath?: string;
+  // the codes of the dashboard that runs in this process. with them and dashboard.publicUrl, /dashboard sends a
+  // sign-in link.
+  loginCodes?: LoginCodes;
 }
 
 export interface App {
@@ -274,7 +278,8 @@ export function createApp(deps: AppDeps): App {
       db,
       clock,
       timeZone: config.timeZone,
-      dashboardUrl: config.dashboard.url ?? `http://127.0.0.1:${config.dashboard.port}`,
+      dashboardUrl: config.dashboard.publicUrl ?? `http://127.0.0.1:${config.dashboard.port}`,
+      ...(config.dashboard.publicUrl && deps.loginCodes ? { signInLink: signInLink(config.dashboard.publicUrl, deps.loginCodes) } : {}),
       approvalCard: approvals.card,
       integrations: () => integrations.status(),
     }),
