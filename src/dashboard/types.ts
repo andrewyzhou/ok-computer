@@ -82,7 +82,7 @@ export interface ToolCallRow {
   // preview, a wrapped text, or a late result. such a row without a blob lost its raw text in a failed blob write.
   rawResultBlob: string | null;
   // one word from outcomeOf in outcome.ts: ran, failed, invalid, denied, held, waiting, approved, declined, expired,
-  // abandoned, late, interrupted or unsent.
+  // abandoned, late, interrupted or unsent. a delegate call whose child still runs has no row yet, and is running.
   outcome: string;
   policy: PolicyDecisionRow | null;
   // the integration that ran the tool, and the json-rpc messages of the call. a built-in tool has none.
@@ -174,8 +174,9 @@ export interface IntegrationDetail extends IntegrationSummary {
 }
 
 // a model call holds the tool calls that its response asked for. a tool call that ran after an approval has no
-// such model call, so it is an item of its own.
-export type TimelineItem = { kind: 'model'; call: ModelCallRow; tools: ToolCallRow[] } | { kind: 'tool'; call: ToolCallRow };
+// such model call, so it is an item of its own. reviews are the reviewer calls with no verdict that checked the tool
+// calls of the turn.
+export type TimelineItem = { kind: 'model'; call: ModelCallRow; tools: ToolCallRow[]; reviews?: ModelCallRow[] } | { kind: 'tool'; call: ToolCallRow };
 
 export interface BlobBody {
   hash: string;

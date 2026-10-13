@@ -52,7 +52,7 @@ function CatalogView({ hash }: { hash: string }) {
   );
 }
 
-function ModelCallItem({ call, tools }: { call: ModelCallRow; tools: ToolCallRow[] }) {
+function ModelCallItem({ call, tools, reviews = [] }: { call: ModelCallRow; tools: ToolCallRow[]; reviews?: ModelCallRow[] }) {
   return (
     <li className={`step step-model${call.error ? ' is-error' : ''}`}>
       <div className="step-head">
@@ -75,6 +75,21 @@ function ModelCallItem({ call, tools }: { call: ModelCallRow; tools: ToolCallRow
         </Expand>
       ) : null}
       <Expand label="full request and response">{() => <ModelCallBodyView id={call.id} />}</Expand>
+      {reviews.length ? (
+        <Expand label={`${reviews.length} reviewer calls with no verdict`}>
+          {() => (
+            <ul>
+              {reviews.map((review) => (
+                <li key={review.id}>
+                  {review.provider}/{review.model}, slot {review.slot}, {usd(review.costUsd)}, {ms(review.latencyMs)}
+                  {review.error ? <span className="error-text"> {review.error}</span> : null}
+                  <Expand label="what the reviewer saw and answered">{() => <ModelCallBodyView id={review.id} />}</Expand>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Expand>
+      ) : null}
       {tools.length ? (
         <ol className="timeline nested">
           {tools.map((tool) => (
@@ -92,7 +107,7 @@ function Timeline({ items, className = 'timeline' }: { items: TimelineItem[]; cl
     <ol className={className}>
       {items.map((item) =>
         item.kind === 'model' ? (
-          <ModelCallItem key={`m${item.call.id}`} call={item.call} tools={item.tools} />
+          <ModelCallItem key={`m${item.call.id}`} call={item.call} tools={item.tools} reviews={item.reviews} />
         ) : (
           <ToolCallItem key={`t${item.call.id}`} call={item.call} />
         ),

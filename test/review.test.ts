@@ -338,3 +338,56 @@ describe('the exfiltration guard counts only outside text as read', () => {
     expect(t.calls).toEqual(['read_inbox']);
   });
 });
+
+describe('the run page of a parent and a reviewer', () => {
+  it('shows a reviewer call with no verdict with its turn, not as a turn of the agent', async () => {
+    const t = await setup(
+      [mail('r1', 'read_inbox'), mail('a1', 'archive', { from: 'bank@bank.example' }), textStep('It waits for you.')],
+      [new ModelError('transient', 'overloaded'), new ModelError('transient', 'overloaded'), toolStep({ id: 'v', name: REVIEW_TOOL, input: { verdict: 'maybe', reason: 'x' } })],
+    );
+    await t.say('check my newest mail');
+    const detail = getRunDetail(t.db, decision(t, 'a1').runId)!;
+    const turns = detail.timeline.flatMap((item) => (item.kind === 'model' ? [item] : []));
+    expect(turns.map((item) => item.call.slot)).toEqual(['main', 'main', 'main']);
+    const reviews = turns.flatMap((item) => item.reviews ?? []);
+    expect(reviews.length).toBeGreaterThan(0);
+    expect(reviews.every((each) => each.slot === 'utility')).toBe(true);
+    expect(turns[1]!.reviews).toEqual(reviews);
+  });
+
+  it('shows a delegate call as running with its child while the child runs', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let entered!: () => void;
+    const inside = new Promise<void>((resolve) => (entered = resolve));
+    const transport = async (): Promise<Transport> => {
+      const [client, server] = InMemoryTransport.createLinkedPair();
+      const slow = new McpServer({ name: 'fake-mail', version: '1.0.0' });
+      slow.registerTool('read_inbox', { description: 'Read the newest mail.' }, async () => {
+        entered();
+        await gate;
+        return { content: [{ type: 'text' as const, text: 'hello' }] };
+      });
+      await slow.connect(server);
+      return client;
+    };
+    const main = createFakeClient([delegate('d1', 'Read the mail.'), mail('c1', 'read_inbox'), textStep('Read.'), textStep('Done.')]);
+    const t = createTestApp([], {
+      start,
+      config: { slots: { main: { chain: ['fake/m'] }, heartbeat: { chain: ['fake/m'] }, batch: { chain: ['fake/m'] }, utility: { chain: ['fake/m'] } } },
+      deps: { integrations: integrations(), mcpTransport: transport, clients: { fake: main }, rules: [...BUILTIN_RULES] },
+    });
+    apps.push(t);
+    await t.app.start();
+    await expect.poll(() => t.app.integrations.status()[0]!.state.status).toBe('connected');
+    const said = t.say('summarize my mail');
+    await inside;
+    const { parentRunId, childRunId } = t.rows('SELECT parentRunId, childRunId FROM subagent_runs')[0] as { parentRunId: string; childRunId: string };
+    const running = getRunDetail(t.db, parentRunId)!.timeline.flatMap((item) => (item.kind === 'model' ? item.tools : []));
+    expect(running).toMatchObject([{ name: 'delegate', toolCallId: 'd1', outcome: 'running', input: { profile: 'inbox' }, child: { childRunId, status: 'running' } }]);
+    release();
+    await said;
+    const done = getRunDetail(t.db, parentRunId)!.timeline.flatMap((item) => (item.kind === 'model' ? item.tools : []));
+    expect(done).toMatchObject([{ name: 'delegate', outcome: 'ran', child: { childRunId, status: 'completed' } }]);
+  });
+});

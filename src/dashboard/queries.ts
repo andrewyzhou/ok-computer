@@ -2,6 +2,7 @@ import type { Config } from '../config/schema.js';
 import type { Db } from '../db/index.js';
 import { goalStats, listGoals, type Goal } from '../goals/store.js';
 import { redact, redactValue } from '../observability/redact.js';
+import { REVIEW_TOOL } from '../policy/reviewer.js';
 import { outcomeOf } from './outcome.js';
 import { getChecklist, inActiveHours } from '../scheduler/heartbeat.js';
 import { describeSchedule } from '../scheduler/schedule.js';
@@ -215,10 +216,12 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
   const modelRows = db
     .prepare(
       `SELECT model_calls.*, (SELECT json_array_length(tools) FROM tool_catalog_snapshots
-         WHERE hash = model_calls.toolCatalogHash) AS toolCount
+         WHERE hash = model_calls.toolCatalogHash) AS toolCount,
+         EXISTS (SELECT 1 FROM tool_catalog_snapshots, json_each(tool_catalog_snapshots.tools)
+           WHERE hash = model_calls.toolCatalogHash AND json_extract(json_each.value, '$.name') = ?) AS isReview
        FROM model_calls WHERE runId = ? ORDER BY id`,
     )
-    .all(id);
+    .all(REVIEW_TOOL, id);
   const decisions = new Map(
     db
       .prepare(
@@ -235,6 +238,7 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
     .map((row) => toToolCall(row, decisions, messages));
   // a reviewer call goes inside the tool call that it checked, not among the turns of the agent.
   const reviews = new Map([...decisions.values()].flatMap((decision) => (decision.reviewerModelCallId === null ? [] : [[decision.reviewerModelCallId, decision] as const])));
+  const links = subagentLinks(db, 'subagent_runs.parentRunId = ?', id);
   const placed = new Set<number>();
   const timeline: TimelineItem[] = [];
   for (const row of modelRows) {
@@ -243,23 +247,62 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
       reviewed.reviewerCall = toModelCall(row);
       continue;
     }
-    const response = row.response ? (JSON.parse(String(row.response)) as { toolCalls?: Array<{ id: string }> }) : undefined;
+    const last = timeline.at(-1);
+    // a reviewer call that gave no verdict (an error, a retry, or an answer that is not clear) has no link from a
+    // decision. tool calls of one turn run at the same time, so it goes with the turn whose tool calls it checked.
+    if (row.isReview === 1 && last?.kind === 'model') {
+      (last.reviews ??= []).push(toModelCall(row));
+      continue;
+    }
+    const response = row.response ? (JSON.parse(String(row.response)) as { toolCalls?: Array<{ id: string; input: unknown }> }) : undefined;
     const asked: ToolCallRow[] = [];
     for (const requested of response?.toolCalls ?? []) {
       const tool = tools.find((call) => call.toolCallId === requested.id && !placed.has(call.id));
-      if (!tool) continue;
-      placed.add(tool.id);
-      asked.push(tool);
+      if (tool) {
+        placed.add(tool.id);
+        asked.push(tool);
+        continue;
+      }
+      // the delegate row is written when the child ends. until then, the call shows as running with its child.
+      const link = links.find((each) => each.toolCallId === requested.id);
+      if (link) asked.push(runningDelegate(id, requested, link, -1 - links.indexOf(link)));
     }
     timeline.push({ kind: 'model', call: toModelCall(row), tools: asked });
   }
   for (const tool of tools) if (!placed.has(tool.id)) timeline.push({ kind: 'tool', call: tool });
-  for (const link of subagentLinks(db, 'subagent_runs.parentRunId = ?', id)) {
+  for (const link of links) {
     const tool = tools.find((call) => call.name === 'delegate' && call.toolCallId === link.toolCallId);
     if (tool) tool.child = link;
   }
   const events = db.prepare('SELECT * FROM events WHERE runId = ? ORDER BY id').all(id).map(toEventRow);
   return { run, parent: subagentLinks(db, 'subagent_runs.childRunId = ?', id)[0] ?? null, timeline, events };
+}
+
+// the call has no tool_calls row yet, so its id is negative and unique in the run.
+function runningDelegate(runId: string, requested: { id: string; input: unknown }, link: SubagentLink, rowId: number): ToolCallRow {
+  return {
+    id: rowId,
+    runId,
+    toolCallId: requested.id,
+    name: 'delegate',
+    input: requested.input,
+    output: { content: 'The sub-agent is still running.' },
+    isError: false,
+    durationMs: 0,
+    createdAt: '',
+    source: 'builtin',
+    riskLevel: null,
+    tainted: false,
+    untrustedSource: null,
+    truncated: false,
+    resultHandle: null,
+    rawResultBlob: null,
+    outcome: 'running',
+    policy: null,
+    serverId: null,
+    mcpMessages: [],
+    child: link,
+  };
 }
 
 function subagentLinks(db: Db, where: string, id: string): SubagentLink[] {
