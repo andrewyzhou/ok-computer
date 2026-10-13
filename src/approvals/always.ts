@@ -5,7 +5,8 @@ import type { Logger } from '../observability/logger.js';
 import { loadPolicy, type Rule } from '../policy/policy.js';
 import type { Card } from '../sessions/commands.js';
 import { localDay, type Clock } from '../time.js';
-import { approvalButtonData, getApproval } from './store.js';
+import type { Tool } from '../tools/registry.js';
+import { approvalButtonData, getApproval, type Approval } from './store.js';
 import type { ApprovalFlow } from './flow.js';
 
 // a confirmation is valid for this time. an old "yes" in the chat history must not add a rule days later.
@@ -21,6 +22,10 @@ export function parseAlwaysButton(data: string): { id: number; expires?: Date } 
   return { id: Number(match[1]), ...(match[2] ? { expires: new Date(parseInt(match[2], 36) * 1000) } : {}) };
 }
 
+// only an external tool without needsApproval can get an allow rule. a rule cannot change needsApproval, and the allow
+// rule of a write tool would also hold in a session that read outside content.
+export const alwaysAllowable = (tool: Pick<Tool, 'risk' | 'needsApproval'>) => tool.risk === 'external' && !tool.needsApproval;
+
 export interface AlwaysAllowDeps {
   db: Db;
   clock: Clock;
@@ -30,6 +35,9 @@ export interface AlwaysAllowDeps {
   // the caller reads this list at each call. the new rule goes into it, so it works without a restart.
   rules: Rule[];
   resolve: ApprovalFlow['resolve'];
+  // the tool of the approval as the current config gives it, or undefined when the session lost it. a card from before
+  // a restart can name a tool whose risk changed since then.
+  toolOf: (approval: Approval) => Pick<Tool, 'risk' | 'needsApproval'> | undefined;
 }
 
 // "always allow" adds an allow rule for the tool to okc.policy.json, then approves the call. a second button
@@ -39,6 +47,10 @@ export function createAlwaysAllow(deps: AlwaysAllowDeps) {
     const approval = getApproval(deps.db, id);
     if (!approval) return { error: `No approval has the id ${id}.` };
     if (approval.status !== 'pending') return { error: `Approval #${id} is already ${approval.status}.` };
+    const tool = deps.toolOf(approval);
+    if (!tool || !alwaysAllowable(tool)) {
+      return { error: `${approval.toolName} cannot be always allowed now, because its risk changed or the session lost it. Approve or deny approval #${id} on its card.` };
+    }
     return { approval };
   };
 

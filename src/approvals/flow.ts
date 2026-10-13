@@ -2,7 +2,7 @@ import type { Button } from '../channels/types.js';
 import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
-import { redactedJson } from '../observability/redact.js';
+import { redact, redactedJson } from '../observability/redact.js';
 import type { TaintSource } from '../policy/policy.js';
 import { decisionForApproval } from '../policy/store.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
@@ -12,7 +12,7 @@ import { localDay, localTime, type Clock } from '../time.js';
 import type { RequestApproval, ToolCaller } from '../tools/caller.js';
 import type { ToolOutput } from '../tools/registry.js';
 import { wrapIfTainted } from '../tools/untrusted.js';
-import { alwaysButtonData } from './always.js';
+import { alwaysAllowable, alwaysButtonData } from './always.js';
 import { approvalButtonData, createApproval, getApproval, resolveApproval, type Approval, type Decision, type ResolvedVia } from './store.js';
 
 export interface ApprovalFlowDeps {
@@ -52,15 +52,17 @@ const FIELD_TAIL = 100;
 // the owner approves what the summary shows, so the summary shows each field of the input on its own line. a long
 // value is cut in its middle with a mark. the dashboard shows the full input. the value is redacted before the cut,
 // because a cut secret no longer matches the redaction. each value is json text, so a line break in a value is
-// escaped and cannot add a false field line or a false "Why:" line.
+// escaped and cannot add a false field line or a false "Why:" line. the model also writes the keys, so each key is
+// redacted too.
 export function describeInput(toolName: string, input: unknown): string {
   const fields: Array<[string, unknown]> =
     input !== null && typeof input === 'object' && !Array.isArray(input) ? Object.entries(input) : [['input', input]];
   const lines = fields.map(([key, value]) => {
-    const name = /^[\w.-]+$/.test(key) ? key : oneLine(JSON.stringify(key));
+    const shown = redact(key);
+    const name = /^[\w.-]+$/.test(shown) ? shown : oneLine(JSON.stringify(shown));
     const json = redactedJson(value);
     const { text, found } = showInvisible(oneLine(json));
-    const marks = warnings(json !== (JSON.stringify(value) ?? 'null'), found, text);
+    const marks = warnings(shown !== key || json !== (JSON.stringify(value) ?? 'null'), found, text);
     if (text.length <= FIELD_HEAD + FIELD_TAIL) return `${name}: ${text}${marks}`;
     const head = headOf(text, FIELD_HEAD);
     const tail = tailOf(text, FIELD_TAIL);
@@ -125,7 +127,7 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
       // the owner sees the reason with the request. the taint can come from an older run, so the message names it.
       const reached = await deps.owner.send(
         cardText(approval, why.reason, why.taint, ctx.timeZone),
-        buttonsFor(approval.id, deps.alwaysAllow === true && tool.risk === 'external' && !tool.needsApproval),
+        buttonsFor(approval.id, deps.alwaysAllow === true && alwaysAllowable(tool)),
         { details: exactInput(input) },
       );
       // the model must not tell the owner to press a button that the owner never got.

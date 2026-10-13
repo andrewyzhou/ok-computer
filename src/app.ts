@@ -165,7 +165,20 @@ export function createApp(deps: AppDeps): App {
   // "always allow" changes this list in place, and the caller reads it at each call.
   const rules = [...(deps.rules ?? BUILTIN_RULES)];
   const always = deps.policyPath
-    ? createAlwaysAllow({ db, clock, logger, timeZone: config.timeZone, policyPath: deps.policyPath, rules, resolve: approvals.resolve })
+    ? createAlwaysAllow({
+        db,
+        clock,
+        logger,
+        timeZone: config.timeZone,
+        policyPath: deps.policyPath,
+        rules,
+        resolve: approvals.resolve,
+        // the lookup checks the current config, as an approved call does.
+        toolOf: (approval) => {
+          const found = tools.resolve({ id: 'always', name: approval.toolName, input: approval.input }, [approval.toolName], approval.sessionKey);
+          return found.ok ? found.tool : undefined;
+        },
+      })
     : undefined;
   // the scheduler is created below. the tools call replan only after the start.
   const replan = () => scheduler.replan();

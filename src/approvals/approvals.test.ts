@@ -251,6 +251,20 @@ describe('the summary that the owner approves', () => {
     expect(describeInput('slack_post', { text: 'love it ❤️ 👩‍💻' })).toBe('slack_post\ntext: "love it ❤️ 👩‍💻"');
   });
 
+  // the model writes the keys too. a key once went to the card, the approvals table and telegram in clear.
+  it('redacts a secret or a token in a key, and marks the field', () => {
+    const secret = `key-name-${'q'.repeat(24)}`;
+    registerSecret(secret);
+    const token = `123456789:${'A'.repeat(35)}`;
+    const summary = describeInput('notes__add_note', { [secret]: 'x', [token]: 1 });
+    expect(summary).not.toContain('qqqqqqqq');
+    expect(summary).not.toContain('AAAAAAAA');
+    expect(summary.split('\n').slice(1)).toEqual([
+      '"[redacted]": "x" [check: this field holds a secret that the card hides, and the tool gets the real value]',
+      '"[redacted]": 1 [check: this field holds a secret that the card hides, and the tool gets the real value]',
+    ]);
+  });
+
   it('redacts a secret before the cut, so no part of it shows', () => {
     const secret = `key-${'s'.repeat(30)}-tail`;
     registerSecret(secret);

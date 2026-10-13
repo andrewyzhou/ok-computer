@@ -72,11 +72,12 @@ describe('createAlwaysAllow', () => {
   const now = new Date('2026-10-13T03:00:00Z');
   const approve = async (id: number) => (resolveApproval(db, id, 'approve', 'button', now).ok ? 'Approved.' : 'Not pending.');
 
-  function setup(resolve: (id: number) => Promise<string> = approve) {
+  function setup(resolve: (id: number) => Promise<string> = approve, tool: { current?: { risk: 'read' | 'write' | 'external'; needsApproval?: boolean } } = { current: { risk: 'external' } }) {
     const path = fresh();
     const rules: Rule[] = [...BUILTIN_RULES];
     const spy = vi.fn(resolve);
-    const always = createAlwaysAllow({ db, clock: () => now, logger: silentLogger, timeZone: 'UTC', policyPath: path, rules, resolve: spy });
+    const toolOf = () => tool.current;
+    const always = createAlwaysAllow({ db, clock: () => now, logger: silentLogger, timeZone: 'UTC', policyPath: path, rules, resolve: spy, toolOf });
     const { id } = createApproval(db, { runId: 'r1', toolName: 'notes__add_note', input: {}, summary: 's' }, now);
     const yes = parseAlwaysButton(always.confirm(id).buttons![0]![0]!.data)!;
     return { path, rules, always, id, expires: yes.expires!, resolve: spy };
@@ -120,6 +121,22 @@ describe('createAlwaysAllow', () => {
     expect(rules).toEqual(BUILTIN_RULES);
     expect(resolve).not.toHaveBeenCalled();
     expect(getApproval(db, id)!.status).toBe('pending');
+  });
+
+  // a card from before a restart keeps its button. the tool can be a write tool by now, and its allow rule would then
+  // also hold in a session that read outside content.
+  it('refuses to add a rule when the tool is no longer external, or needs approval, or is gone', async () => {
+    for (const current of [{ risk: 'write' as const }, { risk: 'external' as const, needsApproval: true }, undefined]) {
+      const tool: { current?: { risk: 'read' | 'write' | 'external'; needsApproval?: boolean } } = { current: { risk: 'external' } };
+      const { path, rules, always, id, expires, resolve } = setup(approve, tool);
+      tool.current = current;
+      expect(always.confirm(id)).toEqual({ text: expect.stringContaining('notes__add_note cannot be always allowed now') });
+      expect(await always.apply(id, expires)).toContain('notes__add_note cannot be always allowed now');
+      expect(existsSync(path)).toBe(false);
+      expect(rules).toEqual(BUILTIN_RULES);
+      expect(resolve).not.toHaveBeenCalled();
+      expect(getApproval(db, id)!.status).toBe('pending');
+    }
   });
 
   it('leaves the approval pending with the rule in place when the approval fails after the write', async () => {
