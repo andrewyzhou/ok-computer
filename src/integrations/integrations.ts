@@ -52,6 +52,9 @@ export interface IntegrationStatus {
   lastErrorAt: string | null;
   // the sign-in link that waits for the owner.
   authUrl?: string;
+  // the redirect url that the owner gives the oauth app, and the credential name of a pre-registered client. paste
+  // means that the owner finishes the sign-in with the address of the failed callback page.
+  oauthApp?: { redirectUrl: string; callback: 'loopback' | 'paste'; clientRef?: string };
   catalogHash?: string;
   // stored means that the tool list is the one from the database, and the server has not answered since the start.
   catalogStored?: boolean;
@@ -85,6 +88,9 @@ export interface Integrations {
   connect(id: string): Promise<{ connected: true } | { url: string } | { error: string }>;
   // a paused integration stays stopped over a restart. its tools stay in the catalog, and a call says that it is paused.
   setPaused(id: string, paused: boolean): Promise<boolean>;
+  // finishSignIn takes the address of the callback page that the owner pasted, for a server that accepts only an https
+  // redirect. the state in the address selects the flow, as in the loopback callback.
+  finishSignIn(pasted: string): Promise<{ ok: boolean; text: string }>;
 }
 
 export function createIntegrations(deps: IntegrationsDeps): Integrations {
@@ -189,6 +195,15 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
     }
     parked.delete(entry.id);
     await connection.start();
+  };
+
+  const transportOf = (integrationId: string) => connections.get(integrationId)?.transport();
+  // the owner can pause the integration while the sign-in page is open. the tokens stay, and the connection starts when
+  // the owner resumes it.
+  const signedIn = (integrationId: string) => {
+    if (paused.has(integrationId)) return;
+    const done = connections.get(integrationId);
+    void done?.stop().then(() => done.start()).catch((err: unknown) => logger.error('mcp restart after sign-in failed', { integration: integrationId, err }));
   };
 
   for (const entry of entries) {
@@ -333,6 +348,15 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
           lastError: text('lastError'),
           lastErrorAt: text('lastErrorAt'),
           ...(authUrl ? { authUrl } : {}),
+          ...(entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' && deps.oauth
+            ? {
+                oauthApp: {
+                  redirectUrl: deps.oauth.redirectUrl(entry),
+                  callback: entry.auth.callback,
+                  ...(entry.auth.clientRef ? { clientRef: entry.auth.clientRef } : {}),
+                },
+              }
+            : {}),
           ...(catalog ? { catalogHash: catalog.hash, catalogStored: catalog.stored } : {}),
           // the live catalog is the text of the server, and a server can quote its key in a description. the stored
           // copy is redacted, and the page gets the same.
@@ -365,6 +389,19 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       return true;
     },
     connection: (id) => connections.get(id),
+    async finishSignIn(pasted) {
+      let url: URL;
+      try {
+        url = new URL(pasted.trim());
+      } catch {
+        return { ok: false, text: 'That is not an address. Copy the whole address of the page that the sign-in opened.' };
+      }
+      if (!deps.oauth) return { ok: false, text: 'No integration signs in with OAuth.' };
+      const done = await deps.oauth.callback(url, transportOf);
+      if (done.status === 200 && done.integrationId) signedIn(done.integrationId);
+      void deps.oauth.closeIfIdle();
+      return { ok: done.status === 200, text: done.text };
+    },
     connect(id) {
       // a second press of Connect while the first one runs joins it. a second attempt would stop the first one before
       // its sign-in link exists.
@@ -383,16 +420,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
     const oauth = entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' ? deps.oauth : undefined;
     if (oauth) {
       try {
-        await oauth.listen(
-          (integrationId) => connections.get(integrationId)?.transport(),
-          (integrationId) => {
-            // the owner can pause the integration while the sign-in page is open. the tokens stay, and the connection
-            // starts when the owner resumes it.
-            if (paused.has(integrationId)) return;
-            const done = connections.get(integrationId);
-            void done?.stop().then(() => done.start()).catch((err: unknown) => logger.error('mcp restart after sign-in failed', { integration: integrationId, err }));
-          },
-        );
+        await oauth.listen(transportOf, signedIn);
       } catch (err) {
         // another process, for example a second copy of the app, can hold the port.
         return { error: `the sign-in callback cannot listen: ${(err as Error).message}` };

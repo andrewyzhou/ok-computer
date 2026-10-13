@@ -3,6 +3,7 @@ import type { CatalogVersion, IntegrationDetail as Detail, IntegrationSummary, M
 import { send, useApi } from '../api';
 import { Empty, Expand, Json, Load, Page, Panel, Status } from '../components';
 import { ms, time } from '../format';
+import { OAuthApp } from './OAuthApp';
 
 const href = (id: string) => `#/integrations/${encodeURIComponent(id)}`;
 const path = (id: string) => `/api/integrations/${encodeURIComponent(id)}`;
@@ -318,6 +319,7 @@ export function IntegrationDetail({ id }: { id: string }) {
             <div className="row">
               <Actions integration={integration} actions={actions} /> <span className="muted">{actions.notice}</span>
             </div>
+            <OAuthApp integration={integration} onDone={loaded.reload} />
             <Panel title="Tools the agent can use">
               <Tools integration={integration} />
             </Panel>

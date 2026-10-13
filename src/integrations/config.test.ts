@@ -18,7 +18,12 @@ const slack = {
 describe('integration registry', () => {
   it('fills the safe defaults', () => {
     const parsed = parseIntegrations({ integrations: [slack] });
-    expect(parsed.ok && parsed.value[0]).toMatchObject({ untrustedOutput: true, sessions: ['main'] });
+    expect(parsed.ok && parsed.value[0]).toMatchObject({ untrustedOutput: true, sessions: ['main'], auth: { callback: 'loopback' } });
+  });
+
+  it('takes the paste callback for an oauth entry and refuses another word', () => {
+    expect(parseIntegrations({ integrations: [{ ...slack, auth: { ...slack.auth, callback: 'paste' } }] })).toMatchObject({ ok: true });
+    expect(parseIntegrations({ integrations: [{ ...slack, auth: { ...slack.auth, callback: 'https' } }] })).toMatchObject({ ok: false });
   });
 
   it('accepts a pinned stdio server with a secret in its env', () => {

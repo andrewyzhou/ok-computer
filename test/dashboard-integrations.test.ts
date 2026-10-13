@@ -90,5 +90,13 @@ describe('the integrations api', () => {
     expect((await post('/api/integrations/nope/connect')).status).toBe(404);
     expect((await dashboard.request('/api/integrations/nope')).status).toBe(404);
   });
+
+  it('refuses a pasted sign-in address when no sign-in waits', async () => {
+    const { post } = await seeded();
+    const response = await post('/api/integrations/callback', { url: 'https://127.0.0.1:4318/oauth/callback?code=x&state=y' });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'No integration signs in with OAuth.' });
+    expect((await post('/api/integrations/callback', { url: 'x', extra: 1 })).status).toBe(400);
+  });
 });
 

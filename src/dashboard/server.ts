@@ -59,6 +59,7 @@ const enabledBody = z.object({ enabled: z.boolean() });
 const checklistBody = z.object({ checklist: z.string().max(10_000) });
 const decisionBody = z.object({ decision: z.enum(['approve', 'deny']) });
 const pausedBody = z.object({ paused: z.boolean() });
+const callbackBody = z.object({ url: z.string().max(8_000) }).strict();
 
 export function createDashboard(deps: DashboardDeps): Hono {
   const { db, config, clock, logger, app } = deps;
@@ -208,6 +209,14 @@ export function createDashboard(deps: DashboardDeps): Hono {
     const input = await body(c, pausedBody);
     if (!input) return c.json({ error: 'give paused as true or false' }, 400);
     return (await app.integrations.setPaused(c.req.param('id'), input.paused)) ? c.json({ paused: input.paused }) : notFound(c, 'integration');
+  });
+  // a server that accepts only an https redirect sends the browser to a page that does not load. the owner pastes its
+  // address here, and the state in it selects the flow.
+  server.post('/api/integrations/callback', async (c) => {
+    const input = await body(c, callbackBody);
+    if (!input) return c.json({ error: 'give the address as url' }, 400);
+    const done = await app.integrations.finishSignIn(input.url);
+    return done.ok ? c.json({ text: done.text }) : c.json({ error: done.text }, 400);
   });
   server.get('/api/mcp-messages/:id', (c) => {
     const row = db.prepare('SELECT * FROM mcp_messages WHERE id = ?').get(Number(c.req.param('id')));

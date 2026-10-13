@@ -44,6 +44,8 @@ export interface OAuthDeps {
 
 export interface OAuth {
   provider(entry: HttpEntry): OAuthClientProvider;
+  // the redirect url of an integration, which the owner gives the oauth app of a pre-registered client.
+  redirectUrl(entry: HttpEntry): string;
   // fetchFor gives the fetch of the http transport of one integration. it logs each sign-in step, and two refreshes
   // with the same refresh token become one request.
   fetchFor(entry: HttpEntry): typeof fetch;
@@ -69,7 +71,10 @@ const clientRef = (id: string) => `${id}:oauth-client`;
 export function createOAuth(deps: OAuthDeps): OAuth {
   const { db, clock, logger, secrets } = deps;
   const port = deps.port ?? CALLBACK_PORT;
-  const redirectUrl = `http://127.0.0.1:${port}${CALLBACK_PATH}`;
+  // with paste nothing answers with tls on the address. the browser shows an error page, and the owner pastes its
+  // address on the dashboard.
+  const redirectFor = (entry: HttpEntry) =>
+    `${entry.auth?.type === 'oauth' && entry.auth.callback === 'paste' ? 'https' : 'http'}://127.0.0.1:${port}${CALLBACK_PATH}`;
   const flows = new Map<string, Flow>();
   const drafts = new Map<string, Draft>();
   // the flow that finishAuth works on. the callback sets it just before the call.
@@ -118,6 +123,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
     const id = entry.id;
     const draft = () => drafts.get(id) ?? (drafts.set(id, {}), drafts.get(id)!);
     const auth = entry.auth?.type === 'oauth' ? entry.auth : undefined;
+    const redirectUrl = redirectFor(entry);
     const metadata: OAuthClientMetadata = {
       client_name: 'OK Computer',
       redirect_uris: [redirectUrl],
@@ -360,6 +366,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
 
   return {
     provider: providerFor,
+    redirectUrl: redirectFor,
     fetchFor: (entry) => singleFlight(observed(entry)),
     serverError: (id) => serverErrors.get(id),
     signInOutage: (id) => outages.get(id),

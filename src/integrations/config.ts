@@ -39,8 +39,16 @@ const stdioEntry = z
   .strict();
 
 const httpAuth = z.discriminatedUnion('type', [
-  // without clientRef the client registers itself, when the server allows it.
-  z.object({ type: z.literal('oauth'), clientRef: secretRef.optional(), scopes: z.array(z.string()).optional() }).strict(),
+  // without clientRef the client registers itself, when the server allows it. paste is for a server that accepts only
+  // an https redirect, such as slack. the owner then pastes the address of the failed callback page on the dashboard.
+  z
+    .object({
+      type: z.literal('oauth'),
+      clientRef: secretRef.optional(),
+      scopes: z.array(z.string()).optional(),
+      callback: z.enum(['loopback', 'paste']).default('loopback'),
+    })
+    .strict(),
   z.object({ type: z.literal('bearer'), secretRef }).strict(),
 ]);
 
