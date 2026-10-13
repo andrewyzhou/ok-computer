@@ -254,7 +254,9 @@ export interface RunningDashboard {
 export function startDashboard(deps: DashboardDeps & { port: number }): Promise<RunningDashboard> {
   const app = createDashboard(deps);
   return new Promise((resolve, reject) => {
-    const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: deps.port }, (info) =>
+    // by default the server puts its own Response class in place of the global one. a real fetch result then fails
+    // `instanceof Response` in this process, and the mcp sdk misreads the error of a failed token refresh.
+    const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: deps.port, overrideGlobalObjects: false }, (info) =>
       resolve({
         port: info.port,
         close: () =>

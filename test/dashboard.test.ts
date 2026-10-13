@@ -303,7 +303,10 @@ describe('the dashboard server', () => {
     const { t } = await seedDashboard();
     const server = await startDashboard({ db: t.db, config: t.config, clock: t.clock, logger: silentLogger, app: t.app, port: 0 });
     const base = `http://127.0.0.1:${server.port}`;
-    expect(await (await fetch(`${base}/api/meta`)).json()).toEqual({ timeZone: 'America/Los_Angeles', now: t.clock().toISOString() });
+    const meta = await fetch(`${base}/api/meta`);
+    // the server keeps the global Response class. the mcp sdk reads a failed token refresh with instanceof Response.
+    expect(meta instanceof Response).toBe(true);
+    expect(await meta.json()).toEqual({ timeZone: 'America/Los_Angeles', now: t.clock().toISOString() });
     const stream = await fetch(`${base}/api/stream`);
     expect(stream.status).toBe(200);
     await server.close();

@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startOAuthServer, type OAuthTestServer } from '../../test/oauth-server.js';
+import { parseConfig } from '../config/load.js';
+import { startDashboard, type DashboardDeps } from '../dashboard/server.js';
 import { openDb } from '../db/index.js';
 import { createBlobStore } from '../observability/blobs.js';
 import { silentLogger } from '../observability/logger.js';
@@ -145,6 +147,24 @@ describe('oauth', () => {
     const requests = as.stats.mcpRequests;
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(as.stats.mcpRequests).toBe(requests);
+  });
+
+  it('reads a revoked refresh token correctly while the dashboard runs in the same process', async () => {
+    const { as, db, secrets, integrations, needsAuth } = await setup();
+    const config = parseConfig({});
+    if (!config.ok) throw new Error(config.error);
+    // the dashboard server starts before the first refresh, as in the live app.
+    const dashboard = await startDashboard({ db, config: config.value, clock: () => new Date(), logger: silentLogger, app: {} as DashboardDeps['app'], port: 0 });
+    cleanup.push(() => dashboard.close());
+    await integrations.start();
+    await connect(integrations);
+    needsAuth.length = 0;
+    as.revoke();
+    expect(await echo(integrations)).toMatchObject({ kind: 'not_sent' });
+    expect(integrations.connection('remote')!.state().status).toBe('needs_auth');
+    // the sdk removes dead tokens only when it can read the invalid_grant answer.
+    expect(await secrets.get('remote:oauth-tokens')).toBeUndefined();
+    expect(needsAuth).toEqual(['remote']);
   });
 
   it('says so when another process holds the callback port', async () => {
