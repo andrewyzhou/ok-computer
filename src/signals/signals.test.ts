@@ -185,8 +185,9 @@ describe('heartbeat with signals', () => {
       queue: createRunQueue(),
       owner: { remember: () => {}, chat: () => undefined, send: options.send ?? (async () => true) },
       agent: async (input) => {
-        if (options.notify) {
-          const call = { id: 'h1', name: 'heartbeat_respond', input: { notify: true, text: 'Essay due' } };
+        // notify undefined is a run that never called heartbeat_respond.
+        if (options.notify !== undefined) {
+          const call = { id: 'h1', name: 'heartbeat_respond', input: options.notify ? { notify: true, text: 'Essay due' } : { notify: false } };
           appendEvent(db, { sessionKey: input.sessionKey, runId: input.runId!, type: 'assistant_message', payload: { toolCalls: [call] } } as never, NOW);
           appendEvent(db, { sessionKey: input.sessionKey, runId: input.runId!, type: 'tool_result', payload: { toolCallId: 'h1', name: 'heartbeat_respond', content: 'ok' } } as never, NOW);
         }
@@ -203,8 +204,15 @@ describe('heartbeat with signals', () => {
     const finished: Finished = [];
     expect(await heartbeat('failed', finished)(automation)).toMatchObject({ status: 'failed' });
     expect(finished).toEqual([]);
-    expect(await heartbeat('completed', finished)(automation)).toMatchObject({ status: 'completed' });
+    expect(await heartbeat('completed', finished, { notify: false })(automation)).toMatchObject({ status: 'completed' });
     expect(finished).toEqual([[digest, 'r1', false]]);
+  });
+
+  // a run that answered in text only did not decide about the shown signals, so only the filtered ones close.
+  it('closes only the filtered signals after a run without heartbeat_respond', async () => {
+    const finished: Finished = [];
+    expect(await heartbeat('completed', finished)(automation)).toMatchObject({ status: 'completed' });
+    expect(finished).toEqual([[{ ...digest, shown: [] }, 'r1', false]]);
   });
 
   it('marks the signals notified after the message went out', async () => {

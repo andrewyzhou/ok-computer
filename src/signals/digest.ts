@@ -80,7 +80,7 @@ export function signalDigest(db: Db, now: Date, timeZone: string): Digest | unde
 
 // a completed heartbeat handles every signal of its digest: notified when it sent the owner a message, seen when it
 // stayed silent. the heartbeat calls this after the send, so a crash before it shows the signals again. a failed
-// heartbeat does not call it.
+// heartbeat does not call it, and a heartbeat without heartbeat_respond closes only the filtered signals.
 export function finishDigest(db: Db, digest: Digest, runId: string | null, notified: boolean, now: Date): void {
   const mark = db.prepare('UPDATE integration_events SET handledAt = ?, handledAs = ?, handledBy = ? WHERE id = ? AND handledAt IS NULL');
   const at = now.toISOString();

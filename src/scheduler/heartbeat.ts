@@ -200,9 +200,12 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
       await owner.send(answer.text);
     }
     // the mark comes after the send. a crash between the two shows the signals again, and the recent notifications
-    // tell the next heartbeat not to repeat itself. a lost deadline is worse than a repeated one.
+    // tell the next heartbeat not to repeat itself. a lost deadline is worse than a repeated one. a run that gave no
+    // heartbeat_respond did not decide about the signals, so they stay open for the next heartbeat. the digest closes
+    // them as stale after some days, so a model that never answers cannot hold them for ever. the filtered signals
+    // need no decision.
     const notified = !!(answer?.notify && answer.text);
-    if (digest) deps.signals!.finish(digest, runId, notified, clock());
+    if (digest) deps.signals!.finish(answer ? digest : { ...digest, shown: [] }, runId, notified, clock());
     if (answer?.notify && answer.text) {
       // the notification can repeat untrusted content that the heartbeat read, so it carries that taint, and its text
       // is wrapped.
