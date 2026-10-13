@@ -64,7 +64,7 @@ describe('migrations 006 and 007', () => {
         VALUES ('a1', 'daily', '{}', '{}', 'isolated', 'main', 1, 'owner', 'x', 'x');
     `);
 
-    expect(migrate(db, real)).toEqual(['006_trace_contract.sql', '007_automation_taint.sql']);
+    expect(migrate(db, real)).toEqual(['006_trace_contract.sql', '007_automation_taint.sql', '008_subagent_runs.sql']);
     // an automation from before 007 has no taint.
     expect(db.prepare('SELECT id, taint FROM automations').all()).toEqual([{ id: 'a1', taint: null }]);
     const columns = (table: string) => db.prepare('SELECT name FROM pragma_table_info(?)').all(table).map((row) => row.name);
@@ -74,7 +74,9 @@ describe('migrations 006 and 007', () => {
     expect(columns('blobs')).not.toContain('refCount');
     expect(columns('policy_decisions')).toContain('taint');
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name);
-    for (const dropped of ['browser_steps', 'sandbox_execs', 'integration_events', 'subagent_runs']) expect(tables).not.toContain(dropped);
+    for (const dropped of ['browser_steps', 'sandbox_execs', 'integration_events']) expect(tables).not.toContain(dropped);
+    // 008 makes subagent_runs again, with the delegate call that started the child and without copies of its task.
+    expect(columns('subagent_runs')).toEqual(['id', 'parentRunId', 'toolCallId', 'childRunId', 'profile', 'createdAt']);
     expect(db.prepare('SELECT COUNT(*) AS n FROM mcp_messages').get()).toEqual({ n: 1 });
 
     expect(db.prepare('SELECT toolCallId, rawResultBlob, resultHandle, outcome, policyDecisionId FROM tool_calls').all()).toEqual([
