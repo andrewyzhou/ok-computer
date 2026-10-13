@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createGoogleHarness, type GoogleHarness } from '../../test/google-harness.js';
+import { CLIENT_ID, createGoogleHarness, type GoogleHarness } from '../../test/google-harness.js';
 import { createFakeClient } from '../models/fake.js';
 import { createSlotRunner } from '../models/slots.js';
-import { createGoogle } from './google.js';
+import { openDb } from '../db/index.js';
+import { scheduleContext } from '../scheduler/context.js';
+import { createAutomation } from '../scheduler/store.js';
+import { googleConfigSchema } from './config.js';
+import { createGoogle, syncGooglePoll } from './google.js';
 
 let h: GoogleHarness;
 afterEach(async () => h?.close());
@@ -31,6 +35,46 @@ describe('google poll job', () => {
     for (let i = 0; i < 14; i++) expect(await google.poll()).toMatchObject({ status: 'completed', error: expect.stringContaining('personal: 503') });
     expect(told).toEqual([expect.stringContaining('The Google poll of the personal account has failed 12 times in a row')]);
     await google.close();
+  });
+
+  it('is a run of its own, and its note says that a gap in the mail history made no signals', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    const google = createGoogle({
+      db: h.db,
+      clock: () => h.now.value,
+      logger: h.logger,
+      blobs: h.blobs,
+      secrets: h.secrets,
+      slots: { call: async () => ({ ok: false, error: 'x', aborted: false }) },
+      config: h.config,
+      timeZone: 'UTC',
+      notifyOwner: () => {},
+      endpoints: { apiRoot: h.fake.url, tokenUrl: `${h.fake.url}token` },
+      newId: () => `poll-${h.fake.requests.length}`,
+    });
+    const first = await google.poll();
+    expect(first).toEqual({ status: 'completed', runId: expect.stringMatching(/^poll-/) });
+    expect(h.rows('SELECT sessionKey, trigger, status, error FROM runs')).toEqual([{ sessionKey: 'poll:google', trigger: 'poll', status: 'completed', error: null }]);
+    // every request of the poll links to its run.
+    expect(h.rows('SELECT DISTINCT runId FROM google_requests')).toEqual([{ runId: first.runId }]);
+
+    h.fake.mailbox('personal').oldestHistoryId = 5000;
+    const gap = await google.poll();
+    expect(gap.error).toContain('the gmail history of personal was too old, so only its inbox mail of the last 2 days made signals');
+    expect(h.rows('SELECT error FROM runs WHERE id = ?', gap.runId!)).toEqual([{ error: gap.error }]);
+    await google.close();
+  });
+
+  // the context of each run lists the next three automations. a poll every 15 minutes would fill it.
+  it('stays out of the schedule in the context of a run', () => {
+    const db = openDb(':memory:');
+    const now = new Date('2026-10-13T16:00:00Z');
+    syncGooglePoll(db, { timeZone: 'UTC', google: googleConfigSchema.parse({ clientId: CLIENT_ID, accounts: [{ alias: 'personal' }] }) }, now);
+    createAutomation(db, { name: 'water the plants', schedule: { kind: 'at', at: '2026-10-13T20:00:00Z' }, payload: { type: 'system_event', text: 'water' }, slot: 'main', createdBy: 'owner' }, now, 'UTC');
+    const context = scheduleContext(db, now, 'UTC');
+    expect(context).toContain('water the plants');
+    expect(context).not.toContain('google poll');
   });
 
   it('skips in the chat process', async () => {

@@ -2,14 +2,15 @@ import type { Db } from '../db/index.js';
 import { formatGoal, listGoals } from '../goals/store.js';
 import { formatLocal, localDay } from '../time.js';
 
-// the heartbeat is not in the list, because it runs all day and is not a plan of the owner.
+// the heartbeat and the polls of the integrations are not in the list, because they run all day and are not plans of
+// the owner. a poll every 15 minutes would push the owner's own automations out of the three lines.
 export function scheduleContext(db: Db, now: Date, timeZone: string): string {
   const today = localDay(now, timeZone);
   const goals = listGoals(db, today);
   const next = db
     .prepare(
       `SELECT id, name, nextRunAt, taint IS NOT NULL AS tainted FROM automations
-       WHERE enabled = 1 AND nextRunAt IS NOT NULL AND json_extract(payload, '$.type') != 'heartbeat'
+       WHERE enabled = 1 AND nextRunAt IS NOT NULL AND json_extract(payload, '$.type') NOT IN ('heartbeat', 'poll')
        ORDER BY nextRunAt LIMIT 3`,
     )
     .all();
