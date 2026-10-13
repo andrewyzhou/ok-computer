@@ -67,4 +67,21 @@ describe.skipIf(!hasChrome())('web acceptance', { timeout: 60_000 }, () => {
       await t.app.stop();
     }
   });
+
+  it('never starts chrome in the chat process, which shares the database with the background app', async () => {
+    const t = createTestApp([toolStep({ id: 'c1', name: 'browser_open', input: { url: site.url('shop.test') } }), textStep('ok')], {
+      start,
+      deps: { connectIntegrations: false, web: { egress: fixtureEgress(), browserArgs: FIXTURE_ARGS } },
+    });
+    await t.app.start();
+    try {
+      site.hits.length = 0;
+      await t.say('open the shop');
+      expect(t.rows('SELECT isError, output FROM tool_calls')).toEqual([{ isError: 1, output: expect.stringContaining('only in the background app') }]);
+      expect(site.hits).toEqual([]);
+      expect(t.rows('SELECT * FROM browser_tasks')).toEqual([]);
+    } finally {
+      await t.app.stop();
+    }
+  });
 });

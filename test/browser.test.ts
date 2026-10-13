@@ -150,7 +150,8 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     const first = harness();
     await first.run('browser_open', { url: site.url('shop.test') });
     expect(profileBusy(join(first.dir, 'profile'))).toBe(true);
-    const second = harness({ dir: first.dir });
+    // two processes share one database file, so the second worker must not close the rows of the first.
+    const second = harness({ dir: first.dir, db: first.db });
     const out = await second.run('browser_open', { url: site.url('shop.test') });
     expect(out).toMatchObject({ isError: true, effect: 'none', content: expect.stringContaining('in use by another Chrome window') });
     // the second worker must not mark the live task of the first as interrupted.
