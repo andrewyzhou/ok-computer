@@ -83,7 +83,7 @@ export function createApp(deps: AppDeps): App {
       ...createGoalTools({ db, replan }),
       ...createAutomationTools({ db, replan }),
       ...createHeartbeatTools({ db }),
-      ...createMemoryTools({ memoryDir }),
+      ...createMemoryTools({ db, memoryDir }),
       createMessageOwnerTool(owner),
     ],
     { gate: approvals.gate },

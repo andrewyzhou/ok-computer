@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { openDb } from '../db/index.js';
 import type { StoredEvent } from '../events/log.js';
 import { createToolRegistry } from '../tools/registry.js';
 import { appendToDailyNote, dailyNotePath, sessionExcerpt } from './daily.js';
@@ -53,7 +54,7 @@ describe('daily notes', () => {
 
   it('writes through memory_write with notes as the default section and today as the default day', async () => {
     const memoryDir = dir();
-    const registry = createToolRegistry(createMemoryTools({ memoryDir }));
+    const registry = createToolRegistry(createMemoryTools({ db: openDb(':memory:'), memoryDir }));
     const ctx = {
       runId: 'r',
       sessionKey: 'main',

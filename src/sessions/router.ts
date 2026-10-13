@@ -19,6 +19,8 @@ export const MAIN_TOOLS: readonly string[] = [
   'goals_set',
   'goals_stats',
   'heartbeat_checklist_set',
+  'memory_get',
+  'memory_search',
   'memory_write',
   'now',
 ];
