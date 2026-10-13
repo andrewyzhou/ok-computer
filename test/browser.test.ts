@@ -280,6 +280,19 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(h.tasks()).toMatchObject([{ sessionKey: 'main', status: 'open' }]);
   });
 
+  it('starts one task for two opens at the same moment, in one session or in two', async () => {
+    const h = harness();
+    const [a, b] = await Promise.all([h.run('browser_open', { url: site.url('shop.test') }), h.run('browser_open', { url: site.url('shop.test', '/about') })]);
+    expect([a.isError, b.isError]).toEqual([false, false]);
+    expect(h.tasks()).toMatchObject([{ id: 'task-1', status: 'open' }]);
+    await h.run('browser_close', {});
+    expect(h.tasks()).toMatchObject([{ status: 'closed', traceError: null }]);
+    const [c, d] = await Promise.all([h.run('browser_open', { url: site.url('shop.test') }, 'main'), h.run('browser_open', { url: site.url('shop.test') }, 'auto:job')]);
+    expect([c.isError, d.isError]).toEqual([false, true]);
+    expect(d.content).toContain('busy');
+    expect(h.tasks().filter((task) => task.status === 'open')).toMatchObject([{ sessionKey: 'main' }]);
+  });
+
   it('sends the form of a page that a child session opened, from the parent, only for the page in the input', async () => {
     const h = harness();
     await h.run('browser_open', { url: site.url('shop.test') }, 'sub:browser:x');
