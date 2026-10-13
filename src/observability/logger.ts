@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { redact } from './redact.js';
+import { redactedJson } from './redact.js';
 
 export const LEVELS = ['debug', 'info', 'warn', 'error'] as const;
 export type Level = (typeof LEVELS)[number];
@@ -29,7 +29,7 @@ export function createLogger(options: LoggerOptions = {}, base: Fields = {}): Lo
 
   const write = (level: Level, msg: string, fields: Fields = {}) => {
     const now = clock();
-    const line = redact(JSON.stringify({ ts: now.toISOString(), level, msg, ...base, ...serializable(fields) }));
+    const line = redactedJson({ ts: now.toISOString(), level, msg, ...base, ...serializable(fields) });
     if (dir) appendFileSync(join(dir, `okc-${now.toISOString().slice(0, 10)}.log`), line + '\n');
     if (LEVELS.indexOf(level) >= consoleRank) process.stderr.write(line + '\n');
   };

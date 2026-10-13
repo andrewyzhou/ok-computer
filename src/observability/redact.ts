@@ -5,23 +5,27 @@ const REDACTED = '[redacted]';
 // the letter n then hides the boundary.
 const PATTERNS = [/sk-ant-[A-Za-z0-9_-]{10,}/g, /(?<![0-9])\d{6,12}:[A-Za-z0-9_-]{30,}\b/g];
 
-const secrets = new Set<string>();
+// the longest form comes first. a raw form is part of its own escaped form, for example "pw\" in "pw\\". when the
+// raw form is replaced first, it takes one half of an escape, and the json text that remains is not valid.
+let secrets: string[] = [];
 // a model request holds an event that holds a tool result that holds json. four levels cover this.
 const ESCAPE_LEVELS = 4;
 
 export function registerSecret(value: string | undefined): void {
   // a very short value can match normal text, so the redactor ignores it.
   if (!value || value.length < 8) return;
-  // most stored payloads are json text. a quote or a backslash in a secret is escaped there, so the escaped form is
-  // a secret too. json text can contain json text, for example a tool result that is json inside an event. each level
-  // escapes the secret again, so each level adds a form.
+  // a string inside json text has its quotes and backslashes escaped, so the escaped form is a secret too. json text
+  // can contain json text, for example a tool result that is json inside an event. each level escapes the secret
+  // again, so each level adds a form.
+  const forms = new Set(secrets);
   let form = value;
   for (let level = 0; level < ESCAPE_LEVELS; level++) {
-    secrets.add(form);
+    forms.add(form);
     const escaped = JSON.stringify(form).slice(1, -1);
-    if (escaped === form) return;
+    if (escaped === form) break;
     form = escaped;
   }
+  secrets = [...forms].sort((a, b) => b.length - a.length);
 }
 
 export function redact(text: string): string {
@@ -31,6 +35,22 @@ export function redact(text: string): string {
   return out;
 }
 
+// the redaction works on each string before the json text exists, so a replacement can never cut an escape and make
+// the json text invalid. an invalid payload in the append-only event log blocks its session for good. the escaped
+// forms still catch a secret in a string that is json text itself.
 export function redactedJson(value: unknown): string {
-  return redact(JSON.stringify(value));
+  return JSON.stringify(value, redactLeaf);
+}
+
+// redactValue gives a copy with each string redacted, for a caller that needs the value and not its text.
+export function redactValue<T>(value: T): T {
+  return JSON.parse(redactedJson(value)) as T;
+}
+
+function redactLeaf(_key: string, value: unknown): unknown {
+  if (typeof value === 'string') return redact(value);
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    return Object.fromEntries(Object.entries(value).map(([key, each]) => [redact(key), each]));
+  }
+  return value;
 }

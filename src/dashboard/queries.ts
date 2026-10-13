@@ -1,7 +1,7 @@
 import type { Config } from '../config/schema.js';
 import type { Db } from '../db/index.js';
 import { goalStats, listGoals, type Goal } from '../goals/store.js';
-import { redact } from '../observability/redact.js';
+import { redact, redactValue } from '../observability/redact.js';
 import { outcomeOf } from './outcome.js';
 import { getChecklist, inActiveHours } from '../scheduler/heartbeat.js';
 import { describeSchedule } from '../scheduler/schedule.js';
@@ -386,7 +386,7 @@ export function listApprovals(db: Db): ApprovalRow[] {
       sessionKey: String(row.sessionKey),
       toolName: String(row.toolName),
       summary: redact(String(row.summary)),
-      input: JSON.parse(redact(String(row.input))) as unknown,
+      input: redactValue(JSON.parse(String(row.input)) as unknown),
       status: String(row.status),
       requestedAt: String(row.requestedAt),
       resolvedAt: str(row.resolvedAt),

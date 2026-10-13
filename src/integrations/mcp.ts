@@ -3,7 +3,7 @@ import { Client, UnauthorizedError, type CallToolResult, type JSONRPCMessage, ty
 import type { Db } from '../db/index.js';
 import type { BlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
-import { redact } from '../observability/redact.js';
+import { redactedJson } from '../observability/redact.js';
 import type { SetTimer } from '../scheduler/scheduler.js';
 import type { Clock } from '../time.js';
 
@@ -37,7 +37,7 @@ export function createMessageRecorder(deps: { db: Db; blobs: BlobStore; clock: C
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   return (direction, message) => {
-    const text = redact(JSON.stringify(message));
+    const text = redactedJson(message);
     const rpcId = 'id' in message && message.id !== undefined ? String(message.id) : null;
     let method = 'method' in message ? message.method : null;
     let trace: CallTrace | undefined;

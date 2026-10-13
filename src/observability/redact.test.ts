@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { redact, redactedJson, registerSecret } from './redact.js';
+import { openDb } from '../db/index.js';
+import { appendEvent, listEvents } from '../events/log.js';
+import { redact, redactedJson, redactValue, registerSecret } from './redact.js';
 
 // the token has the shape of a bot token. it is not a real token.
 const TOKEN = `1234567890:${'A'.repeat(35)}`;
@@ -31,5 +33,39 @@ describe('redact', () => {
   it('gives the same text for a string and for the same string inside json', () => {
     const text = `a result\n${TOKEN}\nmore`;
     expect(JSON.parse(redactedJson({ content: text })).content).toBe(redact(text));
+  });
+
+  // a generated password can start or end with a backslash or a quote. a replacement that cut an escape gave invalid
+  // json, and the append-only log then blocked the session for good.
+  it('gives valid json for a secret that starts or ends with a backslash or a quote', () => {
+    const forms = ['Tr0ub4dor&3pass\\', '\\k9Q2pLx7Zu-only', '"k9Q2pLx7Zv-only', 'pw\\\\x-example-only'];
+    for (const secret of forms) registerSecret(secret);
+    for (const secret of forms) {
+      const once = redactedJson({ content: `token ${secret} here`, list: [secret] });
+      expect(JSON.parse(once)).toEqual({ content: 'token [redacted] here', list: ['[redacted]'] });
+      const twice = redactedJson({ outer: JSON.stringify({ inner: `x ${secret} y` }) });
+      expect(JSON.parse(JSON.parse(twice).outer)).toEqual({ inner: 'x [redacted] y' });
+    }
+  });
+
+  it('keeps an event with such a secret readable in its session', () => {
+    const secret = 'Zz81mQpT4w-example\\';
+    registerSecret(secret);
+    const db = openDb(':memory:');
+    appendEvent(db, { sessionKey: 'main', runId: null, type: 'user_message', payload: { text: `my pw is ${secret}`, channel: 'cli', chatId: 'x' } });
+    appendEvent(db, { sessionKey: 'main', runId: null, type: 'system_event', payload: { text: `again ${secret}` } });
+    expect(listEvents(db, 'main').map((event) => (event.payload as { text: string }).text)).toEqual(['my pw is [redacted]', 'again [redacted]']);
+  });
+
+  it('removes a token after a control character and keeps the json valid', () => {
+    for (const id of ['123456', '1234567890']) {
+      expect(JSON.parse(redactedJson({ text: `\u0001${id}:${'A'.repeat(32)}` }))).toEqual({ text: '\u0001[redacted]' });
+    }
+  });
+
+  it('redacts each string of a parsed value, its keys too', () => {
+    const secret = 'key-name-example-2026';
+    registerSecret(secret);
+    expect(redactValue({ [secret]: [`a ${secret}`, 3, null] })).toEqual({ '[redacted]': ['a [redacted]', 3, null] });
   });
 });
