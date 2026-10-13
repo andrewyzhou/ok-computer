@@ -97,6 +97,48 @@ describe('scheduler', () => {
     expect(executed).toEqual(['job']);
   });
 
+  // the service and npm run chat share the database, and both arm their timer for the same nextRunAt. the second
+  // process here reads the due jobs, and then the first process claims and runs them before the second claims.
+  it('runs a due job one time when a second process ticks at the same moment', async () => {
+    const { db, create, executed, now } = setup();
+    create({ name: 'once', schedule: { kind: 'at', at: new Date(now().getTime() + MIN).toISOString() } });
+    create({ name: 'every', schedule: { kind: 'every', everyMs: MIN } });
+    const later = new Date(now().getTime() + MIN);
+    const scheduler = (name: string, onDue?: () => void) => {
+      // the second process sees the database through a wrapper that lets the first process act after its read.
+      const seen = onDue
+        ? (new Proxy(db, {
+            get: (target, key) =>
+              key === 'prepare'
+                ? (sql: string) => {
+                    const statement = target.prepare(sql);
+                    if (!sql.includes('nextRunAt <= ?')) return statement;
+                    return { all: (...args: never[]) => [statement.all(...args), onDue()][0] };
+                  }
+                : Reflect.get(target, key, target),
+          }) as typeof db)
+        : db;
+      return createScheduler({
+        db: seen,
+        clock: () => later,
+        logger: silentLogger,
+        config: { timeZone: TZ, scheduler: { missedGraceMs: 2 * 60 * MIN } },
+        async execute(automation) {
+          executed.push(`${name} ran ${automation.name}`);
+          return { status: 'completed' };
+        },
+        async notifyOwner() {},
+        setTimer: () => () => {},
+      });
+    };
+    const service = scheduler('service');
+    let first: Promise<void> | undefined;
+    const chat = scheduler('chat', () => (first = service.tick()));
+    await chat.tick();
+    await first;
+    expect(executed.sort()).toEqual(['service ran every', 'service ran once']);
+  });
+
   it('disables a one-shot job after a successful run', async () => {
     const { db, scheduler, create, advance, executed } = setup();
     const job = create({ schedule: { kind: 'at', at: '2026-10-12T17:10:00Z' } });

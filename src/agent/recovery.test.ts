@@ -113,4 +113,31 @@ describe('closeStaleWork', () => {
     // a second sweep finds nothing new.
     expect(closeStaleWork(db, now, hour)).toEqual({ runs: [], expired: [], interrupted: [] });
   });
+
+  // the service and npm run chat can sweep at the same moment. here the second sweep runs between the select of the
+  // first sweep and its inserts. each call must get one row, one note and one message to the owner.
+  it('reports an interrupted approved call one time when two processes sweep at the same moment', () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r1', 'main', 'message', 'main', 'completed', 'x')").run();
+    for (let i = 0; i < 3; i++) {
+      db.prepare(
+        "INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt, resolvedAt, startedAt) VALUES ('r1', 'send', '{}', 'send', 'approved', 'x', ?, ?)",
+      ).run(ago(2 * hour), ago(2 * hour));
+    }
+    let other: ReturnType<typeof closeStaleWork> | undefined;
+    const first = new Proxy(db, {
+      get: (target, key) =>
+        key === 'prepare'
+          ? (sql: string) => {
+              const statement = target.prepare(sql);
+              if (!sql.includes('AND NOT EXISTS (SELECT 1 FROM tool_calls WHERE tool_calls.runId')) return statement;
+              return { all: (...args: never[]) => [statement.all(...args), (other = closeStaleWork(db, now, hour))][0] };
+            }
+          : Reflect.get(target, key, target),
+    }) as typeof db;
+    const mine = closeStaleWork(first, now, hour);
+    expect(other!.interrupted.map((each) => each.id)).toEqual([1, 2, 3]);
+    expect(mine.interrupted).toEqual([]);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM tool_calls WHERE outcome = 'interrupted'").get()).toEqual({ n: 3 });
+  });
 });

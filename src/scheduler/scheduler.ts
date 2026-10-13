@@ -64,17 +64,18 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     cancel = setTimer(run, Math.min(delay, MAX_SLEEP_MS));
   };
 
-  // the claim moves nextRunAt before the job starts, so a second tick during a long job does not run it again.
-  const claim = (automation: Automation, now: Date): void => {
+  // the claim moves nextRunAt before the job starts, so a second tick during a long job does not run it again. it is
+  // a compare and set on the nextRunAt that the tick read. a second process on the same database (npm run chat)
+  // ticks at the same time, and only one of the two claims wins.
+  const claim = (automation: Automation, now: Date): boolean => {
     const next =
       automation.schedule.kind === 'at'
         ? null
         : nextRun(automation.schedule, now, new Date(automation.createdAt), config.timeZone);
-    db.prepare('UPDATE automations SET nextRunAt = ?, lastRunAt = ? WHERE id = ?').run(
-      next?.toISOString() ?? null,
-      now.toISOString(),
-      automation.id,
-    );
+    const claimed = db
+      .prepare('UPDATE automations SET nextRunAt = ?, lastRunAt = ? WHERE id = ? AND nextRunAt IS ?')
+      .run(next?.toISOString() ?? null, now.toISOString(), automation.id, automation.nextRunAt);
+    return claimed.changes === 1;
   };
 
   const recordRun = (automation: Automation, startedAt: Date, result: JobResult): void => {
@@ -101,7 +102,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   const fire = async (automation: Automation, now: Date): Promise<void> => {
     const lateMs = now.getTime() - Date.parse(automation.nextRunAt!);
-    claim(automation, now);
+    if (!claim(automation, now)) return;
 
     // the scheduler runs a missed job one time only. this prevents a burst of old reminders after the pc starts.
     if (lateMs > config.scheduler.missedGraceMs) {

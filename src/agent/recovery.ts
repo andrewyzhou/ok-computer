@@ -120,7 +120,7 @@ export function closeStaleWork(db: Db, now: Date, staleMs: number, live: LiveWor
     .all(cutoff, liveApprovals)
     .map((row) => getApproval(db, Number(row.id))!);
 
-  const interrupted = db
+  const candidates = db
     .prepare(
       `SELECT id FROM approvals WHERE status = 'approved' AND startedAt < ?
          AND id NOT IN (SELECT value FROM json_each(?))
@@ -130,20 +130,30 @@ export function closeStaleWork(db: Db, now: Date, staleMs: number, live: LiveWor
     )
     .all(cutoff, liveApprovals)
     .map((row) => getApproval(db, Number(row.id))!);
-  for (const approval of interrupted) {
+  // the insert is the claim. a sweep of a second process at the same moment can insert the row after the select
+  // above, so only the sweep whose insert writes the row reports the call.
+  const interrupted = candidates.filter((approval) => {
     const content = interruptedText(approval.toolName);
-    db.prepare(
-      `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, policyDecisionId, outcome)
-       VALUES (?, ?, ?, ?, ?, 1, 0, ?, (SELECT id FROM policy_decisions WHERE approvalId = ? ORDER BY id LIMIT 1), 'interrupted')`,
-    ).run(
-      approval.runId,
-      `approval-${approval.id}`,
-      approval.toolName,
-      redactedJson(approval.input),
-      redactedJson({ content, isError: true }),
-      at,
-      approval.id,
+    const callId = `approval-${approval.id}`;
+    return (
+      db
+        .prepare(
+          `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, policyDecisionId, outcome)
+           SELECT ?, ?, ?, ?, ?, 1, 0, ?, (SELECT id FROM policy_decisions WHERE approvalId = ? ORDER BY id LIMIT 1), 'interrupted'
+           WHERE NOT EXISTS (SELECT 1 FROM tool_calls WHERE runId IS ? AND toolCallId = ?)`,
+        )
+        .run(
+          approval.runId,
+          callId,
+          approval.toolName,
+          redactedJson(approval.input),
+          redactedJson({ content, isError: true }),
+          at,
+          approval.id,
+          approval.runId,
+          callId,
+        ).changes === 1
     );
-  }
+  });
   return { runs, expired, interrupted };
 }
