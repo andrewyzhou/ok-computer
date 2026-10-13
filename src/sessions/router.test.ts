@@ -5,14 +5,17 @@ import { openDb } from '../db/index.js';
 import { listEvents } from '../events/log.js';
 import { silentLogger } from '../observability/logger.js';
 import { createRunQueue } from './queue.js';
-import { createRouter } from './router.js';
+import { createCommands, type RunState } from './commands.js';
+import { createRouter, MAIN_SESSION, type RouterDeps } from './router.js';
 
 function setup(
   agent: (input: RunInput) => Promise<RunResult>,
   isOwner = () => true,
   approvals?: (id: number, decision: string, via: string) => Promise<string>,
+  extra: Partial<RouterDeps> = {},
 ) {
   const db = openDb(':memory:');
+  const queue = createRunQueue();
   const sent: string[] = [];
   const channel: ChannelAdapter = {
     id: 'cli',
@@ -27,13 +30,14 @@ function setup(
     db,
     logger: silentLogger,
     clock: () => new Date(),
-    queue: createRunQueue(),
+    queue,
     channels: new Map([['cli', channel]]),
     agent,
     isOwner,
     ...(approvals ? { approvals, approvalCard: (id: number) => ({ text: `the stored card of #${id}`, buttons: [] }) } : {}),
+    ...extra,
   });
-  return { db, router, sent };
+  return { db, router, sent, queue };
 }
 
 const message = (text: string): InboundMessage => ({
@@ -133,5 +137,43 @@ describe('router', () => {
     release();
     await Promise.all([first, second]);
     expect(order).toEqual(['start first', 'end first', 'start second', 'end second']);
+  });
+
+  it('stops the run with /stop in any case, and the stop never waits in the queue', async () => {
+    const { router, sent } = setup(
+      (input) => new Promise((resolve) => input.signal!.addEventListener('abort', () => resolve({ runId: 'r', status: 'aborted', text: '' }))),
+    );
+    const run = router.handle(message('think long'));
+    await new Promise((resolve) => setImmediate(resolve));
+    await router.handle(message(' /STOP '));
+    await run;
+    expect(sent).toEqual(['Stopped.']);
+  });
+
+  // an approved call runs in the main queue for up to 30 minutes, and the owner's next message waits behind it.
+  it('tells the owner that an approved call or an automation holds the session, and that /stop cannot stop it', async () => {
+    const states: RunState[] = [];
+    const { router, sent, queue } = setup(vi.fn(), () => true, undefined, {
+      commands: (text, state) => (text === '/status' ? (states.push(state), [{ text: 'status' }]) : undefined),
+    });
+    let release!: () => void;
+    const held = queue.enqueue(MAIN_SESSION, () => new Promise<void>((resolve) => (release = resolve)));
+    await router.handle(message('/stop'));
+    await router.handle(message('/status'));
+    expect(sent).toEqual(['An approved call or an automation runs now, and /stop cannot stop it. The dashboard shows it.', 'status']);
+    expect(states).toEqual([{ queued: 0, held: true }]);
+    release();
+    await held;
+    await queue.drain();
+    await router.handle(message('/stop'));
+    await router.handle(message('/status'));
+    expect(sent.at(-2)).toBe('Nothing runs now.');
+    expect(states.at(-1)).toEqual({ queued: 0 });
+
+    const commands = createCommands({ db: openDb(':memory:'), clock: () => new Date(), timeZone: 'UTC', dashboardUrl: 'http://127.0.0.1:4317', approvalCard: () => ({ text: '' }) });
+    expect(commands('/status', { queued: 1, held: true })![0]!.text.split('\n').slice(0, 2)).toEqual([
+      'An approved call or an automation runs now. /stop cannot stop it, and the dashboard shows it.',
+      '1 message waits for the reply.',
+    ]);
   });
 });

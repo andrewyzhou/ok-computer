@@ -126,11 +126,19 @@ export function createRouter(deps: RouterDeps): Router {
         return;
       }
       // /stop and the commands answer at once. a message that waits in the queue would wait for the run it stops.
-      if (message.text.trim() === '/stop') {
-        if (!stopCurrent()) return reply('Nothing runs now.');
-        return;
+      // an approved call or an automation of the main session also holds the queue, but only the router's own run
+      // has a stop.
+      const held = !current && queue.busy(MAIN_SESSION);
+      if (message.text.trim().toLowerCase() === '/stop') {
+        if (stopCurrent()) return;
+        return reply(held ? 'An approved call or an automation runs now, and /stop cannot stop it. The dashboard shows it.' : 'Nothing runs now.');
       }
-      const state: RunState = { queued, ...(current ? { runningSince: current.since } : {}), ...(current?.tools ? { tools: current.tools } : {}) };
+      const state: RunState = {
+        queued,
+        ...(current ? { runningSince: current.since } : {}),
+        ...(current?.tools ? { tools: current.tools } : {}),
+        ...(held ? { held } : {}),
+      };
       const cards = deps.commands?.(message.text, state);
       if (cards) {
         for (const card of cards) await send(card);

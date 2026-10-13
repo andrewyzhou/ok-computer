@@ -18,6 +18,8 @@ export interface RunState {
   tools?: string;
   // the owner messages that wait for the run.
   queued?: number;
+  // an approved call or an automation holds the main session, so a new message waits for it.
+  held?: boolean;
 }
 
 const NO_LINK = (url: string) =>
@@ -60,7 +62,8 @@ export function createCommands(deps: CommandDeps) {
       const minutes = Math.floor((clock().getTime() - state.runningSince.getTime()) / 60_000);
       lines.push(`I am working on a reply since ${localTime(state.runningSince, timeZone)} (${minutes} min). /stop stops it.`);
       if (state.tools) lines.push(`Running now: ${state.tools}.`);
-    } else lines.push('Nothing runs now.');
+    } else if (state.held) lines.push('An approved call or an automation runs now. /stop cannot stop it, and the dashboard shows it.');
+    else lines.push('Nothing runs now.');
     if (state.queued) lines.push(`${plural(state.queued, 'message waits', 'messages wait')} for the reply.`);
     const last = db
       .prepare("SELECT status, error, endedAt FROM runs WHERE sessionKey = 'main' AND status != 'running' ORDER BY startedAt DESC LIMIT 1")
