@@ -145,6 +145,29 @@ describe('gmail_unsubscribe', () => {
     expect(plan([results('mx.google.com; dkim=pass header.i=@bank.example header.b=Sig0'), signature('bank.example', 'From'), ['DKIM-Signature', 'v=1; d=bank.example; h=List-Unsubscribe:List-Unsubscribe-Post; b=Badx']])).toBe('refused');
   });
 
+  // a resent signed newsletter with an added header on top, and a forged signature that copies the start of b= of the
+  // one that passed. gmail still reports the pass in both cases.
+  it('refuses a one-click when a header is there twice or when two signatures fit the pass', () => {
+    const SENDER = 'news@bank.example';
+    const EVIL = 'https://collector.attacker.example/u';
+    const pass = ['Authentication-Results', 'mx.google.com; dkim=pass header.i=@bank.example header.s=s1 header.b=Abcd1234'] as [string, string];
+    const plan = (headers: Array<[string, string]>) => planUnsubscribe({ payload: { headers: headers.map(([name, value]) => ({ name, value })) } }, SENDER, EVIL, false);
+    const added: Array<[string, string]> = [
+      ['List-Unsubscribe', `<${EVIL}>`],
+      ['List-Unsubscribe-Post', 'List-Unsubscribe=One-Click'],
+    ];
+    const signed = ['DKIM-Signature', 'v=1; d=bank.example; s=s1; h=From:List-Unsubscribe:List-Unsubscribe-Post; b=Abcd1234real'] as [string, string];
+    expect(plan([pass, ...added, signed, ['From', `Bank <${SENDER}>`]]).way).toBe('one-click');
+    expect(plan([pass, ...added, signed, ['From', `Bank <${SENDER}>`], ['List-Unsubscribe', '<https://bank.example/u>'], ['List-Unsubscribe-Post', 'List-Unsubscribe=One-Click']])).toEqual({
+      way: 'refused',
+      text: 'the message has more than one List-Unsubscribe header, so an added one cannot be told from the signed one',
+    });
+    expect(plan([pass, ...added, signed, ['From', `Bank <${SENDER}>`], ['From', `Bank <${SENDER}>`]]).way).toBe('refused');
+    const forged = ['DKIM-Signature', 'v=1; d=bank.example; s=s1; h=From:List-Unsubscribe:List-Unsubscribe-Post; b=Abcd1234forged'] as [string, string];
+    const real = ['DKIM-Signature', 'v=1; d=bank.example; s=s1; h=From:Subject; b=Abcd1234real'] as [string, string];
+    expect(plan([pass, ...added, forged, real, ['From', `Bank <${SENDER}>`]]).way).toBe('refused');
+  });
+
   // the card shows the sender, so the owner approves a sender. a text test of the from header would let a display
   // name with the bank's address pass.
   it('refuses a message whose from address is not exactly the sender', async () => {

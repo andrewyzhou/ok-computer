@@ -34,16 +34,24 @@ export function planUnsubscribe(message: gmail_v1.Schema$Message, sender: string
   if (!/List-Unsubscribe=One-Click/i.test(header(message, 'List-Unsubscribe-Post'))) {
     return { way: 'refused', text: 'the sender offers no one-click unsubscribe. The owner can open the link in a browser' };
   }
+  // a signature that names a header once signs its last instance (rfc 6376 5.4.2). a resent signed mail with an added
+  // header on top still passes, and the code reads the top one. so each of these headers must be there one time.
+  const headers = message.payload?.headers ?? [];
+  const twice = ['From', 'List-Unsubscribe', 'List-Unsubscribe-Post'].find((key) => headers.filter((each) => each.name?.toLowerCase() === key.toLowerCase()).length > 1);
+  if (twice) return { way: 'refused', text: `the message has more than one ${twice} header, so an added one cannot be told from the signed one` };
   const domain = from.slice(from.lastIndexOf('@') + 1);
   const passes = gmailDkimPasses(message).filter((pass) => aligned(pass.domain, domain));
   if (!passes.length) {
     return { way: 'refused', text: `gmail did not see a passing dkim signature of ${domain} on this message, so its unsubscribe header can be forged` };
   }
-  const signatures = (message.payload?.headers ?? []).filter((each) => each.name?.toLowerCase() === 'dkim-signature').map((each) => tags(each.value ?? ''));
-  const covered = signatures.some((tag) => {
-    const signed = (tag.h ?? '').toLowerCase().split(':');
-    const pass = passes.find((each) => each.domain === tag.d?.toLowerCase() && (!each.b || (tag.b ?? '').startsWith(each.b)));
-    return pass && signed.includes('list-unsubscribe') && signed.includes('list-unsubscribe-post');
+  const signatures = headers.filter((each) => each.name?.toLowerCase() === 'dkim-signature').map((each) => tags(each.value ?? ''));
+  // gmail names a passing signature by its domain and the first characters of b=. a forged signature can copy both.
+  // when more than one signature fits a pass, the code cannot know which one gmail checked, so that pass counts for
+  // nothing.
+  const covered = passes.some((pass) => {
+    const fits = signatures.filter((tag) => tag.d?.toLowerCase() === pass.domain && (!pass.b || (tag.b ?? '').startsWith(pass.b)));
+    const signed = fits.length === 1 ? (fits[0]!.h ?? '').toLowerCase().split(':') : [];
+    return signed.includes('list-unsubscribe') && signed.includes('list-unsubscribe-post');
   });
   if (!covered) return { way: 'refused', text: `the dkim signature of ${domain} does not cover the unsubscribe headers, so they can be forged` };
   return { way: 'one-click' };
