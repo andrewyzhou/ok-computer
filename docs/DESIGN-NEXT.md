@@ -267,7 +267,7 @@ The `tools` parameter therefore never changes inside a session. A changed server
 - **No migration.** Migrations 004 and 005 have every table and column M2 writes. `tool_calls.source = 'mcp'` and `serverId` are now written.
 - **Known gaps after M2.**
   - Orphan stdio servers after a hard crash of the app (the tree kill runs only on close).
-  - The SDK's 10 MB stdio line limit: a larger result closes the connection, and the call is `unknown`.
+  - The SDK's 10 MB stdio line limit, and the same limit on an HTTP answer (3.10): a larger result closes the connection, and the call is `unknown`.
   - `list_changed` is asynchronous: a search right after a call that changes the list can see the old list.
   - No UI to store a pre-registered `clientRef` (Slack, Phase 3 M1); use `cmdkey`.
   - HTTP session-id expiry of a remote server is untested.
@@ -298,6 +298,16 @@ The `tools` parameter therefore never changes inside a session. A changed server
 - **The error of a connection attempt is redacted** before it reaches the state, `integration_state.lastError`, the page and the answer of Connect. A server that quoted its key put it there in plain text.
 - **Requests from a server have a trace limit** of 100 a minute, like notifications; the answers of the app to the others are left out too, with one row that says so. 20,000 pings gave 40,005 rows and held the event loop for 50 s; now 206 rows and 1.3 s, the same as without the recorder. The client still answers every request.
 - **A 401 or a 403 is an answer, not `unsent`.** The HTTP transport posted the whole call before the status, so the row is an in row with `{httpStatus, error}`. The outcome stays `not_sent` for the model, because the server refused before it acted. An auth error of the SDK (it comes only after a 401, or a 403 for a scope) gets the same row without a status; a credential manager failure keeps only the out row, because it can come before or after the post.
+
+### 3.10 Decisions from phase 2 M2, verification round 4
+
+- **One walk of the tool list at a time.** Each `list_changed` started a new walk after its debounce, also while an earlier walk or the first one ran. A slow, older answer then replaced a newer catalog (and was stored as the newest version), and a server with 64 pages of 9 MB and a `list_changed` each second filled the heap until the app crashed in 145 s. Now each attempt runs one walk, the first walk counts as one, and a `list_changed` during a walk runs one more walk after it. The same server now stays connected with the heap under 600 MB. A sequence number on each walk was not taken: it keeps the order, but not the number of walks. No cap on the bytes of a walk: the page limit and the message limit already bound it.
+- **`nextCursor: null` ends the walk**, like a missing cursor. The strict cursor schema threw the whole list away.
+- **An HTTP answer has the 10 MB limit of stdio.** A fetch wrapper on every HTTP entry (no auth, bearer, OAuth) stops a body over the limit and closes the transport, so the call is `unknown` and the backoff starts, as an oversized stdio line does. An event stream can stay open for hours, so there the limit applies to each event (a blank line ends an event; the data lines of one event count together). A 200 MB result now costs no blob and no trace row of its answer.
+- **The reason that a tool list is missing is outside text.** It quotes the error of the connection, which can be the server's words. It now carries the untrusted source of the integration (so the session is tainted and the model reads it wrapped), and its trace row has `source = 'mcp'` and the integration. Dropping the error from the text was not taken: the error tells the owner what to fix.
+- **A Pause during a Reconnect wins.** The reconnect checks the pause after the old connection closes and does not start. The answer of Connect says that the owner paused it. One queue per integration for pause and connect was not taken: one check closes the window.
+- **The page gets a redacted catalog.** `status()` redacts the tools, the rejected tools and the hidden names, as the stored copy is.
+- **The time of the newest message is the newest row by id**, one entry of the `(serverId, id)` index. `MAX(createdAt)` read every row of the server (0.6 s for 1.8 M rows at each load of the page).
 
 ## 4. Integrations
 
