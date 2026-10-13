@@ -35,7 +35,7 @@ export interface Scheduler {
   replan(): void;
 }
 
-export const BACKOFF_MS = [30_000, 60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000] as const;
+export const BACKOFF_MS = [30_000, 60_000, 5 * 60_000, 15 * 60_000] as const;
 export const MAX_FAILURES = 5;
 
 // a timer can fire late after the pc sleeps, so the scheduler wakes at least one time each minute.
