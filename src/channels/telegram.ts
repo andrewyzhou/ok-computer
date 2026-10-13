@@ -93,10 +93,10 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
   // the stop button of a draft sends an update with the draft id. the map finds the run of that draft.
   const stops = new Map<number, { chatId: number; stop: () => void }>();
 
-  // telegram refuses a format with a 400. the caller then sends a simpler format. other errors can come after the
-  // message reached the chat, so they go up, and the message is not sent twice.
   // delivery collects the formats of each message and the reasons for each fallback, for one log line per send.
   type Delivery = { formats: string[]; refused: string[] };
+  // telegram refuses a format with a 400. the caller then sends a simpler format. other errors can come after the
+  // message reached the chat, so they go up, and the message is not sent twice.
   const refusedAsUndefined = async <T>(delivery: Delivery, send: () => Promise<T>): Promise<T | undefined> => {
     try {
       return await send();
