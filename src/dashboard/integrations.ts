@@ -13,7 +13,9 @@ export function summaryOf(db: Db, status: IntegrationStatus, now: Date): Integra
   const counts = db
     .prepare("SELECT COUNT(*) AS calls, SUM(isError) AS errors FROM tool_calls WHERE serverId = ? AND source = 'mcp' AND createdAt >= ?")
     .get(status.id, since);
-  const last = db.prepare('SELECT MAX(createdAt) AS at FROM mcp_messages WHERE serverId = ?').get(status.id);
+  // the newest row by id reads one entry of the (serverId, id) index. MAX(createdAt) read every row of the server, and
+  // with weeks of messages each load of the page held the event loop for more than half a second.
+  const last = db.prepare('SELECT createdAt AS at FROM mcp_messages WHERE serverId = ? ORDER BY id DESC LIMIT 1').get(status.id);
   return {
     ...status,
     state: { ...status.state },

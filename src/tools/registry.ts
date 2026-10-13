@@ -47,10 +47,20 @@ export interface Tool<I = unknown> {
 // the approval and the trace then see that tool and its arguments, never tool_call. unknown marks a name that no tool
 // of the session has, so an approved call can say that its tool is gone. a failed tool_call carries the call that it
 // names, so the trace row names the integration tool too.
-// tool is the tool that the call found, when only its input was wrong.
+// from names the integration of a failed call for the trace: the tool that the call found when only its input was
+// wrong, or the integration that has not sent its tool list.
 export type Resolved =
   | { ok: true; tool: Tool; input: unknown; call: ToolCall }
-  | { ok: false; output: ToolOutput; unknown?: true; call?: ToolCall; tool?: Tool };
+  | { ok: false; output: ToolOutput; unknown?: true; call?: ToolCall; from?: Attribution };
+
+export type Attribution = Pick<Tool, 'source' | 'serverId'>;
+
+// the reason that explain gives. the reason can quote the server, for example the error of its connection, so it
+// carries the source of the outputs of the integration, and the trace row names the integration.
+export interface Explanation extends Attribution {
+  content: string;
+  untrustedSource?: string;
+}
 
 export const TOOL_CALL = 'tool_call';
 
@@ -78,7 +88,7 @@ export function createToolRegistry(
   tools: Tool[],
   logger: Logger = silentLogger,
   dynamic?: DynamicTools,
-  explain?: (name: string, sessionKey: string) => string | undefined,
+  explain?: (name: string, sessionKey: string) => Explanation | undefined,
 ): ToolRegistry {
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   // the tool list is part of the cached prefix, so the order must not change between requests.
@@ -94,7 +104,7 @@ export function createToolRegistry(
       // the schema of an integration tool comes from its server, and the message of the check quotes it, for example
       // the name of a required property. so the message is outside text, as the output of the tool is.
       const outside = !byName.has(tool.name) && tool.untrustedOutput ? { untrustedSource: tool.untrustedOutput } : {};
-      return { ok: false, output: { content: `invalid input for ${tool.name}:\n${z.prettifyError(parsed.error)}`, isError: true, ...outside }, tool };
+      return { ok: false, output: { content: `invalid input for ${tool.name}:\n${z.prettifyError(parsed.error)}`, isError: true, ...outside }, from: tool };
     }
     return { ok: true, tool, input: parsed.data, call };
   };
@@ -114,7 +124,11 @@ export function createToolRegistry(
         const inner = { id: call.id, name, input: args };
         if (byName.has(name) || !dynamic(name, sessionKey) || !allowed.includes(name)) {
           const why = !byName.has(name) && allowed.includes(name) ? explain?.(name, sessionKey) : undefined;
-          const content = why ?? `no integration tool is named ${name}. Use tool_search to find the tool and its exact name.`;
+          if (why) {
+            const { content, untrustedSource, ...from } = why;
+            return { ok: false, output: { content, isError: true, ...(untrustedSource ? { untrustedSource } : {}) }, call: inner, from };
+          }
+          const content = `no integration tool is named ${name}. Use tool_search to find the tool and its exact name.`;
           return { ok: false, output: { content, isError: true }, call: inner };
         }
         const resolved = resolveOne(inner, allowed, sessionKey);

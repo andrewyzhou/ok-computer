@@ -5,8 +5,8 @@ import type { BlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
 import type { SetTimer } from '../scheduler/scheduler.js';
 import { localTime, type Clock } from '../time.js';
-import { TOOL_CALL, type Tool } from '../tools/registry.js';
-import { redact } from '../observability/redact.js';
+import { TOOL_CALL, type Explanation, type Tool } from '../tools/registry.js';
+import { redact, redactValue } from '../observability/redact.js';
 import type { Risk } from '../policy/policy.js';
 import { createCatalogStore, riskFrom, riskOf, type Catalog, type CatalogTool } from './catalog.js';
 import { sessionProfile, type IntegrationEntry } from './config.js';
@@ -72,7 +72,7 @@ export interface Integrations {
   find(name: string, sessionKey: string): Tool | undefined;
   // why find has no tool for a name that the config allows, when the reason is the state of its integration: the
   // server has not sent a tool list yet. undefined for every other name.
-  explain(name: string, sessionKey: string): string | undefined;
+  explain(name: string, sessionKey: string): Explanation | undefined;
   // the tool names that a session may use: the discovery pair, and every allowed tool of its integrations. this
   // depends only on the config, so a new catalog never changes it.
   allowedNames(sessionKey: string): string[];
@@ -288,7 +288,12 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       if (!entry || catalogs.get(entry.id) || !entry.sessions.includes(sessionProfile(sessionKey))) return undefined;
       if (!entry.tools.allow.some((mcpName) => toolName(entry.id, mcpName) === name)) return undefined;
       const why = unavailable(entry.id);
-      return `${name} did not run, because the ${entry.id} integration has not sent its tool list yet.${why ? ` ${why}` : ''}`;
+      return {
+        content: `${name} did not run, because the ${entry.id} integration has not sent its tool list yet.${why ? ` ${why}` : ''}`,
+        ...(entry.untrustedOutput ? { untrustedSource: `mcp:${entry.id}` } : {}),
+        source: 'mcp',
+        serverId: entry.id,
+      };
     },
     allowedNames(sessionKey) {
       // a heartbeat or a consolidation session sees no integration, so it gets no discovery tools either.
@@ -329,17 +334,19 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
           lastErrorAt: text('lastErrorAt'),
           ...(authUrl ? { authUrl } : {}),
           ...(catalog ? { catalogHash: catalog.hash, catalogStored: catalog.stored } : {}),
-          tools: (snapshot?.tools ?? []).map((tool) => ({
+          // the live catalog is the text of the server, and a server can quote its key in a description. the stored
+          // copy is redacted, and the page gets the same.
+          tools: redactValue((snapshot?.tools ?? []).map((tool) => ({
             name: tool.name,
             mcpName: tool.mcpName,
             description: tool.description,
             risk: riskOf(entry, tool),
             riskFrom: riskFrom(entry, tool),
             inputSchema: tool.inputSchema,
-          })),
-          rejected: snapshot?.rejected ?? [],
+          }))),
+          rejected: redactValue(snapshot?.rejected ?? []),
           missing: snapshot?.missing ?? [],
-          hidden: catalog?.hidden ?? [],
+          hidden: redactValue(catalog?.hidden ?? []),
           unknown: entry.tools.allow.filter((name) => !seen.has(name)),
         };
       });
@@ -397,6 +404,9 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
     authorizing.add(id);
     try {
       await connection.stop();
+      // the owner can press Pause while the old connection closes, and a stdio close on windows takes seconds. the
+      // pause wins, or the page says paused while the server runs.
+      if (paused.has(id)) return { error: `the owner paused the ${id} integration.` };
       await connection.start();
     } finally {
       authorizing.delete(id);

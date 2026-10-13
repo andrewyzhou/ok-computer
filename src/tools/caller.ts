@@ -10,7 +10,7 @@ import { decide, type ReviewResult, type Reviewer, type Risk, type Rule, type Ta
 import { decisionOfApproval, recordDecision, sessionTaint, updateDecision } from '../policy/store.js';
 import type { RunQueue } from '../sessions/queue.js';
 import type { Clock } from '../time.js';
-import { errorText, type Tool, type ToolContext, type ToolOutput, type ToolRegistry } from './registry.js';
+import { errorText, type Attribution, type Tool, type ToolContext, type ToolOutput, type ToolRegistry } from './registry.js';
 import { modelView, newHandle } from './results.js';
 
 export interface CallContext {
@@ -79,7 +79,7 @@ interface Trace {
   serverId?: string;
 }
 
-const sourceOf = (tool: Tool) => ({ ...(tool.source ? { source: tool.source } : {}), ...(tool.serverId ? { serverId: tool.serverId } : {}) });
+const sourceOf = (tool: Attribution) => ({ ...(tool.source ? { source: tool.source } : {}), ...(tool.serverId ? { serverId: tool.serverId } : {}) });
 
 // an approval can run days after its call. by then the owner can have removed the integration of its tool.
 function goneText(name: string): string {
@@ -343,7 +343,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       };
       const resolved = tools.resolve(modelCall, ctx.allowed, ctx.sessionKey);
       // a bad input to an integration tool counts for that integration on the dashboard.
-      if (!resolved.ok) return strip(record(ctx.runId, resolved.call ?? modelCall, resolved.output, started, resolved.tool ? sourceOf(resolved.tool) : {}));
+      if (!resolved.ok) return strip(record(ctx.runId, resolved.call ?? modelCall, resolved.output, started, resolved.from ? sourceOf(resolved.from) : {}));
       // for tool_call this is the integration tool that it names, with the same id.
       const { tool, input, call } = resolved;
 
