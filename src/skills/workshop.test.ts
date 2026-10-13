@@ -35,7 +35,7 @@ const reset = (db: Db, time: Date) => appendEvent(db, { sessionKey: 'main', runI
 const runsOf = (db: Db, window = day12) => findTasks(db, window).map((task) => task.runIds);
 
 describe('findTasks', () => {
-  it('finds long runs and corrections of a run with tools, and joins runs that touch', () => {
+  it('finds long runs and corrections of a run with tools, and joins a correction to the run that it corrects', () => {
     const db = openDb(':memory:');
     run(db, 'old', at('10:00', '2026-10-11'), 'long task of the day before', LONG_TASK_CALLS);
     run(db, 'a', at('09:00'), 'short task', 1);
@@ -55,6 +55,17 @@ describe('findTasks', () => {
       [['g', 'h'], [`long: ${LONG_TASK_CALLS} tool calls`, 'the next owner message corrects it', 'the owner corrects the run before ("no")']],
     ]);
     expect(tasks[0]!.events.map((event) => event.runId)).toEqual(['a', 'a', 'a', 'a', 'b', 'b']);
+  });
+
+  it('keeps long runs next to each other as separate tasks, and joins only a chain of corrections', () => {
+    const db = openDb(':memory:');
+    run(db, 'expenses', at('10:00'), 'sort out my expenses', LONG_TASK_CALLS);
+    run(db, 'flights', at('11:00'), 'sort out my flights', LONG_TASK_CALLS);
+    run(db, 'invoices', at('12:00'), 'sort out my invoices', LONG_TASK_CALLS);
+    run(db, 'fix', at('12:10'), 'no, use the other folder', 1);
+    run(db, 'fix-again', at('12:20'), 'actually the shared folder');
+    run(db, 'taxes', at('13:00'), 'sort out my taxes', LONG_TASK_CALLS);
+    expect(runsOf(db)).toEqual([['expenses'], ['flights'], ['invoices', 'fix', 'fix-again'], ['taxes']]);
   });
 
   it('counts a run as long at 8 tool calls and not at 7', () => {
@@ -111,6 +122,25 @@ describe('reviewWindow', () => {
     setSetting(db, REVIEWED_UNTIL, at('00:00', '2027-10-13').toISOString(), now);
     expect(reviewWindow(db, now, tz)).toEqual({ start: at('00:00', '2026-10-19'), end: at('00:00', '2026-10-20') });
   });
+
+  it('ignores only the mark that is after the end and keeps the others', () => {
+    const db = openDb(':memory:');
+    const now = at('09:00', '2026-10-20');
+    // a review that sent a draft while the clock was a year ahead.
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('ahead', 'workshop:ahead', 'automation', 'consolidation', 'completed', ?)").run(
+      at('09:00', '2027-10-13').toISOString(),
+    );
+    createApproval(db, { runId: 'ahead', toolName: 'skill_write', input: {}, summary: 'draft' }, now);
+    setSetting(db, REVIEWED_UNTIL, at('00:00', '2026-10-16').toISOString(), now);
+    expect(reviewWindow(db, now, tz).start).toEqual(at('00:00', '2026-10-16'));
+    // a review that sent a draft on 10-18 still counts when the other mark is ahead.
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('sent', 'workshop:sent', 'automation', 'consolidation', 'failed', ?)").run(
+      at('09:00', '2026-10-18').toISOString(),
+    );
+    createApproval(db, { runId: 'sent', toolName: 'skill_write', input: {}, summary: 'draft' }, now);
+    setSetting(db, REVIEWED_UNTIL, at('00:00', '2027-10-13').toISOString(), now);
+    expect(reviewWindow(db, now, tz).start).toEqual(at('00:00', '2026-10-18'));
+  });
 });
 
 describe('the workshop job', () => {
@@ -138,6 +168,27 @@ describe('the workshop job', () => {
     expect(await review(automation)).toEqual({ status: 'failed', runId: 'review-1', error: 'fake/m rejected the request: overloaded' });
     expect(await review(automation)).toEqual({ status: 'skipped', error: 'the main session is already reviewed until 2026-10-13 00:00' });
     expect(calls).toEqual(['review-1']);
+  });
+
+  it('skips a second review while one runs, as for a run now during the scheduled review', async () => {
+    const db = openDb(':memory:');
+    const now = at('09:00', '2026-10-13');
+    run(db, 'big', at('10:00'), 'big task', LONG_TASK_CALLS);
+    let open = () => {};
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    const calls: string[] = [];
+    const review = job(db, now, async (input) => {
+      calls.push(input.runId!);
+      await gate;
+      return { runId: input.runId!, status: 'completed', text: '' };
+    });
+    const first = review(automation);
+    expect(await review(automation)).toEqual({ status: 'skipped', error: 'a skill review is running now' });
+    open();
+    expect(await first).toEqual({ status: 'completed', runId: 'review-1' });
+    expect(calls).toEqual(['review-1']);
+    // the flag ends with the review, so a later review runs. its window is already reviewed.
+    expect((await review(automation)).error).toBe('the main session is already reviewed until 2026-10-13 00:00');
   });
 
   it('reviews a window again after a failed review that sent no draft', async () => {

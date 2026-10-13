@@ -79,24 +79,25 @@ export function reviewWindow(db: Db, now: Date, timeZone: string): Window {
   const end = zonedToUtc(today, '00:00', timeZone);
   const yesterday = zonedToUtc(addDays(today, -1), '00:00', timeZone);
   const floor = zonedToUtc(addDays(today, -MAX_DAYS), '00:00', timeZone).getTime();
-  const marks = [getSetting<string>(db, REVIEWED_UNTIL), proposedUntil(db, timeZone)].filter((mark) => mark !== undefined).map((mark) => Date.parse(mark));
+  // a mark after the end comes from a clock that was ahead. it would stop every review until that date, so it is
+  // ignored, and the other marks stay. the end of the next finished review writes a correct mark.
+  const marks = [getSetting<string>(db, REVIEWED_UNTIL), ...proposedUntil(db, timeZone)]
+    .filter((mark) => mark !== undefined)
+    .map((mark) => Date.parse(mark))
+    .filter((mark) => mark <= end.getTime());
   if (!marks.length) return { start: yesterday, end };
-  const until = Math.max(...marks);
-  // a mark after the end comes from a clock that was ahead. it would stop every review until that date, so the
-  // review starts yesterday, and the end of that review writes a correct mark.
-  if (until > end.getTime()) return { start: yesterday, end };
-  return { start: new Date(Math.max(until, floor)), end };
+  return { start: new Date(Math.max(...marks, floor)), end };
 }
 
 // a review that sent a draft to the owner counts as done for its window, also when it failed or the app stopped
 // after the draft. a second review of the same window would send a second draft for the same task. a review runs on
-// the day after its window, so its window ends at the start of the day that it started on.
-function proposedUntil(db: Db, timeZone: string): string | undefined {
-  const row = db
-    .prepare("SELECT MAX(r.startedAt) AS startedAt FROM runs r JOIN approvals a ON a.runId = r.id WHERE r.sessionKey LIKE ? AND a.toolName = 'skill_write'")
-    .get(`${WORKSHOP_PREFIX}%`);
-  const startedAt = row?.startedAt;
-  return typeof startedAt === 'string' ? zonedToUtc(localDay(new Date(startedAt), timeZone), '00:00', timeZone).toISOString() : undefined;
+// the day after its window, so its window ends at the start of the day that it started on. each review gives its own
+// mark, so the caller can ignore one that a clock ahead gave.
+function proposedUntil(db: Db, timeZone: string): string[] {
+  const rows = db
+    .prepare("SELECT DISTINCT r.startedAt AS startedAt FROM runs r JOIN approvals a ON a.runId = r.id WHERE r.sessionKey LIKE ? AND a.toolName = 'skill_write'")
+    .all(`${WORKSHOP_PREFIX}%`);
+  return rows.map((row) => String(row.startedAt)).map((startedAt) => zonedToUtc(localDay(new Date(startedAt), timeZone), '00:00', timeZone).toISOString());
 }
 
 export interface Task {
@@ -117,7 +118,8 @@ interface MainRun {
 
 // a task is a message run of the main session that started in the window. a long run is a task. a run whose owner
 // message corrects the run before it makes one task with that run, when the run before used a tool and no /new lies
-// between them. tasks that touch each other become one task, so a review sees each run once.
+// between them. only a correction joins runs. two long runs next to each other are two tasks, so the cut of a long
+// task and the limit on the number of tasks never hide a full task without a note.
 export function findTasks(db: Db, window: Window): Task[] {
   // the runs of the day before the window are read too, so a correction at its start finds the run that it corrects.
   const from = new Date(window.start.getTime() - 24 * 60 * 60_000).toISOString();
@@ -141,6 +143,7 @@ export function findTasks(db: Db, window: Window): Task[] {
   const runs = [...byRun.values()].filter((run) => run.first !== Infinity);
 
   const reasons = new Map<number, string[]>();
+  const corrects = new Set<number>();
   const flag = (i: number, reason: string) => reasons.set(i, [...(reasons.get(i) ?? []), reason]);
   runs.forEach((run, i) => {
     if (run.startedAt < window.start.toISOString()) return;
@@ -153,6 +156,7 @@ export function findTasks(db: Db, window: Window): Task[] {
     if (!matched) return;
     flag(i - 1, 'the next owner message corrects it');
     flag(i, `the owner corrects the run before ("${matched}")`);
+    corrects.add(i);
   });
 
   const tasks: Task[] = [];
@@ -163,6 +167,7 @@ export function findTasks(db: Db, window: Window): Task[] {
   };
   runs.forEach((_, i) => {
     if (!reasons.has(i)) return close();
+    if (!corrects.has(i)) close();
     group.push(i);
   });
   close();
@@ -272,8 +277,21 @@ export interface WorkshopDeps {
 export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => Promise<JobResult> {
   const { db, clock, config } = deps;
   const local = (date: Date) => `${localDay(date, config.timeZone)} ${localTime(date, config.timeZone)}`;
+  // a run now of the review can start while the scheduled review waits for the model. both would review the same
+  // window before either one sends a draft, so the owner would get two drafts of one task.
+  let running = false;
   return async (automation) => {
     if (!deps.background) return { status: 'skipped', error: 'left to the background service' };
+    if (running) return { status: 'skipped', error: 'a skill review is running now' };
+    running = true;
+    try {
+      return await review(automation);
+    } finally {
+      running = false;
+    }
+  };
+
+  async function review(automation: Automation): Promise<JobResult> {
     const window = reviewWindow(db, clock(), config.timeZone);
     const span = `from ${local(window.start)} to ${local(window.end)}`;
     if (window.start >= window.end) return { status: 'skipped', error: `the main session is already reviewed until ${local(window.start)}` };
@@ -310,5 +328,5 @@ export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => 
     if (result.status !== 'completed') return { status: 'failed', runId, error: result.error ?? result.status };
     setSetting(db, REVIEWED_UNTIL, window.end.toISOString(), clock());
     return { status: 'completed', runId };
-  };
+  }
 }
