@@ -16,6 +16,7 @@ export const payloadSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('heartbeat') }),
   z.object({ type: z.literal('goal_checkin'), goalId: z.number().int() }),
   z.object({ type: z.literal('goals_results') }),
+  z.object({ type: z.literal('consolidation') }),
 ]);
 export type Payload = z.infer<typeof payloadSchema>;
 

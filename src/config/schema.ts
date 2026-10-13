@@ -101,6 +101,11 @@ export const configSchema = z.object({
       resultsAt: timeOfDay.default('23:45'),
     })
     .prefault({}),
+  memory: z
+    .object({
+      consolidateAt: timeOfDay.default('03:00'),
+    })
+    .prefault({}),
 });
 
 // the result is in milliseconds. "0" gives 0.

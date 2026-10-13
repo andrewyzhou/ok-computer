@@ -10,6 +10,13 @@ import type { Db } from './db/index.js';
 import { listEvents } from './events/log.js';
 import { installRoutine } from './goals/routine.js';
 import { createGoalTools } from './goals/tools.js';
+import {
+  CONSOLIDATION_INSTRUCTIONS,
+  CONSOLIDATION_PREFIX,
+  createConsolidation,
+  createConsolidationTools,
+  installConsolidation,
+} from './memory/consolidate.js';
 import { appendToDailyNote, sessionExcerpt } from './memory/daily.js';
 import { createMemoryTools } from './memory/tools.js';
 import { createSlotRunner } from './models/slots.js';
@@ -84,6 +91,7 @@ export function createApp(deps: AppDeps): App {
       ...createAutomationTools({ db, replan }),
       ...createHeartbeatTools({ db }),
       ...createMemoryTools({ db, memoryDir }),
+      ...createConsolidationTools({ db, memoryDir }),
       createMessageOwnerTool(owner),
     ],
     { gate: approvals.gate },
@@ -106,6 +114,9 @@ export function createApp(deps: AppDeps): App {
         ...(sessionKey.startsWith(HEARTBEAT_PREFIX)
           ? { personaFiles: ['USER.md'], extraInstructions: HEARTBEAT_INSTRUCTIONS }
           : {}),
+        ...(sessionKey.startsWith(CONSOLIDATION_PREFIX)
+          ? { personaFiles: ['USER.md'], extraInstructions: CONSOLIDATION_INSTRUCTIONS }
+          : {}),
       }),
     contextLines: (now) => scheduleContext(db, now, config.timeZone),
     ...ids,
@@ -122,6 +133,7 @@ export function createApp(deps: AppDeps): App {
     owner,
     agent,
     heartbeat,
+    consolidation: createConsolidation({ db, clock, config, memoryDir, queue, agent, signal: shutdown.signal, ...ids }),
     signal: shutdown.signal,
     ...ids,
   });
@@ -163,6 +175,7 @@ export function createApp(deps: AppDeps): App {
         logger.info('channel started', { channel: channel.id });
       }
       if (installRoutine(db, config, clock())) logger.info('goals routine installed');
+      if (installConsolidation(db, config, clock())) logger.info('memory consolidation installed');
       syncHeartbeat(db, config, clock());
       // missed jobs can take minutes, so the start does not wait for them.
       void scheduler.start().catch((err: unknown) => logger.error('scheduler start failed', { err }));

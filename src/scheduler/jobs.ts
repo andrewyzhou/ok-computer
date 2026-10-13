@@ -38,6 +38,7 @@ export interface JobDeps {
   owner: OwnerMessenger;
   agent: (input: RunInput) => Promise<RunResult>;
   heartbeat: (automation: Automation) => Promise<JobResult>;
+  consolidation: (automation: Automation) => Promise<JobResult>;
   signal: AbortSignal;
   newId?: () => string;
 }
@@ -123,6 +124,8 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
       }
       case 'heartbeat':
         return deps.heartbeat(automation);
+      case 'consolidation':
+        return deps.consolidation(automation);
     }
   };
 }

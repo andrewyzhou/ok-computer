@@ -19,7 +19,7 @@ export function checkinPrompt(goal: Goal, timeZone: string): string {
   return `Check in on goal #${goal.id} "${goal.title}"${eta}. Ask the owner if it is done. If it is done, call goal_update with status done. If it is not done yet, ask for a new ETA, then call goal_update with the new eta and the reason in the note. If the owner gives it up, use status dropped.`;
 }
 
-const daily = (time: string) => {
+export const dailyCron = (time: string) => {
   const [hour, minute] = time.split(':').map(Number);
   return `${minute} ${hour} * * *`;
 };
@@ -32,7 +32,7 @@ export function installRoutine(db: Db, config: Pick<Config, 'timeZone' | 'routin
   const add = (name: string, time: string, payload: Parameters<typeof createAutomation>[1]['payload']) => {
     const created = createAutomation(
       db,
-      { name, schedule: { kind: 'cron', expr: daily(time), tz }, payload, sessionMode: 'main', createdBy: 'system' },
+      { name, schedule: { kind: 'cron', expr: dailyCron(time), tz }, payload, sessionMode: 'main', createdBy: 'system' },
       now,
       tz,
     );
