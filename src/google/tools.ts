@@ -10,7 +10,7 @@ import type { GoogleAccounts, GoogleApis } from './accounts.js';
 import type { GoogleConfig } from './config.js';
 import { GoogleError, toGoogleError } from './errors.js';
 import { badAddress, bodyText, header, rawMessage, type Draft } from './mime.js';
-import { oneClick as realOneClick, unsubscribeTargets, type OneClickResult } from './unsubscribe.js';
+import { oneClick as realOneClick, planUnsubscribe, unsubscribeTargets, type OneClickResult } from './unsubscribe.js';
 
 export const GOOGLE = 'google';
 const name = (tool: string) => `${GOOGLE}__${tool}`;
@@ -252,41 +252,27 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
     googleTool({
       name: name('gmail_unsubscribe'),
       description:
-        'Unsubscribe from a mailing list with the List-Unsubscribe header of a message. target must be one of the unsubscribe targets that gmail_read_thread shows for that message. The owner approves each call.',
-      input: z.object({ account, messageId: z.string().min(1).max(100), target: z.string().min(1).max(2000) }),
+        'Unsubscribe from a mailing list with the List-Unsubscribe header of a message. sender is the address in the From header. target must be one of the unsubscribe targets that gmail_read_thread shows for that message. The owner approves each call.',
+      input: z.object({ account, messageId: z.string().min(1).max(100), sender: z.string().min(1).max(320), target: z.string().min(1).max(2000) }),
       risk: 'external',
       needsApproval: true,
-      async run({ account: alias, messageId, target }) {
+      async run({ account: alias, messageId, sender, target }) {
         const tool = name('gmail_unsubscribe');
         let message: gmail_v1.Schema$Message;
         try {
-          message = (await accounts.run(alias, (apis) => apis.gmail.users.messages.get({ userId: 'me', id: messageId, format: 'metadata', metadataHeaders: ['List-Unsubscribe', 'List-Unsubscribe-Post', 'Authentication-Results'] }))).data;
+          const metadataHeaders = ['From', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'Authentication-Results'];
+          message = (await accounts.run(alias, (apis) => apis.gmail.users.messages.get({ userId: 'me', id: messageId, format: 'metadata', metadataHeaders }))).data;
         } catch (err) {
           return { ...failed(tool, alias, toGoogleError(err), true), effect: 'none' };
         }
-        // the target comes from the header at run time, never from the model alone. the owner approved this exact
-        // target, and the header must still offer it.
-        const targets = unsubscribeTargets(header(message, 'List-Unsubscribe'));
-        if (!targets.includes(target)) {
-          return { content: `${tool} did not run: the message does not offer ${JSON.stringify(target)}. It offers: ${targets.join(' ') || 'nothing'}.`, isError: true, effect: 'none' };
-        }
-        if (target.toLowerCase().startsWith('mailto:')) {
-          if (!config.send) return { content: `${tool} did not run: this sender unsubscribes by mail, and sending is off for the google integration.`, isError: true, effect: 'none' };
-          const mailto = new URL(target);
-          return sendDraft(tool, alias, { to: [decodeURIComponent(mailto.pathname)], subject: mailto.searchParams.get('subject') ?? 'unsubscribe', body: mailto.searchParams.get('body') ?? 'unsubscribe' });
-        }
-        // rfc 8058 needs the post header, and a dkim signature that covers both headers. without a passed dkim check
-        // the header can be forged, and the post would go to a server of the forger.
-        if (!/List-Unsubscribe=One-Click/i.test(header(message, 'List-Unsubscribe-Post'))) {
-          return { content: `${tool} did not run: the sender offers no one-click unsubscribe. The owner can open the link in a browser.`, isError: true, effect: 'none' };
-        }
-        const results = (message.payload?.headers ?? []).filter((each) => each.name?.toLowerCase() === 'authentication-results').map((each) => each.value ?? '');
-        if (!results.some((value) => /\bdkim=pass\b/i.test(value))) {
-          return { content: `${tool} did not run: gmail did not see a passing dkim signature on this message, so its unsubscribe header can be forged.`, isError: true, effect: 'none' };
-        }
+        // the owner approved this sender and this target, so the message must still name both. a refusal has no
+        // effect field: a second approval of the same call cannot help.
+        const plan = planUnsubscribe(message, sender, target, config.send);
+        if (plan.way === 'refused') return { content: `${tool} did not run: ${plan.text}.`, isError: true };
+        if (plan.way === 'mailto') return sendDraft(tool, alias, { to: [plan.to], subject: plan.subject, body: plan.body });
         const result = await oneClick(target);
         if (result.ok) return { content: `unsubscribed: ${result.text}.` };
-        return { content: `${tool} did not finish: ${result.text}.`, isError: true, effect: result.sent ? 'unknown' : 'none' };
+        return { content: `${tool} did not finish: ${result.text}.`, isError: true, ...(result.refused ? {} : { effect: result.sent ? 'unknown' : 'none' }) };
       },
     }),
     googleTool({

@@ -3,7 +3,7 @@ import { createGoogleHarness, refreshOf, type GoogleHarness } from '../../test/g
 import { runTool } from '../../test/run-tool.js';
 import { createToolRegistry, type ToolContext, type ToolOutput } from '../tools/registry.js';
 import { createGoogleTools, googleToolNames } from './tools.js';
-import { isPrivateAddress, oneClick, unsubscribeTargets } from './unsubscribe.js';
+import { isPrivateAddress, oneClick, unsubscribeTargets, type OneClickResult } from './unsubscribe.js';
 
 let h: GoogleHarness;
 afterEach(async () => h?.close());
@@ -20,6 +20,7 @@ async function setup(options: { send?: boolean; oneClick?: (target: string) => P
   return (name: string, input: unknown, context = ctx()): Promise<ToolOutput> => runTool(registry, { id: context.toolCallId!, name: `google__${name}`, input }, allowed, context);
 }
 
+const SENDER = 'news@shop.example';
 const newsletter = {
   id: 'n1',
   headers: {
@@ -89,22 +90,53 @@ describe('gmail_unsubscribe', () => {
     const posted: string[] = [];
     const call = await setup({ oneClick: async (target) => (posted.push(target), { ok: true, sent: true, text: 'the sender answered 200' }) });
     h.fake.deliver('personal', newsletter);
-    expect(await call('gmail_unsubscribe', { account: 'personal', messageId: 'n1', target: 'https://evil.example/u' })).toMatchObject({ isError: true, effect: 'none' });
+    // a refusal has no effect field. the approval flow would give a call without effect back to the owner, and a second
+    // approval of the same call cannot help.
+    expect(await call('gmail_unsubscribe', { account: 'personal', messageId: 'n1', sender: SENDER, target: 'https://evil.example/u' })).toEqual({
+      content: 'google__gmail_unsubscribe did not run: the message does not offer "https://evil.example/u". It offers: mailto:unsub@shop.example?subject=stop https://shop.example/u/abc.',
+      isError: true,
+    });
     expect(posted).toEqual([]);
-    expect(await call('gmail_unsubscribe', { account: 'personal', messageId: 'n1', target: 'https://shop.example/u/abc' })).toMatchObject({ content: expect.stringContaining('unsubscribed') });
+    expect(await call('gmail_unsubscribe', { account: 'personal', messageId: 'n1', sender: 'News@Shop.example', target: 'https://shop.example/u/abc' })).toMatchObject({ content: expect.stringContaining('unsubscribed') });
     expect(posted).toEqual(['https://shop.example/u/abc']);
   });
 
   it('refuses a one-click post without a passing dkim check', async () => {
     const call = await setup({ oneClick: async () => ({ ok: true, sent: true, text: 'x' }) });
     h.fake.deliver('personal', { ...newsletter, headers: { ...newsletter.headers, 'Authentication-Results': 'mx.google.com; dkim=fail' } });
-    expect(await call('gmail_unsubscribe', { account: 'personal', messageId: 'n1', target: 'https://shop.example/u/abc' })).toMatchObject({ isError: true, content: expect.stringContaining('dkim') });
+    expect(await call('gmail_unsubscribe', { account: 'personal', messageId: 'n1', sender: SENDER, target: 'https://shop.example/u/abc' })).toMatchObject({ isError: true, content: expect.stringContaining('dkim') });
+  });
+
+  // the card shows the sender, so the owner approves a sender. a text test of the from header would let a display
+  // name with the bank's address pass.
+  it('refuses a message whose from address is not exactly the sender', async () => {
+    const posted: string[] = [];
+    const call = await setup({ oneClick: async (target) => (posted.push(target), { ok: true, sent: true, text: 'x' }) });
+    for (const from of ['"bank@x.example" <evil@y.example>', 'bank@x.example.evil.example', 'Bank <bank@x.example>, Eve <evil@y.example>', 'not an address']) {
+      h.fake.deliver('personal', { ...newsletter, headers: { ...newsletter.headers, From: from } });
+      const out = await call('gmail_unsubscribe', { account: 'personal', messageId: 'n1', sender: 'bank@x.example', target: 'https://shop.example/u/abc' });
+      expect(out, from).toMatchObject({ isError: true, content: expect.stringContaining('not from "bank@x.example"') });
+      expect(out.effect).toBeUndefined();
+    }
+    expect(posted).toEqual([]);
+  });
+
+  it('gives a refusal of the post itself no effect, and an unreached sender the effect none', async () => {
+    let answer: OneClickResult = { ok: false, sent: false, refused: true, text: 'the unsubscribe link points at a private address (127.0.0.1)' };
+    const call = await setup({ oneClick: async () => answer });
+    h.fake.deliver('personal', newsletter);
+    const input = { account: 'personal', messageId: 'n1', sender: SENDER, target: 'https://shop.example/u/abc' };
+    expect((await call('gmail_unsubscribe', input)).effect).toBeUndefined();
+    answer = { ok: false, sent: false, text: 'connect ECONNREFUSED' };
+    expect((await call('gmail_unsubscribe', input)).effect).toBe('none');
+    answer = { ok: false, sent: true, text: 'socket hang up' };
+    expect((await call('gmail_unsubscribe', input)).effect).toBe('unknown');
   });
 
   it('unsubscribes by mail through the send path', async () => {
     const call = await setup();
     h.fake.deliver('personal', newsletter);
-    const out = await call('gmail_unsubscribe', { account: 'personal', messageId: 'n1', target: 'mailto:unsub@shop.example?subject=stop' });
+    const out = await call('gmail_unsubscribe', { account: 'personal', messageId: 'n1', sender: SENDER, target: 'mailto:unsub@shop.example?subject=stop' });
     expect(out.content).toContain('sent from personal to unsub@shop.example');
     expect(h.fake.sent[0]!.raw).toContain('Subject: stop');
   });
@@ -122,7 +154,7 @@ describe('gmail_unsubscribe', () => {
     expect(await oneClick('https://127.0.0.1:1/u')).toMatchObject({ ok: false, sent: false, text: expect.stringContaining('private address') });
     expect(await oneClick('https://[::1]:1/u')).toMatchObject({ ok: false, sent: false });
     // a name that resolves to a private address is refused inside the connect, after the dns answer.
-    expect(await oneClick('https://localhost:1/u')).toMatchObject({ ok: false, sent: false, text: expect.stringContaining('private address') });
+    expect(await oneClick('https://localhost:1/u')).toMatchObject({ ok: false, sent: false, refused: true, text: expect.stringContaining('private address') });
     expect(await oneClick('http://shop.example/u')).toMatchObject({ ok: false, sent: false });
   });
 });

@@ -8,6 +8,15 @@ export function badAddress(addresses: readonly string[]): string | undefined {
   return addresses.find((address) => !ADDRESS.test(address));
 }
 
+// the one address of a from header: "Name" <a@b> or a@b. a header with a second mailbox gives undefined, because the
+// owner approved one sender.
+export function fromAddress(value: string): string | undefined {
+  if ((value.match(/</g) ?? []).length > 1) return undefined;
+  const angle = /<([^<>]*)>\s*$/.exec(value);
+  const address = (angle ? angle[1]! : value).trim().toLowerCase();
+  return ADDRESS.test(address) ? address : undefined;
+}
+
 // a header value with a non-ascii character goes as an rfc 2047 encoded word. a line break is never kept, because it
 // would start a new header.
 function headerText(value: string): string {

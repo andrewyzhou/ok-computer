@@ -57,7 +57,7 @@ describe('google acceptance', () => {
     const steps = Array.from({ length: 30 }, () =>
       router(() =>
         fakeResponse({
-          toolCalls: [{ id: 'u1', name: 'google__gmail_unsubscribe', input: { account: 'personal', messageId: 'n1', target: 'https://shop.example/u/abc' } }],
+          toolCalls: [{ id: 'u1', name: 'google__gmail_unsubscribe', input: { account: 'personal', messageId: 'n1', sender: 'news@shop.example', target: 'https://shop.example/u/abc' } }],
         }),
       ),
     );
