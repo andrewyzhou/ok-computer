@@ -39,9 +39,11 @@ export async function stdioTransport(entry: StdioEntry, secrets: SecretStore, lo
     let lines = 0;
     let dropped = 0;
     createInterface({ input: stderr }).on('line', (line) => {
-      if (now() - windowStart >= 60_000) {
+      // a clock that moves back would keep the old window open for the length of the jump.
+      const at = now();
+      if (at - windowStart >= 60_000 || at < windowStart) {
         if (dropped) logger.warn('mcp server stderr lines dropped', { integration: entry.id, dropped });
-        windowStart = now();
+        windowStart = at;
         lines = 0;
         dropped = 0;
       }

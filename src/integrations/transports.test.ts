@@ -64,4 +64,18 @@ describe('stdio transport', () => {
     expect(lines).toHaveLength(STDERR_LINES_PER_MINUTE);
     await client.close();
   }, 30_000);
+
+  it('starts a new stderr window when the clock moves back', async () => {
+    const { lines, logger } = capture();
+    const entry = entryFor(process.execPath, ['--import', 'tsx', FIXTURE, '--noisy']);
+    // the first 200 reads of the clock are an hour later than the others, as when the clock of the pc moves back.
+    let reads = 0;
+    const now = () => (++reads <= 200 ? 3_600_000 : 0);
+    const transport = await stdioTransport(entry, createMemorySecretStore(), logger, now);
+    const client = new Client({ name: 'test', version: '0' });
+    await client.connect(transport);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(lines).toHaveLength(2 * STDERR_LINES_PER_MINUTE);
+    await client.close();
+  }, 30_000);
 });

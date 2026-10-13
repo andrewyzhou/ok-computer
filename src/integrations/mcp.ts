@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { createHash } from 'node:crypto';
 import {
   Client,
   OAuthError,
@@ -55,8 +56,13 @@ export interface MessageRecorder {
 // a server can send notifications without a limit, and each row is a synchronous write on the event loop. so each
 // window records this many. the client still gets every message.
 export const NOTIFICATIONS_PER_MINUTE = 100;
-// these notifications change what the app does, so the trace always keeps them.
-const ALWAYS_RECORDED = new Set(['notifications/tools/list_changed', 'notifications/cancelled']);
+// these notifications change what the app does. each one has its own small limit, so a flood of other notifications
+// cannot hide them, and a flood of them cannot hold the event loop: 20,000 list_changed held it for 25 s.
+export const OWN_LIMIT_PER_MINUTE: Readonly<Record<string, number>> = { 'notifications/tools/list_changed': 10, 'notifications/cancelled': 10 };
+// a server can send list_changed often, and the refresh then gets the same list again. 200 tools are about 100 kb, so
+// a list that the attempt already recorded gets a short row with its hash. the set has a limit, because a server can
+// send a new list each time.
+const LISTS_REMEMBERED = 100;
 
 // each connection attempt gets its own recorder. a new client numbers its requests from 0 again, so a shared map of
 // pending requests would pair a new response with a request of the old attempt.
@@ -67,18 +73,26 @@ export function createMessageRecorder(deps: { db: Db; blobs: BlobStore; clock: C
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   let windowStart = 0;
-  let notifications = 0;
+  const counts = new Map<string, number>();
+  const lists = new Set<string>();
   // over reports whether a notification from the server is over the limit of its window. the first one over the
   // limit leaves one row that says so.
   const over = (method: string) => {
     const now = deps.clock().getTime();
-    if (now - windowStart >= 60_000) {
+    // a clock that moves back would keep the old window open for the length of the jump.
+    if (now - windowStart >= 60_000 || now < windowStart) {
       windowStart = now;
-      notifications = 0;
+      counts.clear();
     }
-    if (++notifications <= NOTIFICATIONS_PER_MINUTE) return false;
-    if (notifications === NOTIFICATIONS_PER_MINUTE + 1) {
-      const note = JSON.stringify({ dropped: `the server sent more than ${NOTIFICATIONS_PER_MINUTE} notifications in one minute. the others of this minute are not recorded.` });
+    const own = OWN_LIMIT_PER_MINUTE[method];
+    const limit = own ?? NOTIFICATIONS_PER_MINUTE;
+    const key = own === undefined ? '' : method;
+    const count = (counts.get(key) ?? 0) + 1;
+    counts.set(key, count);
+    if (count <= limit) return false;
+    if (count === limit + 1) {
+      const what = own === undefined ? 'notifications' : `${method} notifications`;
+      const note = JSON.stringify({ dropped: `the server sent more than ${limit} ${what} in one minute. the others of this minute are not recorded.` });
       insert.run(deps.serverId, null, null, 'in', method, null, note, null, null, deps.clock().toISOString());
     }
     return true;
@@ -86,7 +100,7 @@ export function createMessageRecorder(deps: { db: Db; blobs: BlobStore; clock: C
   return (direction, message, error) => {
     const rpcId = 'id' in message && message.id !== undefined ? String(message.id) : null;
     let method = 'method' in message ? message.method : null;
-    if (direction === 'in' && method && rpcId === null && !ALWAYS_RECORDED.has(method) && over(method)) return;
+    if (direction === 'in' && method && rpcId === null && over(method)) return;
     let call: ActiveCall | undefined;
     let latencyMs: number | null = null;
     // a request from the server to the client has its own ids, so the key includes the direction of the request.
@@ -115,20 +129,33 @@ export function createMessageRecorder(deps: { db: Db; blobs: BlobStore; clock: C
       call = ownCall();
     }
     const trace = call?.trace;
-    const text = redactedJson(direction === 'unsent' ? { error } : message);
-    const small = Buffer.byteLength(text) <= INLINE_LIMIT;
-    insert.run(
-      deps.serverId,
-      trace?.runId ?? null,
-      trace?.toolCallId ?? null,
-      direction,
-      method,
-      rpcId,
-      small ? text : null,
-      small ? null : deps.blobs.put(text, 'application/json'),
-      latencyMs,
-      deps.clock().toISOString(),
-    );
+    let text = redactedJson(direction === 'unsent' ? { error } : message);
+    if (direction === 'in' && method === 'tools/list' && 'result' in message) {
+      const hash = createHash('sha256').update(redactedJson(message.result)).digest('hex');
+      if (lists.has(hash)) text = JSON.stringify({ jsonrpc: '2.0', id: message.id, unchanged: `the result has the sha-256 ${hash}, the same as an earlier tools/list answer of this connection` });
+      else {
+        if (lists.size >= LISTS_REMEMBERED) lists.clear();
+        lists.add(hash);
+      }
+    }
+    const bytes = Buffer.byteLength(text);
+    let payload: string | null = bytes <= INLINE_LIMIT ? text : null;
+    let payloadBlob: string | null = null;
+    let blobError: unknown;
+    if (payload === null) {
+      try {
+        payloadBlob = deps.blobs.put(text, 'application/json');
+      } catch (err) {
+        // a message out does not go without its whole trace. a message in already came, and its row keeps the rpc
+        // id, the latency and the call, so the page does not show a request without an answer.
+        if (direction !== 'in') throw err;
+        blobError = err;
+        payload = JSON.stringify({ unrecorded: `the payload of ${bytes} bytes was not stored: ${errorText(err)}` });
+      }
+    }
+    insert.run(deps.serverId, trace?.runId ?? null, trace?.toolCallId ?? null, direction, method, rpcId, payload, payloadBlob, latencyMs, deps.clock().toISOString());
+    // the transport logs the error.
+    if (blobError !== undefined) throw blobError;
   };
 }
 
@@ -457,6 +484,9 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
           setState({ status: 'needs_auth', error: 'the sign-in expired or was revoked. connect it again from the dashboard.' });
           logger.warn('mcp server needs authorization again', { integration: id });
         }
+        // a server that cannot be reached stays down until it starts again. a close starts the backoff now, so the
+        // next call says that it is not connected, and the next ping does not have to find it.
+        if (unreachedCode(err) && client === connected) await connected.close().catch(() => {});
         return classify(err);
       } finally {
         calls--;
@@ -479,5 +509,16 @@ export function classify(err: unknown): CallOutcome {
   }
   // the protocol rejects a request without a transport with a plain error, before any message goes out.
   if (err instanceof Error && !(err instanceof SdkError) && err.message === 'Not connected') return { kind: 'not_sent', reason: err.message };
+  const code = unreachedCode(err);
+  if (code) return { kind: 'not_sent', reason: `the server cannot be reached (${code})` };
   return { kind: 'unknown', reason: errorText(err) };
+}
+
+// fetch fails with these codes before a byte leaves: nothing listens on the port, or the name has no address. fetch
+// gives "fetch failed", and the code is on its cause.
+const UNREACHED = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']);
+function unreachedCode(err: unknown): string | undefined {
+  // the name and not instanceof: the TypeError of fetch can come from another realm, for example in a test runner.
+  const code = err instanceof Error && err.name === 'TypeError' ? (err.cause as { code?: unknown } | undefined)?.code : undefined;
+  return typeof code === 'string' && UNREACHED.has(code) ? code : undefined;
 }

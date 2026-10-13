@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { InMemoryTransport, SdkError, SdkErrorCode, StreamableHTTPClientTransport, type Transport } from '@modelcontextprotocol/client';
-import type { McpServer } from '@modelcontextprotocol/server';
+import { WebStandardStreamableHTTPServerTransport, type McpServer } from '@modelcontextprotocol/server';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createShapeServer, createTestServer } from '../../test/mcp-server.js';
 import { openDb } from '../db/index.js';
@@ -13,10 +13,12 @@ import { silentLogger, type Logger } from '../observability/logger.js';
 import { parseIntegrations, type StdioEntry } from './config.js';
 import { outcomeOutput } from './discovery.js';
 import {
+  classify,
   createMcpConnection,
   createMessageRecorder,
   HEALTHY_AFTER_MS,
   NOTIFICATIONS_PER_MINUTE,
+  OWN_LIMIT_PER_MINUTE,
   PING_EVERY_MS,
   type CallOutcome,
   type McpConnection,
@@ -215,7 +217,7 @@ describe('mcp connection failure modes', () => {
   it('still delivers an answer whose trace write failed, because the server already acted', async () => {
     const errors: string[] = [];
     const logger: Logger = { ...silentLogger, error: (msg) => void errors.push(msg) };
-    const { connection } = setup(memoryTransport(), {
+    const { connection, messages } = setup(memoryTransport(), {
       logger,
       blobs: (real) => ({
         ...real,
@@ -229,6 +231,10 @@ describe('mcp connection failure modes', () => {
     const outcome = await connection.callTool('long_report', {}, trace);
     expect(resultOf(outcome).content).toHaveLength(1);
     expect(errors).toContain('mcp message trace write failed');
+    // the row of the answer stays without its payload, so the page does not show a request without an answer.
+    const answer = messages().find((row) => row.direction === 'in' && row.method === 'tools/call')!;
+    expect(answer).toMatchObject({ toolCallId: 'call-1', payloadBlob: null, latencyMs: expect.any(Number) });
+    expect(String(answer.payload)).toContain('was not stored: EPERM');
   });
 
   it('does not send a request whose trace write failed, and says that the tool did not run', async () => {
@@ -366,6 +372,85 @@ describe('mcp connection failure modes', () => {
     now += 60_000;
     record('in', log);
     expect(count()).toEqual({ n: NOTIFICATIONS_PER_MINUTE + 2 });
+  });
+
+  it('gives list_changed and cancelled their own small limit, so neither a flood of them nor of others holds the app', () => {
+    const db = openDb(':memory:');
+    let now = 0;
+    const clock = () => new Date(now);
+    const record = createMessageRecorder({ db, blobs: createBlobStore(db, mkdtempSync(join(tmpdir(), 'okc-mcp-')), clock), clock, serverId: 'noisy' });
+    const count = (method: string) => db.prepare('SELECT count(*) AS n FROM mcp_messages WHERE method = ?').get(method)!.n;
+    for (let i = 0; i < 1_000; i++) {
+      record('in', { jsonrpc: '2.0', method: 'notifications/tools/list_changed' });
+      record('in', { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: i } });
+    }
+    const listLimit = OWN_LIMIT_PER_MINUTE['notifications/tools/list_changed']!;
+    // the limit, and one row that says where the record stops.
+    expect(count('notifications/tools/list_changed')).toBe(listLimit + 1);
+    expect(count('notifications/cancelled')).toBe(OWN_LIMIT_PER_MINUTE['notifications/cancelled']! + 1);
+    // a flood of list_changed does not use up the limit of the other notifications.
+    record('in', { jsonrpc: '2.0', method: 'notifications/message', params: { level: 'info', data: 'x' } });
+    expect(count('notifications/message')).toBe(1);
+    // a clock that moves back an hour starts a new window, and does not drop every notification for that hour.
+    now -= 3_600_000;
+    record('in', { jsonrpc: '2.0', method: 'notifications/tools/list_changed' });
+    expect(count('notifications/tools/list_changed')).toBe(listLimit + 2);
+  });
+
+  it('records a tools/list answer that the connection already recorded as a short row with its hash', () => {
+    const db = openDb(':memory:');
+    const clock = () => new Date(0);
+    const record = createMessageRecorder({ db, blobs: createBlobStore(db, mkdtempSync(join(tmpdir(), 'okc-mcp-')), clock), clock, serverId: 'notes' });
+    const tools = Array.from({ length: 200 }, (_, i) => ({ name: `tool_${i}`, description: 'x'.repeat(400), inputSchema: { type: 'object' } }));
+    const list = (id: number, result: unknown) => {
+      record('out', { jsonrpc: '2.0', id, method: 'tools/list' });
+      record('in', { jsonrpc: '2.0', id, result } as never);
+    };
+    list(1, { tools });
+    list(2, { tools });
+    list(3, { tools: tools.slice(1) });
+    const rows = db.prepare("SELECT rpcId, payload, payloadBlob FROM mcp_messages WHERE direction = 'in' ORDER BY id").all();
+    expect(rows.map((row) => [row.rpcId, row.payloadBlob !== null])).toEqual([
+      ['1', true],
+      ['2', false],
+      ['3', true],
+    ]);
+    expect(String(rows[1]!.payload)).toMatch(/"id":2,"unchanged":"the result has the sha-256 [0-9a-f]{64}/);
+  });
+
+  it('says that an http server that cannot be reached did not get the call, and starts the backoff', async () => {
+    const server = createServer((req, res) => {
+      void (async () => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of req) chunks.push(chunk as Buffer);
+        const mcp = createTestServer();
+        const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+        await mcp.connect(transport);
+        const headers = new Headers();
+        for (const [key, value] of Object.entries(req.headers)) if (typeof value === 'string') headers.set(key, value);
+        const body = req.method === 'POST' ? { body: Buffer.concat(chunks).toString() } : {};
+        const response = await transport.handleRequest(new Request(`http://127.0.0.1${req.url}`, { method: req.method!, headers, ...body }));
+        // no socket stays open. a call on an old socket that the server closed fails with ECONNRESET, and that error
+        // can also come after the server read the request, so it stays unknown.
+        res.writeHead(response.status, { ...Object.fromEntries(response.headers.entries()), connection: 'close' });
+        res.end(Buffer.from(await response.arrayBuffer()));
+      })();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const url = new URL(`http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`);
+    const { connection, messages } = setup(async () => new StreamableHTTPClientTransport(url));
+    await connection.start();
+    expect(connection.state().status).toBe('connected');
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+
+    const outcome = await connection.callTool('echo', { text: 'hi' }, trace);
+    expect(outcome).toEqual({ kind: 'not_sent', reason: 'the server cannot be reached (ECONNREFUSED)' });
+    expect(messages().filter((row) => row.toolCallId === 'call-1').map((row) => row.direction)).toEqual(['out', 'unsent']);
+    await expect.poll(() => connection.state().status).toBe('error');
+    // a reset can come after the server read the request, so the tool can have acted.
+    const reset = new TypeError('fetch failed', { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) });
+    expect(classify(reset)).toEqual({ kind: 'unknown', reason: 'fetch failed' });
   });
 
   it('names the status and the secret when an http server refuses the key', async () => {
