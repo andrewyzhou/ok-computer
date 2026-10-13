@@ -53,14 +53,33 @@ export function describeInput(toolName: string, input: unknown): string {
     input !== null && typeof input === 'object' && !Array.isArray(input) ? Object.entries(input) : [['input', input]];
   const lines = fields.map(([key, value]) => {
     const name = /^[\w.-]+$/.test(key) ? key : oneLine(JSON.stringify(key));
-    const text = oneLine(redactedJson(value));
-    if (text.length <= FIELD_HEAD + FIELD_TAIL) return `${name}: ${text}`;
+    const json = redactedJson(value);
+    const text = oneLine(json);
+    const marks = warnings(json !== (JSON.stringify(value) ?? 'null'), text);
+    if (text.length <= FIELD_HEAD + FIELD_TAIL) return `${name}: ${text}${marks}`;
     const head = headOf(text, FIELD_HEAD);
     const tail = tailOf(text, FIELD_TAIL);
-    return `${name}: ${head} [... ${text.length - head.length - tail.length} characters cut, the dashboard shows the full input ...] ${tail}`;
+    return `${name}: ${head} [... ${text.length - head.length - tail.length} characters cut, the dashboard shows the full input ...] ${tail}${marks}`;
   });
   return [toolName, ...lines].join('\n');
 }
+
+// the card hides a stored secret, but the tool gets the real value. the owner must know that the call sends it.
+// a letter from another script in a latin word looks like the latin letter, for example a cyrillic о in a domain
+// that an allow rule does not match. the mark names the code point, so the owner can see the difference.
+function warnings(redacted: boolean, text: string): string {
+  const marks: string[] = [];
+  if (redacted) marks.push('this field holds a secret that the card hides, and the tool gets the real value');
+  const mixed = [...new Set(text.split(/[^\p{L}\p{N}]+/u).filter((word) => LATIN.test(word) && OTHER_SCRIPT.test(word)))].slice(0, 3);
+  for (const word of mixed) {
+    const points = [...new Set([...word].filter((char) => OTHER_SCRIPT.test(char)))].map((char) => `U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`);
+    marks.push(`"${word}" mixes scripts (${points.join(', ')})`);
+  }
+  return marks.length ? ` [check: ${marks.join('; ')}]` : '';
+}
+
+const LATIN = /\p{Script=Latin}/u;
+const OTHER_SCRIPT = /[^\p{Script=Latin}\p{Script=Common}\p{Script=Inherited}]/u;
 
 // json text keeps these line breaks, and a chat app can show them as new lines.
 const LINE_BREAKS = new RegExp(`[${String.fromCharCode(0x85, 0x2028, 0x2029)}]`, 'g');

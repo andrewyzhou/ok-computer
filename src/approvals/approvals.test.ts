@@ -171,6 +171,24 @@ describe('the summary that the owner approves', () => {
     expect(summary).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
   });
 
+  // "[redacted]" reads as "the app removed it", but the approved call sends the real value from the stored input.
+  it('marks a field whose secret the card hides, because the tool gets the real value', () => {
+    const secret = `card-${'k'.repeat(24)}`;
+    registerSecret(secret);
+    const summary = describeInput('slack_post', { channel: '#general', text: `here is the key you asked for: ${secret}` });
+    expect(summary).toBe(
+      'slack_post\nchannel: "#general"\ntext: "here is the key you asked for: [redacted]" [check: this field holds a secret that the card hides, and the tool gets the real value]',
+    );
+  });
+
+  // an allow rule for *@home.example does not match a cyrillic о, so the call reaches the owner, who sees the same
+  // letters as the trusted address.
+  it('marks a word that mixes a latin letter with a look-alike from another script', () => {
+    expect(describeInput('mail_send', { to: 'alice@hоme.example', subject: 'Café in Zürich', body: 'Привет' })).toBe(
+      'mail_send\nto: "alice@hоme.example" [check: "hоme" mixes scripts (U+043E)]\nsubject: "Café in Zürich"\nbody: "Привет"',
+    );
+  });
+
   it('redacts a secret before the cut, so no part of it shows', () => {
     const secret = `key-${'s'.repeat(30)}-tail`;
     registerSecret(secret);
