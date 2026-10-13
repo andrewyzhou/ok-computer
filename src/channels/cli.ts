@@ -47,8 +47,9 @@ export function createCliChannel(options: CliOptions = {}): ChannelAdapter {
     },
     async send(out) {
       // the terminal cannot show buttons, so the cli shows them as numbered choices.
+      // a later message without buttons removes the choices, so a number that answers it cannot press an old button.
       const buttons = (out.buttons ?? []).flat();
-      if (buttons.length) choices = buttons;
+      choices = buttons;
       const lines = buttons.map((button, i) => `  ${i + 1}. ${button.text}`);
       output.write(`\nokc> ${out.text}\n${lines.length ? lines.join('\n') + '\n' : ''}\n`);
       return { messageId: String(++sent) };
