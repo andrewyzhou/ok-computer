@@ -9,11 +9,14 @@ const ruleSchema = z.object({
   // tool, session and each args value are patterns. a star matches any text, and case does not matter.
   tool: z.string().min(1),
   session: z.string().min(1).optional(),
-  // each key is a top-level field of the tool input. an object value matches against its json text.
+  // each key is a top-level field of the tool input. an object value matches against its json text. a list
+  // matches an allow rule only when each item matches.
   args: z.record(z.string(), z.string()).optional(),
   effect: z.enum(['allow', 'deny']),
   note: z.string().optional(),
-});
+})
+  // a misspelled key such as "arg" must stop the start. without the key, the rule would match every call of the tool.
+  .strict();
 
 const policyFileSchema = z.object({ rules: z.array(ruleSchema).default([]) }).strict();
 
@@ -92,23 +95,60 @@ export function decide(input: PolicyInput, rules: readonly Rule[]): Verdict {
 }
 
 function matches(rule: Rule, input: PolicyInput): boolean {
-  if (!glob(rule.tool).test(input.tool)) return false;
-  if (rule.session && !glob(rule.session).test(input.sessionKey)) return false;
+  if (!glob(rule.tool, input.tool)) return false;
+  if (rule.session && !glob(rule.session, input.sessionKey)) return false;
   if (!rule.args) return true;
   const fields = input.input !== null && typeof input.input === 'object' ? (input.input as Record<string, unknown>) : {};
   return Object.entries(rule.args).every(([key, pattern]) => {
     const value = fields[key];
     if (value === undefined) return false;
-    return glob(pattern).test(typeof value === 'object' ? JSON.stringify(value) : String(value));
+    if (!Array.isArray(value)) return glob(pattern, text(value));
+    // an allow rule must match each item of a list, so one good recipient cannot carry a bad one. a deny rule
+    // matches when one item or the json text of the list matches.
+    if (rule.effect === 'allow') return value.every((item) => glob(pattern, text(item)));
+    return glob(pattern, text(value)) || value.some((item) => glob(pattern, text(item)));
   });
 }
 
-function glob(pattern: string): RegExp {
-  const source = pattern
-    .split('*')
-    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
-    .join('.*');
-  return new RegExp(`^${source}$`, 'is');
+const text = (value: unknown) => (typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value));
+
+// the fold is the same as in a regular expression with the i flag. it never changes a character outside ascii into
+// an ascii character, so the kelvin sign does not match the letter k in an allow rule.
+function fold(value: string): string {
+  let out = '';
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i]!;
+    const upper = char.toUpperCase();
+    out += upper.length !== 1 || (char.charCodeAt(0) >= 128 && upper.charCodeAt(0) < 128) ? char : upper;
+  }
+  return out;
+}
+
+// a star matches any text, and case does not matter. the matcher goes back only to the last star, so its time is
+// at most the product of both lengths. a regular expression with many stars can take minutes on a long argument.
+export function glob(pattern: string, value: string): boolean {
+  const p = fold(pattern);
+  const v = fold(value);
+  let pi = 0;
+  let vi = 0;
+  let star = -1;
+  let resume = 0;
+  while (vi < v.length) {
+    if (pi < p.length && p[pi] === '*') {
+      star = pi++;
+      resume = vi;
+    } else if (pi < p.length && p[pi] === v[vi]) {
+      pi++;
+      vi++;
+    } else if (star !== -1) {
+      pi = star + 1;
+      vi = ++resume;
+    } else {
+      return false;
+    }
+  }
+  while (pi < p.length && p[pi] === '*') pi++;
+  return pi === p.length;
 }
 
 // the policy file is optional. its rules come after the built-in rules, so a file rule can change them.

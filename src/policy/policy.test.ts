@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { BUILTIN_RULES, decide, loadPolicy, type PolicyInput, type Rule } from './policy.js';
+import { BUILTIN_RULES, decide, glob, loadPolicy, type PolicyInput, type Rule } from './policy.js';
 
 const call = (overrides: Partial<PolicyInput> = {}): PolicyInput => ({
   tool: 'google__gmail_archive',
@@ -91,5 +91,51 @@ describe('the policy file', () => {
     expect(loadPolicy(path).ok).toBe(false);
     writeFileSync(path, '{');
     expect(loadPolicy(path)).toMatchObject({ ok: false, error: expect.stringContaining('not valid json') });
+  });
+
+  it('refuses a rule with an unknown key, because the rule would match every call of the tool', () => {
+    const path = join(dir, 'typo.json');
+    writeFileSync(path, JSON.stringify({ rules: [{ tool: 'gmail_archive', arg: { from: '*' }, effect: 'allow' }] }));
+    expect(loadPolicy(path)).toMatchObject({ ok: false, error: expect.stringContaining('arg') });
+  });
+});
+
+describe('rule patterns under hostile input', () => {
+  // the old matcher was a regular expression. the new matcher must give the same answer on every input.
+  const regex = (pattern: string) =>
+    new RegExp(`^${pattern.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`, 'is');
+
+  it('gives the same answers as a regular expression on random short inputs', () => {
+    let seed = 7;
+    const random = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+    const pick = (alphabet: string, max: number) =>
+      Array.from({ length: Math.floor(random() * max) }, () => alphabet[Math.floor(random() * alphabet.length)]).join('');
+    // the letters outside ascii have case pairs that a plain toLowerCase folds in a different way.
+    const alphabet = 'abBA.\nkKKiIİıßſséÉ';
+    for (let i = 0; i < 20_000; i++) {
+      const pattern = pick(`${alphabet}**`, 7);
+      const value = pick(alphabet, 9);
+      expect(glob(pattern, value), `${JSON.stringify(pattern)} on ${JSON.stringify(value)}`).toBe(regex(pattern).test(value));
+    }
+  });
+
+  it('does not let the kelvin sign match the letter k of an allow rule', () => {
+    expect(glob('*@kelvin.example', 'eve@Kelvin.example')).toBe(false);
+    expect(glob('*@KELVIN.example', 'eve@kelvin.EXAMPLE')).toBe(true);
+  });
+
+  it('matches many stars against a long argument quickly', () => {
+    const started = performance.now();
+    expect(glob('*a*a*a*a*a*a*b', 'a'.repeat(20_000))).toBe(false);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it('allows a list only when each item matches, and denies it when one item matches', () => {
+    const allow = [rule('me', { tool: 'send', args: { to: '*@me.example' }, effect: 'allow' })];
+    const send = (to: unknown) => call({ tool: 'send', input: { to } });
+    expect(decide(send(['a@me.example', 'b@me.example']), allow)).toMatchObject({ decision: 'allow' });
+    expect(decide(send(['a@me.example', 'eve@evil.example']), allow)).toMatchObject({ decision: 'review' });
+    const deny = [rule('evil', { tool: 'send', args: { to: '*@evil.example' }, effect: 'deny' })];
+    expect(decide(send(['a@me.example', 'eve@evil.example']), deny)).toMatchObject({ decision: 'deny' });
   });
 });
