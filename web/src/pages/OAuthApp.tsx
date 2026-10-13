@@ -40,7 +40,7 @@ export function OAuthApp({ integration, onDone }: { integration: IntegrationSumm
         <>
           <p className="muted">
             The client of the app is stored in the Windows Credential Manager as <code>{app.clientRef}.ok-computer</code>. This page never shows it. Store
-            it again to replace it.
+            it again to replace it. With an empty secret, the stored secret of the same client id stays.
           </p>
           <div className="row">
             <input aria-label="client id" placeholder="client id" value={clientId} onChange={(event) => setClientId(event.target.value)} />

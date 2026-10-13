@@ -276,4 +276,20 @@ describe('storing the client of the slack app', () => {
     expect(t.logLines().join('\n')).not.toContain(t.slack.clientSecret);
     await signIn(t);
   });
+
+  it('keeps the stored secret when the owner stores the same client id without a secret', async () => {
+    const t = await setup();
+    await t.integrations.start();
+    const stored = async () => JSON.parse((await t.secrets.get('slack-work-app'))!) as unknown;
+    expect(await t.integrations.storeClient('slack-work', { client_id: t.slack.clientId })).toEqual({ stored: true });
+    expect(await stored()).toEqual({ client_id: t.slack.clientId, client_secret: t.slack.clientSecret });
+    await signIn(t);
+    // another client id is another app, so the secret of the old app does not go with it.
+    expect(await t.integrations.storeClient('slack-work', { client_id: '3333333333.4444444444' })).toEqual({ stored: true });
+    expect(await stored()).toEqual({ client_id: '3333333333.4444444444' });
+    // a client that the owner stored with cmdkey is not json, so the page cannot keep its secret and says so.
+    await t.secrets.set('slack-work-app', '{client_id:1111111111.2222222222,client_secret:cs-secret-from-cmdkey}');
+    expect(await t.integrations.storeClient('slack-work', { client_id: t.slack.clientId })).toEqual({ error: expect.stringContaining('Enter the client secret too') });
+    expect(await t.secrets.get('slack-work-app')).toContain('cs-secret-from-cmdkey');
+  });
 });

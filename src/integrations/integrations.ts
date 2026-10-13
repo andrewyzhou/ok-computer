@@ -411,6 +411,13 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       if (!ref) return { error: `${id} has no auth.clientRef in okc.integrations.json, so it has no place for a client.` };
       registerSecret(client.client_secret, `${ref}#secret`);
       try {
+        // the page never shows the stored secret. so an id without a secret keeps the stored secret of the same id, or
+        // the owner who enters the id again deletes the secret, and the next sign-in fails.
+        if (client.client_secret === undefined) {
+          const kept = keptSecret(await deps.secrets.get(ref), client.client_id);
+          if (kept === null) return { error: `the stored client of ${id} is not valid json, so its secret cannot be kept. Enter the client secret too.` };
+          if (kept !== undefined) client = { ...client, client_secret: kept };
+        }
         await deps.secrets.set(ref, JSON.stringify(client));
       } catch (err) {
         return { error: `the credential manager did not take the client: ${redact(errorText(err))}` };
@@ -468,4 +475,17 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
     if (connection.state().status === 'connected') return { connected: true };
     return url ? { url } : { error: connection.state().error ?? 'the connection did not start' };
   }
+}
+
+// keptSecret gives the secret of a stored client with the same id, undefined when there is none, and null when the
+// stored value is not json, for example a client that the owner stored with cmdkey.
+function keptSecret(stored: string | undefined, clientId: string): string | undefined | null {
+  if (stored === undefined) return undefined;
+  let old: { client_id?: unknown; client_secret?: unknown };
+  try {
+    old = JSON.parse(stored) as typeof old;
+  } catch {
+    return null;
+  }
+  return old?.client_id === clientId && typeof old.client_secret === 'string' ? old.client_secret : undefined;
 }
