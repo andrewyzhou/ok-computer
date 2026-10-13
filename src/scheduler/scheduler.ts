@@ -3,7 +3,7 @@ import type { Db } from '../db/index.js';
 import type { Logger } from '../observability/logger.js';
 import type { Clock } from '../time.js';
 import { nextRun } from './schedule.js';
-import { dueAutomations, earliestRunAt, type Automation } from './store.js';
+import { dueAutomations, earliestRunAt, getAutomation, type Automation } from './store.js';
 
 export interface JobResult {
   status: 'completed' | 'failed' | 'skipped';
@@ -33,6 +33,8 @@ export interface Scheduler {
   tick(): Promise<void>;
   // replan moves the timer after automations change.
   replan(): void;
+  // runNow runs one automation at once. it does not change the schedule or the failure count.
+  runNow(id: string): Promise<JobResult | undefined>;
 }
 
 export const BACKOFF_MS = [30_000, 60_000, 5 * 60_000, 15 * 60_000] as const;
@@ -88,6 +90,15 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     );
   };
 
+  const execute = async (automation: Automation): Promise<JobResult> => {
+    try {
+      return await deps.execute(automation);
+    } catch (err) {
+      logger.error('automation crashed', { automationId: automation.id, err });
+      return { status: 'failed', error: (err as Error).message };
+    }
+  };
+
   const fire = async (automation: Automation, now: Date): Promise<void> => {
     const lateMs = now.getTime() - Date.parse(automation.nextRunAt!);
     claim(automation, now);
@@ -101,13 +112,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       return;
     }
 
-    let result: JobResult;
-    try {
-      result = await deps.execute(automation);
-    } catch (err) {
-      logger.error('automation crashed', { automationId: automation.id, err });
-      result = { status: 'failed', error: (err as Error).message };
-    }
+    const result = await execute(automation);
     recordRun(automation, now, result);
     if (result.status !== 'failed') {
       if (automation.schedule.kind === 'at') {
@@ -167,5 +172,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     },
     tick,
     replan: arm,
+    async runNow(id) {
+      const automation = getAutomation(db, id);
+      if (!automation) return undefined;
+      const startedAt = clock();
+      const result = await execute(automation);
+      recordRun(automation, startedAt, result);
+      return result;
+    },
   };
 }

@@ -76,6 +76,10 @@ describe('schedules', () => {
   it('describes schedules in plain words', () => {
     expect(describeSchedule({ kind: 'every', everyMs: 60 * MIN }, TZ)).toBe('every 1 h');
     expect(describeSchedule({ kind: 'every', everyMs: 15 * MIN }, TZ)).toBe('every 15 min');
+    expect(describeSchedule({ kind: 'cron', expr: '5 7 * * *' }, TZ)).toBe(
+      'every day at 07:05, cron "5 7 * * *" (America/Los_Angeles)',
+    );
+    expect(describeSchedule({ kind: 'cron', expr: '0 9 * * 1' }, TZ)).toBe('cron "0 9 * * 1" (America/Los_Angeles)');
   });
 });
 
@@ -179,5 +183,15 @@ describe('scheduler', () => {
     advance(90 * MIN);
     const result = updateAutomation(db, job.id, { enabled: true }, now(), TZ);
     expect(result.ok && result.value.nextRunAt).toBe('2026-10-12T19:00:00.000Z');
+  });
+
+  it('runs a job now without a change to its schedule or failure count', async () => {
+    const { db, scheduler, create, executed, runs } = setup(['failed']);
+    const job = create({ schedule: { kind: 'every', everyMs: 60 * MIN }, enabled: false });
+    expect(await scheduler.runNow(job.id)).toEqual({ status: 'failed', error: 'boom' });
+    expect(executed).toEqual(['job']);
+    expect(runs()).toEqual([{ status: 'failed', error: 'boom' }]);
+    expect(getAutomation(db, job.id)).toMatchObject({ enabled: false, nextRunAt: null, consecutiveFailures: 0 });
+    expect(await scheduler.runNow('missing')).toBeUndefined();
   });
 });

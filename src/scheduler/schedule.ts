@@ -51,7 +51,11 @@ export function describeSchedule(schedule: Schedule, timeZone: string): string {
       const minutes = schedule.everyMs / 60_000;
       return minutes % 60 === 0 ? `every ${minutes / 60} h` : `every ${minutes} min`;
     }
-    case 'cron':
-      return `cron "${schedule.expr}" (${schedule.tz ?? timeZone})`;
+    case 'cron': {
+      const cron = `cron "${schedule.expr}" (${schedule.tz ?? timeZone})`;
+      const daily = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec(schedule.expr.trim());
+      if (!daily) return cron;
+      return `every day at ${daily[2]!.padStart(2, '0')}:${daily[1]!.padStart(2, '0')}, ${cron}`;
+    }
   }
 }

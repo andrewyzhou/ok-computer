@@ -93,7 +93,7 @@ describe('automations from chat', () => {
     await t.say('what automations do I have?');
     const row = t.rows("SELECT output FROM tool_calls WHERE name = 'automations_list'")[0]!;
     const listed = JSON.parse(String(row.output)).content as string;
-    expect(listed).toContain('"goals: ask": cron "0 19 * * *" (America/Los_Angeles), next Monday, October 12, 2026 at 19:00 PDT');
+    expect(listed).toContain('"goals: ask": every day at 19:00, cron "0 19 * * *" (America/Los_Angeles), next Monday, October 12, 2026 at 19:00 PDT');
     await t.app.stop();
   });
 });

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { runAgent, type AgentDeps } from './agent/loop.js';
 import { buildStablePrompt } from './agent/system-prompt.js';
-import { createApprovalFlow } from './approvals/flow.js';
+import { createApprovalFlow, type ApprovalFlow } from './approvals/flow.js';
 import { expireApprovals } from './approvals/store.js';
 import type { ChannelAdapter } from './channels/types.js';
 import type { Config } from './config/schema.js';
@@ -14,6 +14,7 @@ import { createGoalTools } from './goals/tools.js';
 import {
   CONSOLIDATION_INSTRUCTIONS,
   CONSOLIDATION_PREFIX,
+  CONSOLIDATION_TOOLS,
   createConsolidation,
   createConsolidationTools,
   installConsolidation,
@@ -21,7 +22,7 @@ import {
 import { appendToDailyNote, sessionExcerpt } from './memory/daily.js';
 import { createMemoryTools } from './memory/tools.js';
 import { createSlotRunner } from './models/slots.js';
-import type { ModelClient } from './models/types.js';
+import type { ModelClient, ModelRequest } from './models/types.js';
 import type { Logger } from './observability/logger.js';
 import { scheduleContext } from './scheduler/context.js';
 import {
@@ -29,14 +30,15 @@ import {
   createHeartbeatTools,
   HEARTBEAT_INSTRUCTIONS,
   HEARTBEAT_PREFIX,
+  HEARTBEAT_TOOLS,
   syncHeartbeat,
 } from './scheduler/heartbeat.js';
-import { createJobRunner } from './scheduler/jobs.js';
+import { AUTOMATION_TOOLS, createJobRunner } from './scheduler/jobs.js';
 import { createScheduler, type Scheduler, type SetTimer } from './scheduler/scheduler.js';
 import { createAutomationTools } from './scheduler/tools.js';
 import { createOwnerMessenger } from './sessions/owner.js';
 import { createRunQueue } from './sessions/queue.js';
-import { createRouter, MAIN_SESSION } from './sessions/router.js';
+import { createRouter, MAIN_SESSION, MAIN_TOOLS } from './sessions/router.js';
 import { localDay, localTime, type Clock } from './time.js';
 import { createMessageOwnerTool } from './tools/message-owner.js';
 import { nowTool } from './tools/now.js';
@@ -62,6 +64,16 @@ export interface App {
   idle(): Promise<void>;
   // stop ends the channels, aborts the active runs and waits for them to record their status.
   stop(): Promise<void>;
+  // contextView renders the session with the same strategy, prompt and tools as its next model call.
+  contextView(sessionKey: string): Promise<ModelRequest>;
+  resolveApproval: ApprovalFlow['resolve'];
+}
+
+function sessionTools(sessionKey: string): readonly string[] {
+  if (sessionKey === MAIN_SESSION) return MAIN_TOOLS;
+  if (sessionKey.startsWith(HEARTBEAT_PREFIX)) return HEARTBEAT_TOOLS;
+  if (sessionKey.startsWith(CONSOLIDATION_PREFIX)) return CONSOLIDATION_TOOLS;
+  return AUTOMATION_TOOLS;
 }
 
 // the app wires the modules together. main.ts and the integration tests both use it.
@@ -104,11 +116,12 @@ export function createApp(deps: AppDeps): App {
   );
 
   const slots = createSlotRunner({ db, config, clients: deps.clients, logger, clock });
+  const strategy = createTrimAndCompact({ db, slots, logger, clock, windowTokens: config.context.windowTokens });
   const agentDeps: AgentDeps = {
     db,
     slots,
     tools,
-    strategy: createTrimAndCompact({ db, slots, logger, clock, windowTokens: config.context.windowTokens }),
+    strategy,
     logger,
     config,
     clock,
@@ -194,5 +207,14 @@ export function createApp(deps: AppDeps): App {
       shutdown.abort();
       await queue.drain();
     },
+    // without compaction hooks the strategy only renders. it does not call a model or append an event.
+    contextView: (sessionKey) =>
+      strategy.build({
+        sessionKey,
+        events: listEvents(db, sessionKey),
+        system: agentDeps.stablePrompt(sessionKey),
+        tools: tools.specs(sessionTools(sessionKey)),
+      }),
+    resolveApproval: approvals.resolve,
   };
 }
