@@ -55,10 +55,12 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
   const time = z.iso.datetime({ offset: true });
   const oneClick = deps.oneClick ?? realOneClick;
 
-  // a read tool runs on each account that it names. one account that fails does not hide the others.
+  // a read tool runs on each account that it names. one account that fails does not hide the others. with all, an
+  // account that cannot take a call gets a line that says so, so the answer does not read as if it was checked.
   const eachAccount = async (tool: string, which: string, source: 'gmail' | 'calendar', work: (apis: GoogleApis, alias: string) => Promise<string[]>): Promise<ToolOutput> => {
     const targets = which === 'all' ? aliases.filter((alias) => !accounts.unavailable(alias)) : [which];
-    if (!targets.length) return { content: `${tool}: no google account is signed in.`, isError: true };
+    const skipped = which === 'all' ? aliases.filter((alias) => !targets.includes(alias)).map((alias) => `[${alias}] not checked: ${accounts.unavailable(alias)}`) : [];
+    if (!targets.length) return { content: [`${tool}: no google account is signed in.`, ...skipped].join('\n'), isError: true };
     const parts = await Promise.all(
       targets.map(async (alias) => {
         try {
@@ -68,7 +70,7 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
         }
       }),
     );
-    const content = parts.map((part) => ('error' in part ? part.error! : part.lines!.length ? part.lines!.join('\n') : `[${part.alias}] nothing found`)).join('\n');
+    const content = [...parts.map((part) => ('error' in part ? part.error! : part.lines!.length ? part.lines!.join('\n') : `[${part.alias}] nothing found`)), ...skipped].join('\n');
     return {
       content,
       ...(parts.every((part) => 'error' in part) ? { isError: true } : {}),
@@ -204,8 +206,15 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
     ),
     googleTool({
       name: name('gmail_label'),
-      description: 'Add or remove Gmail labels (by label id) on messages.',
-      input: z.object({ account, messageIds, add: z.array(z.string().max(100)).default([]), remove: z.array(z.string().max(100)).default([]) }),
+      description: 'Add or remove Gmail labels (by label id) on messages. It cannot add TRASH or SPAM.',
+      // the owner can allow this tool without approval, also after the agent read mail. the trash deletes mail for good
+      // after 30 days, and spam hides it, so text in one mail could else make the agent remove the inbox.
+      input: z.object({
+        account,
+        messageIds,
+        add: z.array(z.string().max(100).refine((id) => !['TRASH', 'SPAM'].includes(id.toUpperCase()), 'gmail_label cannot add TRASH or SPAM')).default([]),
+        remove: z.array(z.string().max(100)).default([]),
+      }),
       risk: 'write',
       run: ({ account: alias, messageIds: ids, add, remove }) =>
         write(name('gmail_label'), alias, async (apis) => {

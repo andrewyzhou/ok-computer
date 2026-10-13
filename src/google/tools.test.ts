@@ -334,6 +334,29 @@ describe('read tools', () => {
     expect(ids(lines.slice(0, -1).join('\n'))).toEqual(lines.at(-1)!.includes('for school') ? ['p2', 'p1'] : ['s1']);
   });
 
+  // round 4: with all, an account that needs a new sign-in was left out without a word.
+  it('names an account that all did not check', async () => {
+    const call = await setup();
+    h.fake.deliver('school', { id: 's1', headers: { From: 'Dean <dean@school.example>', Subject: 'Tuition due Friday' }, snippet: 'tuition' });
+    h.db.prepare("UPDATE google_accounts SET status = 'needs_auth', lastError = 'sign-in refused' WHERE alias = 'school'").run();
+    const out = await call('gmail_search', { account: 'all', query: 'tuition' });
+    expect(out.content).toBe('[personal] nothing found\n[school] not checked: the school google account needs the owner to sign in again on the dashboard.');
+    expect(out.untrustedSource).toBe('gmail:personal');
+  });
+
+  // round 4: the owner can allow gmail_label, also after the agent read mail. text in a mail must not make it trash
+  // or spam the inbox.
+  it('gmail_label refuses TRASH and SPAM', async () => {
+    const call = await setup();
+    h.fake.deliver('personal', { id: 'p1', headers: { From: 'a@x.example', Subject: 'keep me' } });
+    for (const label of ['TRASH', 'spam']) {
+      const out = await call('gmail_label', { account: 'personal', messageIds: ['p1'], add: [label], remove: ['INBOX'] });
+      expect(out).toMatchObject({ isError: true, content: expect.stringContaining('cannot add TRASH or SPAM') });
+    }
+    expect(h.fake.mailbox('personal').messages.get('p1')!.labelIds ?? []).not.toContain('TRASH');
+    expect(await call('gmail_label', { account: 'personal', messageIds: ['p1'], add: ['STARRED'] })).toMatchObject({ content: 'labels changed on 1 messages in personal.' });
+  });
+
   it('refuses an account alias that the config does not have', async () => {
     const call = await setup();
     expect(await call('gmail_search', { account: 'boss', query: 'x' })).toMatchObject({ isError: true, content: expect.stringContaining('invalid input') });
