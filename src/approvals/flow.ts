@@ -54,8 +54,8 @@ export function describeInput(toolName: string, input: unknown): string {
   const lines = fields.map(([key, value]) => {
     const name = /^[\w.-]+$/.test(key) ? key : oneLine(JSON.stringify(key));
     const json = redactedJson(value);
-    const text = oneLine(json);
-    const marks = warnings(json !== (JSON.stringify(value) ?? 'null'), text);
+    const { text, found } = showInvisible(oneLine(json));
+    const marks = warnings(json !== (JSON.stringify(value) ?? 'null'), found, text);
     if (text.length <= FIELD_HEAD + FIELD_TAIL) return `${name}: ${text}${marks}`;
     const head = headOf(text, FIELD_HEAD);
     const tail = tailOf(text, FIELD_TAIL);
@@ -65,21 +65,41 @@ export function describeInput(toolName: string, input: unknown): string {
 }
 
 // the card hides a stored secret, but the tool gets the real value. the owner must know that the call sends it.
-// a letter from another script in a latin word looks like the latin letter, for example a cyrillic о in a domain
-// that an allow rule does not match. the mark names the code point, so the owner can see the difference.
-function warnings(redacted: boolean, text: string): string {
+// a letter from another script looks like a latin letter, for example a cyrillic о in a domain that an allow rule does
+// not match. the check is on each run of text between spaces and json marks, not on each word, because a word of
+// look-alikes alone ("аррӏе" in "https://аррӏе.example") is in one script. a run without latin letters, for example
+// a sentence in russian, gets no mark. the mark names the code points, so the owner can see the difference.
+function warnings(redacted: boolean, invisible: boolean, text: string): string {
   const marks: string[] = [];
   if (redacted) marks.push('this field holds a secret that the card hides, and the tool gets the real value');
-  const mixed = [...new Set(text.split(/[^\p{L}\p{N}]+/u).filter((word) => LATIN.test(word) && OTHER_SCRIPT.test(word)))].slice(0, 3);
-  for (const word of mixed) {
-    const points = [...new Set([...word].filter((char) => OTHER_SCRIPT.test(char)))].map((char) => `U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`);
-    marks.push(`"${word}" mixes scripts (${points.join(', ')})`);
+  if (invisible) marks.push('this field holds invisible or direction characters, shown as \\u codes');
+  const mixed = [...new Set(text.split(/[\s",[\]{}]+/u).filter((run) => LATIN.test(run) && OTHER_SCRIPT.test(run)))].slice(0, 3);
+  for (const run of mixed) {
+    const points = [...new Set([...run].filter((char) => OTHER_SCRIPT.test(char)))].slice(0, 5).map(codePoint);
+    marks.push(`"${headOf(run, 60)}" mixes scripts (${points.join(', ')})`);
   }
   return marks.length ? ` [check: ${marks.join('; ')}]` : '';
 }
 
 const LATIN = /\p{Script=Latin}/u;
 const OTHER_SCRIPT = /[^\p{Script=Latin}\p{Script=Common}\p{Script=Inherited}]/u;
+const codePoint = (char: string) => `U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`;
+
+// a zero width space, a soft hyphen or a word joiner hides inside a look-alike address, and a direction override
+// reorders the text after it in the chat. json text keeps them, so the card shows each one as a \u code. a variation
+// selector and a joiner after an emoji stay, because they only form the emoji.
+const INVISIBLE = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
+const EMOJI_PART = /[\p{Extended_Pictographic}\p{Emoji_Modifier}️]$/u;
+function showInvisible(text: string): { text: string; found: boolean } {
+  let found = false;
+  const shown = text.replace(INVISIBLE, (char: string, offset: number) => {
+    if (char === '︎' || char === '️' || (char === '‍' && EMOJI_PART.test(text.slice(0, offset)))) return char;
+    found = true;
+    const point = char.codePointAt(0)!;
+    return point > 0xffff ? `\\u{${point.toString(16)}}` : `\\u${point.toString(16).padStart(4, '0')}`;
+  });
+  return { text: shown, found };
+}
 
 // json text keeps these line breaks, and a chat app can show them as new lines.
 const LINE_BREAKS = new RegExp(`[${String.fromCharCode(0x85, 0x2028, 0x2029)}]`, 'g');

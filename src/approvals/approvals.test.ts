@@ -207,9 +207,30 @@ describe('the summary that the owner approves', () => {
   // an allow rule for *@home.example does not match a cyrillic о, so the call reaches the owner, who sees the same
   // letters as the trusted address.
   it('marks a word that mixes a latin letter with a look-alike from another script', () => {
-    expect(describeInput('mail_send', { to: 'alice@hоme.example', subject: 'Café in Zürich', body: 'Привет' })).toBe(
-      'mail_send\nto: "alice@hоme.example" [check: "hоme" mixes scripts (U+043E)]\nsubject: "Café in Zürich"\nbody: "Привет"',
+    expect(describeInput('mail_send', { to: 'alice@hоme.example', subject: 'Café in Zürich', body: 'Привет, как дела?' })).toBe(
+      'mail_send\nto: "alice@hоme.example" [check: "alice@hоme.example" mixes scripts (U+043E)]\nsubject: "Café in Zürich"\nbody: "Привет, как дела?"',
     );
+  });
+
+  // an invisible character split the word, so each part was in one script and got no mark. a host made only of
+  // look-alikes was in one script too, and a direction override was printed raw.
+  it('shows invisible and direction characters as codes, and marks a look-alike host and an address split by them', () => {
+    for (const char of ['​', '⁠', '­', '﻿']) {
+      const summary = describeInput('gmail_send', { to: `alice@h${char}о${char}me.example` });
+      const code = `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`;
+      expect(summary).toBe(
+        `gmail_send\nto: "alice@h${code}о${code}me.example" [check: this field holds invisible or direction characters, shown as \\u codes; "alice@h${code}о${code}me.example" mixes scripts (U+043E)]`,
+      );
+    }
+    expect(describeInput('web_open', { url: 'https://аррӏе.example/login' })).toBe(
+      'web_open\nurl: "https://аррӏе.example/login" [check: "https://аррӏе.example/login" mixes scripts (U+0430, U+0440, U+04CF, U+0435)]',
+    );
+    const override = describeInput('web_open', { url: 'https://evil.example/?x=‮elpmaxe.emoh//:sptth' });
+    expect(override).not.toContain('‮');
+    expect(override).toContain('\\u202e');
+    expect(override).toContain('invisible or direction characters');
+    // an emoji keeps its joiner and its variation selector, so a message with emoji gets no mark.
+    expect(describeInput('slack_post', { text: 'love it ❤️ 👩‍💻' })).toBe('slack_post\ntext: "love it ❤️ 👩‍💻"');
   });
 
   it('redacts a secret before the cut, so no part of it shows', () => {
