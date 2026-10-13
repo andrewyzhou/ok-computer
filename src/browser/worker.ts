@@ -6,7 +6,7 @@ import type { Db } from '../db/index.js';
 import type { BlobStore } from '../observability/blobs.js';
 import type { ByteStore } from '../observability/byte-blobs.js';
 import type { Logger } from '../observability/logger.js';
-import { redactedJson } from '../observability/redact.js';
+import { redact, redactedJson } from '../observability/redact.js';
 import type { Clock } from '../time.js';
 import { errorText } from '../tools/registry.js';
 import { checkUrlShape, type Egress } from '../web/egress.js';
@@ -117,6 +117,8 @@ interface Tab {
   crashed?: string;
   rules: TabRules;
   snapshot: number;
+  // the run of the last step. a row that the close writes belongs to it.
+  runId: string;
 }
 
 export interface BrowserWorker {
@@ -145,12 +147,21 @@ export function untraced<T>(page: Page, read: () => Promise<T>): Promise<T> {
   return client._wrapApiCall(read, { internal: true });
 }
 
+// the trace keeps the parameters of each action, for example the text of a fill or the address of a goto, and the
+// dashboard serves the zip. an action whose text holds a secret runs outside the trace, and its step row keeps the
+// text redacted.
+export const untracedIfSecret = <T>(page: Page, text: string, act: () => Promise<T>): Promise<T> => (redact(text) === text ? act() : untraced(page, act));
+
 // the ai snapshot shows the value of a password field as plain text. the model, the blobs and the trace must never get
-// it, so each value is masked wherever it shows in the snapshot.
+// it, so each value is masked wherever it shows in the snapshot. the snapshot also shows the fields of each frame, and
+// a page locator does not go into frames, so each frame is read.
 async function passwordsOf(page: Page, ms: number): Promise<string[]> {
-  const values = await within(page.locator('input[type=password]').evaluateAll((inputs) => inputs.map((input) => (input as unknown as { value: string }).value)), ms);
+  const read = Promise.all(
+    page.frames().map((frame) => frame.locator('input[type=password]').evaluateAll((inputs) => inputs.map((input) => (input as unknown as { value: string }).value))),
+  );
+  const values = await within(read, ms);
   if (values === TIMED_OUT) throw new Error(`Timeout ${ms}ms exceeded while the password fields were read`);
-  return values.filter((value) => value.length > 0);
+  return values.flat().filter((value) => value.length > 0);
 }
 
 // the longest value goes first, so a value that holds a shorter one is masked whole.
@@ -316,7 +327,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   async function newTab(ctx: BrowserContext, kind: Tab['kind'], step: StepInput, allowlist: string[]): Promise<Tab> {
     const page = await ctx.newPage();
     owned.add(page);
-    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), submit: false, blocked: [], sent: [], reached: new Set(), console: [], lastUsed: performance.now(), queue: Promise.resolve(), snapshot: 0 } as unknown as Tab;
+    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), submit: false, blocked: [], sent: [], reached: new Set(), console: [], lastUsed: performance.now(), queue: Promise.resolve(), snapshot: 0, runId: step.runId } as unknown as Tab;
     tab.rules = {
       allows: (host) => allowedBy(tab.allowlist, host),
       submitting: () => tab.submit,
@@ -341,16 +352,23 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       await page.close().catch(() => undefined);
       throw err;
     }
+    // a tab with no row would be in no task map, so no close would end it, and chrome would keep the profile lock
+    // until the app restarts. the tab closes when the row fails.
+    try {
+      db.prepare('INSERT INTO browser_tasks (id, kind, sessionKey, runId, allowlist, status, startedAt) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+        tab.id,
+        kind,
+        step.sessionKey,
+        step.runId,
+        JSON.stringify([...tab.allowlist]),
+        'open',
+        now(),
+      );
+    } catch (err) {
+      await page.close().catch(() => undefined);
+      throw err;
+    }
     tabs.set(page, tab);
-    db.prepare('INSERT INTO browser_tasks (id, kind, sessionKey, runId, allowlist, status, startedAt) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-      tab.id,
-      kind,
-      step.sessionKey,
-      step.runId,
-      JSON.stringify([...tab.allowlist]),
-      'open',
-      now(),
-    );
     if (kind === 'task') {
       // the trace belongs to the context, so one task at a time has it. the row says why a task has no trace.
       try {
@@ -361,15 +379,35 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
         tracing = tab.id;
       } catch (err) {
         logger.warn('the browser trace did not start', { taskId: tab.id, err });
-        db.prepare('UPDATE browser_tasks SET traceError = ? WHERE id = ?').run(`the trace did not start: ${errorText(err).split('\n')[0]}`, tab.id);
+        try {
+          db.prepare('UPDATE browser_tasks SET traceError = ? WHERE id = ?').run(`the trace did not start: ${errorText(err).split('\n')[0]}`, tab.id);
+        } catch (dbErr) {
+          logger.error('browser task row update failed', { taskId: tab.id, err: dbErr });
+        }
       }
     }
     return tab;
   }
 
+  async function startTab(ctx: BrowserContext, kind: Tab['kind'], step: StepInput, allowlist: string[]): Promise<Tab | BrowserRefusal> {
+    try {
+      return await newTab(ctx, kind, step, allowlist);
+    } catch (err) {
+      logger.error('the browser tab did not start', { err });
+      return { refused: `The browser tab did not start: ${errorText(err).split('\n')[0]}. Nothing was opened.` };
+    }
+  }
+
   async function endTab(tab: Tab, status: 'closed' | 'crashed', reason: string): Promise<void> {
     tabs.delete(tab.page);
     if (tasks.get(tab.sessionKey) === tab) tasks.delete(tab.sessionKey);
+    // a block after the last step, for example of a timed refresh, goes into the next row. no next row comes after a
+    // close, so the close writes one.
+    if (tab.blocked.length || tab.sent.length || tab.reached.size) {
+      const url = tab.page.isClosed() ? '' : tab.page.url();
+      record(tab, { sessionKey: tab.sessionKey, runId: tab.runId, action: 'close', target: reason }, { urlBefore: url, urlAfter: url, started: performance.now() });
+      recorded(tab);
+    }
     // the tab closes first. a hung page keeps its renderer busy, and with dom snapshots it also held the trace stop for
     // ever.
     await within(tab.page.close({ runBeforeUnload: false }), t.capture);
@@ -442,8 +480,8 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
           step.toolCallId ?? null,
           step.action,
           step.target === undefined ? null : redactedJson(step.target),
-          data.urlBefore,
-          data.urlAfter,
+          redact(data.urlBefore),
+          redact(data.urlAfter),
           snapshotBlob,
           screenshotBlob,
           tab.console.length ? redactedJson(tab.console) : null,
@@ -487,6 +525,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       }
       const started = performance.now();
       tab.lastUsed = performance.now();
+      tab.runId = input.runId;
       lastActivity = performance.now();
       tab.topBlocked = false;
       const urlBefore = tab.page.url();
@@ -549,7 +588,9 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     // a refresh replaces its own entry in the history, so the way back can skip the page. the address is the target.
     const target = urlBefore.startsWith('chrome-error:') ? tab.lastPage : urlBefore;
     await tab.page.goBack({ waitUntil: 'domcontentloaded', timeout: t.capture }).catch(() => undefined);
-    if (target && tab.page.url() !== target) await tab.page.goto(target, { waitUntil: 'domcontentloaded', timeout: t.capture }).catch(() => undefined);
+    if (target && tab.page.url() !== target) {
+      await untracedIfSecret(tab.page, target, () => tab.page.goto(target, { waitUntil: 'domcontentloaded', timeout: t.capture })).catch(() => undefined);
+    }
     return `A navigation was blocked, so the tab went back to ${tab.page.url()}.`;
   }
 
@@ -593,7 +634,8 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     }
     const ctx = await contextOrRefusal();
     if ('refused' in ctx) return ctx;
-    const created = await newTab(ctx, 'task', input, [siteOf(host)]);
+    const created = await startTab(ctx, 'task', input, [siteOf(host)]);
+    if ('refused' in created) return created;
     tasks.set(input.sessionKey, created);
     return created;
   }
@@ -611,7 +653,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       const tab = await claimed;
       if ('refused' in tab) return tab;
       return step(tab, { ...input, target: url }, async (page) => {
-        const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
+        const response = await untracedIfSecret(page, url, () => page.goto(url, { waitUntil: 'domcontentloaded' }));
         return response && response.status() >= 400 ? `the page answered with status ${response.status()}` : undefined;
       });
     },
@@ -623,7 +665,8 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     async inTab(input, hosts, work) {
       const ctx = await contextOrRefusal();
       if ('refused' in ctx) return ctx;
-      const tab = await newTab(ctx, 'search', input, hosts.map(siteOf));
+      const tab = await startTab(ctx, 'search', input, hosts.map(siteOf));
+      if ('refused' in tab) return tab;
       let value: Awaited<ReturnType<typeof work>> | undefined;
       let error: string | undefined;
       const result = await step(tab, input, async (page) => {

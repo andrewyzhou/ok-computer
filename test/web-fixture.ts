@@ -117,6 +117,11 @@ export async function startFixture(): Promise<Fixture> {
         return send(200, html('<form action="/find" method="get"><input name="q" aria-label="Query" value="shirts"><button type="submit">Search</button></form>', 'Search'));
       case 'shop.test/find':
         return send(200, html(`<h1>Found ${new URL(path, 'http://x').searchParams.get('q')}</h1>`, 'Found'));
+      case 'shop.test/pw-frame':
+        // the snapshot also shows the fields of a frame, so a password in a frame must be masked too.
+        return send(200, html(`<label>Main pw <input type="password" name="pw" value="MAIN-${FIXTURE_PASSWORD}"></label><iframe src="/pw-inner"></iframe>`, 'Frames'));
+      case 'shop.test/pw-inner':
+        return send(200, html(`<label>Frame pw <input type="password" name="pw" value="${FIXTURE_PASSWORD}"></label>`, 'Inner'));
       case 'shop.test/login':
         return send(
           200,

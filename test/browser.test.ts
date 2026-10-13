@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { siteOf } from '../src/browser/gate.js';
 import { browserLogin } from '../src/browser/login.js';
 import { profileBusy } from '../src/browser/worker.js';
+import { openDb } from '../src/db/index.js';
 import { registerSecret } from '../src/observability/redact.js';
 import { createBrowserHarness, hasChrome, killChrome, traceEntries } from './browser-harness.js';
 import { FIXTURE_COOKIE, FIXTURE_PASSWORD, startFixture, type Fixture } from './web-fixture.js';
@@ -246,6 +247,56 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(trace).not.toContain(FIXTURE_PASSWORD);
   });
 
+  it('masks a password in a frame too', async () => {
+    const h = harness();
+    await h.run('browser_open', { url: site.url('shop.test', '/pw-frame') });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const out = await h.run('browser_snapshot', {});
+    expect(out.content).toMatch(/textbox "Frame pw" \[ref=s2f\d+e\d+\]: ••••••/);
+    for (const text of [out.content, ...h.steps().map((step) => h.blobs.read(String(step.snapshotBlob)))]) expect(text).not.toContain(FIXTURE_PASSWORD);
+  });
+
+  it('records a block after the last step when the task closes', async () => {
+    const h = harness();
+    await h.run('browser_open', { url: site.url('shop.test', '/late-evil') });
+    // the refresh comes 1 s after the load, and no step comes after it.
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+    await h.run('browser_close', {});
+    expect(site.hitsOn('evil.test')).toEqual([]);
+    const last = h.steps().at(-1)!;
+    expect(last).toMatchObject({ action: 'close', runId: 'run-1' });
+    expect(JSON.parse(String(last.blockedRequests))).toContainEqual(expect.objectContaining({ url: site.url('evil.test', '/late?leak=1') }));
+  });
+
+  it('keeps a secret in an address out of the step rows and the trace', async () => {
+    const h = harness();
+    await h.run('browser_open', { url: site.url('shop.test', `/about?key=${PATTERN_KEY}`) });
+    await h.run('browser_close', {});
+    const rows = JSON.stringify(h.steps());
+    expect(rows).toContain('about?key=');
+    expect(rows).not.toContain(PATTERN_KEY);
+    const trace = [...traceEntries(join(h.dir, 'traces', 'task-1.zip')).values()].map((bytes) => bytes.toString('latin1')).join('\n');
+    expect(trace).not.toContain(PATTERN_KEY);
+  });
+
+  it('closes the tab when its task row cannot be written, so chrome can still close and free the profile', async () => {
+    const db = openDb(':memory:');
+    const prepare = db.prepare.bind(db);
+    let fail = true;
+    db.prepare = ((sql: string) => {
+      if (fail && sql.startsWith('INSERT INTO browser_tasks')) {
+        fail = false;
+        throw new Error('database is locked');
+      }
+      return prepare(sql);
+    }) as typeof db.prepare;
+    const h = harness({ db, idleMs: 1500 });
+    expect(await h.run('browser_open', { url: site.url('shop.test') })).toMatchObject({ isError: true, effect: 'none', content: expect.stringContaining('database is locked') });
+    expect((await h.run('browser_open', { url: site.url('shop.test') })).isError).toBe(false);
+    await h.run('browser_close', {});
+    await vi.waitFor(() => expect(profileBusy(join(h.dir, 'profile'))).toBe(false), { timeout: 10_000, interval: 250 });
+  });
+
   it('refuses a ref of an older snapshot, and the page gets no click', async () => {
     const h = harness();
     const first = await h.run('browser_open', { url: site.url('shop.test') });
@@ -314,8 +365,8 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
   it('keeps the task of a session from another session, also when it is idle for more than a minute', async () => {
     const h = harness();
     await h.run('browser_open', { url: site.url('shop.test') }, 'main');
-    const now = Date.now();
-    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 61_000);
+    const now = performance.now();
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(now + 61_000);
     try {
       expect(await h.run('browser_open', { url: site.url('shop.test', '/about') }, 'auto:a:r')).toMatchObject({ isError: true, effect: 'none', content: expect.stringContaining('busy') });
     } finally {

@@ -1,9 +1,8 @@
 import type { ElementHandle, Locator, Page } from 'playwright-core';
 import { z } from 'zod';
-import { redact } from '../observability/redact.js';
 import { defineTool, type Tool, type ToolContext, type ToolOutput } from '../tools/registry.js';
 import { extractIsolated } from '../web/extract-run.js';
-import { NotDone, untraced, type ActTab, type BrowserRefusal, type BrowserWorker, type StepInput, type StepResult } from './worker.js';
+import { NotDone, untraced, untracedIfSecret, type ActTab, type BrowserRefusal, type BrowserWorker, type StepInput, type StepResult } from './worker.js';
 
 // the tools that change what leaves the pc. the owner approves each call, so they stay with the main session when a
 // browser child session gets the other tools.
@@ -185,9 +184,7 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
             if (await untraced(page, () => target.evaluate((el) => (el as unknown as PageControl).matches('input[type=password]')))) {
               throw new NotDone(`${id} is a password field. The agent never types a password. Nothing was typed. The owner signs in with okc browser login`);
             }
-            // the trace keeps the text of a fill, and the dashboard serves the zip. a text with a secret in it is typed
-            // outside the trace, and the step row keeps it redacted.
-            await (redact(text) === text ? target.fill(text) : untraced(page, () => target.fill(text)));
+            await untracedIfSecret(page, text, () => target.fill(text));
             return `typed ${text.length} characters`;
           }),
         );
@@ -201,7 +198,8 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
       async run({ ref: id, element: name, value }, ctx) {
         return view(
           await act(ctx, 'select', { ref: id, element: name, value }, async (page, tab) => {
-            await (await find(page, tab, id)).selectOption(value);
+            const target = await find(page, tab, id);
+            await untracedIfSecret(page, value, () => target.selectOption(value));
           }),
         );
       },
