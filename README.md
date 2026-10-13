@@ -30,7 +30,9 @@ It runs on this PC. Its persona files (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, an
 | `okc logs` | Follow the agent log |
 | `okc open` | Open the dashboard at http://127.0.0.1:4317 |
 
-To connect MCP servers (optional), see [docs/setup/integrations.md](docs/setup/integrations.md). To connect Gmail and Google Calendar, see [docs/setup/google.md](docs/setup/google.md).
+To connect MCP servers (optional), see [docs/setup/integrations.md](docs/setup/integrations.md).
+
+To connect Gmail and Google Calendar (optional), see [docs/setup/google.md](docs/setup/google.md). New mail and calendar changes become signals that the heartbeat reads; sending, unsubscribing and invitations always ask you.
 
 A small supervisor restarts the agent if it stops. The logon task means it runs whenever you are signed in to Windows.
 

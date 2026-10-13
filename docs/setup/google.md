@@ -1,24 +1,25 @@
 # Connect Gmail and Google Calendar
 
-Optional. Without a `google` block in `okc.config.json` the app has no Google tools and does not poll. Takes about 10 minutes the first time, then about 1 minute for each account.
+Optional. Without a `google` block in `okc.config.json` the app has no Google tools, does not poll, and shows "Google is not configured" on the Google page. The first time takes about 10 minutes, then about 1 minute for each account.
 
 ## 1. Create the Google Cloud project (one time)
 
 1. Open https://console.cloud.google.com and create a project, for example `ok-computer`.
 2. **APIs & Services → Library**: turn on the **Gmail API** and the **Google Calendar API**.
-3. **APIs & Services → OAuth consent screen** (Google Auth Platform):
-   - User type **External**. App name `OK Computer`. Your own address as the support and developer contact.
+3. **Google Auth Platform → Branding / Audience** (the OAuth consent screen):
+   - User type **External**. App name `OK Computer`. Use your own address as the support and developer contact.
    - **Audience → Publish app**, so the status is **In production**. Do not submit it for verification. In **Testing** mode Google ends each sign-in after 7 days.
-   - You do not need to add scopes here; the app asks for them at sign-in.
-4. **APIs & Services → Credentials → Create credentials → OAuth client ID**, type **Desktop app**. Download the JSON file. A **Web application** client does not work.
+   - You do not need to add scopes here. The app asks for them at sign-in.
+4. **Clients → Create client**, type **Desktop app**. Download the JSON file (`client_secret_….json`). Keep it on this PC. A **Web application** client does not work.
 
 ## 2. Configure the accounts
 
-Add this to `okc.config.json` (create the file next to `README.md` if it is missing):
+Add this block to `okc.config.json`. If the file does not exist, create it next to `README.md`.
 
 ```json
 {
   "google": {
+    "clientId": "1234567890-abc.apps.googleusercontent.com",
     "accounts": [
       { "alias": "personal", "email": "you@gmail.com" },
       { "alias": "school", "email": "you@school.edu" }
@@ -30,46 +31,66 @@ Add this to `okc.config.json` (create the file next to `README.md` if it is miss
 }
 ```
 
+- `clientId`: the client ID of the Desktop app client (it ends in `.apps.googleusercontent.com`). It is not a secret.
 - `alias`: at most 16 lower-case letters, digits and dashes. The agent names an account by its alias.
 - `email` (optional, recommended): a sign-in with another Google account is refused, so an alias can never read the wrong mailbox.
-- `send` (default `false`): when `true`, the sign-in also asks for `gmail.send`, and the agent gets `gmail_send`. Each send needs your approval. Changing it later needs a new sign-in of each account.
-- `sessions`: `main`, and `auto` if your automations may use Gmail and Calendar.
+- `send` (default `false`): when `true`, the sign-in also asks for permission to send mail, and the agent gets `gmail_send`. You approve each send. If you change it later, connect each account again.
+- `sessions`: `main`, and also `auto` if your automations may use Gmail and Calendar.
 - `pollMinutes` (default 15, at least 5).
 
-Run `okc restart`. An invalid block stops the app at start with a message that names the field.
+Run `okc restart`. If the block is invalid, the app stops at start and the message names the field.
 
-## 3. Store the client and connect each account
+## 3. Store the client secret and connect each account
 
-Open the dashboard on this PC (`okc open`). Until the page has buttons for these steps, use a terminal on the PC:
+Open the dashboard on this PC (`okc open`), then go to **Google**.
 
-```powershell
-# store the downloaded client file (the file stays in the Windows Credential Manager, never in the database)
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:4317/api/google/client -ContentType application/json -InFile "$HOME\Downloads\client_secret_XXXX.json"
+1. Under **Accounts**, use **Upload the client file** and pick the downloaded `client_secret_….json`. The app checks that the client ID matches `clientId`. Only the secret is kept, in the Windows Credential Manager (`google.client.ok-computer`). It never goes into the database.
+2. Press **Connect** next to an account. A new tab opens the Google sign-in.
+   - Pick the account that matches the alias. If your browser is signed in to several accounts, check the address.
+   - Google says that the app is not verified. Click **Advanced → Go to OK Computer (unsafe)**. This is your own app.
+   - **Keep every box checked.** If a permission is missing, the app saves nothing and the page names the permission.
+3. The tab shows "Signed in as …". The link works once, for 10 minutes, and only on this PC (the answer goes to a port on `127.0.0.1`).
+4. Repeat for each alias.
 
-# start the sign-in of one account, then open the link in the browser of this PC
-(Invoke-RestMethod -Method Post -Uri http://127.0.0.1:4317/api/google/personal/connect -ContentType application/json -Body '{}').url
-```
+## 4. What happens next
 
-Add `-Headers @{ Authorization = "Bearer $env:DASHBOARD_TOKEN" }` when `DASHBOARD_TOKEN` is set.
+- Every `pollMinutes`, the app reads the new inbox mail and the calendar changes of each signed-in account. Mail from before the sign-in is not news. Each poll is a run on the **Runs** page (trigger `poll`), with every request to Google and every classifier call.
+- New items become **signals**. Code checks two things first: a date in a mail that no event of that day matches, and an event that starts within two hours. Then a cheap model labels each mail (`needs_reply`, `deadline`, `event_change`, `newsletter`, `noise`). The heartbeat reads at most 20 new signals and tells you only what needs attention. It runs for signals also when the heartbeat checklist is empty, so you only need `heartbeat.every`. Newsletters and noise without a detector hit are closed without a model call. The **Signals** page shows what happened to each signal.
+- **Approvals.** These always ask you: sending mail, unsubscribing, an event with guests (Google sends them invitations), and changing or deleting an event. The card shows the sender and the exact unsubscribe link, the recipients, or the current title of the event.
+- **Write tools.** Archive, labels, mark as read, drafts and private events also ask you until the reviewer model exists. To let the agent do them without asking, add rules to `okc.policy.json` (next to `okc.config.json`) and restart:
 
-On the Google page:
+  ```json
+  {
+    "rules": [
+      { "tool": "google__gmail_archive", "effect": "allow" },
+      { "tool": "google__gmail_mark_read", "effect": "allow" },
+      { "tool": "google__gmail_label", "effect": "allow" },
+      { "tool": "google__gmail_draft", "effect": "allow" },
+      { "tool": "google__calendar_create_event", "effect": "allow", "note": "private events only; an event with guests still asks" }
+    ]
+  }
+  ```
 
-1. Pick the account that matches the alias. If you are signed in to several accounts in the browser, check the address.
-2. Google says the app is not verified: **Advanced → Go to OK Computer (unsafe)**. This is your own app.
-3. **Tick every box.** A sign-in without one of the permissions is refused, and the app says which one is missing.
+  An allow rule on a write tool also holds after the agent read mail. It never lets an event invite people.
+- **Unsubscribe** uses only the sender's own `List-Unsubscribe` header: a one-click link (only when Gmail saw a valid DKIM signature, and never to an address inside your network) or a mail (only with `send: true`). Otherwise the agent gives you the link.
 
-The browser then shows "Signed in as …". The link works once and for 10 minutes. Repeat for each alias. `GET /api/google` shows each account and its last poll.
+## 5. When something goes wrong
 
-## What happens next
+The Google page says what to do for each account.
 
-- Every `pollMinutes`, the app reads new inbox mail and calendar changes of each signed-in account. The first poll after a sign-in starts from the moment of the sign-in; older mail is not news.
-- New items become signals. A cheap model labels them (`needs_reply`, `deadline`, `event_change`, `newsletter`, `noise`), and code checks for a date in a mail that is not on your calendar and for an event that starts within two hours. The heartbeat reads at most 20 new signals and tells you only what needs attention. You need a heartbeat interval (`heartbeat.every`) for this; a checklist is not needed.
-- **Approvals:** sending mail, unsubscribing, and changing or deleting a calendar event always ask you. Archiving, labels, drafts and new events on your own calendar ask you too until the reviewer model exists, unless an `okc.policy.json` rule allows them.
-- **Unsubscribe** works only through the sender's own `List-Unsubscribe` header: a one-click link (only when Gmail saw a valid DKIM signature) or a mail (only with `send: true`). The approval card shows the exact link or address.
-
-## When something goes wrong
-
-- **"Google stopped accepting the sign-in of the X account"** (one Telegram message): the token was revoked, the password changed, the account was unused for 6 months, or more than 100 sign-ins exist for the client. Connect that account again. The app does not retry a dead token and does not send the message again.
+- **"Google stopped accepting the sign-in of the X account"** (one Telegram message): the access was removed, the password changed, the account was unused for 6 months, or the client has more than 100 sign-ins. Press **Connect** for that account. The app does not retry a dead sign-in and does not send the message again.
 - The message says **Testing mode**: the consent screen is not In production. Publish it (step 1.3) and connect again.
-- **"has failed 12 times in a row"**: Google or the network has failed for about three hours. The app keeps polling and sends this once per failure streak.
-- The tokens never appear in the logs, the database or the blob store. To remove the app's access, use https://myaccount.google.com/permissions, then delete the `google.<alias>.ok-computer` entries in the Credential Manager.
+- **"Google refused the OAuth client"** (one message for all accounts): `clientId` or the secret is wrong, or the client was deleted. Fix `clientId`, restart, and upload the client file again. The accounts work again without a new sign-in.
+- **"has failed 12 times in a row"**: Google or the network failed for about three hours. The app keeps polling and sends this once for each run of failures.
+- To remove the access: https://myaccount.google.com/permissions, then delete the `google.<alias>.ok-computer` and `google.client.ok-computer` entries in the Windows Credential Manager.
+
+## 6. Manual checks against real Google
+
+The tests use a fake Google server. Check these with your real accounts once, after the first sign-in:
+
+1. **Calendar sync.** After the first poll, the account has a calendar sync token (the Google page shows no error). Change an event that someone else organized, and check that the next poll makes a signal. This checks that Google accepts a sync token after a first read with `timeMin`.
+2. **Sign-in lifetime.** 8 days after a sign-in, the account still polls. This checks that the consent screen is In production.
+3. **History gap.** Leave the app off for more than a week, then start it. The run of the first poll says that the mail history was too old and that only the mail of the last 2 days made signals.
+4. **Unsubscribe.** Ask the agent to unsubscribe from a real newsletter. Check the card (sender and link), approve it, and check the poll run or the call on the Runs page for the POST to the sender.
+5. **Send** (only with `send: true`). Ask the agent to send a short mail to yourself. Approve it and check that it arrived once.
+6. **Invitation.** Ask for an event with a second address of yours as a guest. Check that it asks for approval, and that the invitation arrives after you approve it.
