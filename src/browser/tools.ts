@@ -2,7 +2,7 @@ import type { Locator, Page } from 'playwright-core';
 import { z } from 'zod';
 import { defineTool, type Tool, type ToolContext, type ToolOutput } from '../tools/registry.js';
 import { extractIsolated } from '../web/extract-run.js';
-import type { BrowserRefusal, BrowserWorker, StepInput, StepResult } from './worker.js';
+import { NotDone, type ActTab, type BrowserRefusal, type BrowserWorker, type StepInput, type StepResult } from './worker.js';
 
 export const BROWSER_TOOLS = [
   'browser_allow_domain',
@@ -18,7 +18,8 @@ export const BROWSER_TOOLS = [
   'browser_type',
 ] as const;
 
-const ref = z.string().regex(/^(f\d+)?e\d+$/, 'use a ref from the last snapshot, such as e12');
+const ref = z.string().regex(/^s\d+(f\d+)?e\d+$/, 'use a ref from the last snapshot, such as s3e12');
+const element = z.string().min(1).max(200).describe('a short description of the element, which the owner reads when the call needs approval');
 
 const hostOf = (url: string) => {
   try {
@@ -32,6 +33,7 @@ const hostOf = (url: string) => {
 // text: nothing ran in a page, so the effect is none.
 function view(result: StepResult | BrowserRefusal, options: { body?: 'snapshot' | 'note'; effectNone?: boolean } = {}): ToolOutput {
   if ('refused' in result) return { content: result.refused, isError: true, ...(options.effectNone === false ? {} : { effect: 'none' as const }) };
+  const none = !result.acted && options.effectNone !== false ? { effect: 'none' as const } : {};
   const lines = [`Page: ${result.title || '(no title)'}`, `Address: ${result.url}`];
   if (result.note && (options.body !== 'note' || !result.ok)) lines.push(`${result.ok ? 'Result' : 'Error'}: ${result.note}`);
   if (result.blocked.length) {
@@ -42,9 +44,10 @@ function view(result: StepResult | BrowserRefusal, options: { body?: 'snapshot' 
     lines.push(`Sent ${result.sent.length} request${result.sent.length > 1 ? 's' : ''} with the owner's approval:`);
     for (const each of result.sent.slice(0, 8)) lines.push(`- ${each.method} ${each.url.slice(0, 200)}`);
   }
-  if (options.body === 'note' && result.ok) lines.push('', result.note);
-  else lines.push('', 'Snapshot (use the refs, such as e12, with browser_click, browser_type and browser_select):', result.snapshot ?? '(the snapshot failed)');
-  return { content: lines.join('\n'), isError: !result.ok, untrustedSource: `browser:${hostOf(result.url)}` };
+  // each step takes a new snapshot, so the refs that the model read before this step no longer work.
+  if (options.body === 'note' && result.ok) lines.push('Refs of earlier snapshots no longer work. Use browser_snapshot for new refs.', '', result.note);
+  else lines.push('', 'Snapshot (use its refs, such as s3e12, with browser_click, browser_type and browser_select):', result.snapshot ?? '(the snapshot failed)');
+  return { content: lines.join('\n'), isError: !result.ok, untrustedSource: `browser:${hostOf(result.url)}`, ...none };
 }
 
 const stepOf = (ctx: ToolContext, action: string, target?: unknown): StepInput => ({
@@ -62,6 +65,7 @@ const SUBMIT_CONTROL = 'button:not([type]), button[type=submit], input[type=subm
 interface PageControl {
   closest(selector: string): PageControl | null;
   getAttribute(name: string): string | null;
+  matches(selector: string): boolean;
   form: { action: string; method: string; elements: ArrayLike<PageField> } | null;
   innerText?: string;
   value?: string;
@@ -85,10 +89,13 @@ async function sendsData(locator: Locator): Promise<boolean> {
   }, SUBMIT_CONTROL);
 }
 
-// a stale ref waits for the whole action timeout and then gives a timeout. a count first gives a clear answer.
-async function element(page: Page, id: string): Promise<Locator> {
-  const locator = page.getByRef(id);
-  if ((await locator.count()) !== 1) throw new Error(`${id} is not on the page now. Use browser_snapshot to get new refs`);
+// playwright reads a ref against the last snapshot of the page, which can be newer than the one that the model read.
+// a ref that is gone waits for the whole action timeout, so a count first gives a clear answer.
+async function find(page: Page, tab: ActTab, id: string): Promise<Locator> {
+  const [, n, own] = /^s(\d+)(.+)$/.exec(id)!;
+  if (Number(n) !== tab.snapshot) throw new NotDone(`${id} is from an older snapshot, and the page can have changed since then. Nothing was done. Use the refs of the last snapshot (s${tab.snapshot}), or take a new browser_snapshot`);
+  const locator = page.getByRef(own!);
+  if ((await locator.count()) !== 1) throw new NotDone(`${id} is not on the page now. Nothing was done. Use browser_snapshot to get new refs`);
   return locator;
 }
 
@@ -96,6 +103,7 @@ interface FormState {
   name: string;
   action: string;
   fields: Record<string, string>;
+  password: boolean;
 }
 
 // the fields that the owner reads on the card: every named field that a person sees and can change. a password
@@ -109,12 +117,14 @@ async function submitControls(page: Page): Promise<FormState[]> {
       if (!form) continue;
       const name = (control.innerText || control.value || control.getAttribute('aria-label') || '').trim();
       const fields: Record<string, string> = {};
+      let password = false;
       for (const item of Array.from(form.elements)) {
+        if (item.type === 'password') password = true;
         if (!item.name || ['hidden', 'submit', 'button', 'image', 'reset', 'file'].includes(item.type)) continue;
         if ((item.type === 'checkbox' || item.type === 'radio') && !item.checked) continue;
         fields[item.name] = item.type === 'password' ? `(password of ${item.value.length} characters)` : item.value;
       }
-      out.push({ name, action: form.action, fields });
+      out.push({ name, action: form.action, fields, password });
     }
     return out;
   }, SUBMIT_CONTROL);
@@ -133,8 +143,7 @@ const sameAddress = (a: string, b: string) => {
 };
 
 export function createBrowserTools(worker: BrowserWorker): Tool[] {
-  const act = (ctx: ToolContext, action: string, target: unknown, work: (page: Page, tab: Parameters<Parameters<BrowserWorker['act']>[1]>[1]) => Promise<string | void>) =>
-    worker.act(stepOf(ctx, action, target), work);
+  const act = (ctx: ToolContext, action: string, target: unknown, work: (page: Page, tab: ActTab) => Promise<string | void>) => worker.act(stepOf(ctx, action, target), work);
 
   return [
     defineTool({
@@ -170,13 +179,13 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
       name: 'browser_click',
       description:
         'Click an element by its ref from the last snapshot, for example a link, a tab or a menu. A button that sends a form does not work here: use browser_submit.',
-      input: z.object({ ref }),
+      input: z.object({ ref, element }),
       risk: 'write',
-      async run({ ref: id }, ctx) {
+      async run({ ref: id, element: name }, ctx) {
         return view(
-          await act(ctx, 'click', id, async (page) => {
-            const target = await element(page, id);
-            if (await sendsData(target)) throw new Error(`${id} sends a form. Nothing was clicked. Use browser_submit, which the owner approves`);
+          await act(ctx, 'click', { ref: id, element: name }, async (page, tab) => {
+            const target = await find(page, tab, id);
+            if (await sendsData(target)) throw new NotDone(`${id} sends a form. Nothing was clicked. Use browser_submit, which the owner approves`);
             await target.click();
           }),
         );
@@ -185,12 +194,16 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
     defineTool({
       name: 'browser_type',
       description: 'Put text into a field by its ref. It does not press Enter and does not send the form.',
-      input: z.object({ ref, text: z.string().max(5000) }),
+      input: z.object({ ref, element, text: z.string().max(5000) }),
       risk: 'write',
-      async run({ ref: id, text }, ctx) {
+      async run({ ref: id, element: name, text }, ctx) {
         return view(
-          await act(ctx, 'type', { ref: id, text }, async (page) => {
-            await (await element(page, id)).fill(text);
+          await act(ctx, 'type', { ref: id, element: name, text }, async (page, tab) => {
+            const target = await find(page, tab, id);
+            if (await target.evaluate((el) => (el as unknown as PageControl).matches('input[type=password]'))) {
+              throw new NotDone(`${id} is a password field. The agent never types a password. Nothing was typed. The owner signs in with okc browser login`);
+            }
+            await target.fill(text);
             return `typed ${text.length} characters`;
           }),
         );
@@ -199,12 +212,12 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
     defineTool({
       name: 'browser_select',
       description: 'Choose an option of a list by its ref, with the value or the label of the option.',
-      input: z.object({ ref, value: z.string().max(500) }),
+      input: z.object({ ref, element, value: z.string().max(500) }),
       risk: 'write',
-      async run({ ref: id, value }, ctx) {
+      async run({ ref: id, element: name, value }, ctx) {
         return view(
-          await act(ctx, 'select', { ref: id, value }, async (page) => {
-            await (await element(page, id)).selectOption(value);
+          await act(ctx, 'select', { ref: id, element: name, value }, async (page, tab) => {
+            await (await find(page, tab, id)).selectOption(value);
           }),
         );
       },
@@ -251,6 +264,7 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
           const matches = (await submitControls(page)).filter((each) => each.name === button.trim());
           if (matches.length !== 1) throw new Error(`${matches.length ? 'more than one' : 'no'} button of a form is named ${JSON.stringify(button)}. Nothing was sent`);
           const form = matches[0]!;
+          if (form.password) throw new Error('the form has a password field. The agent never sends a password. Nothing was sent. The owner signs in with okc browser login');
           const want = JSON.stringify(Object.entries(fields).sort());
           const have = JSON.stringify(Object.entries(form.fields).sort());
           if (want !== have) throw new Error(`the form now has these fields: ${JSON.stringify(form.fields)}. Nothing was sent. Ask again with these values`);

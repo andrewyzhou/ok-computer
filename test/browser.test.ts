@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { browserLogin } from '../src/browser/login.js';
 import { profileBusy } from '../src/browser/worker.js';
 import { createBrowserHarness, hasChrome, killChrome } from './browser-harness.js';
-import { startFixture, type Fixture } from './web-fixture.js';
+import { FIXTURE_PASSWORD, startFixture, type Fixture } from './web-fixture.js';
 
 let site: Fixture;
 beforeAll(async () => {
@@ -37,7 +37,7 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     const out = await h.run('browser_open', { url: site.url('shop.test') });
     expect(out.isError).toBe(false);
     expect(out.untrustedSource).toBe(`browser:shop.test:${site.port}`);
-    expect(out.content).toMatch(/button "Buy now" \[ref=e\d+\]/);
+    expect(out.content).toMatch(/button "Buy now" \[ref=s1e\d+\]/);
     const [step] = h.steps();
     expect(step).toMatchObject({ action: 'open', urlAfter: site.url('shop.test') });
     expect(h.blobs.read(String(step!.snapshotBlob))).toContain('Buy now');
@@ -78,7 +78,7 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     const first = await h.run('browser_open', { url: site.url('shop.test') });
     const buy = await h.run('browser_click', { ref: refOf(first.content, /button "Buy now"/) });
     expect(buy).toMatchObject({ isError: true, content: expect.stringContaining('Use browser_submit') });
-    const save = await h.run('browser_click', { ref: refOf(first.content, /button "Save"/) });
+    const save = await h.run('browser_click', { ref: refOf(buy.content, /button "Save"/) });
     expect(save.content).toContain('tried to send data (POST)');
     expect(site.hitsOn('shop.test').filter((hit) => hit.path === '/buy')).toEqual([]);
   });
@@ -133,6 +133,34 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     // the step lists what the submit let out: one post, once, although both layers of the gate saw it.
     expect(JSON.parse(String(h.steps().at(-1)!.sent))).toEqual([{ method: 'POST', url: site.url('shop.test', '/buy') }]);
     expect(sent.content).toContain(`POST ${site.url('shop.test', '/buy')}`);
+  });
+
+  it('masks a password in every snapshot, and refuses to type or send one', async () => {
+    const h = harness();
+    const page = await h.run('browser_open', { url: site.url('shop.test', '/login') });
+    expect(page.content).toMatch(/textbox "Password" \[ref=s1e\d+\]: ••••••/);
+    const typed = await h.run('browser_type', { ref: refOf(page.content, /textbox "Password"/), element: 'password', text: 'other' });
+    expect(typed).toMatchObject({ isError: true, effect: 'none', content: expect.stringContaining('never types a password') });
+    const sent = await h.run('browser_submit', { url: site.url('shop.test', '/login'), button: 'Sign in', fields: { user: 'ada', pw: '(password of 17 characters)' } });
+    expect(sent).toMatchObject({ isError: true, content: expect.stringContaining('never sends a password') });
+    const outputs = [page, typed, sent, await h.run('browser_snapshot', {})].map((each) => each.content).join('\n');
+    expect(outputs).not.toContain(FIXTURE_PASSWORD);
+    for (const step of h.steps()) expect(h.blobs.read(String(step.snapshotBlob))).not.toContain(FIXTURE_PASSWORD);
+    expect(site.hitsOn('shop.test').filter((hit) => hit.path === '/session')).toEqual([]);
+  });
+
+  it('refuses a ref of an older snapshot, and the page gets no click', async () => {
+    const h = harness();
+    const first = await h.run('browser_open', { url: site.url('shop.test') });
+    const about = refOf(first.content, /link "About"/);
+    expect(about).toMatch(/^s1e\d+$/);
+    const second = await h.run('browser_snapshot', {});
+    expect(refOf(second.content, /link "About"/)).toBe(about.replace(/^s1/, 's2'));
+    site.hits.length = 0;
+    const out = await h.run('browser_click', { ref: about, element: 'About link' });
+    expect(out).toMatchObject({ isError: true, effect: 'none', content: expect.stringContaining('older snapshot') });
+    expect(site.hitsOn('shop.test')).toEqual([]);
+    expect(h.steps().at(-1)).toMatchObject({ action: 'click', urlAfter: site.url('shop.test') });
   });
 
   it('opens an off-list site only after browser_allow_domain', async () => {

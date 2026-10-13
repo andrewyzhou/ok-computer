@@ -75,11 +75,25 @@ export interface StepResult {
   sent: Sent[];
   stepId?: number;
   taskId: string;
+  // false when the action refused before it touched the page.
+  acted: boolean;
 }
 
 // a failure before any action, for example no chrome or no open task. effect none: nothing happened in a page.
 export interface BrowserRefusal {
   refused: string;
+}
+
+// an action throws this when it refuses before it touches the page, for example for a ref of an older snapshot. the
+// step is still recorded, and the tool says that nothing happened.
+export class NotDone extends Error {}
+
+// the tab state that an action can read and change.
+export interface ActTab {
+  allowlist: ReadonlySet<string>;
+  // the number of the last snapshot. its refs carry it, for example s3e12.
+  snapshot: number;
+  setSubmit(on: boolean): void;
 }
 
 interface Tab {
@@ -96,13 +110,14 @@ interface Tab {
   queue: Promise<unknown>;
   crashed?: string;
   rules: TabRules;
+  snapshot: number;
 }
 
 export interface BrowserWorker {
   // open starts the task of the session at its first call, and the host of the address joins its allowlist.
   open(step: StepInput, url: string): Promise<StepResult | BrowserRefusal>;
   // act runs one action in the open task of the session, one action at a time, and records the step.
-  act(step: StepInput, action: (page: Page, tab: { allowlist: ReadonlySet<string>; setSubmit(on: boolean): void }) => Promise<string | void>): Promise<StepResult | BrowserRefusal>;
+  act(step: StepInput, action: (page: Page, tab: ActTab) => Promise<string | void>): Promise<StepResult | BrowserRefusal>;
   // search runs in a short tab of its own with the hosts of the engine, and records one step.
   inTab<T>(step: StepInput, hosts: string[], work: (page: Page) => Promise<T>): Promise<{ value?: T; error?: string; result: StepResult } | BrowserRefusal>;
   allowlistOf(sessionKey: string): string[] | undefined;
@@ -112,6 +127,22 @@ export interface BrowserWorker {
   sweep(): number;
   stop(): Promise<void>;
 }
+
+// the ai snapshot shows the value of a password field as plain text. the model, the blobs and the trace must never get
+// it, so each value is masked wherever it shows in the snapshot.
+async function passwordsOf(page: Page, ms: number): Promise<string[]> {
+  const values = await within(page.locator('input[type=password]').evaluateAll((inputs) => inputs.map((input) => (input as unknown as { value: string }).value)), ms);
+  if (values === TIMED_OUT) throw new Error(`Timeout ${ms}ms exceeded while the password fields were read`);
+  return values.filter((value) => value.length > 0);
+}
+
+// the longest value goes first, so a value that holds a shorter one is masked whole.
+export const maskPasswords = (snapshot: string, secrets: string[]) =>
+  [...secrets].sort((a, b) => b.length - a.length).reduce((text, secret) => text.split(secret).join('••••••'), snapshot);
+
+// playwright resolves a ref against the last snapshot of the page, and the next snapshot can give the same ref to
+// another element. the number of the snapshot in each ref lets a tool refuse a ref that the model read earlier.
+export const renumber = (snapshot: string, n: number) => snapshot.replace(/\[ref=((?:f\d+)?e\d+)\]/g, `[ref=s${n}$1]`);
 
 // chrome keeps a file named lockfile open while it uses a profile, and windows refuses a second open (probe p4). this
 // is exact, also after a crash of the app, so the app needs no lock file of its own.
@@ -254,7 +285,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   async function newTab(ctx: BrowserContext, kind: Tab['kind'], step: StepInput, allowlist: string[]): Promise<Tab> {
     const page = await ctx.newPage();
     owned.add(page);
-    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), submit: false, blocked: [], sent: [], console: [], lastUsed: Date.now(), queue: Promise.resolve() } as unknown as Tab;
+    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), submit: false, blocked: [], sent: [], console: [], lastUsed: Date.now(), queue: Promise.resolve(), snapshot: 0 } as unknown as Tab;
     tab.rules = {
       allows: (host) => allowedBy(tab.allowlist, host),
       submitting: () => tab.submit,
@@ -326,7 +357,10 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     let snapshot: string | undefined;
     let png: Buffer | undefined;
     try {
-      snapshot = await tab.page.ariaSnapshot({ mode: 'ai', timeout: t.capture });
+      // a script can change a value while the snapshot runs, so the values before and after it are both masked.
+      const before = await passwordsOf(tab.page, t.capture);
+      const text = await tab.page.ariaSnapshot({ mode: 'ai', timeout: t.capture });
+      snapshot = renumber(maskPasswords(text, [...before, ...(await passwordsOf(tab.page, t.capture))]), ++tab.snapshot);
     } catch (err) {
       errors.push(`snapshot: ${errorText(err).split('\n')[0]}`);
     }
@@ -406,17 +440,19 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       const urlBefore = tab.page.url();
       let note = '';
       let error: string | undefined;
+      let acted = true;
       try {
         note = (await action(tab.page)) ?? '';
       } catch (err) {
         error = errorText(err).split('\n')[0]!;
+        acted = !(err instanceof NotDone);
       }
       // a navigation can still run. the snapshot waits for the document, with the capture limit.
       await tab.page.waitForLoadState('domcontentloaded', { timeout: t.capture }).catch(() => undefined);
       const shot = await capture(tab);
       const urlAfter = tab.page.url();
       const stepId = record(tab, input, { urlBefore, urlAfter, snapshot: shot.snapshot, png: shot.png, started, ...(error || shot.errors.length ? { error: [error, ...shot.errors].filter(Boolean).join('; ') } : {}) });
-      const base = { url: urlAfter, blocked: [...tab.blocked], sent: [...tab.sent], taskId: tab.id, ...(shot.snapshot !== undefined ? { snapshot: shot.snapshot } : {}), ...(stepId ? { stepId } : {}) };
+      const base = { url: urlAfter, blocked: [...tab.blocked], sent: [...tab.sent], taskId: tab.id, acted, ...(shot.snapshot !== undefined ? { snapshot: shot.snapshot } : {}), ...(stepId ? { stepId } : {}) };
       // a page that answers neither capture is hung, for example by a loop in its script. closing the tab is the only
       // way back (probe p5), and the next browser_open starts a new task.
       if (shot.errors.length === 2 && /Timeout/.test(shot.errors.join(' '))) {
@@ -484,7 +520,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     async act(input, action) {
       const tab = tasks.get(input.sessionKey);
       if (!tab) return { refused: 'No page is open in this session. Use browser_open first.' };
-      return step(tab, input, (page) => action(page, { allowlist: tab.allowlist, setSubmit: (on) => void (tab.submit = on) }));
+      return step(tab, input, (page) => action(page, { allowlist: tab.allowlist, snapshot: tab.snapshot, setSubmit: (on) => void (tab.submit = on) }));
     },
     async inTab(input, hosts, work) {
       const ctx = await contextOrRefusal();
