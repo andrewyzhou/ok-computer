@@ -233,14 +233,30 @@ describe('token health against the token endpoint', () => {
     h.signedIn('personal');
     await poll();
     h.fake.fault({ route: 'GET /gmail/v1/users/me/history', status: 401, times: 1, body: { error: { code: 401, message: 'Invalid Credentials' } } });
-    h.fake.fault({ route: 'POST /token', status: 503, times: 4 });
+    h.fake.fault({ route: 'POST /token', status: 503, times: 1 });
+    const tokensBefore = tokenRequests();
     const [report] = await poll();
     expect(report).toMatchObject({ ok: false, error: expect.stringContaining('the token request failed with 503') });
+    // the poll owns its retries, so the library sends one token request, not four.
+    expect(tokenRequests() - tokensBefore).toBe(1);
     expect(h.alerts).toEqual([]);
     expect(h.rows('SELECT status FROM google_accounts')).toEqual([{ status: 'ok' }]);
     expect(h.secrets.values.get('google.personal')).toBe(refreshOf('personal'));
     await poll();
     expect(h.rows('SELECT failures FROM google_accounts')).toEqual([{ failures: 0 }]);
+  });
+
+  // a token endpoint that takes the connection and never answers, as after a sleep or a change of network. the api
+  // requests had a timeout, but the token request goes through another transporter.
+  it('gives up on a token request that never answers after the request timeout, and counts the failure', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'], requestTimeoutMs: 300 });
+    h.signedIn('personal');
+    h.fake.fault({ route: 'POST /token', delayMs: 60_000, times: 1 });
+    const started = Date.now();
+    const [report] = await poll();
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(report).toMatchObject({ ok: false, failures: 1, error: expect.stringContaining('the token request failed') });
+    expect(tokenRequests()).toBe(1);
   });
 
   it('sends one message for a dead sign-in, then makes no token request, and works again after a new sign-in', async () => {

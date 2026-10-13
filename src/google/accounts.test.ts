@@ -91,14 +91,15 @@ describe('google sign-in', () => {
     expect(h.secrets.values.get('google.client')).toBe('GOCSPX-desktop-secret');
   });
 
-  it('clears the needs_auth state and the alert mark after a new sign-in', async () => {
+  // the failures of the dead sign-in are over. else the page says that polls fail right after a sign-in that worked.
+  it('clears the needs_auth state, the alert mark and the failure count after a new sign-in', async () => {
     h = await createGoogleHarness({ accounts: ['personal'] });
     h.signedIn('personal');
-    h.db.prepare("UPDATE google_accounts SET status = 'needs_auth', alertedAt = '2026-10-12T00:00:00Z'").run();
+    h.db.prepare("UPDATE google_accounts SET status = 'needs_auth', alertedAt = '2026-10-12T00:00:00Z', failures = 1, lastErrorAt = '2026-10-12T00:00:00Z'").run();
     h.fake.nextSignIn = { alias: 'personal', refreshToken: NEW_REFRESH };
     const { state, callback } = await begin('personal');
     await visit(callback, `code=good-code&state=${state}`);
-    expect(h.rows('SELECT status, alertedAt FROM google_accounts')).toEqual([{ status: 'ok', alertedAt: null }]);
+    expect(h.rows('SELECT status, alertedAt, failures, lastErrorAt FROM google_accounts')).toEqual([{ status: 'ok', alertedAt: null, failures: 0, lastErrorAt: null }]);
     expect(h.accounts.unavailable('personal')).toBeUndefined();
   });
 });

@@ -52,6 +52,8 @@ export interface AccountsDeps {
   onNeedsAuth: (alias: string, text: string) => void;
   // called when an account gets a new mailbox, so the sync starts again from nothing.
   onNewMailbox?: (alias: string) => void;
+  // tests use a short timeout.
+  requestTimeoutMs?: number;
 }
 
 const CLIENT_REF = 'google.client';
@@ -72,6 +74,7 @@ interface Flow {
 export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
   const { db, clock, logger, secrets, config } = deps;
   const endpoints = deps.endpoints ?? {};
+  const timeout = deps.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
   const aliases = config.accounts.map((each) => each.alias);
   const cached = new Map<string, { auth: OAuth2Client; apis: GoogleApis }>();
   const flows = new Map<string, Flow>();
@@ -100,7 +103,10 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
       // new token and tries once more, so the answer of the token endpoint decides. invalid_grant is a dead sign-in,
       // and a 5xx is an outage.
       forceRefreshOnFailure: true,
-      transporterOptions: { fetchImplementation: tracedFetch(deps.trace) },
+      // the token requests go through this transporter, not through the api clients, so they need their own timeout.
+      // without it a token endpoint that never answers holds a poll for about 15 minutes: the 300 s header timeout of
+      // node, three times over the retries of the library. the poll owns its retries, so the library makes none.
+      transporterOptions: { fetchImplementation: tracedFetch(deps.trace), timeout, retryConfig: { retry: 0, noResponseRetries: 0 } },
       endpoints: {
         ...(endpoints.tokenUrl ? { oauth2TokenUrl: endpoints.tokenUrl } : {}),
         ...(endpoints.authUrl ? { oauth2AuthBaseUrl: endpoints.authUrl } : {}),
@@ -110,7 +116,7 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
 
   // the sdk retries a get three times on a 5xx by default. the poll owns its retries, so the sdk does not.
   const apisFor = (auth: OAuth2Client): GoogleApis => {
-    const options = { auth, retry: false, timeout: REQUEST_TIMEOUT_MS, ...(endpoints.apiRoot ? { rootUrl: endpoints.apiRoot } : {}) };
+    const options = { auth, retry: false, timeout, ...(endpoints.apiRoot ? { rootUrl: endpoints.apiRoot } : {}) };
     return { gmail: gmail({ version: 'v1', ...options }), calendar: calendar({ version: 'v3', ...options }) };
   };
 
@@ -256,7 +262,7 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
       await secrets.set(tokenRef(flow.alias), tokens.refresh_token);
       cached.delete(flow.alias);
       db.prepare(
-        `UPDATE google_accounts SET email = ?, scopes = ?, status = 'ok', authorizedAt = ?, alertedAt = NULL, lastError = NULL, updatedAt = ? WHERE alias = ?`,
+        `UPDATE google_accounts SET email = ?, scopes = ?, status = 'ok', authorizedAt = ?, alertedAt = NULL, lastError = NULL, lastErrorAt = NULL, failures = 0, updatedAt = ? WHERE alias = ?`,
       ).run(email, [...granted].join(' '), now(), now(), flow.alias);
       if (before && before !== email) deps.onNewMailbox?.(flow.alias);
       // the gmail baseline is the moment of the sign-in, not the first poll that works. mail that comes between the

@@ -35,7 +35,7 @@ export interface GoogleHarness {
   close(): Promise<void>;
 }
 
-export async function createGoogleHarness(options: { accounts?: string[]; config?: Partial<GoogleConfig>; db?: Db } = {}): Promise<GoogleHarness> {
+export async function createGoogleHarness(options: { accounts?: string[]; config?: Partial<GoogleConfig>; db?: Db; requestTimeoutMs?: number } = {}): Promise<GoogleHarness> {
   const aliases = options.accounts ?? ['personal', 'school'];
   const fake = await startFakeGoogle();
   fake.grant = [SCOPES.readonly, SCOPES.modify, SCOPES.events, SCOPES.calendarRead, SCOPES.send];
@@ -79,6 +79,7 @@ export async function createGoogleHarness(options: { accounts?: string[]; config
         endpoints,
         onNeedsAuth: (alias, text) => alerts.push({ alias, text }),
         onNewMailbox: (alias) => harness.sync.reset(alias),
+        ...(options.requestTimeoutMs ? { requestTimeoutMs: options.requestTimeoutMs } : {}),
       });
       harness.sync = createSync({ db, clock, logger, blobs, accounts: harness.accounts, timeZone: 'America/Los_Angeles' });
     },
