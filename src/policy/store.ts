@@ -75,14 +75,7 @@ export function decisionOfApproval(db: Db, approvalId: number): number | null {
 export function sessionTaint(db: Db, sessionKey: string): TaintSource[] {
   const rows = db
     .prepare(
-      // the event of an integration call names tool_call, the model's own call. the owner needs the tool that read
-      // the content, so the name comes from the trace row when it exists. the row is only for the name: the event
-      // alone decides the taint.
-      `SELECT runId, createdAt, json_extract(payload, '$.untrustedSource') AS source,
-         CASE WHEN json_extract(payload, '$.name') = 'tool_call'
-           THEN COALESCE((SELECT name FROM tool_calls WHERE tool_calls.runId = events.runId
-             AND tool_calls.toolCallId = json_extract(events.payload, '$.toolCallId') ORDER BY id LIMIT 1), 'tool_call')
-           ELSE json_extract(payload, '$.name') END AS name,
+      `SELECT runId, createdAt, json_extract(payload, '$.untrustedSource') AS source, json_extract(payload, '$.name') AS name,
          json_extract(payload, '$.toolCallId') AS toolCallId, json_extract(payload, '$.taint') AS taint
        FROM events
        WHERE sessionKey = ? AND type IN ('tool_result', 'system_event')
@@ -96,17 +89,22 @@ export function sessionTaint(db: Db, sessionKey: string): TaintSource[] {
     if (!sources.has(each.source)) sources.set(each.source, each);
   };
   for (const row of rows) {
-    if (row.source !== null) {
-      add({
-        source: String(row.source),
-        toolName: String(row.name),
-        runId: row.runId === null ? null : String(row.runId),
-        toolCallId: String(row.toolCallId),
-        at: String(row.createdAt),
-      });
+    if (row.source !== null && !sources.has(String(row.source))) {
+      const runId = row.runId === null ? null : String(row.runId);
+      const toolCallId = String(row.toolCallId);
+      add({ source: String(row.source), toolName: toolNameOf(db, String(row.name), runId, toolCallId), runId, toolCallId, at: String(row.createdAt) });
     }
     // a system event carries the sources of another session, for example of an automation run.
     if (row.taint !== null) for (const each of JSON.parse(String(row.taint)) as TaintSource[]) add(each);
   }
   return [...sources.values()];
+}
+
+// the event of an integration call names tool_call, the model's own call. the owner needs the tool that read the
+// content, so the name comes from the trace row when it exists. the row gives only the name: the event alone decides
+// the taint. the lookup runs one time for each source, so a long session does not make the check slow.
+function toolNameOf(db: Db, name: string, runId: string | null, toolCallId: string): string {
+  if (name !== 'tool_call' || runId === null) return name;
+  const row = db.prepare('SELECT name FROM tool_calls WHERE runId = ? AND toolCallId = ? ORDER BY id LIMIT 1').get(runId, toolCallId);
+  return row ? String(row.name) : name;
 }
