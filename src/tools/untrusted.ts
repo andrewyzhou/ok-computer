@@ -2,9 +2,15 @@
 // closing tag would then look like trusted text, or like a separate system message.
 const CLOSING_TAG = /<\s*\/\s*(untrusted|system_event|note)\b[^>]*>?/gi;
 
+// the source names the origin, and the taint keeps it in full. in the wrapper it has a limit, so a long url cannot
+// push a preview over the handle limit.
+const SOURCE_LIMIT = 120;
+
 export function wrapUntrusted(source: string, text: string): string {
   const body = text.replace(CLOSING_TAG, '[removed closing tag]');
-  const attribute = source.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  let attribute = source.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // the cut must not leave a part of an entity.
+  if (attribute.length > SOURCE_LIMIT) attribute = `${attribute.slice(0, SOURCE_LIMIT).replace(/&[a-z]*$/, '')}...`;
   return `<untrusted source="${attribute}">\n${body}\n</untrusted>`;
 }
 

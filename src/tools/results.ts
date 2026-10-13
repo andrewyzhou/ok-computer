@@ -29,7 +29,10 @@ export interface ModelView {
 export function modelView(output: ToolOutput, handle: () => string = newHandle): ModelView {
   const raw = output.content;
   const wrap = (text: string) => (output.untrustedSource ? wrapUntrusted(output.untrustedSource, text) : text);
-  if (raw.length <= HANDLE_OVER) return { content: wrap(raw), truncated: false };
+  // the limit applies to the text that the model gets, with its wrapper. a view over the limit without a handle is
+  // cut by the trim, and the model then cannot read the cut part again.
+  const whole = wrap(raw);
+  if (whole.length <= HANDLE_OVER) return { content: whole, truncated: false };
   const id = handle();
   const head = raw.slice(0, safeEnd(raw, PREVIEW_HEAD));
   const tail = raw.slice(safeStart(raw, raw.length - PREVIEW_TAIL));

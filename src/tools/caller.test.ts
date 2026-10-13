@@ -147,6 +147,27 @@ describe('tool caller', () => {
     expect((await call('result_read', { handle, query: `${query}a` }, 'r1', 'too-long')).isError).toBe(true);
   });
 
+  // the search runs on the event loop of the live app. it once made one span for each match of each word, which
+  // took more than a second and hundreds of megabytes for this query.
+  it('stops the search of a large result soon after the passages are full', async () => {
+    const { call, row } = setup();
+    const words = 'the quick brown fox jumps over a lazy dog and then sleeps. ';
+    await call('echo', { text: words.repeat(Math.ceil(8_000_000 / words.length)) }, 'r1', 'huge');
+    const handle = String(row('huge').resultHandle);
+    const query = 'abcdefghijklmnopqrstuvwxyz'.split('').join(' ');
+    const started = performance.now();
+    const found = await call('result_read', { handle, query }, 'r1', 'read-huge');
+    expect(performance.now() - started).toBeLessThan(400);
+    expect(found.content).toMatch(/^more than \d+ passages of res_\w+ \(\d+ characters\) match/);
+    expect(found.content).toMatch(/\[more than \d+ more passages match\. use a narrower query, or from and length\.\]$/);
+    expect(found.content.length).toBeLessThanOrEqual(HANDLE_OVER);
+
+    // a sparse match still counts every passage.
+    await call('echo', { text: `${'x'.repeat(5000)} one ${'x'.repeat(5000)} two ${'x'.repeat(5000)}` }, 'r1', 'sparse');
+    const sparse = await call('result_read', { handle: String(row('sparse').resultHandle), query: 'one two' }, 'r1', 'read-sparse');
+    expect(sparse.content).toMatch(/^2 passages of res_\w+ \(\d+ characters\) match "one two":\n\n\[at 4851\] x+ one x+\n\n\[at 9856\] x+ two x+$/);
+  });
+
   it('redacts a secret before the preview cuts it, so no part of it reaches the trace', async () => {
     const { call, row, blobs } = setup();
     const secret = `secret-${'k'.repeat(30)}-end-of-key`;

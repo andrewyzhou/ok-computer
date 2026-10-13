@@ -8,6 +8,8 @@ import { defineTool } from './registry.js';
 export const READ_LIMIT = 3500;
 export const QUERY_LIMIT = 200;
 const AROUND = 150;
+// the search looks at most at this many more matches after the passages are full.
+const SCAN_LIMIT = 10_000;
 
 export function createResultReadTool(deps: { db: Db; blobs: BlobStore }) {
   return defineTool({
@@ -38,33 +40,53 @@ function page(text: string, handle: string, from: number, length: number): strin
   return `${handle} characters ${from}-${end} of ${text.length}:\n${text.slice(from, end)}${more}`;
 }
 
-// each passage shows its offset, so the model can read around it with from and length.
+// each passage shows its offset, so the model can read around it with from and length. the search is one pass in
+// text order, and it stops soon after the passages fill the limit. a query of short common words over a large
+// result then cannot hold the event loop or fill the heap, and untrusted text can ask for such a query.
 function search(text: string, handle: string, query: string): string {
-  const spans: Array<[number, number]> = [];
-  for (const word of new Set(query.split(/\s+/).filter(Boolean))) {
-    const pattern = new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-    for (const match of text.matchAll(pattern)) {
-      spans.push([Math.max(0, match.index - AROUND), Math.min(text.length, match.index + match[0].length + AROUND)]);
-    }
-  }
-  if (!spans.length) return `no passage of ${handle} (${text.length} characters) matches "${query}"`;
-  spans.sort((a, b) => a[0] - b[0]);
-  const merged: Array<[number, number]> = [];
-  for (const span of spans) {
-    const last = merged.at(-1);
-    if (last && span[0] <= last[1]) last[1] = Math.max(last[1], span[1]);
-    else merged.push([...span]);
-  }
+  const words = [...new Set(query.split(/\s+/).filter(Boolean))].sort((a, b) => b.length - a.length);
+  const pattern = new RegExp(words.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
   const passages: string[] = [];
   let used = 0;
-  for (const [start, end] of merged) {
+  let full = false;
+  let count = 0;
+  // after the passages are full, the search only counts, and it stops after SCAN_LIMIT more matches.
+  let scanned = 0;
+  let stopped = false;
+  const add = ([start, end]: [number, number]) => {
+    count++;
+    if (full) return;
     const passage = `[at ${start}] ${text.slice(start, end)}`;
-    if (used + passage.length > READ_LIMIT && passages.length) break;
+    if (used + passage.length > READ_LIMIT && passages.length) {
+      full = true;
+      return;
+    }
     passages.push(passage.slice(0, READ_LIMIT));
     // the separator between two passages counts too.
     used += passage.length + 2;
+    if (used >= READ_LIMIT) full = true;
+  };
+  // the matches come in text order, so a span can only join the span before it.
+  let span: [number, number] | undefined;
+  for (const match of text.matchAll(pattern)) {
+    if (full && ++scanned > SCAN_LIMIT) {
+      stopped = true;
+      break;
+    }
+    const start = Math.max(0, match.index - AROUND);
+    const end = Math.min(text.length, match.index + match[0].length + AROUND);
+    // a span longer than the limit is cut anyway, so a dense match closes it early.
+    if (span && start <= span[1] && span[1] - span[0] < READ_LIMIT) {
+      span[1] = Math.max(span[1], end);
+      continue;
+    }
+    if (span) add(span);
+    span = [start, end];
   }
-  const rest = merged.length - passages.length;
-  const more = rest ? `\n\n[${rest} more passages match. use a narrower query, or from and length.]` : '';
-  return `${merged.length} passages of ${handle} (${text.length} characters) match "${query}":\n\n${passages.join('\n\n')}${more}`;
+  if (span) add(span);
+  if (!count) return `no passage of ${handle} (${text.length} characters) matches "${query}"`;
+  const rest = count - passages.length;
+  const total = stopped ? `more than ${count}` : String(count);
+  const more = rest ? `\n\n[${stopped ? 'more than ' : ''}${rest} more passages match. use a narrower query, or from and length.]` : '';
+  return `${total} passages of ${handle} (${text.length} characters) match "${query}":\n\n${passages.join('\n\n')}${more}`;
 }
