@@ -71,6 +71,8 @@ export function createRouter(deps: RouterDeps): Router {
     current.stop.abort();
     return true;
   };
+  // the owner messages that wait in the queue of the main session. /status shows the count.
+  let queued = 0;
 
   return {
     async handle(message) {
@@ -124,7 +126,8 @@ export function createRouter(deps: RouterDeps): Router {
         if (!stopCurrent()) return reply('Nothing runs now.');
         return;
       }
-      const cards = deps.commands?.(message.text, current ? { runningSince: current.since, ...(current.tools ? { tools: current.tools } : {}) } : {});
+      const state: RunState = { queued, ...(current ? { runningSince: current.since } : {}), ...(current?.tools ? { tools: current.tools } : {}) };
+      const cards = deps.commands?.(message.text, state);
       if (cards) {
         for (const card of cards) await send(card);
         return;
@@ -141,7 +144,9 @@ export function createRouter(deps: RouterDeps): Router {
 
       // the user message goes into the log when its run starts. if it went in earlier, it could land between a
       // tool call and its result in a run that is still active.
+      queued++;
       await queue.enqueue(MAIN_SESSION, async () => {
+        queued--;
         if (message.text === '/new') {
           // no later run reads the calls before the reset, so a dangling call gets its result and its row now. /new
           // is the way out of a broken session, so a failed repair does not stop it.

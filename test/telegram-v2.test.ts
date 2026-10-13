@@ -163,7 +163,7 @@ describe('telegram v2 acceptance', () => {
   // the stop abandons the tool. it can still act, so the owner must know which tool ran.
   it('names the tool that ran when the owner stopped the run, and shows it in the draft', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
-    const t = setup([call('c1', 'notes__hang', {})], { integrations: true });
+    const t = setup([call('c1', 'notes__hang', {}), textStep('Next.')], { integrations: true });
     apps.push(t);
     await t.app.start();
     await expect.poll(() => t.app.integrations.status()[0]!.state.status).toBe('connected');
@@ -171,10 +171,28 @@ describe('telegram v2 acceptance', () => {
     await expect.poll(() => t.rows("SELECT decision FROM policy_decisions WHERE toolCallId = 'c1'").length).toBe(1);
     await vi.advanceTimersByTimeAsync(1000);
     expect(of(t, 'sendMessageDraft').map((d) => d.text)).toContain('⏳ notes__hang');
+
+    // /status answers at once, with the run, its tool, the queue and the integrations.
+    owner(t, 'and then this');
+    owner(t, '/status');
+    await until(() => of(t, 'sendMessage').some((m) => String(m.text).startsWith('I am working')));
+    expect(String(of(t, 'sendMessage').find((m) => String(m.text).startsWith('I am working'))!.text).split('\n')).toEqual([
+      expect.stringMatching(/^I am working on a reply since \S+ \(0 min\)\. \/stop stops it\.$/),
+      'Running now: notes__hang.',
+      '1 message waits for the reply.',
+      'No approval waits for you.',
+      'Integrations: notes connected.',
+      'Dashboard: http://127.0.0.1:4317',
+    ]);
     owner(t, '/stop');
     await until(() => of(t, 'sendMessage').some((m) => String(m.text).startsWith('Stopped')));
     await t.app.idle();
     expect(of(t, 'sendMessage').map((m) => m.text)).toContain('Stopped while notes__hang ran. Its effect is unknown.');
+    await until(() => of(t, 'sendRichMessage').length === 1);
+    await t.app.idle();
+    owner(t, '/status');
+    await until(() => of(t, 'sendMessage').some((m) => String(m.text).startsWith('Nothing runs now.')));
+    expect(String(of(t, 'sendMessage').find((m) => String(m.text).startsWith('Nothing runs now.'))!.text)).toMatch(/\nLast reply: completed at \S+\.\n/);
   });
 
   it('answers /status, /goals, /approvals and /dashboard in code', async () => {

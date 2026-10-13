@@ -276,6 +276,7 @@ export function createApp(deps: AppDeps): App {
       timeZone: config.timeZone,
       dashboardUrl: config.dashboard.url ?? `http://127.0.0.1:${config.dashboard.port}`,
       approvalCard: approvals.card,
+      integrations: () => integrations.status(),
     }),
     onReset: () => {
       const now = clock();
