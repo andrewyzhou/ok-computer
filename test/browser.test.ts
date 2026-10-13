@@ -56,7 +56,9 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     // the image of another host loads, and the frame of an off-list site does not.
     expect(site.hitsOn('cdn.test').length).toBeGreaterThan(0);
     expect(site.hitsOn('evil.test')).toEqual([]);
-    expect(JSON.parse(String(step!.blockedRequests))).toEqual([expect.objectContaining({ url: site.url('evil.test', '/frame'), reason: expect.stringContaining('not on the allowlist') })]);
+    // chrome's own connections, for example to google.com, also go through the proxy, and the fixture egress refuses them.
+    const ofPages = (JSON.parse(String(step!.blockedRequests)) as Array<{ url: string }>).filter((each) => /\.test[:/]/.test(each.url));
+    expect(ofPages).toEqual([expect.objectContaining({ url: site.url('evil.test', '/frame'), reason: expect.stringContaining('not on the allowlist') })]);
   });
 
   it.each([
@@ -295,6 +297,79 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect((await h.run('browser_open', { url: site.url('shop.test') })).isError).toBe(false);
     await h.run('browser_close', {});
     await vi.waitFor(() => expect(profileBusy(join(h.dir, 'profile'))).toBe(false), { timeout: 10_000, interval: 250 });
+  });
+
+  // a server on another loopback address stands for the owner's network. the fixture egress refuses that address.
+  async function startLan() {
+    const hits: string[] = [];
+    const server = createServer((req, res) => {
+      hits.push(`${req.method} ${req.url}`);
+      res.writeHead(200, { 'content-type': 'text/html' }).end('<p>lan</p>');
+    });
+    server.on('upgrade', (req, socket) => {
+      hits.push(`UPGRADE ${req.url}`);
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.5', resolve));
+    const port = (server.address() as { port: number }).port;
+    return { port, hits, close: () => new Promise((resolve) => server.close(resolve)) };
+  }
+  const allBlocked = (h: Harness) => h.steps().flatMap((step) => (step.blockedRequests ? (JSON.parse(String(step.blockedRequests)) as Array<{ url: string; reason: string }>) : []));
+
+  // a shared worker belongs to no tab, so no page layer saw it, and a web socket of a dedicated worker skips the
+  // socket route of the tab. both reached the owner's network.
+  it('starts no shared worker, and keeps the requests and sockets of a worker off the owner network', async () => {
+    const lan = await startLan();
+    try {
+      const h = harness();
+      site.hits.length = 0;
+      await h.run('browser_open', { url: site.url('shop.test', `/workers?lan=${lan.port}`) });
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const out = await h.run('browser_snapshot', {});
+      expect(out.content).toContain('no shared worker');
+      expect(lan.hits).toEqual([]);
+      expect(site.hitsOn('evil.test').filter((hit) => hit.method !== 'GET')).toEqual([]);
+      const blocked = allBlocked(h);
+      expect(blocked).toContainEqual({ url: `http://127.0.0.5:${lan.port}/worker-get`, reason: expect.stringContaining('local network') });
+      expect(blocked).toContainEqual({ url: `127.0.0.5:${lan.port}`, reason: expect.stringContaining('local network') });
+    } finally {
+      await lan.close();
+    }
+  });
+
+  // chrome preloads the pages of speculation rules outside the tab, and the activation of a prerender sends no request,
+  // so a click could show an off-list page.
+  it('preloads no page of the speculation rules', async () => {
+    const lan = await startLan();
+    try {
+      const h = harness();
+      site.hits.length = 0;
+      const page = await h.run('browser_open', { url: site.url('shop.test', `/speculation?lan=${lan.port}`) });
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const out = await h.run('browser_click', { ref: refOf(page.content, /link "Prerendered"/), element: 'Prerendered link' });
+      expect(out.content).toContain(`Address: ${site.url('shop.test', `/speculation?lan=${lan.port}`)}`);
+      expect(lan.hits).toEqual([]);
+      expect(site.hitsOn('evil.test')).toEqual([]);
+      // chrome does not even try: the proxy refused nothing.
+      expect(allBlocked(h).filter((each) => each.url.includes('127.0.0.5'))).toEqual([]);
+    } finally {
+      await lan.close();
+    }
+  });
+
+  // the gate resolved a name in node, and chrome resolved it again, so a name that pointed elsewhere the second time
+  // (dns rebinding) reached the owner's network. chrome now connects through the proxy, to the address it checked.
+  it('connects to the address that the gate checked, also when the name would resolve elsewhere for chrome', async () => {
+    const lan = await startLan();
+    try {
+      const h = harness({ args: ['--host-resolver-rules=MAP rebind.test 127.0.0.5, MAP *.test 127.0.0.1'] });
+      await h.run('browser_open', { url: site.url('shop.test', `/rebind?lan=${lan.port}`) });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await h.run('browser_snapshot', {});
+      expect(lan.hits).toEqual([]);
+    } finally {
+      await lan.close();
+    }
   });
 
   it('refuses a ref of an older snapshot, and the page gets no click', async () => {

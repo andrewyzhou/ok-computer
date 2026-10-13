@@ -11,6 +11,7 @@ import type { Clock } from '../time.js';
 import { errorText } from '../tools/registry.js';
 import { checkUrlShape, type Egress } from '../web/egress.js';
 import { allowedBy, guardContext, guardSockets, guardTab, siteOf, tooBroad, type Blocked, type Sent, type TabRules } from './gate.js';
+import { startEgressProxy, type EgressProxy } from './proxy.js';
 
 export interface BrowserDeps {
   db: Db;
@@ -211,6 +212,9 @@ export function hardenProfile(profile: string, downloads: string): void {
     profile: { password_manager_enabled: false },
     autofill: { profile_enabled: false, credit_card_enabled: false },
     download: { default_directory: downloads, prompt_for_download: false },
+    // 2 is "never": no preload of links and no speculation rules. a preload runs outside the tab, so no page layer of the
+    // gate sees it, and the activation of a prerender sends no request.
+    net: { network_prediction_options: 2 },
   });
   const temp = `${path}.${process.pid}.tmp`;
   writeFileSync(temp, JSON.stringify(hardened));
@@ -233,6 +237,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   let tracing: string | undefined;
   let userAgent: string | undefined;
   let lastActivity = performance.now();
+  let proxy: Promise<EgressProxy> | undefined;
 
   const now = () => clock().toISOString();
 
@@ -265,6 +270,11 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     hardenProfile(profile, downloads);
     // no other chrome holds the profile, so no task row that is open can be live. the app crashed while it ran.
     sweep();
+    proxy ??= startEgressProxy(deps.egress, (url, reason) => {
+      // the proxy does not know the tab, so each open tab records the block.
+      for (const tab of tabs.values()) tab.blocked.push({ url, reason });
+    });
+    const { url: proxyUrl } = await proxy;
     const start = () =>
       chromium.launchPersistentContext(profile, {
         channel: 'chrome',
@@ -273,7 +283,14 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
         // no tool works with a file, and a download is a file that a page puts on this pc without a step.
         acceptDownloads: false,
         viewport: { width: 1280, height: 800 },
-        args: deps.args ?? [],
+        args: [
+          // <-loopback> also sends the addresses of this pc through the proxy, which chrome otherwise connects to directly.
+          `--proxy-server=${proxyUrl}`,
+          '--proxy-bypass-list=<-loopback>',
+          // a shared worker belongs to no tab, so no page layer of the gate sees its requests or its sockets.
+          '--disable-blink-features=SharedWorker',
+          ...(deps.args ?? []),
+        ],
         ...(userAgent ? { userAgent } : {}),
       });
     let ctx = await start();
@@ -717,6 +734,8 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       closing = true;
       await context?.close().catch(() => undefined);
       context = undefined;
+      await (await proxy)?.close();
+      proxy = undefined;
     },
   };
 }

