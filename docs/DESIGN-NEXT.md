@@ -198,13 +198,15 @@ The `tools` parameter therefore never changes inside a session. A changed server
 
 ### 4.3 Web search and fetch
 
-- `web_search`: Brave Search API, called directly over REST (about $5 per 1,000 queries, with $5 of free credit each month). Record the cost per call. SearXNG is an optional free fallback.
-- `web_fetch`: a local fetch with readability extraction, a 20,000-character limit, results through handles, and `wrapUntrusted`.
+No paid search API. The owner has Chrome on this PC, and search runs through it.
+
+- `web_search { query, engine? }`: the browser worker (section 4.4) opens the engine's results page in the agent's Chrome profile and extracts the result list (title, URL, snippet) from the page. The default engine is Google. DuckDuckGo's HTML results page is the fallback when Google shows a CAPTCHA or a consent wall. Keep the volume personal-scale (a few searches per task), and back off when an engine shows a CAPTCHA. A self-hosted SearXNG container is an optional extra later; it is also free.
+- `web_fetch`: a local fetch with readability extraction, a 20,000-character limit, results through handles, and `wrapUntrusted`. Pages that need JavaScript or a login go through the browser instead.
 - **Exfiltration guard.** In a tainted run, a fetch URL that contains data from the run (long query strings, encoded text) goes to the reviewer.
 
 ### 4.4 Browser
 
-**Decision:** Playwright as a library, in-process (`playwright` 1.64.x). It runs Chrome with a dedicated persistent profile at `data/browser/profile`. The library gives the hard controls we need: a route-level domain allowlist, a screenshot and accessibility snapshot after every action, and Playwright tracing. These are things the MCP server flags do not enforce as a security boundary.
+**Decision:** Playwright as a library, in-process (`playwright` 1.64.x). It runs the installed Chrome (`channel: 'chrome'`) with a dedicated persistent profile at `data/browser/profile`. This is the owner's real Chrome program with a separate profile, so pages, search engines, and logins behave like normal browsing. The owner's everyday profile, with banking and every other session, stays out of reach. The library gives the hard controls we need: a route-level domain allowlist, a screenshot and accessibility snapshot after every action, and Playwright tracing. These are things the MCP server flags do not enforce as a security boundary.
 
 - **Tools**, shaped like the snapshot-based browser tools models already know:
   - `browser_open(url)`
@@ -372,7 +374,7 @@ Each milestone is one implementer agent, named `phase<N>_milestone<M>_<word>` in
 | Milestone | Scope | Done when |
 |---|---|---|
 | **M1 slack** | Slack through the official MCP server (OAuth with a pre-registered client per workspace); DM polling into signals; send through approval | With a fake MCP server shaped like Slack: DMs become signals, and sends need approval |
-| **M2 web** | `web_search` (Brave), `web_fetch`, the browser worker with Playwright, allowlists, step screenshots, trace zips, and the Browser page | Against a local test site: every step has a screenshot and snapshot, off-list navigation is blocked and recorded, and a form submit needs approval |
+| **M2 web** | `web_search` through Chrome (Google, DuckDuckGo fallback), `web_fetch`, the browser worker with Playwright, allowlists, step screenshots, trace zips, and the Browser page | Against a local test site: every step has a screenshot and snapshot, off-list navigation is blocked and recorded, and a form submit needs approval |
 | **M3 review** | Reviewer model, taint propagation, exfiltration guard, `delegate` with profiles, sub-agent traces | A tainted run cannot send without approval; the reviewer holds an injected action in a fixture; child runs show in the parent timeline |
 | **M4 history** | Claude Code transcript watcher and index, claude.ai export import, `history_search` and `history_get` | Fixture transcripts and an export ZIP are indexed with secrets redacted, and results are wrapped as untrusted |
 
@@ -390,7 +392,6 @@ These steps need the owner's own accounts. The implementer writes a guide in `do
 
 1. **Google** (Phase 2 M3): create a Google Cloud project, turn on the Gmail and Calendar APIs, create a "Desktop app" OAuth client, and set the consent screen to "In production". Then connect each Gmail account from the dashboard. Takes about 10 minutes.
 2. **Slack** (Phase 3 M1): one internal app per workspace with the user scopes in section 4.2. The owner may need admin approval in a workspace they do not own.
-3. **Brave Search API key** (Phase 3 M2).
+3. **Browser logins** (Phase 3 M2): run `okc browser login` once and sign in to the sites the agent may use, in the agent's own Chrome profile.
 4. **Docker Desktop running** (Phase 4 M1).
 5. **Tailscale** on the PC, phone, and laptop (any time).
-6. **Claude Code retention:** raise `cleanupPeriodDays` (any time).
