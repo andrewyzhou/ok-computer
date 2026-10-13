@@ -43,7 +43,16 @@ export async function sendDraft(accounts: GoogleAccounts, tool: string, alias: s
     }
     try {
       await accounts.run(alias, (apis) => apis.gmail.users.drafts.get({ userId: 'me', id: draftId }));
-      return { content: `${tool} did not send from ${alias} (${error.message}). Google still has the draft ${draftId}, so the message did not go out.`, isError: true, effect: 'none' };
+      // a 5xx answer ends the send. without an answer, google can still be at work on it, and the draft goes only
+      // when the send ends. a second approval could then send the mail twice, so the effect is unknown.
+      if (error.status !== undefined) {
+        return { content: `${tool} did not send from ${alias} (${error.message}). Google still has the draft ${draftId}, so the message did not go out.`, isError: true, effect: 'none' };
+      }
+      return {
+        content: `${tool} got no answer from google (${error.message}). The draft ${draftId} is still there, but google can still be sending it. Check the Sent folder before you try again.`,
+        isError: true,
+        effect: 'unknown',
+      };
     } catch (check) {
       if (toGoogleError(check).kind === 'not_found') return { content: `sent from ${alias} to ${draft.to.join(', ')}. The answer was lost (${error.message}), but google no longer has the draft, so it went out.` };
       return failed(tool, alias, error, true);

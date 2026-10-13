@@ -3,7 +3,7 @@ import { createGoogleHarness, refreshOf, type GoogleHarness } from '../../test/g
 import { runTool } from '../../test/run-tool.js';
 import { createToolRegistry, type ToolContext, type ToolOutput } from '../tools/registry.js';
 import { createGoogleTools, googleToolNames } from './tools.js';
-import { isPrivateAddress, oneClick, unsubscribeTargets, type OneClickResult } from './unsubscribe.js';
+import { isPrivateAddress, oneClick, planUnsubscribe, unsubscribeTargets, type OneClickResult } from './unsubscribe.js';
 
 let h: GoogleHarness;
 afterEach(async () => h?.close());
@@ -28,7 +28,8 @@ const newsletter = {
     Subject: 'Deals',
     'List-Unsubscribe': '<mailto:unsub@shop.example?subject=stop>, <https://shop.example/u/abc>',
     'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-    'Authentication-Results': 'mx.google.com; dkim=pass header.i=@shop.example; spf=pass',
+    'Authentication-Results': 'mx.google.com; dkim=pass header.i=@shop.example header.s=s1 header.b=Sig0; spf=pass',
+    'DKIM-Signature': 'v=1; a=rsa-sha256; d=shop.example; s=s1;\r\n h=From:Subject:List-Unsubscribe:List-Unsubscribe-Post; bh=x; b=Sig0abc',
   },
 };
 
@@ -52,9 +53,19 @@ describe('gmail_send', () => {
     expect(h.fake.sent).toHaveLength(1);
   });
 
-  it('finds out that a send with a lost answer did not go out, so a retry is safe', async () => {
+  // without an answer google can still be sending, and the draft goes only when the send ends. a second approval after
+  // "did not go out" could then send the mail twice.
+  it('says that the effect is unknown when a send without an answer still has its draft', async () => {
     const call = await setup();
     h.fake.fault({ route: 'POST /gmail/v1/users/me/drafts/send', reset: true, times: 1 });
+    const out = await call('gmail_send', { account: 'personal', to: ['friend@example.com'], subject: 'Hi', body: 'x' });
+    expect(out).toMatchObject({ isError: true, effect: 'unknown', content: expect.stringContaining('google can still be sending it') });
+    expect(h.fake.sent).toHaveLength(0);
+  });
+
+  it('finds out that a send with a 5xx answer did not go out, so a retry is safe', async () => {
+    const call = await setup();
+    h.fake.fault({ route: 'POST /gmail/v1/users/me/drafts/send', status: 503, times: 1 });
     const out = await call('gmail_send', { account: 'personal', to: ['friend@example.com'], subject: 'Hi', body: 'x' });
     expect(out).toMatchObject({ isError: true, effect: 'none', content: expect.stringContaining('did not go out') });
     expect(h.fake.sent).toHaveLength(0);
@@ -93,7 +104,7 @@ describe('gmail_unsubscribe', () => {
     // a refusal has no effect field. the approval flow would give a call without effect back to the owner, and a second
     // approval of the same call cannot help.
     expect(await call('gmail_unsubscribe', { account: 'personal', messageId: 'n1', sender: SENDER, target: 'https://evil.example/u' })).toEqual({
-      content: 'google__gmail_unsubscribe did not run: the message does not offer "https://evil.example/u". It offers: mailto:unsub@shop.example?subject=stop https://shop.example/u/abc.',
+      content: 'google__gmail_unsubscribe did not run: the message does not offer "https://evil.example/u". gmail_read_thread shows the targets that it offers.',
       isError: true,
     });
     expect(posted).toEqual([]);
@@ -105,6 +116,33 @@ describe('gmail_unsubscribe', () => {
     const call = await setup({ oneClick: async () => ({ ok: true, sent: true, text: 'x' }) });
     h.fake.deliver('personal', { ...newsletter, headers: { ...newsletter.headers, 'Authentication-Results': 'mx.google.com; dkim=fail' } });
     expect(await call('gmail_unsubscribe', { account: 'personal', messageId: 'n1', sender: SENDER, target: 'https://shop.example/u/abc' })).toMatchObject({ isError: true, content: expect.stringContaining('dkim') });
+  });
+
+  // a forger can add a header that says dkim=pass, or sign the mail with a domain of its own. only the result that
+  // gmail put on top counts, and only for a signature of the from domain that covers both unsubscribe headers.
+  it('accepts only an aligned dkim pass of gmail that covers the unsubscribe headers', () => {
+    const plan = (headers: Array<[string, string]>) =>
+      planUnsubscribe(
+        { payload: { headers: [['From', 'Bank <alerts@bank.example>'], ['List-Unsubscribe', '<https://evil.example/u>'], ['List-Unsubscribe-Post', 'List-Unsubscribe=One-Click'], ...headers].map(([name, value]) => ({ name, value })) } },
+        'alerts@bank.example',
+        'https://evil.example/u',
+        false,
+      ).way;
+    const signature = (d: string, h = 'From:List-Unsubscribe:List-Unsubscribe-Post') => ['DKIM-Signature', `v=1; d=${d}; s=s1; h=${h}; b=Sig0abc`] as [string, string];
+    const results = (value: string) => ['Authentication-Results', value] as [string, string];
+    expect(plan([results('mx.google.com; dkim=pass header.i=@bank.example header.b=Sig0'), signature('bank.example')])).toBe('one-click');
+    expect(plan([results('mx.google.com; dkim=pass (good signature) header.d=mail.bank.example'), signature('mail.bank.example')])).toBe('one-click');
+    // the sender added a second header below the one of gmail.
+    expect(plan([results('mx.google.com; dkim=fail header.i=@bank.example'), results('mx.google.com; dkim=pass header.i=@bank.example'), signature('bank.example')])).toBe('refused');
+    // a header from another server than gmail.
+    expect(plan([results('forged.example; dkim=pass header.i=@bank.example'), signature('bank.example')])).toBe('refused');
+    // a pass for the domain of the forger, with dmarc failing for the from domain.
+    expect(plan([results('mx.google.com; dkim=pass header.i=@evil.example; dmarc=fail header.from=bank.example'), signature('evil.example')])).toBe('refused');
+    expect(plan([results('mx.google.com; dkim=pass header.i=@ank.example'), signature('ank.example')])).toBe('refused');
+    // the signature does not cover the unsubscribe headers, so they were added after it.
+    expect(plan([results('mx.google.com; dkim=pass header.i=@bank.example'), signature('bank.example', 'From:Subject')])).toBe('refused');
+    // a second signature of the domain covers them, but it is not the one that passed.
+    expect(plan([results('mx.google.com; dkim=pass header.i=@bank.example header.b=Sig0'), signature('bank.example', 'From'), ['DKIM-Signature', 'v=1; d=bank.example; h=List-Unsubscribe:List-Unsubscribe-Post; b=Badx']])).toBe('refused');
   });
 
   // the card shows the sender, so the owner approves a sender. a text test of the from header would let a display
@@ -220,7 +258,7 @@ describe('calendar writes', () => {
     const call = await setup();
     h.fake.upsertEvent('personal', { id: 'e1', summary: 'Board meeting', start: { dateTime: '2026-10-20T09:00:00Z' }, end: { dateTime: '2026-10-20T10:00:00Z' } });
     const update = await call('calendar_update_event', { account: 'personal', eventId: 'e1', currentTitle: 'Lunch', summary: 'moved' });
-    expect(update).toEqual({ content: 'google__calendar_update_event did not run: the event e1 is called "Board meeting", not "Lunch".', isError: true });
+    expect(update).toEqual({ content: 'google__calendar_update_event did not run: the event e1 has another title now, not "Lunch". calendar_list_events shows its title.', isError: true });
     expect(await call('calendar_delete_event', { account: 'personal', eventId: 'e1', currentTitle: 'Lunch' })).toMatchObject({ isError: true });
     expect(h.fake.mailbox('personal').events.get('e1')).toMatchObject({ summary: 'Board meeting', status: 'confirmed' });
     expect((await call('calendar_update_event', { account: 'personal', eventId: 'e1', currentTitle: 'Board meeting', summary: 'moved' })).content).toBe('updated event e1 in personal.');

@@ -97,9 +97,10 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
       throw err;
     }
     if (event.status === 'cancelled') return 'gone';
-    const title = event.summary ?? '';
-    if (title === currentTitle) return undefined;
-    return { content: `${tool} did not run: the event ${eventId} is called ${JSON.stringify(title)}, not ${JSON.stringify(currentTitle)}.`, isError: true };
+    if ((event.summary ?? '') === currentTitle) return undefined;
+    // the refusal does not quote the title. the sender of an invitation writes it, and this output is not marked as
+    // untrusted. calendar_list_events shows it.
+    return { content: `${tool} did not run: the event ${eventId} has another title now, not ${JSON.stringify(currentTitle)}. calendar_list_events shows its title.`, isError: true };
   };
 
   const messageIds = z.array(z.string().min(1).max(100)).min(1).max(100);
@@ -221,7 +222,7 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
         const tool = name('gmail_unsubscribe');
         let message: gmail_v1.Schema$Message;
         try {
-          const metadataHeaders = ['From', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'Authentication-Results'];
+          const metadataHeaders = ['From', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'Authentication-Results', 'DKIM-Signature'];
           message = (await accounts.run(alias, (apis) => apis.gmail.users.messages.get({ userId: 'me', id: messageId, format: 'metadata', metadataHeaders }))).data;
         } catch (err) {
           return { ...failed(tool, alias, toGoogleError(err), true), effect: 'none' };

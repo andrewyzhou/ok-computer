@@ -20,8 +20,10 @@ export function planUnsubscribe(message: gmail_v1.Schema$Message, sender: string
   if (!from || from !== sender.trim().toLowerCase()) {
     return { way: 'refused', text: `the message is from ${from ?? 'an address that cannot be read'}, not from ${JSON.stringify(sender)}` };
   }
+  // the refusal does not quote the targets of the message. they are outside text, and this output is not marked as
+  // untrusted. the model can read them again with gmail_read_thread.
   const targets = unsubscribeTargets(header(message, 'List-Unsubscribe'));
-  if (!targets.includes(target)) return { way: 'refused', text: `the message does not offer ${JSON.stringify(target)}. It offers: ${targets.join(' ') || 'nothing'}` };
+  if (!targets.includes(target)) return { way: 'refused', text: `the message does not offer ${JSON.stringify(target)}. gmail_read_thread shows the targets that it offers` };
   if (target.toLowerCase().startsWith('mailto:')) {
     if (!send) return { way: 'refused', text: 'this sender unsubscribes by mail, and sending is off for the google integration' };
     const mailto = new URL(target);
@@ -32,11 +34,49 @@ export function planUnsubscribe(message: gmail_v1.Schema$Message, sender: string
   if (!/List-Unsubscribe=One-Click/i.test(header(message, 'List-Unsubscribe-Post'))) {
     return { way: 'refused', text: 'the sender offers no one-click unsubscribe. The owner can open the link in a browser' };
   }
-  const results = (message.payload?.headers ?? []).filter((each) => each.name?.toLowerCase() === 'authentication-results').map((each) => each.value ?? '');
-  if (!results.some((value) => /\bdkim=pass\b/i.test(value))) {
-    return { way: 'refused', text: 'gmail did not see a passing dkim signature on this message, so its unsubscribe header can be forged' };
+  const domain = from.slice(from.lastIndexOf('@') + 1);
+  const passes = gmailDkimPasses(message).filter((pass) => aligned(pass.domain, domain));
+  if (!passes.length) {
+    return { way: 'refused', text: `gmail did not see a passing dkim signature of ${domain} on this message, so its unsubscribe header can be forged` };
   }
+  const signatures = (message.payload?.headers ?? []).filter((each) => each.name?.toLowerCase() === 'dkim-signature').map((each) => tags(each.value ?? ''));
+  const covered = signatures.some((tag) => {
+    const signed = (tag.h ?? '').toLowerCase().split(':');
+    const pass = passes.find((each) => each.domain === tag.d?.toLowerCase() && (!each.b || (tag.b ?? '').startsWith(each.b)));
+    return pass && signed.includes('list-unsubscribe') && signed.includes('list-unsubscribe-post');
+  });
+  if (!covered) return { way: 'refused', text: `the dkim signature of ${domain} does not cover the unsubscribe headers, so they can be forged` };
   return { way: 'one-click' };
+}
+
+// the passing dkim results in the authentication-results header that gmail added. gmail puts its header on top. a
+// header further down, or one from another server, can come from the sender. header.b is the start of the signature,
+// so it names which signature passed.
+function gmailDkimPasses(message: gmail_v1.Schema$Message): Array<{ domain: string; b?: string }> {
+  const top = (message.payload?.headers ?? []).find((each) => each.name?.toLowerCase() === 'authentication-results')?.value ?? '';
+  const [server, ...results] = top.replace(/\([^()]*\)/g, ' ').split(';').map((each) => each.trim());
+  if (server?.toLowerCase() !== 'mx.google.com') return [];
+  return results.flatMap((result) => {
+    if (!/^dkim\s*=\s*pass\b/i.test(result)) return [];
+    const domain = /\bheader\.d=([^\s;]+)/i.exec(result)?.[1] ?? /\bheader\.i=[^\s;@]*@([^\s;]+)/i.exec(result)?.[1];
+    const b = /\bheader\.b=([^\s;]+)/i.exec(result)?.[1];
+    return domain ? [{ domain: domain.toLowerCase(), ...(b ? { b } : {}) }] : [];
+  });
+}
+
+// relaxed alignment: the signing domain is the from domain, a parent of it, or a child of it. a name without a dot is
+// a top-level domain, and it never signs mail.
+const aligned = (signer: string, from: string) => signer.includes('.') && (signer === from || from.endsWith(`.${signer}`) || signer.endsWith(`.${from}`));
+
+// the tags of a dkim-signature header, without the folding white space.
+function tags(value: string): Record<string, string> {
+  return Object.fromEntries(
+    value
+      .replace(/\s+/g, '')
+      .split(';')
+      .filter((each) => each.indexOf('=') > 0)
+      .map((each) => [each.slice(0, each.indexOf('=')), each.slice(each.indexOf('=') + 1)]),
+  );
 }
 
 // a sender writes the header, so a link can point at the pc itself, the router, or a cloud metadata address. a post
