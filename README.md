@@ -30,9 +30,11 @@ It runs on this PC. Its persona files (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, an
 | `okc logs` | Follow the agent log |
 | `okc open` | Open the dashboard at http://127.0.0.1:4317 |
 
+To connect MCP servers (optional), see [docs/setup/integrations.md](docs/setup/integrations.md).
+
 A small supervisor restarts the agent if it stops. The logon task means it runs whenever you are signed in to Windows.
 
-`npm run chat` uses the same database as the background agent. That is fine, but do not chat with it while the agent is answering you in Telegram at the same moment: two processes in one conversation can give the same tool call two results.
+`npm run chat` uses the same database as the background agent. That is fine, but do not chat with it while the agent is answering you in Telegram at the same moment: two processes in one conversation can give the same tool call two results. `npm run chat` never connects to MCP servers: only the background agent does, so each server runs once and an OAuth token is refreshed by one process.
 
 ## Phases
 
