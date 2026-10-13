@@ -14,3 +14,9 @@ export function toolName(integrationId: string, mcpName: string): string {
   const cleaned = mcpName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, Math.max(room, 0));
   return `${integrationId}__${cleaned}_${hash}`;
 }
+
+// the integration id of a tool name, or undefined for a built-in tool. built-in names never have "__".
+export function integrationOf(name: string): string | undefined {
+  const at = name.indexOf('__');
+  return at > 0 ? name.slice(0, at) : undefined;
+}

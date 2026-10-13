@@ -274,10 +274,11 @@ describe('mcp acceptance', () => {
     expect(history).toHaveLength(1);
   });
 
-  it('does not run an approved call when its tool is gone or its input no longer matches the schema', async () => {
+  it('does not run an approved call when its tool is gone, its session lost it, or its input no longer matches the schema', async () => {
     const db = openDb(':memory:');
     const first = memoryServers();
-    const t1 = createTestApp([call('c1', 'notes__add_note', { note: 'one' }), call('c2', 'notes__add_note', { note: 'two' }), textStep('waiting')], {
+    const notes = [call('c1', 'notes__add_note', { note: 'one' }), call('c2', 'notes__add_note', { note: 'two' }), call('c3', 'notes__add_note', { note: 'three' })];
+    const t1 = createTestApp([...notes, textStep('waiting')], {
       start,
       deps: { db, integrations: [notesEntry()], mcpTransport: first.transport },
     });
@@ -285,7 +286,7 @@ describe('mcp acceptance', () => {
     await expect.poll(() => t1.app.integrations.status()[0]!.state.status).toBe('connected');
     await t1.say('add two notes');
     await t1.app.stop();
-    const [one, two] = db.prepare("SELECT id FROM approvals ORDER BY id").all() as Array<{ id: number }>;
+    const [one, two, three] = db.prepare("SELECT id FROM approvals ORDER BY id").all() as Array<{ id: number }>;
 
     // after a restart, the server's add_note needs a field that the stored input does not have.
     const changed = async (): Promise<Transport> => {
@@ -311,7 +312,21 @@ describe('mcp acceptance', () => {
     await t3.app.resolveApproval(two!.id, 'approve', 'dashboard');
     await t3.settle();
     expect(db.prepare('SELECT output FROM tool_calls WHERE toolCallId = ?').get(`approval-${two!.id}`)).toEqual({
-      output: expect.stringContaining('unknown tool: notes__add_note'),
+      output: expect.stringContaining(
+        'notes__add_note no longer exists, because the notes integration was removed or no longer allows it for this session. The call did not run.',
+      ),
+    });
+    await t3.app.stop();
+
+    // the integration now serves automations only. the approval came from the main session, so it does not run.
+    const t4 = createTestApp([], { start, deps: { db, integrations: [notesEntry({ sessions: ['auto'] })], mcpTransport: memoryServers().transport, newId: () => `t4-${++ids}` } });
+    apps.push(t4);
+    await t4.app.start();
+    await expect.poll(() => t4.app.integrations.status()[0]!.state.status).toBe('connected');
+    await t4.app.resolveApproval(three!.id, 'approve', 'dashboard');
+    await t4.settle();
+    expect(db.prepare('SELECT output FROM tool_calls WHERE toolCallId = ?').get(`approval-${three!.id}`)).toEqual({
+      output: expect.stringContaining('notes__add_note no longer exists'),
     });
     expect(db.prepare("SELECT count(*) AS n FROM mcp_messages WHERE method = 'tools/call' AND toolCallId LIKE 'approval-%'").get()).toEqual({ n: 0 });
   });

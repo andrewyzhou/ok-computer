@@ -1,6 +1,7 @@
 import type { Approval } from '../approvals/store.js';
 import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
+import { integrationOf } from '../integrations/names.js';
 import type { ToolCall } from '../models/types.js';
 import type { BlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
@@ -76,6 +77,14 @@ interface Trace {
 }
 
 const sourceOf = (tool: Tool) => ({ ...(tool.source ? { source: tool.source } : {}), ...(tool.serverId ? { serverId: tool.serverId } : {}) });
+
+// an approval can run days after its call. by then the owner can have removed the integration of its tool.
+function goneText(name: string): string {
+  const integration = integrationOf(name);
+  return integration
+    ? `${name} no longer exists, because the ${integration} integration was removed or no longer allows it for this session. The call did not run.`
+    : `${name} no longer exists. The call did not run.`;
+}
 
 const STOPPED = Symbol('stopped');
 
@@ -310,7 +319,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         signal: ctx.signal,
         toolCallId: modelCall.id,
       };
-      const resolved = tools.resolve(modelCall, ctx.allowed);
+      const resolved = tools.resolve(modelCall, ctx.allowed, ctx.sessionKey);
       if (!resolved.ok) return strip(record(ctx.runId, modelCall, resolved.output, started, {}));
       // for tool_call this is the integration tool that it names, with the same id.
       const { tool, input, call } = resolved;
@@ -368,8 +377,12 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         logger.error('approved call failed before it ran', { runId: approval.runId, approvalId: approval.id, err });
         return skipped(`approval #${approval.id} did not run: ${errorText(err)}`);
       }
-      const resolved = tools.resolve(call, [approval.toolName]);
-      if (!resolved.ok) return { started: false, output: strip(record(approval.runId, call, resolved.output, started, trace)) };
+      // the lookup checks the current config, so a tool that the session lost since the approval does not run.
+      const resolved = tools.resolve(call, [approval.toolName], approval.sessionKey);
+      if (!resolved.ok) {
+        const output = resolved.unknown ? { content: goneText(approval.toolName), isError: true } : resolved.output;
+        return { started: false, output: strip(record(approval.runId, call, output, started, trace)) };
+      }
       let abandoned = false;
       const finish = (output: ToolOutput, outcome?: 'abandoned') => {
         abandoned = outcome === 'abandoned';

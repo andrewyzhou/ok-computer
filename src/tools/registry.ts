@@ -40,19 +40,21 @@ export interface Tool<I = unknown> {
 }
 
 // call is the call that runs. it differs from the model's call when tool_call names an integration tool: the policy,
-// the approval and the trace then see that tool and its arguments, never tool_call.
-export type Resolved = { ok: true; tool: Tool; input: unknown; call: ToolCall } | { ok: false; output: ToolOutput };
+// the approval and the trace then see that tool and its arguments, never tool_call. unknown marks a name that no tool
+// of the session has, so an approved call can say that its tool is gone.
+export type Resolved = { ok: true; tool: Tool; input: unknown; call: ToolCall } | { ok: false; output: ToolOutput; unknown?: true };
 
 export const TOOL_CALL = 'tool_call';
 
 // an integration tool is not in the tools parameter. the model reaches it through tool_call, and an approval reaches it
-// by its name. the lookup gives undefined for a name that no integration offers now.
-export type DynamicTools = (name: string) => Tool | undefined;
+// by its name. the lookup gives undefined for a name that no integration offers to the session now, so an approval
+// made days earlier checks the session profile of the current config again.
+export type DynamicTools = (name: string, sessionKey: string) => Tool | undefined;
 
 export interface ToolRegistry {
   specs(allowed: readonly string[]): ToolSpec[];
   // resolve finds the tool and checks its input. the error output goes back to the model.
-  resolve(call: ToolCall, allowed: readonly string[]): Resolved;
+  resolve(call: ToolCall, allowed: readonly string[], sessionKey: string): Resolved;
   // execute runs a resolved tool. a tool that throws gives an error output, and the log gets the stack. only the tool
   // caller calls it, so every call goes through the policy.
   execute(tool: Tool, input: unknown, ctx: ToolContext): Promise<ToolOutput>;
@@ -68,10 +70,10 @@ export function createToolRegistry(tools: Tool[], logger: Logger = silentLogger,
   const sorted = [...tools].sort((a, b) => a.name.localeCompare(b.name));
   const specs = new Map(sorted.map((tool) => [tool.name, toSpec(tool)]));
 
-  const resolveOne = (call: ToolCall, allowed: readonly string[]): Resolved => {
-    const tool = byName.get(call.name) ?? dynamic?.(call.name);
+  const resolveOne = (call: ToolCall, allowed: readonly string[], sessionKey: string): Resolved => {
+    const tool = byName.get(call.name) ?? dynamic?.(call.name, sessionKey);
     // a tool outside the allowlist is the same as a tool that does not exist.
-    if (!tool || !allowed.includes(call.name)) return { ok: false, output: { content: `unknown tool: ${call.name}`, isError: true } };
+    if (!tool || !allowed.includes(call.name)) return { ok: false, output: { content: `unknown tool: ${call.name}`, isError: true }, unknown: true };
     const parsed = tool.input.safeParse(call.input);
     if (!parsed.success) {
       return { ok: false, output: { content: `invalid input for ${tool.name}:\n${z.prettifyError(parsed.error)}`, isError: true } };
@@ -83,7 +85,7 @@ export function createToolRegistry(tools: Tool[], logger: Logger = silentLogger,
     specs(allowed) {
       return sorted.filter((tool) => allowed.includes(tool.name)).map((tool) => specs.get(tool.name)!);
     },
-    resolve(call, allowed) {
+    resolve(call, allowed, sessionKey) {
       if (call.name === TOOL_CALL && dynamic && allowed.includes(TOOL_CALL)) {
         const outer = byName.get(TOOL_CALL)?.input.safeParse(call.input);
         if (!outer?.success) {
@@ -91,12 +93,12 @@ export function createToolRegistry(tools: Tool[], logger: Logger = silentLogger,
         }
         const { name, arguments: args } = outer.data as { name: string; arguments: unknown };
         // only an integration tool goes through tool_call. a built-in tool has its own entry in the tools parameter.
-        if (byName.has(name) || !dynamic(name) || !allowed.includes(name)) {
+        if (byName.has(name) || !dynamic(name, sessionKey) || !allowed.includes(name)) {
           return { ok: false, output: { content: `unknown integration tool: ${name}. use tool_search to find the exact name.`, isError: true } };
         }
-        return resolveOne({ id: call.id, name, input: args }, allowed);
+        return resolveOne({ id: call.id, name, input: args }, allowed, sessionKey);
       }
-      return resolveOne(call, allowed);
+      return resolveOne(call, allowed, sessionKey);
     },
     async execute(tool, input, ctx) {
       let output: ToolOutput;

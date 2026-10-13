@@ -11,7 +11,7 @@ import { sessionProfile, type IntegrationEntry } from './config.js';
 import type { OAuth } from './oauth.js';
 import { createDiscoveryTools, outcomeOutput, TOOL_SEARCH, type Discoverable } from './discovery.js';
 import { createMcpConnection, type ConnectionState, type McpConnection } from './mcp.js';
-import { toolName } from './names.js';
+import { integrationOf, toolName } from './names.js';
 import type { SecretStore } from './secrets.js';
 import { httpTransport, stdioTransport } from './transports.js';
 
@@ -55,8 +55,9 @@ export interface IntegrationStatus {
 export interface Integrations {
   // tool_search and tool_call. without integrations the list is empty, and the tools parameter does not change.
   tools: Tool[];
-  // the integration tool with this name, for the registry. it reads the current catalog at each call.
-  resolve(name: string): Tool | undefined;
+  // the integration tool with this name, for the registry. it reads the current catalog and config at each call, so a
+  // session whose profile lost the integration does not find the tool.
+  find(name: string, sessionKey: string): Tool | undefined;
   // the tool names that a session may use: the discovery pair, and every allowed tool of its integrations. this
   // depends only on the config, so a new catalog never changes it.
   allowedNames(sessionKey: string): string[];
@@ -160,11 +161,11 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
     };
   };
 
-  const resolve = (name: string): Tool | undefined => {
-    const id = name.split('__')[0]!;
-    const entry = byId.get(id);
-    const catalog = catalogs.get(id);
-    if (!entry || !catalog) return undefined;
+  const find = (name: string, sessionKey: string): Tool | undefined => {
+    const id = integrationOf(name);
+    const entry = id === undefined ? undefined : byId.get(id);
+    const catalog = id === undefined ? undefined : catalogs.get(id);
+    if (!entry || !catalog || !entry.sessions.includes(sessionProfile(sessionKey))) return undefined;
     const item = catalog.snapshot.tools.find((each) => each.name === name);
     if (!item) return undefined;
     const cached = built.get(name);
@@ -191,7 +192,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
 
   return {
     tools: entries.length ? createDiscoveryTools(discovery) : [],
-    resolve,
+    find,
     allowedNames(sessionKey) {
       // a heartbeat or a consolidation session sees no integration, so it gets no discovery tools either.
       const visible = visibleTo(sessionKey);
