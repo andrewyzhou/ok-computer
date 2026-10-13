@@ -1,0 +1,9 @@
+.env
+.env.*
+data/
+node_modules/
+dist/
+web/dist/
+*.log
+
+workspace/USER.md
