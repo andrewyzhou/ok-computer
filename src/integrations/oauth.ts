@@ -49,6 +49,9 @@ export interface OAuth {
   fetchFor(entry: HttpEntry): typeof fetch;
   // the text of the last failed sign-in step of an integration, as the server wrote it. a success clears it.
   serverError(integrationId: string): string | undefined;
+  // the reason when the last sign-in step failed because the sign-in server was down: no answer, a 5xx, or the oauth
+  // errors server_error and temporarily_unavailable. the tokens are not known to be bad then.
+  signInOutage(integrationId: string): string | undefined;
   hasTokens(integrationId: string): Promise<boolean>;
   // closeIfIdle closes the callback port when no flow waits, for example after a connect with working tokens.
   closeIfIdle(): Promise<void>;
@@ -72,7 +75,9 @@ export function createOAuth(deps: OAuthDeps): OAuth {
   // the flow that finishAuth works on. the callback sets it just before the call.
   const active = new Map<string, Flow>();
   const serverErrors = new Map<string, string>();
+  const outages = new Map<string, string>();
   let server: Server | undefined;
+  let starting: Promise<void> | undefined;
   let closeTimer: NodeJS.Timeout | undefined;
 
   const readJson = async <T>(ref: string): Promise<T | undefined> => {
@@ -144,6 +149,12 @@ export function createOAuth(deps: OAuthDeps): OAuth {
         const current = draft();
         const state = url.searchParams.get('state');
         drafts.delete(id);
+        // the sdk asks for a new sign-in also when a refresh fails because the sign-in server is down. the stored tokens
+        // can still be good then, so the owner gets no new link, and the connection tries again later.
+        if (outages.has(id)) {
+          logger.warn('oauth sign-in server is down, so no new sign-in link', { integration: id, reason: outages.get(id) });
+          return;
+        }
         if (!state || state !== current.state || !current.verifier) {
           logger.error('oauth flow without its state or verifier', { integration: id });
           return;
@@ -158,6 +169,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
           ...(current.discovery ? { discovery: current.discovery } : {}),
           expiresAt: clock().getTime() + FLOW_TTL_MS,
         });
+        armClose();
         logger.info('oauth flow waits for the owner', { integration: id });
       },
       saveCodeVerifier(verifier) {
@@ -196,8 +208,15 @@ export function createOAuth(deps: OAuthDeps): OAuth {
       for (const [key, each] of shared) if (now - each.at > REFRESH_SHARE_MS) shared.delete(key);
       let entry = shared.get(token);
       if (!entry) {
-        entry = { response: base(input, init), at: now };
-        shared.set(token, entry);
+        const mine = { response: base(input, init), at: now };
+        entry = mine;
+        shared.set(token, mine);
+        // only new tokens are shared. a failed refresh must not answer the next refresh for 30 s, because the next one
+        // can work after a short outage.
+        const forget = () => {
+          if (shared.get(token) === mine) shared.delete(token);
+        };
+        mine.response.then((response) => !response.ok && forget(), forget);
       }
       // each caller reads its own copy. the first response is never read, so it can give more copies.
       return (await entry.response).clone();
@@ -219,6 +238,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
       try {
         response = await fetch(input, init);
       } catch (err) {
+        outages.set(entry.id, `${url.pathname}: ${errorText(err)}`);
         logger.warn('oauth step failed', { ...fields, err });
         throw err;
       }
@@ -227,10 +247,16 @@ export function createOAuth(deps: OAuthDeps): OAuth {
       // failed step.
       if (response.ok || fields.method !== 'POST') {
         logger.info('oauth step', { ...fields, status: response.status, ms });
+        // any answer shows that the sign-in server works again. a client that the owner registered makes no post
+        // before its link, so a post alone cannot end the outage.
+        if (response.ok) outages.delete(entry.id);
         if (response.ok && fields.method === 'POST') serverErrors.delete(entry.id);
         return response;
       }
-      const detail = redact(await errorDetail(response.clone()));
+      const failed = await errorDetail(response.clone());
+      const detail = redact(failed.text);
+      if (failed.down) outages.set(entry.id, `${url.pathname}: ${detail}`);
+      else outages.delete(entry.id);
       serverErrors.set(entry.id, detail);
       logger.warn('oauth step failed', { ...fields, status: response.status, ms, detail });
       // a failed callback does not change the state of the connection, so the page reads the text from here.
@@ -246,10 +272,22 @@ export function createOAuth(deps: OAuthDeps): OAuth {
       return response;
     };
 
-  // the callback listens only while a flow waits for the owner.
+  // the callback listens only while a flow waits for the owner. the timer closes the port when the last flow ends, so a
+  // second connect within the time of the first moves the close to the end of the second.
+  const armClose = (until = 0) => {
+    clearTimeout(closeTimer);
+    if (!server) return;
+    const last = Math.max(until, ...[...flows.values()].map((flow) => flow.expiresAt));
+    closeTimer = setTimeout(() => void closeWhenIdle(), Math.max(0, last - clock().getTime()) + 1_000);
+    closeTimer.unref();
+  };
   const closeWhenIdle = async () => {
     prune();
-    if (flows.size || !server) return;
+    if (!server) return;
+    if (flows.size) {
+      armClose();
+      return;
+    }
     clearTimeout(closeTimer);
     const current = server;
     server = undefined;
@@ -289,6 +327,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
     provider: providerFor,
     fetchFor: (entry) => singleFlight(observed(entry)),
     serverError: (id) => serverErrors.get(id),
+    signInOutage: (id) => outages.get(id),
     hasTokens: async (id) => (await secrets.get(tokensRef(id))) !== undefined,
     closeIfIdle: closeWhenIdle,
     pendingUrl(id) {
@@ -298,27 +337,9 @@ export function createOAuth(deps: OAuthDeps): OAuth {
     callback,
     async listen(finish, onDone) {
       if (server) return;
-      const next = createServer((req, res) => {
-        // the server answers only on loopback, and only with fixed text, so a page cannot read anything from it.
-        const host = req.headers.host ?? '';
-        if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host) || req.method !== 'GET') {
-          res.writeHead(400).end();
-          return;
-        }
-        void callback(new URL(req.url ?? '/', `http://127.0.0.1:${port}`), finish).then(({ status, integrationId, text }) => {
-          res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }).end(text);
-          if (status === 200 && integrationId) onDone(integrationId);
-          void closeWhenIdle();
-        });
-      });
-      await new Promise<void>((resolve, reject) => {
-        next.once('error', reject);
-        next.listen(port, '127.0.0.1', () => resolve());
-      });
-      server = next;
-      // a flow that the owner never finishes ends after its time limit, and the port closes then too.
-      closeTimer = setTimeout(() => void closeWhenIdle(), FLOW_TTL_MS + 1_000);
-      closeTimer.unref();
+      // two connects at the same time share one start, so the second does not get EADDRINUSE from the first.
+      starting ??= start(finish, onDone).finally(() => (starting = undefined));
+      return starting;
     },
     async close() {
       clearTimeout(closeTimer);
@@ -327,16 +348,44 @@ export function createOAuth(deps: OAuthDeps): OAuth {
       if (current) await new Promise<void>((resolve) => current.close(() => resolve()));
     },
   };
+
+  async function start(finish: (integrationId: string) => Transport | undefined, onDone: (integrationId: string) => void) {
+    const next = createServer((req, res) => {
+      // the server answers only on loopback, and only with fixed text, so a page cannot read anything from it.
+      const host = req.headers.host ?? '';
+      if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host) || req.method !== 'GET') {
+        res.writeHead(400).end();
+        return;
+      }
+      void callback(new URL(req.url ?? '/', `http://127.0.0.1:${port}`), finish).then(({ status, integrationId, text }) => {
+        res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }).end(text);
+        if (status === 200 && integrationId) onDone(integrationId);
+        void closeWhenIdle();
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      next.once('error', reject);
+      next.listen(port, '127.0.0.1', () => resolve());
+    });
+    server = next;
+    // a flow that the owner never finishes ends after its time limit, and the port closes then too. the flow of this
+    // connect comes after the start, so the first limit counts from now.
+    armClose(clock().getTime() + FLOW_TTL_MS);
+  }
 }
 
-// an oauth error answer has error and error_description. other answers give the start of their text.
-async function errorDetail(response: Response): Promise<string> {
+// an oauth error answer has error and error_description. other answers give the start of their text. down marks an
+// answer that says that the sign-in server cannot work now, and not that the request or the tokens are bad.
+async function errorDetail(response: Response): Promise<{ text: string; down: boolean }> {
   const text = (await response.text().catch(() => '')).slice(0, 500);
+  let body: { error?: unknown; error_description?: unknown } = {};
   try {
-    const body = JSON.parse(text) as { error?: unknown; error_description?: unknown };
-    if (typeof body.error === 'string') return body.error_description ? `${body.error}: ${String(body.error_description)}` : body.error;
+    body = JSON.parse(text) as typeof body;
   } catch {
     // the body is not json. the status and the start of the text say enough.
   }
-  return `http ${response.status}${text ? `: ${text}` : ''}`;
+  const code = typeof body.error === 'string' ? body.error : undefined;
+  const down = response.status >= 500 || code === 'server_error' || code === 'temporarily_unavailable';
+  if (code !== undefined) return { text: body.error_description ? `${code}: ${String(body.error_description)}` : code, down };
+  return { text: `http ${response.status}${text ? `: ${text}` : ''}`, down };
 }

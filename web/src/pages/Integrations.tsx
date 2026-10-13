@@ -31,6 +31,16 @@ type ConnectResult = { connected: true } | { url: string } | { error: string };
 
 function useActions(onDone: () => void) {
   const [notice, setNotice] = useState('');
+  // the integrations whose connect request runs. their button waits, because a second press would start the sign-in
+  // again.
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+  const mark = (id: string, on: boolean) =>
+    setBusy((before) => {
+      const next = new Set(before);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
   const run = (promise: Promise<string>) =>
     promise.then(
       (text) => {
@@ -39,8 +49,9 @@ function useActions(onDone: () => void) {
       },
       (err: Error) => setNotice(err.message),
     );
-  const connect = (id: string) =>
-    run(
+  const connect = (id: string) => {
+    mark(id, true);
+    return run(
       send<ConnectResult>(`${path(id)}/connect`, 'POST', {}).then((result) => {
         if ('connected' in result) return `${id} is connected.`;
         if ('error' in result) return result.error;
@@ -48,10 +59,11 @@ function useActions(onDone: () => void) {
         window.open(result.url, '_blank', 'noopener');
         return `Sign in to ${id} in the new tab. If no tab opened, use the sign-in link on the page of ${id}.`;
       }),
-    );
+    ).finally(() => mark(id, false));
+  };
   const pause = (id: string, paused: boolean) =>
     run(send<{ paused: boolean }>(`${path(id)}/pause`, 'POST', { paused }).then(() => `${id} is ${paused ? 'paused' : 'resumed'}.`));
-  return { notice, connect, pause };
+  return { notice, busy, connect, pause };
 }
 
 function Actions({ integration, actions }: { integration: IntegrationSummary; actions: ReturnType<typeof useActions> }) {
@@ -64,7 +76,7 @@ function Actions({ integration, actions }: { integration: IntegrationSummary; ac
   }
   return (
     <div className="row">
-      <button type="button" onClick={() => actions.connect(integration.id)}>
+      <button type="button" disabled={actions.busy.has(integration.id)} onClick={() => actions.connect(integration.id)}>
         {integration.state.status === 'connected' ? 'Reconnect' : 'Connect'}
       </button>
       <button type="button" className="secondary" onClick={() => actions.pause(integration.id, true)}>

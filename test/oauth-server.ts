@@ -17,8 +17,11 @@ export interface OAuthTestServer {
   revoke(): void;
   // refuseCodes makes the token endpoint refuse each authorization code, as for a consent that took too long.
   refuseCodes(): void;
+  // down makes each refresh fail as a token endpoint that is down: a 503, or a connection that closes without an answer.
+  // undefined ends the outage. refreshFailures counts the refreshes that failed.
+  down(kind: 'network' | '503' | undefined): void;
   // requests counts every http request, so a test can show that a parked integration makes none.
-  stats: { requests: number; authorizations: number; codeGrants: number; refreshGrants: number; reuse: number; mcpRequests: number };
+  stats: { requests: number; authorizations: number; codeGrants: number; refreshGrants: number; reuse: number; mcpRequests: number; refreshFailures: number };
   // the client must give this client id. without it the test uses dynamic registration.
   clientId: string;
 }
@@ -30,7 +33,8 @@ export async function startOAuthServer(): Promise<OAuthTestServer> {
   const access = new Set<string>();
   const refresh = new Map<string, { used: boolean }>();
   let refusing = false;
-  const stats = { requests: 0, authorizations: 0, codeGrants: 0, refreshGrants: 0, reuse: 0, mcpRequests: 0 };
+  let outage: 'network' | '503' | undefined;
+  const stats = { requests: 0, authorizations: 0, codeGrants: 0, refreshGrants: 0, reuse: 0, mcpRequests: 0, refreshFailures: 0 };
   const clientId = 'okc-test-client';
   let base = '';
 
@@ -117,6 +121,12 @@ export async function startOAuthServer(): Promise<OAuthTestServer> {
         return json(res, 200, issue());
       }
       if (params.get('grant_type') === 'refresh_token') {
+        if (outage) {
+          stats.refreshFailures++;
+          if (outage === 'network') return void res.socket?.destroy();
+          res.writeHead(503, { 'content-type': 'text/plain' });
+          return void res.end('upstream unavailable');
+        }
         const token = refresh.get(params.get('refresh_token') ?? '');
         if (!token) return json(res, 400, { error: 'invalid_grant', error_description: 'unknown refresh token' });
         if (token.used) {
@@ -150,6 +160,9 @@ export async function startOAuthServer(): Promise<OAuthTestServer> {
     },
     refuseCodes: () => {
       refusing = true;
+    },
+    down: (kind) => {
+      outage = kind;
     },
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };

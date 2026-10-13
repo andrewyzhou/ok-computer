@@ -95,6 +95,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
   const parked = new Map<string, ConnectionState>();
   // a sign-in that the owner starts from the dashboard can end in needs_auth too. the owner needs no message then.
   const authorizing = new Set<string>();
+  const connecting = new Map<string, Promise<{ connected: true } | { url: string } | { error: string }>>();
   const stateOf = (id: string): ConnectionState => parked.get(id) ?? states.get(id) ?? { status: 'stopped' };
   const paused = new Set(
     deps.db
@@ -197,6 +198,10 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
         },
         onState: (state) => saveState(entry.id, state),
         ...(deps.setTimer ? { setTimer: deps.setTimer } : {}),
+        ...(entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' && deps.oauth ? { signInOutage: () => deps.oauth?.signInOutage(entry.id) } : {}),
+        ...(entry.kind === 'mcp-http' && entry.auth?.type === 'bearer'
+          ? { refusedKeyHint: `Update the secret ${entry.auth.secretRef} in the credential manager with cmdkey, then press Connect.` }
+          : {}),
       }),
     );
   }
@@ -332,39 +337,53 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       return true;
     },
     connection: (id) => connections.get(id),
-    async connect(id) {
-      const entry = byId.get(id);
-      const connection = connections.get(id);
-      if (!entry || !connection) return { error: `no integration has the id ${id}` };
-      const oauth = entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' ? deps.oauth : undefined;
-      if (oauth) {
-        try {
-          await oauth.listen(
-            (integrationId) => connections.get(integrationId)?.transport(),
-            (integrationId) => {
-              const done = connections.get(integrationId);
-              void done?.stop().then(() => done.start()).catch((err: unknown) => logger.error('mcp restart after sign-in failed', { integration: integrationId, err }));
-            },
-          );
-        } catch (err) {
-          // another process, for example a second copy of the app, can hold the port.
-          return { error: `the sign-in callback cannot listen: ${(err as Error).message}` };
-        }
-      }
-      if (paused.has(id)) writePaused(id, false);
-      // a new attempt makes the sdk create a new flow, or connect with the stored tokens.
-      parked.delete(id);
-      authorizing.add(id);
-      try {
-        await connection.stop();
-        await connection.start();
-      } finally {
-        authorizing.delete(id);
-      }
-      const url = oauth?.pendingUrl(id);
-      if (!url) await oauth?.closeIfIdle();
-      if (connection.state().status === 'connected') return { connected: true };
-      return url ? { url } : { error: connection.state().error ?? 'the connection did not start' };
+    connect(id) {
+      // a second press of Connect while the first one runs joins it. a second attempt would stop the first one before
+      // its sign-in link exists.
+      const running = connecting.get(id);
+      if (running) return running;
+      const attempt = connectOnce(id).finally(() => connecting.delete(id));
+      connecting.set(id, attempt);
+      return attempt;
     },
   };
+
+  async function connectOnce(id: string): Promise<{ connected: true } | { url: string } | { error: string }> {
+    const entry = byId.get(id);
+    const connection = connections.get(id);
+    if (!entry || !connection) return { error: `no integration has the id ${id}` };
+    const oauth = entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' ? deps.oauth : undefined;
+    if (oauth) {
+      try {
+        await oauth.listen(
+          (integrationId) => connections.get(integrationId)?.transport(),
+          (integrationId) => {
+            // the owner can pause the integration while the sign-in page is open. the tokens stay, and the connection
+            // starts when the owner resumes it.
+            if (paused.has(integrationId)) return;
+            const done = connections.get(integrationId);
+            void done?.stop().then(() => done.start()).catch((err: unknown) => logger.error('mcp restart after sign-in failed', { integration: integrationId, err }));
+          },
+        );
+      } catch (err) {
+        // another process, for example a second copy of the app, can hold the port.
+        return { error: `the sign-in callback cannot listen: ${(err as Error).message}` };
+      }
+    }
+    if (paused.has(id)) writePaused(id, false);
+    // a new attempt makes the sdk create a new flow, or connect with the stored tokens.
+    parked.delete(id);
+    authorizing.add(id);
+    try {
+      await connection.stop();
+      await connection.start();
+    } finally {
+      authorizing.delete(id);
+    }
+    const url = oauth?.pendingUrl(id);
+    // the connect of another integration can still wait for its sign-in link, and it needs the port.
+    if (!url && connecting.size <= 1) await oauth?.closeIfIdle();
+    if (connection.state().status === 'connected') return { connected: true };
+    return url ? { url } : { error: connection.state().error ?? 'the connection did not start' };
+  }
 }

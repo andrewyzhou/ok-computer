@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { startOAuthServer, type OAuthTestServer } from '../../test/oauth-server.js';
 import { parseConfig } from '../config/load.js';
 import { startDashboard, type DashboardDeps } from '../dashboard/server.js';
@@ -226,6 +226,100 @@ describe('oauth', () => {
     await integrations.start();
     expect(integrations.status()[0]!.state.status).toBe('needs_auth');
     expect(needsAuth).toHaveLength(1);
+  });
+
+  for (const kind of ['503', 'network'] as const) {
+    it(`keeps a working sign-in when the token endpoint is down for a moment (${kind})`, async () => {
+      const { as, oauth, secrets, integrations, needsAuth } = await setup();
+      await integrations.start();
+      await connect(integrations);
+      needsAuth.length = 0;
+      as.expire();
+      as.down(kind);
+      expect(await echo(integrations)).toMatchObject({ kind: 'not_sent', reason: expect.stringContaining('sign-in server did not answer') });
+      // the tokens can still be good, so the owner gets no message and no new sign-in link.
+      expect(integrations.connection('remote')!.state().status).toBe('connected');
+      expect(needsAuth).toEqual([]);
+      expect(oauth.pendingUrl('remote')).toBeUndefined();
+      expect(await secrets.get('remote:oauth-tokens')).toContain('rt_');
+      // the next call refreshes again at once. the failed refresh is not shared with it.
+      as.down(undefined);
+      expect(await echo(integrations, 'c2')).toMatchObject({ kind: 'result' });
+      expect(as.stats).toMatchObject({ refreshGrants: 1, refreshFailures: 1 });
+    });
+  }
+
+  it('tries again later when the token endpoint is down at the start', async () => {
+    const { as, integrations, needsAuth } = await setup();
+    await integrations.start();
+    await connect(integrations);
+    await integrations.stop();
+    needsAuth.length = 0;
+    as.expire();
+    as.down('503');
+    await integrations.start();
+    expect(integrations.connection('remote')!.state()).toMatchObject({ status: 'error', error: expect.stringContaining('sign-in server did not answer'), retryAt: expect.any(String) });
+    expect(needsAuth).toEqual([]);
+    as.down(undefined);
+    await expect.poll(() => integrations.connection('remote')!.state().status, { timeout: 5_000 }).toBe('connected');
+  });
+
+  it('joins a second press of Connect to the first, so the sign-in link works', async () => {
+    const { integrations } = await setup();
+    await integrations.start();
+    const first = integrations.connect('remote');
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    const [one, two] = await Promise.all([first, integrations.connect('remote'), integrations.connect('remote')]);
+    expect(one).toEqual(two);
+    if (!one || !('url' in one)) throw new Error(`expected a link, got ${JSON.stringify(one)}`);
+    const { response } = await consent(one.url);
+    expect(response.status).toBe(200);
+    await expect.poll(() => integrations.connection('remote')!.state().status).toBe('connected');
+  });
+
+  it('keeps the callback port open for the last sign-in link, and closes it when that link ends', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    cleanup.push(async () => void vi.useRealTimers());
+    const { integrations, port, advance } = await setup();
+    const taken = async () => {
+      const probe = createServer();
+      const free = await new Promise<boolean>((resolve) => {
+        probe.once('error', () => resolve(false));
+        probe.listen(port, '127.0.0.1', () => resolve(true));
+      });
+      if (free) await new Promise((resolve) => probe.close(resolve));
+      return !free;
+    };
+    await integrations.start();
+    expect(await integrations.connect('remote')).toMatchObject({ url: expect.any(String) });
+    const later = 9 * 60_000;
+    advance(later);
+    await vi.advanceTimersByTimeAsync(later);
+    expect(await integrations.connect('remote')).toMatchObject({ url: expect.any(String) });
+    // the time limit of the first link passes. the second link still waits, so the port stays open.
+    advance(FLOW_TTL_MS - later + 1_000);
+    await vi.advanceTimersByTimeAsync(FLOW_TTL_MS - later + 1_000);
+    expect(await taken()).toBe(true);
+    // the second link ends too, and the port closes.
+    advance(later);
+    await vi.advanceTimersByTimeAsync(later);
+    await expect.poll(taken).toBe(false);
+  });
+
+  it('leaves a paused integration stopped when the owner finishes its sign-in later', async () => {
+    const { integrations, secrets } = await setup();
+    await integrations.start();
+    const started = await integrations.connect('remote');
+    if (!('url' in started)) throw new Error('expected a link');
+    await integrations.setPaused('remote', true);
+    const { response } = await consent(started.url);
+    expect(response.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(integrations.status()[0]).toMatchObject({ paused: true, state: { status: 'stopped' } });
+    // the tokens stay, so a resume connects without a new sign-in.
+    expect(await secrets.get('remote:oauth-tokens')).toContain('rt_');
+    await integrations.setPaused('remote', false);
+    expect(integrations.connection('remote')!.state().status).toBe('connected');
   });
 
   it('says so when another process holds the callback port', async () => {
