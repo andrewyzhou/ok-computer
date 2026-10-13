@@ -21,7 +21,7 @@ export interface StablePromptInput {
 }
 
 export function baseInstructions(timeZone: string): string {
-  return `You are OK Computer, a personal assistant for one person, the owner. You run on the owner's PC and talk with the owner over chat.
+  return `You are Computer, a personal assistant for one person, the owner. You run on the owner's PC and talk with the owner over chat.
 
 The owner's time zone is ${timeZone}. Give all times in this time zone.
 

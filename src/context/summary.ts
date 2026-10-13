@@ -14,7 +14,7 @@ export const DROPPED_HEADING = '## dropped identifiers';
 export const SUMMARY_ATTEMPTS = 3;
 const LISTED_FAILURES = 100;
 
-export const SUMMARY_PROMPT = `You write a summary of the earlier part of a conversation between OK Computer, a personal assistant, and its owner. The assistant will see only your summary instead of that part, so the summary must keep everything that can matter later.
+export const SUMMARY_PROMPT = `You write a summary of the earlier part of a conversation between Computer, a personal assistant, and its owner. The assistant will see only your summary instead of that part, so the summary must keep everything that can matter later.
 
 Use exactly these headings, in this order:
 ${SUMMARY_HEADINGS.join('\n')}
