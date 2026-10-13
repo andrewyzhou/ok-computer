@@ -70,6 +70,9 @@ export interface Integrations {
   // the integration tool with this name, for the registry. it reads the current catalog and config at each call, so a
   // session whose profile lost the integration does not find the tool.
   find(name: string, sessionKey: string): Tool | undefined;
+  // why find has no tool for a name that the config allows, when the reason is the state of its integration: the
+  // server has not sent a tool list yet. undefined for every other name.
+  explain(name: string, sessionKey: string): string | undefined;
   // the tool names that a session may use: the discovery pair, and every allowed tool of its integrations. this
   // depends only on the config, so a new catalog never changes it.
   allowedNames(sessionKey: string): string[];
@@ -105,8 +108,8 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
   );
 
   // the text says why an integration cannot take a call now, and whether a retry can help. the model can then tell the
-  // owner what to do. undefined means that it is connected.
-  const unavailable = (id: string, timeZone: string): string | undefined => {
+  // owner what to do. undefined means that it is connected. without a time zone the text gives no time.
+  const unavailable = (id: string, timeZone?: string): string | undefined => {
     if (deps.connects === false) return `the ${id} integration runs only in the background app, not in this chat process.`;
     if (paused.has(id)) return `the owner paused the ${id} integration.`;
     const state = stateOf(id);
@@ -116,7 +119,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       case 'connecting':
         return `${id} is not connected yet. The app connects it now; try again in a moment.`;
       case 'error':
-        return `${id} is not connected: ${state.error ?? 'unknown error'}.${state.retryAt ? ` The app tries again at ${localTime(new Date(state.retryAt), timeZone)}.` : ''}`;
+        return `${id} is not connected: ${state.error ?? 'unknown error'}.${state.retryAt && timeZone ? ` The app tries again at ${localTime(new Date(state.retryAt), timeZone)}.` : ''}`;
       case 'needs_auth':
         return parked.has(id)
           ? `${id} is not signed in yet. The owner connects it on the dashboard.`
@@ -279,6 +282,14 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
   return {
     tools: entries.length ? createDiscoveryTools(discovery) : [],
     find,
+    explain(name, sessionKey) {
+      const id = integrationOf(name);
+      const entry = id === undefined ? undefined : byId.get(id);
+      if (!entry || catalogs.get(entry.id) || !entry.sessions.includes(sessionProfile(sessionKey))) return undefined;
+      if (!entry.tools.allow.some((mcpName) => toolName(entry.id, mcpName) === name)) return undefined;
+      const why = unavailable(entry.id);
+      return `${name} did not run, because the ${entry.id} integration has not sent its tool list yet.${why ? ` ${why}` : ''}`;
+    },
     allowedNames(sessionKey) {
       // a heartbeat or a consolidation session sees no integration, so it gets no discovery tools either.
       const visible = visibleTo(sessionKey);

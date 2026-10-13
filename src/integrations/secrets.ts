@@ -9,6 +9,11 @@ export interface SecretStore {
   delete(ref: string): Promise<void>;
 }
 
+// the credential manager failed while a request needed a value from it, so the request did not reach a tool.
+export class CredentialStoreError extends Error {
+  override name = 'CredentialStoreError';
+}
+
 // one entry of the credential manager. get gives null for a missing entry.
 export interface KeyringBackend {
   get(ref: string): Promise<string | null>;

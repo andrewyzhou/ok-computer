@@ -57,6 +57,32 @@ describe('catalog', () => {
     ]);
   });
 
+  // the list comes as the server sent it. a bad tool must not stop the others: a hidden one stays hidden, and an
+  // allowed one moves to rejected with the reason.
+  it('checks each tool of a sloppy list on its own', () => {
+    const store = createCatalogStore({ db: openDb(':memory:'), clock, logger: silentLogger, entries: [] });
+    const e = entry(['bare', 'nulls', 'hint', 'text']);
+    const catalog = store.update(e, [
+      { name: 'bare' },
+      { name: 'nulls', inputSchema: { type: 'object', properties: null } },
+      { name: 'hint', inputSchema: { type: 'object' }, annotations: { readOnlyHint: 'true' }, description: null },
+      { name: 'text', inputSchema: 'object' },
+      { name: 'hidden', inputSchema: { required: null } },
+      { description: 'no name' },
+      null,
+      42,
+    ]);
+    expect(catalog.snapshot.tools.map((each) => [each.mcpName, each.inputSchema, each.description, each.readOnlyHint])).toEqual([
+      ['bare', { type: 'object' }, '', false],
+      ['hint', { type: 'object' }, '', false],
+    ]);
+    expect(catalog.snapshot.rejected).toEqual([
+      { mcpName: 'text', reason: 'the input schema is not an object' },
+      { mcpName: 'nulls', reason: expect.stringContaining('does not compile') },
+    ]);
+    expect(catalog.hidden).toEqual(['hidden']);
+  });
+
   // a server names its tools. a plain risk map read constructor as the Object function, and the policy check failed
   // with no trace row.
   it('gives the default risk to a tool whose name is a key of Object.prototype', () => {

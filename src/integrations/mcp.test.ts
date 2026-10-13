@@ -3,13 +3,14 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { InMemoryTransport, SdkError, SdkErrorCode, StreamableHTTPClientTransport, type Transport } from '@modelcontextprotocol/client';
+import { InMemoryTransport, SdkError, SdkErrorCode, SdkHttpError, StreamableHTTPClientTransport, type Transport } from '@modelcontextprotocol/client';
 import { WebStandardStreamableHTTPServerTransport, type McpServer } from '@modelcontextprotocol/server';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createShapeServer, createTestServer } from '../../test/mcp-server.js';
 import { openDb } from '../db/index.js';
 import { createBlobStore, type BlobStore } from '../observability/blobs.js';
 import { silentLogger, type Logger } from '../observability/logger.js';
+import { registerSecret } from '../observability/redact.js';
 import { parseIntegrations, type StdioEntry } from './config.js';
 import { outcomeOutput } from './discovery.js';
 import {
@@ -17,14 +18,16 @@ import {
   createMcpConnection,
   createMessageRecorder,
   HEALTHY_AFTER_MS,
+  LIST_PAGES_LIMIT,
   NOTIFICATIONS_PER_MINUTE,
   OWN_LIMIT_PER_MINUTE,
   PING_EVERY_MS,
+  REQUESTS_PER_MINUTE,
   type CallOutcome,
   type McpConnection,
   type McpTool,
 } from './mcp.js';
-import { createMemorySecretStore } from './secrets.js';
+import { createMemorySecretStore, CredentialStoreError } from './secrets.js';
 import { stdioTransport } from './transports.js';
 
 const FIXTURE = join(import.meta.dirname, '../../test/fixtures/stdio-server.ts');
@@ -64,7 +67,7 @@ function setup(
     logger: options.logger ?? silentLogger,
     clock,
     transport,
-    onTools: (tools: McpTool[]) => lists.push(tools.map((tool) => tool.name)),
+    onTools: (tools) => lists.push((tools as McpTool[]).map((tool) => tool.name)),
     ...(options.answerWaitMs ? { answerWaitMs: options.answerWaitMs } : {}),
     ...(options.refusedKeyHint ? { refusedKeyHint: options.refusedKeyHint } : {}),
     setTimer: (fn, ms) => {
@@ -543,4 +546,122 @@ describe('stdio server', () => {
     // the client alone says only "connection closed". the error of the transport says why.
     expect(connection.state()).toMatchObject({ status: 'error', error: expect.stringContaining('spawn okc-no-such-server ENOENT') });
   }, 20_000);
+});
+
+// rawServer answers json-rpc by hand, so nothing on the server side cleans its answers. tools gives the tool list of
+// each tools/list request: the cursor of the request, or undefined for the first page.
+function rawServer(tools: (cursor: string | undefined) => { tools: unknown[]; nextCursor?: string }, onReady?: (server: Transport) => void) {
+  return async (): Promise<Transport> => {
+    const [client, server] = InMemoryTransport.createLinkedPair();
+    server.onmessage = (message) => {
+      const m = message as { id?: number; method?: string; params?: { cursor?: string; arguments?: { text?: string } } };
+      if (m.id === undefined) return;
+      const reply = (result: unknown) => void server.send({ jsonrpc: '2.0', id: m.id!, result } as never);
+      if (m.method === 'initialize') reply({ protocolVersion: '2025-06-18', capabilities: { tools: { listChanged: true } }, serverInfo: { name: 'raw', version: '1.0.0' } });
+      else if (m.method === 'tools/list') reply(tools(m.params?.cursor));
+      else if (m.method === 'tools/call') reply({ content: [{ type: 'text', text: `echo: ${m.params?.arguments?.text}` }] });
+      else reply({});
+    };
+    await server.start();
+    onReady?.(server);
+    return client;
+  };
+}
+
+const echo = { name: 'echo', inputSchema: { type: 'object', properties: { text: { type: 'string' } } } };
+
+describe('a server that breaks the rules', () => {
+  // the sdk checked the whole list with its strict schema, so one sloppy tool, also a hidden one, stopped the
+  // integration: it retried for ever, and the allowed tool was never callable.
+  it('connects when one tool of the list has a shape that the strict schema of the sdk refuses', async () => {
+    let list: unknown[] = [echo, { name: 'ping_server', inputSchema: { type: 'object', required: null } }, { name: 'bare' }, { description: 'no name' }, 42];
+    let server: Transport | undefined;
+    const { connection, lists } = setup(rawServer(() => ({ tools: list }), (each) => (server = each)));
+    await connection.start();
+    expect(connection.state().status).toBe('connected');
+    expect(lists[0]).toEqual(['echo', 'ping_server', 'bare', undefined, undefined]);
+    expect(resultOf(await connection.callTool('echo', { text: 'hi' }, trace)).content).toEqual([{ type: 'text', text: 'echo: hi' }]);
+    // the refresh after list_changed reads the list the same way.
+    list = [echo, { name: 'later', annotations: { readOnlyHint: 'true' } }];
+    await server!.send({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' });
+    await expect.poll(() => lists.length, { timeout: 3_000 }).toBe(2);
+    expect(lists[1]).toEqual(['echo', 'later']);
+  });
+
+  it('reads every page of the list, and stops a server whose pages never end', async () => {
+    const paged = setup(rawServer((cursor) => (cursor === undefined ? { tools: [echo], nextCursor: 'p2' } : { tools: [{ name: 'two' }], nextCursor: 'p2' })));
+    await paged.connection.start();
+    // a server that gives the same cursor again has no more pages.
+    expect(paged.lists[0]).toEqual(['echo', 'two']);
+    const endless = setup(rawServer((cursor) => ({ tools: [], nextCursor: `${Number(cursor ?? 0) + 1}` })));
+    await endless.connection.start();
+    expect(endless.connection.state()).toMatchObject({ status: 'error', error: expect.stringContaining(`more than ${LIST_PAGES_LIMIT} pages`) });
+    expect(endless.messages().filter((row) => row.method === 'tools/list' && row.direction === 'out')).toHaveLength(LIST_PAGES_LIMIT);
+  });
+
+  // a server that quotes its key in an error put the key in plain text into integration_state, the page and the
+  // answer of connect.
+  it('redacts a secret in the error of a connection attempt', async () => {
+    registerSecret('raw-server-api-key-2026', 'raw-key');
+    const { connection } = setup(async () => {
+      throw new Error('upstream said: invalid api key raw-server-api-key-2026');
+    });
+    await connection.start();
+    expect(connection.state()).toMatchObject({ status: 'error', error: 'upstream said: invalid api key [redacted]' });
+  });
+
+  // 20,000 pings from a server held the event loop for 50 s, because each one and its answer were rows.
+  it('records at most the limit of server requests in a minute, and leaves out the answers to the others', () => {
+    const db = openDb(':memory:');
+    const clock = () => new Date(0);
+    const record = createMessageRecorder({ db, blobs: createBlobStore(db, mkdtempSync(join(tmpdir(), 'okc-mcp-')), clock), clock, serverId: 'noisy' });
+    for (let i = 0; i < REQUESTS_PER_MINUTE + 50; i++) {
+      record('in', { jsonrpc: '2.0', id: i, method: 'ping' });
+      record('out', { jsonrpc: '2.0', id: i, result: {} });
+    }
+    const rows = db.prepare('SELECT direction, method, rpcId, payload FROM mcp_messages ORDER BY id').all();
+    expect(rows.filter((row) => row.direction === 'in' && row.rpcId !== null)).toHaveLength(REQUESTS_PER_MINUTE);
+    expect(rows.filter((row) => row.direction === 'out')).toHaveLength(REQUESTS_PER_MINUTE);
+    // each recorded answer has the method of its request.
+    expect(rows.filter((row) => row.direction === 'out').every((row) => row.method === 'ping')).toBe(true);
+    expect(rows.filter((row) => row.rpcId === null).map((row) => String(row.payload))).toEqual([expect.stringContaining('more than 100 requests')]);
+    // the notifications of the server have their own limit.
+    record('in', { jsonrpc: '2.0', method: 'notifications/message', params: { level: 'info', data: 'x' } });
+    expect(db.prepare("SELECT count(*) AS n FROM mcp_messages WHERE method = 'notifications/message'").get()).toEqual({ n: 1 });
+  });
+
+  // the http transport posted the whole call before the 401 or the 403, so the server got the arguments. the trace
+  // said that the message did not leave.
+  it('records a 401 or a 403 of an http server as an answer with the status, not as unsent', async () => {
+    for (const status of [401, 403]) {
+      const make = memoryTransport();
+      const { connection, messages } = setup(async () => {
+        const transport = await make();
+        const send = transport.send.bind(transport);
+        transport.send = async (message, options) => {
+          if ('method' in message && message.method === 'tools/call') {
+            throw new SdkHttpError(SdkErrorCode.ClientHttpNotImplemented, 'Error POSTing to endpoint: no', { status, statusText: 'no' });
+          }
+          return send(message, options);
+        };
+        return transport;
+      });
+      await connection.start();
+      expect(await connection.callTool('echo', { text: 'x' }, trace)).toMatchObject({ kind: 'not_sent' });
+      const rows = messages().filter((row) => row.method === 'tools/call');
+      expect(rows.map((row) => [row.direction, row.toolCallId])).toEqual([
+        ['out', 'call-1'],
+        ['in', 'call-1'],
+      ]);
+      expect(JSON.parse(String(rows[1]!.payload))).toEqual({ httpStatus: status, error: 'Error POSTing to endpoint: no' });
+      await connection.stop();
+    }
+  });
+
+  it('says that a call did not run when the credential manager fails', () => {
+    expect(classify(new CredentialStoreError('the credential manager failed: locked'))).toEqual({
+      kind: 'not_sent',
+      reason: 'the credential manager failed: locked',
+    });
+  });
 });

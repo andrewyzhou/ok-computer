@@ -6,7 +6,6 @@ import type { Risk } from '../policy/policy.js';
 import { headOf } from '../text.js';
 import type { Clock } from '../time.js';
 import type { IntegrationEntry } from './config.js';
-import type { McpTool } from './mcp.js';
 import { toolName } from './names.js';
 import { createValidatorSet, prepareSchema, type Validate } from './schema-guard.js';
 
@@ -94,16 +93,22 @@ export function diffCatalogs(before: CatalogTool[], after: CatalogTool[]): Catal
   };
 }
 
-// the server's list goes through the allow list of the config first. tools outside it never reach the model.
-export function buildSnapshot(entry: IntegrationEntry, listed: McpTool[]): CatalogSnapshot & { hidden: string[] } {
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+// the server's list goes through the allow list of the config first. tools outside it never reach the model. the list
+// comes as the server sent it, so each field is checked here, and a bad tool never stops the others: a hidden tool
+// stays hidden, and an allowed tool moves to rejected with the reason.
+export function buildSnapshot(entry: IntegrationEntry, listed: readonly unknown[]): CatalogSnapshot & { hidden: string[] } {
   const tools: CatalogTool[] = [];
   const rejected: CatalogSnapshot['rejected'] = [];
   const hidden: string[] = [];
   const allowed = new Set(entry.tools.allow);
   const seen = new Map<string, string>();
   for (const tool of listed) {
+    // a tool without a name cannot be in the allow list.
+    if (!isRecord(tool) || typeof tool.name !== 'string') continue;
     if (!allowed.has(tool.name)) {
-      if (!entry.tools.allow.includes(tool.name) && hidden.length < HIDDEN_LIMIT) hidden.push(headOf(String(tool.name), HIDDEN_NAME_LIMIT));
+      if (!entry.tools.allow.includes(tool.name) && hidden.length < HIDDEN_LIMIT) hidden.push(headOf(tool.name, HIDDEN_NAME_LIMIT));
       continue;
     }
     allowed.delete(tool.name);
@@ -125,7 +130,7 @@ export function buildSnapshot(entry: IntegrationEntry, listed: McpTool[]): Catal
       mcpName: tool.name,
       description: headOf(typeof tool.description === 'string' ? tool.description : '', DESCRIPTION_LIMIT),
       inputSchema: prepared.schema,
-      readOnlyHint: tool.annotations?.readOnlyHint === true,
+      readOnlyHint: isRecord(tool.annotations) && tool.annotations.readOnlyHint === true,
     });
   }
   tools.sort((a, b) => a.name.localeCompare(b.name));
@@ -155,7 +160,7 @@ const hashOf = (snapshot: CatalogSnapshot) => createHash('sha256').update(redact
 
 export interface CatalogStore {
   // update takes a new tool list of a server. it returns the catalog, and records a version only when the list changed.
-  update(entry: IntegrationEntry, listed: McpTool[]): Catalog;
+  update(entry: IntegrationEntry, listed: readonly unknown[]): Catalog;
   get(integrationId: string): Catalog | undefined;
 }
 

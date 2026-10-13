@@ -252,6 +252,27 @@ describe('mcp acceptance', () => {
     expect(results[1]).toContain('other__echo did not run: the owner paused the other integration.');
   });
 
+  // without a catalog the model read "no integration tool is named notes__echo", and searched for a tool that exists.
+  it('says that an integration has not sent its tool list yet, and why, when no catalog exists', async () => {
+    const t = createTestApp([call('c1', 'notes__echo', { text: 'x' }), textStep('ok')], {
+      start,
+      deps: {
+        integrations: [notesEntry()],
+        mcpTransport: async () => {
+          throw new Error('spawn notes-server ENOENT');
+        },
+      },
+    });
+    apps.push(t);
+    await t.app.start();
+    await expect.poll(() => t.app.integrations.status()[0]!.state.status).toBe('error');
+    await t.say('try it');
+    const result = listEvents(t.db, 'main').find((event) => event.type === 'tool_result')!.payload as { content: string };
+    expect(result.content).toBe(
+      'notes__echo did not run, because the notes integration has not sent its tool list yet. notes is not connected: spawn notes-server ENOENT.',
+    );
+  });
+
   it('changes nothing for an app without integrations, so an upgrade keeps the cached prefix', async () => {
     const t = createTestApp([textStep('hi')], { start });
     apps.push(t);

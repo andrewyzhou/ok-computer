@@ -170,6 +170,7 @@ export function createApp(deps: AppDeps): App {
     ],
     logger,
     integrations.find,
+    integrations.explain,
   );
   const caller = createToolCaller({
     db,

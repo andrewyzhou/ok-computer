@@ -13,13 +13,15 @@ import {
   type Tool as McpTool,
   type Transport,
 } from '@modelcontextprotocol/client';
+import { z } from 'zod';
 import type { Db } from '../db/index.js';
 import type { BlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
-import { redactedJson } from '../observability/redact.js';
+import { redact, redactedJson } from '../observability/redact.js';
 import type { SetTimer } from '../scheduler/scheduler.js';
 import type { Clock } from '../time.js';
 import { errorText } from '../tools/registry.js';
+import { CredentialStoreError } from './secrets.js';
 
 export type { McpTool };
 
@@ -49,13 +51,17 @@ interface Pending {
 const activeCall = new AsyncLocalStorage<ActiveCall>();
 
 // unsent marks a message whose out row exists, but the transport refused to send it. its row holds the error.
+// refused marks a request that reached an http server, which answered with an http error and no json-rpc message. it
+// is recorded as an in row with the status, because the server got the request and read it.
 export interface MessageRecorder {
-  (direction: 'out' | 'in' | 'unsent', message: JSONRPCMessage, error?: string): void;
+  (direction: 'out' | 'in' | 'unsent' | 'refused', message: JSONRPCMessage, error?: string, httpStatus?: number): void;
 }
 
-// a server can send notifications without a limit, and each row is a synchronous write on the event loop. so each
-// window records this many. the client still gets every message.
+// a server can send notifications and requests without a limit, and each row is a synchronous write on the event
+// loop. so each window records this many of each. the client still gets every message and answers every request.
 export const NOTIFICATIONS_PER_MINUTE = 100;
+// 20,000 pings from a server held the event loop for 50 s: each one is an in row and an out row for the answer.
+export const REQUESTS_PER_MINUTE = 100;
 // these notifications change what the app does. each one has its own small limit, so a flood of other notifications
 // cannot hide them, and a flood of them cannot hold the event loop: 20,000 list_changed held it for 25 s.
 export const OWN_LIMIT_PER_MINUTE: Readonly<Record<string, number>> = { 'notifications/tools/list_changed': 10, 'notifications/cancelled': 10 };
@@ -75,32 +81,41 @@ export function createMessageRecorder(deps: { db: Db; blobs: BlobStore; clock: C
   let windowStart = 0;
   const counts = new Map<string, number>();
   const lists = new Set<string>();
-  // over reports whether a notification from the server is over the limit of its window. the first one over the
-  // limit leaves one row that says so.
-  const over = (method: string) => {
+  // the ids of the server's requests that were not recorded. the app's answer to such a request is not recorded
+  // either, so the page never shows an answer without its request.
+  const unrecorded = new Set<string>();
+  // over reports whether a notification or a request from the server is over the limit of its window. the first one
+  // over the limit leaves one row that says so.
+  const over = (method: string, kind: 'notification' | 'request') => {
     const now = deps.clock().getTime();
     // a clock that moves back would keep the old window open for the length of the jump.
     if (now - windowStart >= 60_000 || now < windowStart) {
       windowStart = now;
       counts.clear();
     }
-    const own = OWN_LIMIT_PER_MINUTE[method];
-    const limit = own ?? NOTIFICATIONS_PER_MINUTE;
-    const key = own === undefined ? '' : method;
+    const own = kind === 'notification' ? OWN_LIMIT_PER_MINUTE[method] : undefined;
+    const limit = own ?? (kind === 'request' ? REQUESTS_PER_MINUTE : NOTIFICATIONS_PER_MINUTE);
+    const key = own === undefined ? kind : method;
     const count = (counts.get(key) ?? 0) + 1;
     counts.set(key, count);
     if (count <= limit) return false;
     if (count === limit + 1) {
-      const what = own === undefined ? 'notifications' : `${method} notifications`;
-      const note = JSON.stringify({ dropped: `the server sent more than ${limit} ${what} in one minute. the others of this minute are not recorded.` });
+      const what = own !== undefined ? `${method} notifications` : kind === 'request' ? 'requests' : 'notifications';
+      const others = kind === 'request' ? 'the others of this minute and the answers of the app to them' : 'the others of this minute';
+      const note = JSON.stringify({ dropped: `the server sent more than ${limit} ${what} in one minute. ${others} are not recorded.` });
       insert.run(deps.serverId, null, null, 'in', method, null, note, null, null, deps.clock().toISOString());
     }
     return true;
   };
-  return (direction, message, error) => {
+  return (direction, message, error, httpStatus) => {
     const rpcId = 'id' in message && message.id !== undefined ? String(message.id) : null;
     let method = 'method' in message ? message.method : null;
-    if (direction === 'in' && method && rpcId === null && over(method)) return;
+    if (direction === 'in' && method && rpcId === null && over(method, 'notification')) return;
+    if (direction === 'in' && method && rpcId !== null && over(method, 'request')) {
+      unrecorded.add(rpcId);
+      return;
+    }
+    if (direction === 'out' && !method && rpcId !== null && unrecorded.delete(rpcId)) return;
     let call: ActiveCall | undefined;
     let latencyMs: number | null = null;
     // a request from the server to the client has its own ids, so the key includes the direction of the request.
@@ -108,10 +123,13 @@ export function createMessageRecorder(deps: { db: Db; blobs: BlobStore; clock: C
     // only a tools/call and its cancel belong to a tool call. other requests can run in the async context of a call,
     // for example the tools/list that a list_changed during the call starts, but the call did not send them.
     const ownCall = () => (direction === 'out' && (method === 'tools/call' || method === 'notifications/cancelled') ? activeCall.getStore() : undefined);
-    if (direction === 'unsent') {
-      // no answer comes for a request that did not leave, so its pending entry ends here.
-      call = pending.get(key('out'))?.call;
+    if (direction === 'unsent' || direction === 'refused') {
+      // no json-rpc answer comes for a request that did not leave or that the http server refused, so its pending
+      // entry ends here.
+      const request = pending.get(key('out'));
       pending.delete(key('out'));
+      call = request?.call;
+      if (direction === 'refused' && request) latencyMs = Math.round(performance.now() - request.sentAt);
     } else if (method && rpcId !== null) {
       call = ownCall();
       pending.set(key(direction), { method, sentAt: performance.now(), call });
@@ -129,7 +147,7 @@ export function createMessageRecorder(deps: { db: Db; blobs: BlobStore; clock: C
       call = ownCall();
     }
     const trace = call?.trace;
-    let text = redactedJson(direction === 'unsent' ? { error } : message);
+    let text = redactedJson(direction === 'unsent' ? { error } : direction === 'refused' ? { httpStatus: httpStatus ?? null, error } : message);
     if (direction === 'in' && method === 'tools/list' && 'result' in message) {
       const hash = createHash('sha256').update(redactedJson(message.result)).digest('hex');
       if (lists.has(hash)) text = JSON.stringify({ jsonrpc: '2.0', id: message.id, unchanged: `the result has the sha-256 ${hash}, the same as an earlier tools/list answer of this connection` });
@@ -153,7 +171,8 @@ export function createMessageRecorder(deps: { db: Db; blobs: BlobStore; clock: C
         payload = JSON.stringify({ unrecorded: `the payload of ${bytes} bytes was not stored: ${errorText(err)}` });
       }
     }
-    insert.run(deps.serverId, trace?.runId ?? null, trace?.toolCallId ?? null, direction, method, rpcId, payload, payloadBlob, latencyMs, deps.clock().toISOString());
+    const stored = direction === 'refused' ? 'in' : direction;
+    insert.run(deps.serverId, trace?.runId ?? null, trace?.toolCallId ?? null, stored, method, rpcId, payload, payloadBlob, latencyMs, deps.clock().toISOString());
     // the transport logs the error.
     if (blobError !== undefined) throw blobError;
   };
@@ -187,9 +206,13 @@ export function recordingTransport(
       } catch (err) {
         // the out row exists. when the error shows that the message did not leave, a second row says so. an http send
         // also reads the answer, so other errors can come after the server acted, and they keep only the out row.
+        // a 401 or a 403 shows that the server got the request and refused it, so its row is an answer with the status.
         if (classify(err).kind === 'not_sent') {
           try {
-            record('unsent', message, errorText(err));
+            const status = refusedStatus(err);
+            if (status !== undefined) record('refused', message, errorText(err), status ?? undefined);
+            // a credential manager failure can come before the post or after a 401, so it keeps only the out row.
+            else if (!(err instanceof CredentialStoreError)) record('unsent', message, errorText(err));
           } catch (recordErr) {
             onRecordError(recordErr);
           }
@@ -251,7 +274,8 @@ export interface McpConnectionDeps {
   clock: Clock;
   // each attempt gets a new transport. the oauth flow needs the same transport for finishAuth, so it gets it here.
   transport: () => Promise<Transport>;
-  onTools: (tools: McpTool[]) => void;
+  // the tools as the server listed them. the catalog checks the shape of each one.
+  onTools: (tools: unknown[]) => void;
   onState?: (state: ConnectionState) => void;
   setTimer?: SetTimer;
   // the longest time to wait for the answer of one tools/call. the run does not wait this long, but the late result
@@ -304,9 +328,11 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
   let connectedAt: number | undefined;
   let cancelTimer: (() => void) | undefined;
 
+  // the error is often the server's own text, for example a json-rpc error or an http body that quotes the key. the
+  // state goes to the database, the page and the answer of connect, so it is redacted here, once.
   const setState = (next: ConnectionState) => {
-    state = next;
-    deps.onState?.(next);
+    state = next.error === undefined ? next : { ...next, error: redact(next.error) };
+    deps.onState?.(state);
   };
   const clearTimer = () => {
     cancelTimer?.();
@@ -348,20 +374,21 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
     const mine = ++generation;
     setState({ status: 'connecting' });
     const record = createMessageRecorder({ ...deps, serverId: id });
-    const attempt = new Client(CLIENT_INFO, {
-      // the default is legacy today. auto mode starts a second stdio process that the recorder never sees, so the
-      // mode is fixed here and an sdk update cannot change it.
-      versionNegotiation: { mode: 'legacy' },
-      listChanged: {
-        tools: {
-          debounceMs: 1_000,
-          onChanged: (error, tools) => {
-            if (mine !== generation) return;
-            if (error) logger.warn('mcp tool list refresh failed', { integration: id, err: error });
-            else if (tools) deps.onTools(tools);
-          },
-        },
-      },
+    // the default is legacy today. auto mode starts a second stdio process that the recorder never sees, so the mode
+    // is fixed here and an sdk update cannot change it.
+    const attempt = new Client(CLIENT_INFO, { versionNegotiation: { mode: 'legacy' } });
+    // the refresh after list_changed waits for a quiet second, because a server often sends several at once.
+    let refreshTimer: NodeJS.Timeout | undefined;
+    attempt.setNotificationHandler('notifications/tools/list_changed', () => {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        if (mine !== generation) return;
+        listTools(attempt).then(
+          (tools) => mine === generation && deps.onTools(tools),
+          (err: unknown) => mine === generation && logger.warn('mcp tool list refresh failed', { integration: id, err }),
+        );
+      }, LIST_CHANGED_DEBOUNCE_MS);
+      refreshTimer.unref();
     });
     const stale = async () => {
       if (mine === generation && !stopped) return false;
@@ -396,7 +423,7 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
         ),
       );
       if (await stale()) return;
-      const { tools } = await attempt.listTools();
+      const tools = await listTools(attempt);
       if (await stale()) return;
       client = attempt;
       connectedAt = clock().getTime();
@@ -495,12 +522,45 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
   };
 }
 
+export const LIST_CHANGED_DEBOUNCE_MS = 1_000;
+// a server whose pages never end must not hold the connection. the sdk has the same limit.
+export const LIST_PAGES_LIMIT = 64;
+// the sdk checks a whole tools/list answer against its strict tool schema, so one tool with a sloppy shape, also a
+// tool that the config hides, threw the whole list away, and the integration never connected. this schema takes the
+// list as it is, and the catalog checks each allowed tool on its own.
+const ToolsPage = z.looseObject({ tools: z.array(z.unknown()), nextCursor: z.string().optional() });
+
+export async function listTools(client: Client): Promise<unknown[]> {
+  // a server without the tools capability has no tools, and a request would get an error.
+  if (!client.getServerCapabilities()?.tools) return [];
+  const tools: unknown[] = [];
+  let cursor: string | undefined;
+  for (let page = 1; ; page++) {
+    const result = await client.request({ method: 'tools/list', ...(cursor === undefined ? {} : { params: { cursor } }) }, ToolsPage);
+    tools.push(...result.tools);
+    // a server that gives the same cursor again has no more pages.
+    if (result.nextCursor === undefined || result.nextCursor === cursor) return tools;
+    if (page >= LIST_PAGES_LIMIT) throw new Error(`the tools/list of the server has more than ${LIST_PAGES_LIMIT} pages`);
+    cursor = result.nextCursor;
+  }
+}
+
 // the sdk gives a typed error for each way that a request can fail. the kind decides what the model may assume.
 // a 401 that the sdk could not repair with a refresh. the http transport throws it before the server acts.
 const isAuthError = (err: unknown) => err instanceof UnauthorizedError || err instanceof OAuthError;
 
+// the http status of a request that the server refused: null when the sdk does not give it, undefined when the server
+// did not refuse it. the sdk throws its auth errors only after the server answered a post with a 401, or with a 403
+// for a missing scope. it reads the token for a header without a request.
+function refusedStatus(err: unknown): number | null | undefined {
+  if (err instanceof SdkHttpError && (err.status === 401 || err.status === 403)) return err.status;
+  return isAuthError(err) ? null : undefined;
+}
+
 export function classify(err: unknown): CallOutcome {
   if (err instanceof ProtocolError) return { kind: 'refused', code: err.code, message: err.message };
+  // the oauth provider reads and writes the tokens before the post, or after a 401. the tool did not run either way.
+  if (err instanceof CredentialStoreError) return { kind: 'not_sent', reason: err.message };
   if (isAuthError(err)) return { kind: 'not_sent', reason: `the server refused the sign-in: ${errorText(err)}` };
   // an http server checks the key before it acts.
   if (err instanceof SdkHttpError && (err.status === 401 || err.status === 403)) return { kind: 'not_sent', reason: `the server refused the key (http ${err.status})` };

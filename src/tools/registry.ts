@@ -72,7 +72,14 @@ export function defineTool<I>(tool: Tool<I>): Tool<unknown> {
   return tool as Tool<unknown>;
 }
 
-export function createToolRegistry(tools: Tool[], logger: Logger = silentLogger, dynamic?: DynamicTools): ToolRegistry {
+// explain gives the reason when a name that the config allows has no tool now, for example because its server has not
+// sent a tool list yet. the model can then tell the owner, instead of searching for a tool that exists.
+export function createToolRegistry(
+  tools: Tool[],
+  logger: Logger = silentLogger,
+  dynamic?: DynamicTools,
+  explain?: (name: string, sessionKey: string) => string | undefined,
+): ToolRegistry {
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   // the tool list is part of the cached prefix, so the order must not change between requests.
   const sorted = [...tools].sort((a, b) => a.name.localeCompare(b.name));
@@ -106,7 +113,9 @@ export function createToolRegistry(tools: Tool[], logger: Logger = silentLogger,
         // only an integration tool goes through tool_call. a built-in tool has its own entry in the tools parameter.
         const inner = { id: call.id, name, input: args };
         if (byName.has(name) || !dynamic(name, sessionKey) || !allowed.includes(name)) {
-          return { ok: false, output: { content: `no integration tool is named ${name}. Use tool_search to find the tool and its exact name.`, isError: true }, call: inner };
+          const why = !byName.has(name) && allowed.includes(name) ? explain?.(name, sessionKey) : undefined;
+          const content = why ?? `no integration tool is named ${name}. Use tool_search to find the tool and its exact name.`;
+          return { ok: false, output: { content, isError: true }, call: inner };
         }
         const resolved = resolveOne(inner, allowed, sessionKey);
         return resolved.ok ? resolved : { ...resolved, call: inner };
