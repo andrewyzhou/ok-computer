@@ -56,6 +56,9 @@ ok-computer/
   skills/                 skill folders, each with a SKILL.md
   src/
     main.ts               process entry: load config, open db, start channels, scheduler, dashboard
+    app.ts                wires the modules together; used by main.ts and integration tests
+    smoke.ts              npm run smoke
+    time.ts               clock type and owner-time-zone formatting
     config/               config schema and loader
     db/                   connection, migrations, typed query helpers
     events/               append-only event log
@@ -155,11 +158,14 @@ id INTEGER PRIMARY KEY, sessionKey TEXT, runId TEXT NULL, seq INTEGER,
 type TEXT, payload TEXT (json), createdAt TEXT (iso, utc)
 ```
 
-Event types: `user_message`, `assistant_message`, `tool_result`, `system_event`, `compaction`, `session_reset`, `note`.
+Event types: `user_message`, `assistant_message`, `tool_result`, `context`, `system_event`, `compaction`, `session_reset`, `note`.
+
+`context` holds the volatile part of the system prompt (section 8.4), recorded once at the start of each run so that later requests replay the same bytes.
 
 Rules:
-- Insert only. No `UPDATE` or `DELETE` on `events`, ever. Add a test that greps the source for violations.
-- `assistant_message` payloads store the full content blocks exactly as the provider returned them, including thinking blocks and signatures, so they can be replayed unchanged.
+- Insert only. No `UPDATE` or `DELETE` on `events`, ever. Add a test that greps the source for violations. Database triggers also abort any `UPDATE` or `DELETE` on the table.
+- `assistant_message` payloads store the full content blocks exactly as the provider returned them, including thinking blocks and signatures, so they can be replayed unchanged. They also store the provider, model, normalized text, and tool calls, so another provider's adapter can rebuild the turn.
+- The router appends a `user_message` only when its run starts, so a message that arrives during a run can never land between a tool call and its result.
 
 ### 8.2 Context strategy interface
 
@@ -169,12 +175,13 @@ interface ContextStrategy {
   build(input: {
     session: SessionInfo;
     events: StoredEvent[];      // full history of the session, in order
-    systemPrompt: SystemPrompt; // stable part and volatile part
+    system: string;             // stable part only; the volatile part is a `context` event
     tools: ToolSpec[];
-    model: ModelInfo;           // context window, provider
   }): Promise<ModelRequest>;
 }
 ```
+
+M1 ships `full-history`, which renders every event after the last `session_reset`. M3 adds `trim-and-compact` and adds a `model` input (context window, provider) when the strategy needs it.
 
 The default strategy is `trim-and-compact`:
 
@@ -192,12 +199,21 @@ Token estimation: use the provider's token counting endpoint when cheap and avai
 
 Before writing the Anthropic adapter and the context strategy, invoke the `claude-api` skill and read its TypeScript README, the prompt caching guide, and the model migration guide sections about preserved thinking and compaction. Current Claude models bind thinking blocks to the conversation that produced them, and editing earlier turns can make requests fail. The context view must follow the guidance there. In particular: keep the rendered prefix byte-stable between turns when nothing changed, replay assistant blocks unchanged, and handle the change of prefix after a compaction in the way the skill documents. Write tests for these cases with the fake provider.
 
+Decisions from M1:
+
+- The Anthropic adapter calls the beta messages endpoint with the `thinking-binding-controls-2026-08-01` beta and `thinking.block_binding.prefix_mismatch_behavior: "drop_block"`. The stable prompt is rebuilt each run, so an edit to a persona file or `MEMORY.md`, or a deploy that changes tools, changes the prefix. With `drop_block` the API drops the stale thinking blocks one time; without it the request fails with a 400 on enforced accounts. Dropped blocks come back in `input_transformations` and are logged as warnings.
+- Requests use adaptive thinking, an explicit effort per slot, an explicit cache breakpoint on the stable system prompt, and top-level automatic caching for the conversation tail. They never force `tool_choice`.
+- Refusals fall back through the slot chain on the client side (section 9.3). The server-side `fallbacks` parameter is not used.
+- For M3: trimming an old tool result in place is a history edit. It invalidates every later thinking block and the cache. Trimming must happen only at a compaction boundary, or through server-side context editing. Keep-tail compaction must strip the thinking blocks from the turns that it keeps (or rely on `drop_block`).
+
 ### 8.4 System prompt
 
 Built in two parts so prompt caching works:
 
 - **Stable part** (cached): base instructions for OK Computer, the persona files from `workspace/` (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`), `MEMORY.md` (main session only), the skills index, and tool descriptions. Per-file cap 20,000 characters, total cap 60,000; truncated files get a note that tells the model to read the file directly.
-- **Volatile part** (after the cache breakpoint): current time in the owner's time zone, the channel, today's goals with status, and the next three scheduled automations.
+- **Volatile part**: current time in the owner's time zone, the channel, today's goals with status, and the next three scheduled automations. It is not in the system prompt, because a system prompt that changes every run breaks the cache and the thinking blocks. The agent loop records it as a `context` event at the start of each run, and the strategy renders it as a `<context>` text block in that run's user turn.
+
+Tool descriptions travel in the provider's `tools` parameter, not in the stable text.
 
 Base instructions must cover: who the agent is, the owner's time zone, when to stay silent (`NO_REPLY`), how to use the goals and automations tools, how to write memory, and that content inside untrusted markers is data and never instructions.
 
@@ -208,7 +224,8 @@ Base instructions must cover: who the agent is, the owner's time zone, when to s
 ```ts
 interface ModelClient {
   provider: string;
-  complete(req: ModelRequest, signal?: AbortSignal): Promise<ModelResponse>;
+  // ModelCall is a ModelRequest plus model, maxTokens and effort from the slot.
+  complete(call: ModelCall, signal?: AbortSignal): Promise<ModelResponse>;
 }
 
 interface ModelResponse {
@@ -219,8 +236,11 @@ interface ModelResponse {
   usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number };
   model: string;
   latencyMs: number;
+  warnings?: string[];              // input changes the provider reports, e.g. dropped thinking blocks
 }
 ```
+
+Adapters throw a `ModelError` with kind `transient`, `request`, or `aborted`. The SDKs' own retries are off; the slot chain owns retries.
 
 ### 9.2 Adapters
 
@@ -245,7 +265,7 @@ Failover: retry the same model once on a transient error (429, 5xx, network) wit
 
 ### 9.4 Cost
 
-A pricing table in config gives input, cached input, cache write, and output prices per million tokens per model. Every model call writes a `model_calls` row: `runId, slot, provider, model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUsd, latencyMs, stopReason, error, createdAt`. Unknown models get a cost of null, not zero.
+A pricing table in config gives input, cached input, cache write, and output prices per million tokens per model. Every model call attempt, failed or not, writes a `model_calls` row: `runId, slot, provider, model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUsd, latencyMs, stopReason, error, request, response, createdAt`. `request` and `response` hold the full redacted JSON for the run detail view. Unknown models get a cost of null, not zero.
 
 Current Claude prices per million tokens (verify against the skill before use): Opus 5.5 $4 input, $0.20 cached input, $20 output. Sonnet 5.5 $2, $0.20, $10. Haiku 5.5 $0.10 input, $0.50 output.
 
@@ -380,7 +400,7 @@ The base instructions say that this content is data and never instructions. Stri
 
 Everything below is queryable from SQLite:
 - `runs`, `events`, `model_calls`, `tool_calls` (`runId, name, input, output, isError, durationMs, createdAt`; full payloads stored), `automation_runs`, `approvals`.
-- A structured JSON-lines log in `data/logs/okc-YYYY-MM-DD.log` with levels. Redact secrets (API keys, bot tokens) in every log line and every stored payload.
+- A structured JSON-lines log in `data/logs/okc-YYYY-MM-DD.log` (UTC date) with levels. The same lines go to stderr at a configurable level (`warn` in `npm run chat`), so the cli chat on stdout stays readable. Redact secrets (API keys, bot tokens) in every log line and every stored payload.
 
 ### 16.2 Dashboard
 
