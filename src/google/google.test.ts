@@ -5,6 +5,7 @@ import { createSlotRunner } from '../models/slots.js';
 import { openDb } from '../db/index.js';
 import { scheduleContext } from '../scheduler/context.js';
 import { createAutomation } from '../scheduler/store.js';
+import { signalDigest } from '../signals/digest.js';
 import { googleConfigSchema } from './config.js';
 import { createGoogle, syncGooglePoll } from './google.js';
 
@@ -92,5 +93,33 @@ describe('google poll job', () => {
       polls: false,
     });
     expect(await google.poll()).toEqual({ status: 'skipped', error: 'the google poll runs only in the background app' });
+  });
+
+  // the scheduler runs due jobs at the same time. a heartbeat that took the mail before the detectors ran would close
+  // it without the hit, and the owner would never hear about the deadline.
+  it('keeps a mail from a heartbeat while the poll that will check it waits for the calendar', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    const google = createGoogle({
+      db: h.db,
+      clock: () => h.now.value,
+      logger: h.logger,
+      blobs: h.blobs,
+      secrets: h.secrets,
+      slots: { call: async () => ({ ok: false, error: 'x', aborted: false }) },
+      config: h.config,
+      timeZone: 'America/Los_Angeles',
+      notifyOwner: () => {},
+      endpoints: { apiRoot: h.fake.url, tokenUrl: `${h.fake.url}token` },
+    });
+    await google.poll();
+    h.fake.deliver('personal', { id: 'm1', labelIds: ['INBOX'], headers: { From: 't@school.example', Subject: 'Essay due Oct 20' }, snippet: 'submit the essay by Oct 20' });
+    h.fake.fault({ route: 'GET /calendar/v3/calendars/primary/events', delayMs: 300, times: 2 });
+    const polling = google.poll();
+    while (!h.rows("SELECT 1 FROM integration_events WHERE externalId = 'm1' AND state = 'ready'").length) await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(signalDigest(h.db, h.now.value, 'America/Los_Angeles')).toBeUndefined();
+    await polling;
+    expect(signalDigest(h.db, h.now.value, 'America/Los_Angeles')?.text).toContain('detector date_not_on_calendar');
+    await google.close();
   });
 });

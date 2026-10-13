@@ -42,8 +42,16 @@ export function signalDigest(db: Db, now: Date, timeZone: string): Digest | unde
     now.toISOString(),
     new Date(now.getTime() - STALE_MS).toISOString(),
   );
+  // a poll makes a mail ready before its detectors run. a heartbeat in that gap would show the mail without its hit
+  // and close it, so the hit would never reach the owner. a mail that the detectors did not check therefore waits
+  // while a poll runs. after a failed detector run no poll runs, so the mail shows unchecked.
   const open = db
-    .prepare("SELECT id, source, account, kind, summary, label, occursAt, detectors, seenAt FROM integration_events WHERE handledAt IS NULL AND state = 'ready' ORDER BY id DESC")
+    .prepare(
+      `SELECT id, source, account, kind, summary, label, occursAt, detectors, seenAt FROM integration_events
+       WHERE handledAt IS NULL AND state = 'ready'
+         AND NOT (source = 'gmail' AND detectors IS NULL AND EXISTS (SELECT 1 FROM runs WHERE trigger = 'poll' AND status = 'running'))
+       ORDER BY id DESC`,
+    )
     .all() as unknown as Row[];
   const filtered = open.filter((row) => quiet(row, now));
   const shown = open.filter((row) => !quiet(row, now)).slice(0, DIGEST_LIMIT);

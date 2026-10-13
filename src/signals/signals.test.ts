@@ -115,6 +115,7 @@ describe('classifier', () => {
     mail(db, 'a', 'please reply by Friday');
     for (let i = 0; i < 4; i++) await classifySignals({ db, slots, logger: silentLogger, runId: 'poll' });
     expect(db.prepare('SELECT labelAttempts FROM integration_events').get()).toEqual({ labelAttempts: 3 });
+    db.prepare("UPDATE runs SET status = 'completed' WHERE id = 'poll'").run();
     expect(signalDigest(db, NOW, TZ)?.shown).toEqual([1]);
   });
 });
