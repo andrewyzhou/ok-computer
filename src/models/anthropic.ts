@@ -155,7 +155,9 @@ function toModelError(err: unknown): ModelError {
   if (err instanceof Anthropic.APIConnectionError) return new ModelError('transient', err.message);
   if (err instanceof Anthropic.APIError) {
     const status = err.status ?? 0;
-    const transient = status === 408 || status === 409 || status === 429 || status >= 500;
+    // an error event inside a stream has no status. its type tells an overload from a bad request.
+    const streamed = status === 0 && (err.type === 'overloaded_error' || err.type === 'api_error');
+    const transient = streamed || status === 408 || status === 409 || status === 429 || status >= 500;
     return new ModelError(transient ? 'transient' : 'request', err.message, status);
   }
   throw err;

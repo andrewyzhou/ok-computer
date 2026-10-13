@@ -175,6 +175,22 @@ describe('createAnthropicClient streaming', () => {
     });
   });
 
+  // an overload can arrive as an error event after the stream started with a 200. it has no status, so it was a
+  // request error, and the run failed without a retry.
+  it('takes an overload inside a stream as transient, and a bad request inside a stream as a request error', async () => {
+    const broken = (type: string) =>
+      createAnthropicClient('test-key', {
+        fetch: async () =>
+          new Response(
+            `event: message_start\ndata: ${JSON.stringify(events[0])}\n\nevent: error\ndata: ${JSON.stringify({ type: 'error', error: { type, message: 'boom' } })}\n\n`,
+            { status: 200, headers: { 'content-type': 'text/event-stream' } },
+          ),
+      });
+    await expect(broken('overloaded_error').complete(request, undefined, () => {})).rejects.toMatchObject({ name: 'ModelError', kind: 'transient' });
+    await expect(broken('api_error').complete(request, undefined, () => {})).rejects.toMatchObject({ kind: 'transient' });
+    await expect(broken('invalid_request_error').complete(request, undefined, () => {})).rejects.toMatchObject({ kind: 'request' });
+  });
+
   it('maps a refused stream and an abort to the same errors as a plain request', async () => {
     const limited = createAnthropicClient('test-key', {
       fetch: async () => new Response(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'slow down' } }), { status: 429 }),

@@ -63,6 +63,8 @@ export function createSlotRunner(deps: SlotRunnerDeps): SlotRunner {
         const call: ModelCall = { ...request, model, maxTokens: slotConfig.maxTokens, effort: slotConfig.effort };
         for (let attempt = 0; attempt < 2; attempt++) {
           const started = performance.now();
+          // a retry, a refusal or the next model throws the old text away, so the draft of the owner clears too.
+          onText?.('');
           try {
             const response = await client.complete(call, signal, onText);
             const cost = costUsd(config.pricing, ref, response.usage);

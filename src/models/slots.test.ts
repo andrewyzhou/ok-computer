@@ -112,6 +112,17 @@ describe('slot runner', () => {
     expect(rows().map((r) => r.stopReason)).toEqual(['refusal', 'end_turn']);
   });
 
+  // the draft shows the text of the current call. text of a refused call must not stay in it.
+  it('clears the text so far before each attempt', async () => {
+    const { runner } = setup(['anthropic/a', 'other/b'], {
+      anthropic: [{ text: 'refused words', stopReason: 'refusal' }],
+      other: [transient(), textStep('ok')],
+    });
+    const seen: string[] = [];
+    await runner.call('main', request, { runId: null, onText: (text) => seen.push(text) });
+    expect(seen).toEqual(['', 'refused words', '', '', 'ok']);
+  });
+
   it('fails when every model refuses', async () => {
     const { runner } = setup(['anthropic/a'], { anthropic: [{ stopReason: 'refusal' }] });
     expect(await runner.call('main', request, { runId: null })).toMatchObject({ ok: false, error: 'anthropic/a refused the request' });
