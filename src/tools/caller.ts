@@ -101,8 +101,9 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
 
   // the preview cuts the text, and a secret that the cut splits no longer matches the redaction. so the redaction
   // comes first. the model sees the redacted text in each later request anyway, because the events are redacted.
+  // the source goes to the row, the taint and the dashboard, and a url can hold a key, so it is redacted too.
   const viewOf = (output: ToolOutput) => {
-    const clean = { ...output, content: redact(output.content) };
+    const clean = { ...output, content: redact(output.content), ...(output.untrustedSource ? { untrustedSource: redact(output.untrustedSource) } : {}) };
     return { clean, view: modelView(clean, deps.newHandle ?? newHandle) };
   };
 
@@ -168,14 +169,14 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       if (rowId !== undefined) {
         db.prepare(
           "UPDATE tool_calls SET outcome = 'late', isError = ?, rawResultBlob = ?, resultHandle = ?, untrustedSource = ? WHERE id = ?",
-        ).run(late.isError ? 1 : 0, rawResultBlob, view.handle ?? null, late.untrustedSource ?? null, rowId);
+        ).run(late.isError ? 1 : 0, rawResultBlob, view.handle ?? null, clean.untrustedSource ?? null, rowId);
       }
       logger.warn('an abandoned tool call finished late', { runId, toolCallId: call.id, tool: call.name });
     } catch (err) {
       logger.error('late tool result trace write failed', { runId, toolCallId: call.id, tool: call.name, err });
     }
-    const taint: TaintSource[] = late.untrustedSource
-      ? [{ source: late.untrustedSource, toolName: call.name, runId, toolCallId: call.id, at: clock().toISOString() }]
+    const taint: TaintSource[] = clean.untrustedSource
+      ? [{ source: clean.untrustedSource, toolName: call.name, runId, toolCallId: call.id, at: clock().toISOString() }]
       : [];
     const text = `${call.name} (call ${call.id}) finished after its run stopped.${late.isError ? ' It failed.' : ''} Result:\n${view.content}`;
     void deps.queue

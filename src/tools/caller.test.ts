@@ -227,6 +227,28 @@ describe('tool caller', () => {
     }
   });
 
+  // a url with a key can be the source. the event and the view were redacted, but the row kept the source as it was.
+  it('redacts a secret in the untrusted source of a result', async () => {
+    const key = `apikey-${'w'.repeat(30)}`;
+    registerSecret(key);
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r1', 'main', 'message', 'main', 'running', 'x')").run();
+    const fetcher = defineTool({
+      name: 'fetcher',
+      description: 'x',
+      input: z.object({}),
+      risk: 'read',
+      run: async () => ({ content: 'page', untrustedSource: `web:https://api.example.test/?key=${key}` }),
+    });
+    const { caller } = createTestCaller(db, createToolRegistry([fetcher]), () => new Date('2026-10-13T03:15:00Z'));
+    const output = await caller.call({ id: 'f1', name: 'fetcher', input: {} }, { runId: 'r1', sessionKey: 'main', allowed: ['fetcher'], signal: new AbortController().signal });
+    const recorded = db.prepare("SELECT untrustedSource, output FROM tool_calls WHERE toolCallId = 'f1'").get() as Record<string, unknown>;
+    for (const stored of [output.untrustedSource, output.content, recorded.untrustedSource, recorded.output]) {
+      expect(String(stored)).toContain('[redacted]');
+      expect(String(stored)).not.toContain('wwwwwwwwww');
+    }
+  });
+
   it('keeps the raw text of a short wrapped result in a blob, so rawResultBlob ?? output gives the raw text', async () => {
     const { call, row, blobs } = setup();
     const view = await call('page', {}, 'r1', 'short-page');

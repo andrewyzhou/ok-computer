@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Config, Slot } from '../config/schema.js';
 import type { Db } from '../db/index.js';
 import type { Logger } from '../observability/logger.js';
-import { redactedJson } from '../observability/redact.js';
+import { redact, redactedJson } from '../observability/redact.js';
 import { costUsd } from './cost.js';
 import {
   ModelError,
@@ -73,13 +73,15 @@ export function createSlotRunner(deps: SlotRunnerDeps): SlotRunner {
           } catch (err) {
             if (!(err instanceof ModelError)) throw err;
             const latencyMs = Math.round(performance.now() - started);
-            record(db, { runId, slot, provider, model, call, error: err.message, cost: null, latencyMs }, clock());
+            // a provider can echo the key in its error body. the text goes to the trace, the run, and the owner's chat.
+            const message = redact(err.message);
+            record(db, { runId, slot, provider, model, call, error: message, cost: null, latencyMs }, clock());
             if (err.kind === 'aborted') return { ok: false, error: 'the run was aborted', aborted: true };
             if (err.kind === 'request') {
               logger.error('model request failed', { slot, ref, runId, status: err.status, err });
-              return { ok: false, error: `${ref} rejected the request: ${err.message}`, aborted: false };
+              return { ok: false, error: `${ref} rejected the request: ${message}`, aborted: false };
             }
-            lastError = `${ref} failed: ${err.message}`;
+            lastError = `${ref} failed: ${message}`;
             logger.warn('transient model error', { slot, ref, runId, attempt, status: err.status, err });
             if (attempt === 0) await sleep(RETRY_DELAY_MS);
           }

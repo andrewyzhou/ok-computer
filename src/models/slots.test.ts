@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { parseConfig } from '../config/load.js';
 import { openDb } from '../db/index.js';
 import { silentLogger } from '../observability/logger.js';
+import { registerSecret } from '../observability/redact.js';
 import { costUsd } from './cost.js';
 import { createFakeClient, textStep, type FakeStep } from './fake.js';
 import { createSlotRunner } from './slots.js';
@@ -27,6 +28,17 @@ function setup(chain: string[], steps: Record<string, FakeStep[]>) {
 const transient = () => new ModelError('transient', 'overloaded', 529);
 
 describe('slot runner', () => {
+  // an openai compatible server can echo the key in a 401 body. the text went to model_calls.error, runs.error and
+  // the reply to the owner.
+  it('redacts a secret in the error of a provider', async () => {
+    const key = `sk-local-${'q'.repeat(30)}`;
+    registerSecret(key);
+    const { runner, rows } = setup(['local/m'], { local: [new ModelError('request', `401 invalid key ${key}`, 401)] });
+    const result = await runner.call('main', request, { runId: null });
+    expect(result.ok ? '' : result.error).toBe('local/m rejected the request: 401 invalid key [redacted]');
+    expect(rows()[0]!.error).toBe('401 invalid key [redacted]');
+  });
+
   it('records each call with its cost', async () => {
     const { runner, clients, rows } = setup(['anthropic/claude-haiku-5-5'], {
       anthropic: [{ text: 'hello', usage: { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 } }],

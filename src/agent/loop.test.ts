@@ -4,6 +4,7 @@ import { createHarness } from '../../test/harness.js';
 import { getRunDetail } from '../dashboard/queries.js';
 import { textStep, toolStep } from '../models/fake.js';
 import { ModelError } from '../models/types.js';
+import { registerSecret } from '../observability/redact.js';
 import { defineTool } from '../tools/registry.js';
 
 describe('agent loop', () => {
@@ -109,6 +110,17 @@ describe('agent loop', () => {
     expect(result.status).toBe('failed');
     expect(result.error).toContain('bad request');
     expect(rows('SELECT status FROM runs')).toEqual([{ status: 'failed' }]);
+  });
+
+  // a provider can echo the key in its error. the error of a run goes to runs.error and to the reply to the owner.
+  it('redacts a secret in the error of a run', async () => {
+    const secret = `sk-echo-${'z'.repeat(30)}`;
+    registerSecret(secret);
+    const { run, rows } = createHarness([new ModelError('request', `401 invalid key ${secret}`, 401)]);
+    const result = await run('hi');
+    expect(result.error).toContain('401 invalid key [redacted]');
+    expect(result.error).not.toContain('zzzzzzzzzz');
+    expect(String(rows('SELECT error FROM runs')[0]!.error)).not.toContain('zzzzzzzzzz');
   });
 
   it('aborts the run when the outer signal fires', async () => {

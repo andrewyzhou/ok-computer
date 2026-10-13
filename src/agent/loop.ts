@@ -5,6 +5,7 @@ import type { Db } from '../db/index.js';
 import { appendEvent, listEvents, type EventInput } from '../events/log.js';
 import type { SlotRunner } from '../models/slots.js';
 import type { Logger } from '../observability/logger.js';
+import { redact } from '../observability/redact.js';
 import type { Clock } from '../time.js';
 import type { ToolCaller } from '../tools/caller.js';
 import type { ToolRegistry } from '../tools/registry.js';
@@ -78,7 +79,9 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
   if (input.signal?.aborted) onOuterAbort();
   input.signal?.addEventListener('abort', onOuterAbort);
 
-  const finish = (status: RunResult['status'], text: string, error?: string): RunResult => {
+  // the error goes to the trace and to the owner's chat, and the text of an error can hold a secret.
+  const finish = (status: RunResult['status'], text: string, raw?: string): RunResult => {
+    const error = raw === undefined ? undefined : redact(raw);
     db.prepare('UPDATE runs SET status = ?, endedAt = ?, error = ? WHERE id = ?').run(
       status,
       clock().toISOString(),
