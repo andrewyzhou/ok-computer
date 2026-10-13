@@ -13,6 +13,7 @@ function setup(results: Array<JobResult['status']> = []) {
   let now = new Date('2026-10-12T17:00:00Z');
   const clock = () => now;
   const executed: string[] = [];
+  const planned: Array<string | null> = [];
   const notices: string[] = [];
   const timers: number[] = [];
   const scheduler = createScheduler({
@@ -22,6 +23,7 @@ function setup(results: Array<JobResult['status']> = []) {
     config: { timeZone: TZ, scheduler: { missedGraceMs: 2 * 60 * MIN } },
     async execute(automation) {
       executed.push(automation.name);
+      planned.push(automation.nextRunAt);
       const status = results.shift() ?? 'completed';
       return status === 'failed' ? { status, error: 'boom' } : { status };
     },
@@ -45,7 +47,7 @@ function setup(results: Array<JobResult['status']> = []) {
   };
   const advance = (ms: number) => (now = new Date(now.getTime() + ms));
   const runs = () => db.prepare('SELECT status, error FROM automation_runs ORDER BY id').all();
-  return { db, scheduler, create, advance, executed, notices, timers, runs, now: () => now };
+  return { db, scheduler, create, advance, executed, planned, notices, timers, runs, now: () => now };
 }
 
 describe('schedules', () => {
@@ -193,5 +195,13 @@ describe('scheduler', () => {
     expect(runs()).toEqual([{ status: 'failed', error: 'boom' }]);
     expect(getAutomation(db, job.id)).toMatchObject({ enabled: false, nextRunAt: null, consecutiveFailures: 0 });
     expect(await scheduler.runNow('missing')).toBeUndefined();
+  });
+
+  it('gives a job that runs now the current time as its planned time', async () => {
+    const { db, scheduler, create, planned } = setup();
+    const job = create({ schedule: { kind: 'every', everyMs: 60 * MIN } });
+    await scheduler.runNow(job.id);
+    expect(planned).toEqual(['2026-10-12T17:00:00.000Z']);
+    expect(getAutomation(db, job.id)?.nextRunAt).toBe('2026-10-12T18:00:00.000Z');
   });
 });

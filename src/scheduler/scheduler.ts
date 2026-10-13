@@ -176,7 +176,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       const automation = getAutomation(db, id);
       if (!automation) return undefined;
       const startedAt = clock();
-      const result = await execute(automation);
+      // some jobs take their day from nextRunAt. for a run now, the planned time is the current time.
+      const result = await execute({ ...automation, nextRunAt: startedAt.toISOString() });
       recordRun(automation, startedAt, result);
       return result;
     },
