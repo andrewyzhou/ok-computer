@@ -19,17 +19,22 @@ export interface OwnerMessenger {
   send(text: string, buttons?: Button[][]): Promise<boolean>;
 }
 
-// proactive messages go to the chat that the owner used last. before the first message, they go to the cli.
+// proactive messages go to the chat that the owner used last. the preferred chat, for example the owner's private
+// telegram chat, comes before the cli, because the cli is often not in front of the owner.
 export function createOwnerMessenger(deps: {
   db: Db;
   channels: Map<string, ChannelAdapter>;
   logger: Logger;
   clock: Clock;
+  preferred?: OwnerChat;
 }): OwnerMessenger {
-  const { db, channels, logger } = deps;
+  const { db, channels, logger, preferred } = deps;
   const chat = (): OwnerChat | undefined => {
     const saved = getSetting<OwnerChat>(db, OWNER_CHAT);
-    if (saved && channels.has(saved.channel)) return saved;
+    const running = (candidate: OwnerChat | undefined) => candidate !== undefined && channels.has(candidate.channel);
+    if (running(saved) && saved!.channel !== 'cli') return saved;
+    if (running(preferred)) return preferred;
+    if (running(saved)) return saved;
     return channels.has('cli') ? { channel: 'cli', chatId: CLI_CHAT_ID } : undefined;
   };
   return {

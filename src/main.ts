@@ -1,6 +1,9 @@
 import { join } from 'node:path';
+import { Bot } from 'grammy';
 import { createApp } from './app.js';
 import { createCliChannel } from './channels/cli.js';
+import { createTelegramChannel, TELEGRAM } from './channels/telegram.js';
+import type { ChannelAdapter } from './channels/types.js';
 import { loadConfig, loadDotEnv, loadSecrets } from './config/load.js';
 import { openDb } from './db/index.js';
 import { createClients } from './models/clients.js';
@@ -19,7 +22,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   const config = loaded.value;
-  const secrets = loadSecrets();
+  const { telegramOwnerId, ...secrets } = loadSecrets();
   Object.values(secrets).forEach(registerSecret);
 
   const logger = createLogger({ dir: join(config.paths.data, 'logs'), consoleLevel: chatMode ? 'warn' : 'info' });
@@ -40,9 +43,23 @@ async function main(): Promise<void> {
     process.exit(0);
   };
 
-  // when piped input ends, the runs that it started finish before the process stops.
-  const cli = createCliChannel({ onClose: () => void app.idle().then(() => stop('cli input ended')) });
-  const app = createApp({ config, db, logger, clients: clients.value, channels: [cli], clock: systemClock });
+  const channels: ChannelAdapter[] = [];
+  const ownerIds: Record<string, string> = {};
+  // npm run chat is the cli only. without a token or an owner id, telegram does not start and the cli still runs.
+  if (!chatMode && secrets.telegramBotToken && telegramOwnerId) {
+    channels.push(createTelegramChannel({ bot: new Bot(secrets.telegramBotToken), logger }));
+    ownerIds[TELEGRAM] = telegramOwnerId;
+  } else if (!chatMode) {
+    logger.info('telegram is off, because TELEGRAM_BOT_TOKEN or TELEGRAM_OWNER_ID is not set');
+  }
+  const telegram = channels.length > 0;
+  // a service has no terminal. the cli then runs only when no other channel runs.
+  if (chatMode || !telegram || process.stdin.isTTY) {
+    // when piped input ends, the runs that it started finish before the process stops. telegram keeps the process up.
+    const onClose = () => (telegram ? logger.info('cli input ended') : void app.idle().then(() => stop('cli input ended')));
+    channels.push(createCliChannel({ onClose }));
+  }
+  const app = createApp({ config, db, logger, clients: clients.value, channels, ownerIds, clock: systemClock });
   process.on('SIGINT', () => void stop('SIGINT'));
   process.on('SIGTERM', () => void stop('SIGTERM'));
 

@@ -48,6 +48,8 @@ export interface AppDeps {
   logger: Logger;
   clients: Record<string, ModelClient>;
   channels: ChannelAdapter[];
+  // the sender id of the owner on each channel other than the cli, for example the telegram user id.
+  ownerIds?: Record<string, string>;
   clock: Clock;
   setTimer?: SetTimer;
   newId?: () => string;
@@ -70,7 +72,10 @@ export function createApp(deps: AppDeps): App {
   const memoryDir = join(config.paths.data, 'memory');
   const memoryPath = join(memoryDir, 'MEMORY.md');
   const channels = new Map(deps.channels.map((channel) => [channel.id, channel]));
-  const owner = createOwnerMessenger({ db, channels, logger, clock });
+  const ownerIds = deps.ownerIds ?? {};
+  // in a private telegram chat, the chat id is the same as the user id of the owner.
+  const [preferred] = Object.entries(ownerIds).map(([channel, chatId]) => ({ channel, chatId }));
+  const owner = createOwnerMessenger({ db, channels, logger, clock, ...(preferred ? { preferred } : {}) });
   const ids = deps.newId ? { newId: deps.newId } : {};
 
   const approvals = createApprovalFlow({
@@ -157,8 +162,8 @@ export function createApp(deps: AppDeps): App {
     queue,
     channels,
     agent,
-    // the cli runs on the owner's own terminal. other channels check their owner id when they are added.
-    isOwner: (message) => message.channel === 'cli',
+    // the cli runs on the owner's own terminal. other channels check the sender id against the owner id.
+    isOwner: (message) => message.channel === 'cli' || ownerIds[message.channel] === message.senderId,
     rememberOwnerChat: owner.remember,
     approvals: approvals.resolve,
     onReset: () => {
