@@ -5,7 +5,9 @@ import { headOf } from '../text.js';
 // the match stops at the next angle bracket, so a tag without its ">" does not take the text after it. the brackets
 // of a tag become square brackets. this keeps the length of the text, so the wrapped text never grows past the
 // limit of the preview.
-const CLOSING_TAG = /<\s*\/\s*(untrusted|system_event|note)\b[^<>]*>?/gi;
+// the summary request puts the transcript in a conversation tag and the old summary in a previous_summary tag, and
+// the summary goes back to the model in a summary tag, so these tags are closed too.
+const CLOSING_TAG = /<\s*\/\s*(untrusted|system_event|note|conversation|previous_summary|summary)\b[^<>]*>?/gi;
 const neutral = (tag: string) => `[${tag.slice(1).replace(/>$/, ']')}`;
 
 // the source names the origin, and the taint keeps it in full. in the wrapper it has a limit, so a long url cannot
