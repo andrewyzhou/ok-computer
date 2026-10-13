@@ -78,7 +78,7 @@ Open the dashboard on this PC (`okc open`), then go to **Google**.
 
 The Google page says what to do for each account.
 
-- **"Google stopped accepting the sign-in of the X account"** (one Telegram message): the access was removed, the password changed, the account was unused for 6 months, or the client has more than 100 sign-ins. Press **Connect** for that account. The app does not retry a dead sign-in and does not send the message again.
+- **"Google stopped accepting the sign-in of the X account"** (one Telegram message): the access was removed, the password changed, the account was unused for 6 months, or the client has more than 100 sign-ins. It also comes when the account was signed in with another OAuth client than the one in `clientId`. Press **Connect** for that account. The app does not retry a dead sign-in and does not send the message again.
 - The message says **Testing mode**: the consent screen is not In production. Publish it (step 1.3) and connect again.
 - **"Google refused the OAuth client"** (one message for all accounts): `clientId` or the secret is wrong, or the client was deleted. Fix `clientId`, restart, and upload the client file again. The accounts work again without a new sign-in.
 - **"has failed 12 times in a row"**: Google or the network failed for about three hours. The app keeps polling and sends this once for each run of failures.

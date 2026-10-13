@@ -45,8 +45,11 @@ export interface ClassifyDeps {
 }
 
 // the classifier sees untrusted text, so its answer can carry only a label from the fixed list for an id of the batch.
-// injected text can at worst give a wrong label. a wrong quiet label cannot hide a detector hit, because the detectors
-// ran before the classifier, and the digest shows every row with a hit.
+// injected text can at worst give wrong labels, but they can land on every mail of its batch, not only on the mail
+// that holds the text. a newsletter or noise label without a detector hit closes a mail as filtered, so one mail can
+// keep the other mails of its batch from the heartbeat. they stay on the signals page with the model call. a wrong
+// quiet label cannot hide a detector hit, because the detectors ran before the classifier, and the digest shows every
+// row with a hit.
 // the request names the tool in the system text and does not force tool_choice, because current models refuse a
 // forced tool choice.
 export async function classifySignals(deps: ClassifyDeps): Promise<{ labeled: number; failed: number }> {
