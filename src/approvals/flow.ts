@@ -2,7 +2,7 @@ import type { Button } from '../channels/types.js';
 import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
-import { redactedJson } from '../observability/redact.js';
+import { redact, redactedJson } from '../observability/redact.js';
 import type { TaintSource } from '../policy/policy.js';
 import { decisionForApproval } from '../policy/store.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
@@ -12,7 +12,7 @@ import { localDay, localTime, type Clock } from '../time.js';
 import type { RequestApproval, ToolCaller } from '../tools/caller.js';
 import type { ToolOutput } from '../tools/registry.js';
 import { wrapIfTainted } from '../tools/untrusted.js';
-import { approvalButtonData, createApproval, getApproval, resolveApproval, type Approval, type Decision, type ResolvedVia } from './store.js';
+import { approvalButtonData, createApproval, getApproval, markUnsent, resolveApproval, type Approval, type Decision, type ResolvedVia } from './store.js';
 
 export interface ApprovalFlowDeps {
   db: Db;
@@ -48,11 +48,12 @@ const FIELD_TAIL = 100;
 // value is cut in its middle with a mark. the dashboard shows the full input. the value is redacted before the cut,
 // because a cut secret no longer matches the redaction. each value is json text, so a line break in a value is
 // escaped and cannot add a false field line or a false "Why:" line.
-export function describeInput(toolName: string, input: unknown): string {
+export function describeInput(toolName: string, input: unknown, full: readonly string[] = []): string {
   const fields: Array<[string, unknown]> =
     input !== null && typeof input === 'object' && !Array.isArray(input) ? Object.entries(input) : [['input', input]];
   const lines = fields.map(([key, value]) => {
     const name = /^[\w.-]+$/.test(key) ? key : oneLine(JSON.stringify(key));
+    if (full.includes(key) && typeof value === 'string') return fullField(name, value);
     const json = redactedJson(value);
     const { text, found } = showInvisible(oneLine(json));
     const marks = warnings(json !== (JSON.stringify(value) ?? 'null'), found, text);
@@ -64,20 +65,31 @@ export function describeInput(toolName: string, input: unknown): string {
   return [toolName, ...lines].join('\n');
 }
 
+// a field in full keeps its lines, so the owner can read a long text. each line starts with a bar, so a line of the
+// value cannot look like a field line or a "Why:" line of the card. other line breaks show as \u codes.
+function fullField(name: string, value: string): string {
+  const text = redact(value);
+  const breaks = text.replace(/[\r\v\f]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);
+  const { text: shown, found } = showInvisible(oneLine(breaks));
+  const block = shown.split('\n').map((line) => `│ ${line}`).join('\n');
+  return `${name} (in full, ${value.length} characters):${warnings(text !== value, found, shown, true)}\n${block}`;
+}
+
 // the card hides a stored secret, but the tool gets the real value. the owner must know that the call sends it.
 // a letter from another script looks like a latin letter, for example a cyrillic о in a domain that an allow rule does
 // not match. the check is on each run of text between spaces and json marks, not on each word, because a word of
 // look-alikes alone ("аррӏе" in "https://аррӏе.example") is in one script. a run without latin letters, for example
 // a sentence in russian, gets no mark. the mark names the code points, so the owner can see the difference.
-function warnings(redacted: boolean, invisible: boolean, text: string): string {
+// a field in full shows each run on its own lines, so it gets one mark with the count and the code points. a quote of
+// each run would repeat the text and make the card too long for one telegram message.
+function warnings(redacted: boolean, invisible: boolean, text: string, full = false): string {
   const marks: string[] = [];
   if (redacted) marks.push('this field holds a secret that the card hides, and the tool gets the real value');
   if (invisible) marks.push('this field holds invisible or direction characters, shown as \\u codes');
-  const mixed = [...new Set(text.split(/[\s",[\]{}]+/u).filter((run) => LATIN.test(run) && OTHER_SCRIPT.test(run)))].slice(0, 3);
-  for (const run of mixed) {
-    const points = [...new Set([...run].filter((char) => OTHER_SCRIPT.test(char)))].slice(0, 5).map(codePoint);
-    marks.push(`"${headOf(run, 60)}" mixes scripts (${points.join(', ')})`);
-  }
+  const mixed = [...new Set(text.split(/[\s",[\]{}]+/u).filter((run) => LATIN.test(run) && OTHER_SCRIPT.test(run)))];
+  const pointsOf = (runs: string[]) => [...new Set(runs.flatMap((run) => [...run].filter((char) => OTHER_SCRIPT.test(char))))].slice(0, 5).map(codePoint);
+  if (full && mixed.length) marks.push(`${mixed.length} ${mixed.length === 1 ? 'run mixes' : 'runs mix'} scripts (${pointsOf(mixed).join(', ')})`);
+  if (!full) for (const run of mixed.slice(0, 3)) marks.push(`"${headOf(run, 60)}" mixes scripts (${pointsOf([run]).join(', ')})`);
   return marks.length ? ` [check: ${marks.join('; ')}]` : '';
 }
 
@@ -114,7 +126,8 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
   return {
     active,
     async request(tool, input, ctx, why) {
-      const summary = describeInput(tool.name, input);
+      const note = tool.taintNote && why.taint.length ? `\n${tool.taintNote}` : '';
+      const summary = describeInput(tool.name, input, tool.fullFields) + note;
       const approval = createApproval(db, { runId: ctx.runId, toolName: tool.name, input, summary, decisionId: why.decisionId }, clock());
       logger.info('approval requested', { approvalId: approval.id, tool: tool.name, runId: ctx.runId });
       // the owner sees the reason with the request. the taint can come from an older run, so the message names it.
@@ -122,6 +135,7 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
       // the model must not tell the owner to press a button that the owner never got.
       if (!reached) {
         logger.warn('the request for an approval did not reach the owner', { approvalId: approval.id, runId: ctx.runId });
+        markUnsent(db, approval.id, clock());
         return {
           content: `${tool.name} needs the owner's approval, and the tool did not run yet. Approval #${approval.id} is pending, but the message to the owner failed, so the owner sees it only on the dashboard or with /approve ${approval.id}. Tell the owner about it when you can. The decision comes back as a system event.`,
         };

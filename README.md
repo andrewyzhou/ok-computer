@@ -13,7 +13,7 @@ It runs on this PC. Its persona files (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, an
 - **Exact scheduling + heartbeat.** Automations fire at exact times; a heartbeat with a configurable interval (15m / 30m / 1h) and quiet hours handles "anything worth telling them?" checks.
 - **Gmail and Calendar by polling every 15 minutes.** No push watcher.
 - **Memory:** daily notes → nightly consolidation ("dreaming") into long-term memory and weekly trend summaries, so goal/productivity history can be tracked without rereading every note.
-- **Skill Workshop:** the agent turns repeated or corrected procedures into skills (`SKILL.md` format).
+- **Skill Workshop:** each morning a review looks at the long or corrected tasks since the last review and can propose a new or changed skill (`SKILL.md` format). You get the full text in Telegram, and only Approve writes it to `skills/` (gitignored, because skills come from your tasks). Move or pause it like any automation ("move the skill review to 8am"). See [DESIGN-NEXT 10.1](docs/DESIGN-NEXT.md#101-decisions-from-phase-4-m3).
 - **Safety in code, not prompts:** narrow tool set, approval buttons for anything that sends/deletes/pays/unsubscribes, email and web content marked untrusted.
 - **Big observability UI:** every turn, tool call, model, token count, cost and error is logged and browsable in a web dashboard.
 - **Language:** TypeScript on Node.js.

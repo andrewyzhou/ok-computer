@@ -83,7 +83,10 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
       let messageId = '';
       for (const [i, part] of parts.entries()) {
         const last = i === parts.length - 1;
-        const sent = await bot.api.sendMessage(out.chatId, part, last && keyboard ? { reply_markup: keyboard } : {});
+        // telegram fetches the first link of a message to show a preview. model text and an approval card can hold a
+        // link that sends data in its query, so the fetch would send the data before the owner reads the message.
+        const options = { link_preview_options: { is_disabled: true }, ...(last && keyboard ? { reply_markup: keyboard } : {}) };
+        const sent = await bot.api.sendMessage(out.chatId, part, options);
         messageId = String(sent.message_id);
       }
       return { messageId };

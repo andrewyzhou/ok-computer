@@ -42,6 +42,8 @@ describe('telegram channel', () => {
     expect(sent[0]).toMatchObject({ chat_id: '777', text: 'a'.repeat(3000) });
     expect(sent[0]).not.toHaveProperty('reply_markup');
     expect(sent.some((p) => 'parse_mode' in p)).toBe(false);
+    // a preview would make telegram fetch a link of the text before the owner reads it.
+    expect(sent.every((p) => JSON.stringify(p.link_preview_options) === '{"is_disabled":true}')).toBe(true);
     expect(sent[1]).toMatchObject({
       text: 'b'.repeat(3000),
       reply_markup: {

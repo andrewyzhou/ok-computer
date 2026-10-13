@@ -47,6 +47,7 @@ export interface JobDeps {
   // the poll of each integration, by its id. a poll reads new items in code, without a model call. only the process
   // that connects the integrations has polls.
   polls?: ReadonlyMap<string, () => Promise<JobResult>>;
+  workshop: (automation: Automation) => Promise<JobResult>;
   signal: AbortSignal;
   newId?: () => string;
 }
@@ -151,6 +152,8 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
         const poll = deps.polls?.get(payload.integration);
         return poll ? poll() : { status: 'skipped', error: deps.polls ? `${payload.integration} has no poll` : 'the chat process does not poll' };
       }
+      case 'workshop':
+        return deps.workshop(automation);
     }
   };
 }

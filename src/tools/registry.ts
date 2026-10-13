@@ -40,6 +40,11 @@ export interface Tool<I = unknown> {
   // the trace columns of a tool that an integration gives, for example 'mcp' and the integration id.
   source?: string;
   serverId?: string;
+  // the input fields that the approval card shows in full and not cut, for example the text of a skill. the tool
+  // limits their length in its schema.
+  fullFields?: readonly string[];
+  // a line that the approval card adds when the session is tainted, for a tool whose effect lasts, such as a skill.
+  taintNote?: string;
   run(input: I, ctx: ToolContext): Promise<ToolOutput>;
 }
 

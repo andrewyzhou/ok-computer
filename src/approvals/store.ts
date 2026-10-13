@@ -82,6 +82,11 @@ export function expireApprovals(db: Db, now: Date): Approval[] {
     .map((row) => getApproval(db, Number(row.id))!);
 }
 
+// a caller can then tell an expiry that the owner chose from an expiry of a card that the owner never got.
+export function markUnsent(db: Db, id: number, now: Date): void {
+  db.prepare('UPDATE approvals SET unsentAt = ? WHERE id = ?').run(now.toISOString(), id);
+}
+
 // only the sweep expires approvals, because it also tells their sessions. an approval past its age cannot be resolved
 // here, and it stays pending until the next sweep.
 export function resolveApproval(db: Db, id: number, decision: Decision, via: ResolvedVia, now: Date): Result<Approval> {
