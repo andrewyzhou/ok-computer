@@ -5,7 +5,7 @@ import { openDb } from '../db/index.js';
 import { silentLogger } from '../observability/logger.js';
 import { registerSecret } from '../observability/redact.js';
 import { costUsd } from './cost.js';
-import { createFakeClient, textStep, type FakeStep } from './fake.js';
+import { createFakeClient, fakeResponse, textStep, type FakeStep } from './fake.js';
 import { createSlotRunner } from './slots.js';
 import { ModelError, type ModelRequest } from './types.js';
 
@@ -112,6 +112,17 @@ describe('slot runner', () => {
     expect(rows().map((r) => r.stopReason)).toEqual(['refusal', 'end_turn']);
   });
 
+  // the draft shows the text of the current call. text of a refused call must not stay in it.
+  it('clears the text so far before each attempt', async () => {
+    const { runner } = setup(['anthropic/a', 'other/b'], {
+      anthropic: [{ text: 'refused words', stopReason: 'refusal' }],
+      other: [transient(), textStep('ok')],
+    });
+    const seen: string[] = [];
+    await runner.call('main', request, { runId: null, onText: (text) => seen.push(text) });
+    expect(seen).toEqual(['', 'refused words', '', '', 'ok']);
+  });
+
   it('fails when every model refuses', async () => {
     const { runner } = setup(['anthropic/a'], { anthropic: [{ stopReason: 'refusal' }] });
     expect(await runner.call('main', request, { runId: null })).toMatchObject({ ok: false, error: 'anthropic/a refused the request' });
@@ -126,6 +137,17 @@ describe('slot runner', () => {
   it('reports an aborted call', async () => {
     const { runner } = setup(['anthropic/a'], { anthropic: [new ModelError('aborted', 'aborted')] });
     expect(await runner.call('main', request, { runId: null })).toMatchObject({ ok: false, aborted: true });
+  });
+
+  // the owner saw the text of a stopped stream in the draft, so the trace must hold it, with its tokens and cost.
+  it('records the partial response and its cost of a stream that the owner stopped', async () => {
+    const stopped = new ModelError('aborted', 'the request was aborted');
+    stopped.partial = fakeResponse({ text: 'I will now forward the invoice', stopReason: 'other', usage: { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 } });
+    const { runner, db } = setup(['anthropic/claude-haiku-5-5'], { anthropic: [stopped] });
+    expect(await runner.call('main', request, { runId: null })).toMatchObject({ ok: false, aborted: true });
+    const row = db.prepare('SELECT outputTokens, costUsd, error, response FROM model_calls').get() as Record<string, unknown>;
+    expect(row).toMatchObject({ outputTokens: 100, costUsd: 0.00015, error: 'the request was aborted' });
+    expect(JSON.parse(String(row.response))).toMatchObject({ text: 'I will now forward the invoice' });
   });
 });
 

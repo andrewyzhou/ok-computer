@@ -8,7 +8,7 @@ import type { Logger } from '../observability/logger.js';
 import { redact } from '../observability/redact.js';
 import type { Clock } from '../time.js';
 import type { ToolCaller } from '../tools/caller.js';
-import type { ToolRegistry } from '../tools/registry.js';
+import { TOOL_CALL, type ToolRegistry } from '../tools/registry.js';
 import { repairSession } from './recovery.js';
 import { buildVolatilePrompt } from './system-prompt.js';
 
@@ -45,6 +45,10 @@ export interface RunInput {
   signal?: AbortSignal;
   // the memory flush before a compaction runs with this flag, so it cannot start a second compaction.
   noCompaction?: boolean;
+  // onText gets the text of the current model call while it streams. a channel shows it as a draft.
+  onText?: (text: string) => void;
+  // onActivity gets the names of the tools that run now, and undefined when they end. a channel shows them.
+  onActivity?: (tools: string | undefined) => void;
 }
 
 export interface RunResult {
@@ -143,7 +147,11 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
         tools: toolSpecs,
         ...(compaction ? { compaction } : {}),
       });
-      const result = await slots.call(input.slot, request, { runId, signal: abort.signal });
+      const result = await slots.call(input.slot, request, {
+        runId,
+        signal: abort.signal,
+        ...(input.onText ? { onText: input.onText } : {}),
+      });
       if (!result.ok) {
         return finish(result.aborted ? 'aborted' : 'failed', '', abortReason(abort.signal) ?? result.error);
       }
@@ -166,13 +174,19 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
 
       // every tool call gets a result, also when the reply was cut. a call without a result makes the next request fail.
       const callCtx = { runId, sessionKey: input.sessionKey, allowed: input.allowedTools, signal: abort.signal };
+      // a tool_call names the integration tool that it calls. the owner knows that name.
+      const shown = response.toolCalls.map((call) => {
+        const inner = call.name === TOOL_CALL ? (call.input as { name?: unknown }).name : undefined;
+        return typeof inner === 'string' ? inner : call.name;
+      });
+      if (response.stopReason === 'tool_use') input.onActivity?.([...new Set(shown)].join(', '));
       const outputs = await Promise.all(
         response.toolCalls.map((call) =>
           response.stopReason === 'tool_use'
             ? deps.caller.call(call, callCtx)
             : deps.caller.notRun(call, callCtx, 'this tool call was not run because the reply was cut off'),
         ),
-      );
+      ).finally(() => input.onActivity?.(undefined));
       response.toolCalls.forEach((call, i) => {
         const output = outputs[i]!;
         append({

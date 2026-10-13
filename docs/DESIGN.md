@@ -287,9 +287,17 @@ interface ChannelAdapter {
   start(onMessage: (m: InboundMessage) => void): Promise<void>;
   stop(): Promise<void>;
   send(out: OutboundMessage): Promise<{ messageId: string }>;
+  progress?(message: InboundMessage, stop: () => void): ReplyProgress;   // phase 2 M4
 }
-interface OutboundMessage { chatId: string; text: string; buttons?: Button[][] }
+interface OutboundMessage {
+  chatId: string; text: string; buttons?: Button[][];
+  markdown?: boolean;   // the text is model markdown (phase 2 M4)
+  details?: string;     // a block that the owner opens, e.g. the exact input of an approval (phase 2 M4)
+  runId?: string;       // the run that wrote the text, for the log
+}
 ```
+
+- Phase 2 M4 changes the Telegram adapter: rich markdown with a sanitizer, signed buttons, drafts, reactions and commands. See DESIGN-NEXT 7.1. The cli prints `details` under the text and ignores `markdown`.
 
 - **cli**: a terminal chat for development (`npm run chat`). It counts as the owner. Buttons show as numbered choices.
 - **telegram**: grammY with long polling. Owner is set by `TELEGRAM_OWNER_ID`. Split messages over 4,096 characters at paragraph boundaries. Escape formatting safely, or send plain text. Inline keyboard buttons for approvals. If `TELEGRAM_BOT_TOKEN` is missing, the adapter does not start and the log says so. The process still runs with the cli channel.

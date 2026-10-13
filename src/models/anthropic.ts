@@ -28,13 +28,27 @@ export function createAnthropicClient(apiKey: string, options: { fetch?: typeof 
   const client = new Anthropic({ apiKey, maxRetries: 0, ...options });
   return {
     provider: ANTHROPIC,
-    async complete(call, signal) {
+    async complete(call, signal, onText) {
       const started = performance.now();
       let message: BetaMessage;
+      // the message that a stream built so far. the sdk clears its own copy when a stream ends without message_stop.
+      let partial: BetaMessage | undefined;
       try {
-        message = await client.beta.messages.create(toAnthropicParams(call), { signal });
+        // a stream sends the same body with stream: true, and finalMessage gives the same message as create.
+        if (onText) {
+          const stream = client.beta.messages.stream(toAnthropicParams(call), { signal });
+          let text = '';
+          stream.on('text', (delta) => onText((text += delta)));
+          stream.on('streamEvent', (_event, snapshot) => (partial = snapshot));
+          message = await stream.finalMessage();
+        } else {
+          message = await client.beta.messages.create(toAnthropicParams(call), { signal });
+        }
       } catch (err) {
-        throw toModelError(err);
+        const error = toModelError(err, signal);
+        // the partial message holds the usage of message_start and of the last message_delta.
+        if (partial) error.partial = fromAnthropicMessage(partial, Math.round(performance.now() - started));
+        throw error;
       }
       return fromAnthropicMessage(message, Math.round(performance.now() - started));
     },
@@ -142,13 +156,18 @@ function toStopReason(reason: BetaStopReason | null): StopReason {
   }
 }
 
-function toModelError(err: unknown): ModelError {
-  if (err instanceof Anthropic.APIUserAbortError) return new ModelError('aborted', 'the request was aborted');
+function toModelError(err: unknown, signal: AbortSignal | undefined): ModelError {
+  if (err instanceof Anthropic.APIUserAbortError || signal?.aborted) return new ModelError('aborted', 'the request was aborted');
   if (err instanceof Anthropic.APIConnectionError) return new ModelError('transient', err.message);
   if (err instanceof Anthropic.APIError) {
     const status = err.status ?? 0;
-    const transient = status === 408 || status === 409 || status === 429 || status >= 500;
+    // an error event inside a stream has no status. its type tells an overload from a bad request.
+    const streamed = status === 0 && (err.type === 'overloaded_error' || err.type === 'api_error');
+    const transient = streamed || status === 408 || status === 409 || status === 429 || status >= 500;
     return new ModelError(transient ? 'transient' : 'request', err.message, status);
   }
+  // a stream that the network cut, that ended before message_stop, or that sent bad json gives the base error of the
+  // sdk. the request can go again, and the slot runner then records the failed call.
+  if (err instanceof Anthropic.AnthropicError) return new ModelError('transient', err.message);
   throw err;
 }

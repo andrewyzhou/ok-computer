@@ -6,6 +6,7 @@ import { createTelegramChannel, TELEGRAM } from './channels/telegram.js';
 import type { ChannelAdapter } from './channels/types.js';
 import { loadConfig, loadDotEnv, loadSecrets } from './config/load.js';
 import { openDb } from './db/index.js';
+import { createLoginCodes } from './dashboard/login.js';
 import { startDashboard, type RunningDashboard } from './dashboard/server.js';
 import { loadIntegrations } from './integrations/config.js';
 import { createKeyringStore } from './integrations/secrets.js';
@@ -63,7 +64,7 @@ async function main(): Promise<void> {
   const ownerIds: Record<string, string> = {};
   // npm run chat is the cli only. without a token or an owner id, telegram does not start and the cli still runs.
   if (!chatMode && secrets.telegramBotToken && telegramOwnerId) {
-    channels.push(createTelegramChannel({ bot: new Bot(secrets.telegramBotToken), logger }));
+    channels.push(createTelegramChannel({ bot: new Bot(secrets.telegramBotToken), ownerId: telegramOwnerId, logger }));
     ownerIds[TELEGRAM] = telegramOwnerId;
   } else if (!chatMode) {
     logger.info('telegram is off, because TELEGRAM_BOT_TOKEN or TELEGRAM_OWNER_ID is not set');
@@ -75,6 +76,8 @@ async function main(): Promise<void> {
     const onClose = () => (telegram ? logger.info('cli input ended') : void app.idle().then(() => stop('cli input ended')));
     channels.push(createCliChannel({ onClose }));
   }
+  // the sign-in codes live in the process that runs the dashboard. npm run chat runs no dashboard.
+  const loginCodes = !chatMode && secrets.dashboardToken && config.dashboard.publicUrl ? createLoginCodes(systemClock) : undefined;
   const app = createApp({
     config,
     db,
@@ -84,10 +87,12 @@ async function main(): Promise<void> {
     ownerIds,
     clock: systemClock,
     rules: rules.value,
+    policyPath: 'okc.policy.json',
     integrations: integrations.value,
     ...(integrations.value.length ? { secrets: createKeyringStore() } : {}),
     connectIntegrations: !chatMode,
     background: !chatMode,
+    ...(loginCodes ? { loginCodes } : {}),
   });
   process.on('SIGINT', () => void stop('SIGINT'));
   process.on('SIGTERM', () => void stop('SIGTERM'));
@@ -96,7 +101,7 @@ async function main(): Promise<void> {
   // npm run chat is the cli only. a dashboard that cannot start does not stop the agent.
   if (!chatMode) {
     try {
-      const token = secrets.dashboardToken ? { token: secrets.dashboardToken } : {};
+      const token = secrets.dashboardToken ? { token: secrets.dashboardToken, ...(loginCodes ? { codes: loginCodes } : {}) } : {};
       dashboard = await startDashboard({ db, config, clock: systemClock, logger, app, port: config.dashboard.port, ...token });
       logger.info('dashboard started', { url: `http://127.0.0.1:${dashboard.port}` });
     } catch (err) {

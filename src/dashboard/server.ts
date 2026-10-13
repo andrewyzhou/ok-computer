@@ -1,9 +1,11 @@
+import { timingSafeEqual } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { join } from 'node:path';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono, type Context } from 'hono';
+import { getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import type { App } from '../app.js';
@@ -36,6 +38,7 @@ import {
   toMcpMessage,
 } from './queries.js';
 import { integrationDetail, summaryOf } from './integrations.js';
+import { createSessions, LOCAL_SESSION_MS, LOGIN_PAGE, REMOTE_SESSION_MS, type LoginCodes } from './login.js';
 import { createFeed } from './stream.js';
 import type { ContextView, MemoryFile, Meta } from './types.js';
 
@@ -48,13 +51,26 @@ export interface DashboardDeps {
   // with a token, every api request must give it. the browser gives it in the query, because EventSource has no
   // headers.
   token?: string;
+  // the codes that /dashboard sends. without them, only the token signs in.
+  codes?: LoginCodes;
   pollMs?: number;
   webDir?: string;
 }
 
 const WEB_DIR = join(import.meta.dirname, '../../web/dist');
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
+const SESSION_COOKIE = 'okc_session';
 
+// the compare takes the same time for each wrong value of one length, so the time does not show the token.
+function same(given: string | undefined, expected: string | undefined): boolean {
+  if (given === undefined || expected === undefined) return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// a login gives a code from /dashboard or the token. the body is json, so a form on another site cannot send it.
+const loginBody = z.union([z.object({ code: z.string().min(1).max(64) }).strict(), z.object({ token: z.string().min(1).max(512) }).strict()]);
 const enabledBody = z.object({ enabled: z.boolean() });
 const checklistBody = z.object({ checklist: z.string().max(10_000) });
 const decisionBody = z.object({ decision: z.enum(['approve', 'deny']) });
@@ -72,13 +88,27 @@ export function createDashboard(deps: DashboardDeps): Hono {
   const blobs = createBlobStore(db, join(config.paths.data, 'blobs'), clock);
   const server = new Hono();
 
+  // each sign-in gets a random id (see login.ts). a restart or a new token signs out every browser. an id of one host
+  // does not open the other host.
+  const localSessions = createSessions(clock, LOCAL_SESSION_MS);
+  const remoteSessions = createSessions(clock, REMOTE_SESSION_MS);
+  // tailscale serve forwards the requests of the tailnet name. that name is accepted only with a token, so the
+  // dashboard is never open on the tailnet without one.
+  const remoteHost = deps.token && config.dashboard.publicUrl ? new URL(config.dashboard.publicUrl).hostname : undefined;
+  if (config.dashboard.publicUrl && !deps.token) logger.warn('dashboard.publicUrl is ignored, because DASHBOARD_TOKEN is not set');
+
   // a web page in the browser can send requests to a loopback port. the host check stops dns rebinding, and the
   // json check makes the browser ask for cors permission before a write, which this server never gives.
   server.use(async (c, next) => {
-    if (!LOOPBACK.has(new URL(c.req.url).hostname)) return c.text('forbidden', 403);
+    const host = new URL(c.req.url).hostname;
+    if (!LOOPBACK.has(host) && host !== remoteHost) return c.text('forbidden', 403);
     if (c.req.path.startsWith('/api/')) {
+      // the login is the one api request that comes before a sign-in. it checks its own code or token.
+      const open = c.req.path === '/api/login';
       const given = c.req.header('authorization')?.replace(/^Bearer /, '') ?? c.req.query('token');
-      if (deps.token && given !== deps.token) return c.json({ error: 'unauthorized' }, 401);
+      const cookie = getCookie(c, SESSION_COOKIE);
+      const signedIn = (given !== undefined && same(given, deps.token)) || (host === remoteHost ? remoteSessions : localSessions).valid(cookie);
+      if (deps.token && !signedIn && !open) return c.json({ error: 'unauthorized' }, 401);
       const write = c.req.method !== 'GET' && c.req.method !== 'HEAD';
       if (write && !c.req.header('content-type')?.startsWith('application/json')) {
         return c.json({ error: 'send a json body' }, 415);
@@ -92,6 +122,32 @@ export function createDashboard(deps: DashboardDeps): Hono {
     return parsed.success ? parsed.data : undefined;
   };
   const notFound = (c: Context, what: string) => c.json({ error: `${what} not found` }, 404);
+
+  // the owner signs in one time with a code or the token. the token then never goes into a url, a bookmark or the
+  // history.
+  server.get('/login', (c) => (deps.token ? c.html(LOGIN_PAGE) : c.redirect('/')));
+  server.post('/api/login', async (c) => {
+    const given = await body(c, loginBody);
+    const host = new URL(c.req.url).hostname;
+    const valid = given !== undefined && ('code' in given ? deps.codes?.spend(given.code) === true : same(given.token, deps.token));
+    if (!deps.token || !given || !valid) {
+      logger.warn('dashboard login refused', { host });
+      return c.json({ error: 'that code or token does not work' }, 401);
+    }
+    // tailscale serve forwards plain http, so the public host or the forwarded protocol tells that the browser uses https.
+    const https = host === remoteHost || c.req.header('x-forwarded-proto') === 'https' || new URL(c.req.url).protocol === 'https:';
+    // a cookie of a sign-in on the pc goes to every local port, so it is short and ends with the browser (see login.ts).
+    const remote = host === remoteHost;
+    setCookie(c, SESSION_COOKIE, (remote ? remoteSessions : localSessions).issue(), {
+      httpOnly: true,
+      sameSite: 'Strict',
+      path: '/',
+      ...(remote ? { maxAge: REMOTE_SESSION_MS / 1000 } : {}),
+      secure: https,
+    });
+    logger.info('dashboard login', { host, via: 'code' in given ? 'code' : 'token' });
+    return c.json({ ok: true });
+  });
 
   server.get('/api/meta', (c) => c.json({ timeZone: tz, now: clock().toISOString() } satisfies Meta));
   server.get('/api/overview', (c) => c.json(overview(db, clock(), config)));
@@ -295,7 +351,9 @@ export function startDashboard(deps: DashboardDeps & { port: number }): Promise<
   return new Promise((resolve, reject) => {
     // by default the server puts its own Response class in place of the global one. a real fetch result then fails
     // `instanceof Response` in this process, and the mcp sdk misreads the error of a failed token refresh.
-    const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: deps.port, overrideGlobalObjects: false }, (info) =>
+    const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: deps.port, overrideGlobalObjects: false }, (info) => {
+      // a code from /dashboard works only here, so the codes go out only once this server listens.
+      deps.codes?.listening();
       resolve({
         port: info.port,
         close: () =>
@@ -304,8 +362,8 @@ export function startDashboard(deps: DashboardDeps & { port: number }): Promise<
             server.close(() => done());
             (server as Server).closeAllConnections();
           }),
-      }),
-    );
+      });
+    });
     server.once('error', reject);
   });
 }

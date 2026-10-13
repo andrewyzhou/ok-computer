@@ -176,7 +176,7 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
     // the answer comes from the event log, because one failed trace write must not drop the owner's notification.
     const answer = succeededCalls(db, sessionKey, runId, 'heartbeat_respond').at(-1) as Respond | undefined;
     if (answer?.notify && answer.text) {
-      await owner.send(answer.text);
+      await owner.send(answer.text, undefined, { markdown: true, runId });
       // the notification can repeat untrusted content that the heartbeat read, so it carries that taint, and its text
       // is wrapped.
       const taint = sessionTaint(db, sessionKey);

@@ -12,6 +12,7 @@ import { localDay, localTime, type Clock } from '../time.js';
 import type { RequestApproval, ToolCaller } from '../tools/caller.js';
 import type { ToolOutput } from '../tools/registry.js';
 import { wrapIfTainted } from '../tools/untrusted.js';
+import { alwaysAllowable, alwaysButtonData } from './always.js';
 import { approvalButtonData, createApproval, getApproval, markUnsent, resolveApproval, type Approval, type Decision, type ResolvedVia } from './store.js';
 
 export interface ApprovalFlowDeps {
@@ -26,6 +27,10 @@ export interface ApprovalFlowDeps {
   // an approved call stops after this time, as a background run does. so a stuck tool cannot hold its session.
   timeoutMs: number;
   timeZone: string;
+  // with this flag the first card of an external tool has an "always allow" button. a tool with needsApproval never
+  // gets it, because a rule cannot change it. a write tool never gets it, because its allow rule would also hold in a
+  // session that read outside content.
+  alwaysAllow?: boolean;
 }
 
 export interface ApprovalFlow {
@@ -36,7 +41,7 @@ export interface ApprovalFlow {
   active: ReadonlySet<number>;
   // card gives the stored request of an approval with its buttons. the assistant can send a false card with the same
   // words and the id of a real approval, so a typed /approve shows this card, and only a button runs the call.
-  card(id: number): { text: string; buttons?: Button[][] };
+  card(id: number): { text: string; buttons?: Button[][]; details?: string };
 }
 
 const SUMMARY_LIMIT = 500;
@@ -47,16 +52,18 @@ const FIELD_TAIL = 100;
 // the owner approves what the summary shows, so the summary shows each field of the input on its own line. a long
 // value is cut in its middle with a mark. the dashboard shows the full input. the value is redacted before the cut,
 // because a cut secret no longer matches the redaction. each value is json text, so a line break in a value is
-// escaped and cannot add a false field line or a false "Why:" line.
+// escaped and cannot add a false field line or a false "Why:" line. the model also writes the keys, so each key is
+// redacted too.
 export function describeInput(toolName: string, input: unknown, full: readonly string[] = []): string {
   const fields: Array<[string, unknown]> =
     input !== null && typeof input === 'object' && !Array.isArray(input) ? Object.entries(input) : [['input', input]];
   const lines = fields.map(([key, value]) => {
-    const name = /^[\w.-]+$/.test(key) ? key : oneLine(JSON.stringify(key));
-    if (full.includes(key) && typeof value === 'string') return fullField(name, value);
+    const shown = redact(key);
+    const name = /^[\w.-]+$/.test(shown) ? shown : oneLine(JSON.stringify(shown));
+    if (full.includes(key) && typeof value === 'string') return fullField(name, value, shown !== key);
     const json = redactedJson(value);
     const { text, found } = showInvisible(oneLine(json));
-    const marks = warnings(json !== (JSON.stringify(value) ?? 'null'), found, text);
+    const marks = warnings(shown !== key || json !== (JSON.stringify(value) ?? 'null'), found, text);
     if (text.length <= FIELD_HEAD + FIELD_TAIL) return `${name}: ${text}${marks}`;
     const head = headOf(text, FIELD_HEAD);
     const tail = tailOf(text, FIELD_TAIL);
@@ -67,12 +74,12 @@ export function describeInput(toolName: string, input: unknown, full: readonly s
 
 // a field in full keeps its lines, so the owner can read a long text. each line starts with a bar, so a line of the
 // value cannot look like a field line or a "Why:" line of the card. other line breaks show as \u codes.
-function fullField(name: string, value: string): string {
+function fullField(name: string, value: string, keyRedacted = false): string {
   const text = redact(value);
   const breaks = text.replace(/[\r\v\f]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);
   const { text: shown, found } = showInvisible(oneLine(breaks));
   const block = shown.split('\n').map((line) => `│ ${line}`).join('\n');
-  return `${name} (in full, ${value.length} characters):${warnings(text !== value, found, shown, true)}\n${block}`;
+  return `${name} (in full, ${value.length} characters):${warnings(keyRedacted || text !== value, found, shown, true)}\n${block}`;
 }
 
 // the card hides a stored secret, but the tool gets the real value. the owner must know that the call sends it.
@@ -131,7 +138,11 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
       const approval = createApproval(db, { runId: ctx.runId, toolName: tool.name, input, summary, decisionId: why.decisionId }, clock());
       logger.info('approval requested', { approvalId: approval.id, tool: tool.name, runId: ctx.runId });
       // the owner sees the reason with the request. the taint can come from an older run, so the message names it.
-      const reached = await deps.owner.send(cardText(approval, why.reason, why.taint, ctx.timeZone), buttonsFor(approval.id));
+      const reached = await deps.owner.send(
+        cardText(approval, why.reason, why.taint, ctx.timeZone),
+        buttonsFor(approval.id, deps.alwaysAllow === true && alwaysAllowable(tool)),
+        { details: exactInput(input) },
+      );
       // the model must not tell the owner to press a button that the owner never got.
       if (!reached) {
         logger.warn('the request for an approval did not reach the owner', { approvalId: approval.id, runId: ctx.runId });
@@ -151,7 +162,11 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
       if (approval.status !== 'pending') return { text: `Approval #${id} is ${approval.status}, so it cannot be approved now.` };
       const decision = decisionForApproval(db, id);
       const card = cardText(approval, decision?.reason ?? 'the policy asks the owner', decision?.taint ?? [], deps.timeZone);
-      return { text: `This is the real request #${id}. Check each field, then press Approve.\n\n${card}`, buttons: buttonsFor(id) };
+      return {
+        text: `This is the real request #${id}. Check each field, then press Approve.\n\n${card}`,
+        buttons: buttonsFor(id, false),
+        details: exactInput(approval.input),
+      };
     },
 
     async resolve(id, decision, via) {
@@ -232,12 +247,17 @@ function cardText(approval: Approval, reason: string, taint: TaintSource[], time
   return lines.join('\n');
 }
 
-const buttonsFor = (id: number): Button[][] => [
+const buttonsFor = (id: number, always: boolean): Button[][] => [
   [
     { text: 'Approve', data: approvalButtonData(id, 'approve') },
     { text: 'Deny', data: approvalButtonData(id, 'deny') },
   ],
+  ...(always ? [[{ text: 'Always allow…', data: alwaysButtonData(id) }]] : []),
 ];
+
+// the block that the owner opens shows the exact input, redacted as the dashboard shows it. the summary above it
+// keeps the marks for invisible characters and mixed scripts.
+const exactInput = (input: unknown) => JSON.stringify(JSON.parse(redactedJson(input)), null, 2);
 
 // the run id is long, so the owner gets its first 8 characters, as the dashboard shows it.
 function taintText(taint: TaintSource, timeZone: string): string {

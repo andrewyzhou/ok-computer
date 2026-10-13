@@ -38,14 +38,14 @@ function setup(steps: FakeStep[], start = '2026-10-12T09:00:00-07:00') {
     logger: silentLogger,
     clients: { fake: model },
     channels: [
-      createTelegramChannel({ bot: telegram.bot, logger: silentLogger, clock: () => now }),
+      createTelegramChannel({ bot: telegram.bot, ownerId: String(OWNER), logger: silentLogger, clock: () => now }),
       createCliChannel({ input: new PassThrough(), output: cliOut, clock: () => now }),
     ],
     ownerIds: { telegram: String(OWNER) },
     clock: () => now,
     setTimer: () => () => {},
   });
-  const texts = () => telegram.sent().map((p) => `${p.chat_id}: ${String(p.text)}`);
+  const texts = () => telegram.messages().map((m) => `${m.chatId}: ${m.text}`);
   return {
     app,
     db,
@@ -93,12 +93,12 @@ describe('telegram through the app', () => {
     await t.app.stop();
   });
 
-  it('sends proactive messages to the owner telegram chat, not the cli, and splits long replies', async () => {
+  it('sends proactive messages to the owner telegram chat, not the cli, and a long reply as one rich message', async () => {
     const long = `${'a'.repeat(3000)}\n\n${'b'.repeat(3000)}`;
     const t = setup([textStep(long)]);
     await t.app.start();
     await t.at('2026-10-12T19:00:00-07:00');
-    expect(t.texts()).toEqual([`${OWNER}: ${'a'.repeat(3000)}`, `${OWNER}: ${'b'.repeat(3000)}`]);
+    expect(t.texts()).toEqual([`${OWNER}: ${long}`]);
     expect(t.cliPrinted()).toBe('');
     await t.app.stop();
   });

@@ -1,5 +1,6 @@
 import { Bot, type Transformer } from 'grammy';
 import type { Update } from 'grammy/types';
+import { buttonSigner } from '../src/channels/telegram-buttons.js';
 
 export interface ApiCall {
   method: string;
@@ -13,7 +14,17 @@ export function textUpdate(from: number, text: string, chat = from): Omit<Update
   return { message: { message_id: 1, date: 0, chat: privateChat(chat), from: person(from), text } } as Omit<Update, 'update_id'>;
 }
 
+export const FAKE_BOT_TOKEN = '123456:TEST-TOKEN';
+// the data of a button that the bot sent, with its mark.
+export const signed = (data: string) => buttonSigner(FAKE_BOT_TOKEN).sign(data);
+
+// a press of a button that the bot sent. the data gets the mark that the adapter added when it sent the button.
 export function buttonUpdate(from: number, data: string, chat = from): Omit<Update, 'update_id'> {
+  return rawButtonUpdate(from, signed(data), chat);
+}
+
+// a press with exactly this data, for example of a button that the model wrote into rich markdown.
+export function rawButtonUpdate(from: number, data: string, chat = from): Omit<Update, 'update_id'> {
   return {
     callback_query: {
       id: `cb-${data}`,
@@ -25,20 +36,32 @@ export function buttonUpdate(from: number, data: string, chat = from): Omit<Upda
   } as Omit<Update, 'update_id'>;
 }
 
+export function stopUpdate(chat: number, draftId: number): Omit<Update, 'update_id'> {
+  return { stopped_message_generation: { chat: privateChat(chat), draft_id: draftId } } as Omit<Update, 'update_id'>;
+}
+
 // the fake bot api answers every call in memory. getUpdates gives the pushed updates and waits for more until
-// polling stops, so tests drive the real long polling loop without a network.
+// polling stops, so tests drive the real long polling loop without a network. a test can make telegram refuse a
+// format: a call that refuse() names gets a 400, as telegram gives for markdown or html that it cannot parse.
 export function createFakeTelegram() {
   const calls: ApiCall[] = [];
   const updates: Update[] = [];
   let nextUpdateId = 1;
   let nextMessageId = 100;
   let wake: (() => void) | undefined;
+  // the rule gives the error code of a refused call, or false.
+  let refuse: (call: ApiCall) => number | false = () => false;
 
   const transformer: Transformer = async (_prev, method, payload, signal) => {
     const body = (payload ?? {}) as Record<string, unknown>;
     calls.push({ method, payload: body });
     const ok = (result: unknown) => ({ ok: true as const, result }) as never;
+    const code = refuse({ method, payload: body });
+    if (code === 429) return { ok: false as const, error_code: 429, description: 'Too Many Requests: retry after 3', parameters: { retry_after: 3 } } as never;
+    if (code) return { ok: false as const, error_code: code, description: code === 400 ? "Bad Request: can't parse entities" : 'Internal Server Error' } as never;
     switch (method) {
+      case 'sendRichMessage':
+        return ok({ message_id: nextMessageId++, date: 0, chat: { id: Number(body.chat_id), type: 'private' } });
       case 'getUpdates': {
         const offset = Number(body.offset ?? 0);
         while (!updates.some((u) => u.update_id >= offset)) {
@@ -58,7 +81,7 @@ export function createFakeTelegram() {
     }
   };
 
-  const bot = new Bot('123456:TEST-TOKEN', {
+  const bot = new Bot(FAKE_BOT_TOKEN, {
     botInfo: {
       id: 1,
       is_bot: true,
@@ -77,6 +100,14 @@ export function createFakeTelegram() {
     bot,
     calls,
     sent: () => calls.filter((c) => c.method === 'sendMessage').map((c) => c.payload),
+    // the messages that reached the chat in order, plain or rich.
+    messages: () =>
+      calls
+        .filter((c) => c.method === 'sendMessage' || c.method === 'sendRichMessage')
+        .map((c) => ({ chatId: String(c.payload.chat_id), text: String(c.payload.text ?? (c.payload.rich_message as { markdown: string }).markdown) })),
+    refuse(rule: (call: ApiCall) => number | false) {
+      refuse = rule;
+    },
     push(update: Omit<Update, 'update_id'>) {
       updates.push({ ...update, update_id: nextUpdateId++ } as Update);
       wake?.();

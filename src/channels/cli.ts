@@ -51,7 +51,8 @@ export function createCliChannel(options: CliOptions = {}): ChannelAdapter {
       const buttons = (out.buttons ?? []).flat();
       choices = buttons;
       const lines = buttons.map((button, i) => `  ${i + 1}. ${button.text}`);
-      output.write(`\nokc> ${out.text}\n${lines.length ? lines.join('\n') + '\n' : ''}\n`);
+      const details = out.details === undefined ? '' : `\n${out.details}`;
+      output.write(`\nokc> ${out.text}${details}\n${lines.length ? lines.join('\n') + '\n' : ''}\n`);
       return { messageId: String(++sent) };
     },
   };

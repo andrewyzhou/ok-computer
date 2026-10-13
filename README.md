@@ -32,6 +32,10 @@ It runs on this PC. Its persona files (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, an
 
 To connect MCP servers (optional), see [docs/setup/integrations.md](docs/setup/integrations.md). For Slack, see [docs/setup/slack.md](docs/setup/slack.md).
 
+To open the dashboard from your phone or laptop (optional), see [docs/setup/tailscale.md](docs/setup/tailscale.md).
+
+To check the Telegram v2 features against the real bot once, run `node --env-file=.env scripts/smoke-telegram.mjs` and look at the chat. It sends a few test messages to you and reads no updates.
+
 A small supervisor restarts the agent if it stops. The logon task means it runs whenever you are signed in to Windows.
 
 `npm run chat` uses the same database as the background agent. That is fine, but do not chat with it while the agent is answering you in Telegram at the same moment: two processes in one conversation can give the same tool call two results. `npm run chat` never connects to MCP servers: only the background agent does, so each server runs once and an OAuth token is refreshed by one process.

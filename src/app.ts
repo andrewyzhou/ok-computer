@@ -2,9 +2,11 @@ import { join } from 'node:path';
 import { runAgent, type AgentDeps } from './agent/loop.js';
 import { closeStaleWork, interruptedText, repairSession } from './agent/recovery.js';
 import { buildStablePrompt } from './agent/system-prompt.js';
+import { createAlwaysAllow } from './approvals/always.js';
 import { approvalNote, createApprovalFlow, type ApprovalFlow } from './approvals/flow.js';
 import { expireApprovals, type Approval } from './approvals/store.js';
 import type { ChannelAdapter } from './channels/types.js';
+import type { LoginCodes } from './dashboard/login.js';
 import type { Config } from './config/schema.js';
 import { sinceLastReset } from './context/full-history.js';
 import { createTrimAndCompact } from './context/trim-and-compact.js';
@@ -46,6 +48,7 @@ import { AUTOMATION_TOOLS, createJobRunner } from './scheduler/jobs.js';
 import { createScheduler, type Scheduler, type SetTimer } from './scheduler/scheduler.js';
 import type { Automation } from './scheduler/store.js';
 import { createAutomationTools } from './scheduler/tools.js';
+import { createCommands, signInLink } from './sessions/commands.js';
 import { createOwnerMessenger } from './sessions/owner.js';
 import { createRunQueue } from './sessions/queue.js';
 import { createRouter, MAIN_SESSION, MAIN_TOOLS } from './sessions/router.js';
@@ -81,6 +84,11 @@ export interface AppDeps {
   connectIntegrations?: boolean;
   // false in npm run chat. background jobs that message the owner, such as the skill review, run only in the service.
   background?: boolean;
+  // the policy file that "always allow" writes. without it, approval cards have no "always allow" button.
+  policyPath?: string;
+  // the codes of the dashboard that runs in this process. with them and dashboard.publicUrl, /dashboard sends a
+  // sign-in link.
+  loginCodes?: LoginCodes;
 }
 
 export interface App {
@@ -160,7 +168,26 @@ export function createApp(deps: AppDeps): App {
     signal: shutdown.signal,
     timeoutMs: config.agent.backgroundTimeoutMs,
     timeZone: config.timeZone,
+    alwaysAllow: deps.policyPath !== undefined,
   });
+  // "always allow" changes this list in place, and the caller reads it at each call.
+  const rules = [...(deps.rules ?? BUILTIN_RULES)];
+  const always = deps.policyPath
+    ? createAlwaysAllow({
+        db,
+        clock,
+        logger,
+        timeZone: config.timeZone,
+        policyPath: deps.policyPath,
+        rules,
+        resolve: approvals.resolve,
+        // the lookup checks the current config, as an approved call does.
+        toolOf: (approval) => {
+          const found = tools.resolve({ id: 'always', name: approval.toolName, input: approval.input }, [approval.toolName], approval.sessionKey);
+          return found.ok ? found.tool : undefined;
+        },
+      })
+    : undefined;
   // the scheduler is created below. the tools call replan only after the start.
   const replan = () => scheduler.replan();
   const tools = createToolRegistry(
@@ -185,7 +212,7 @@ export function createApp(deps: AppDeps): App {
     db,
     blobs,
     tools,
-    rules: deps.rules ?? BUILTIN_RULES,
+    rules,
     requestApproval: approvals.request,
     queue,
     logger,
@@ -279,6 +306,18 @@ export function createApp(deps: AppDeps): App {
     rememberOwnerChat: owner.remember,
     approvals: approvals.resolve,
     approvalCard: approvals.card,
+    ...(always ? { always } : {}),
+    commands: createCommands({
+      db,
+      clock,
+      timeZone: config.timeZone,
+      // the dashboard accepts the public name only with a token, and the sign-in codes exist only then. without them,
+      // a link to the public name gets a 403.
+      dashboardUrl: (deps.loginCodes && config.dashboard.publicUrl) || `http://127.0.0.1:${config.dashboard.port}`,
+      ...(config.dashboard.publicUrl && deps.loginCodes ? { signInLink: signInLink(config.dashboard.publicUrl, deps.loginCodes, config.dashboard.port) } : {}),
+      approvalCard: approvals.card,
+      integrations: () => integrations.status(),
+    }),
     onReset: () => {
       const now = clock();
       const excerpt = sessionExcerpt(sinceLastReset(listEvents(db, MAIN_SESSION)), localTime(now, config.timeZone));
