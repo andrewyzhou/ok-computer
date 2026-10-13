@@ -48,6 +48,22 @@ describe('integration registry', () => {
     expect(parseIntegrations({ integrations: [{ ...slack, url: 'file:///etc/passwd' }] }).ok).toBe(false);
   });
 
+  it('refuses a package that a runner downloads without an exact version', () => {
+    const stdio = (command: string, args: string[]) => parseIntegrations({ integrations: [{ id: 'fs', kind: 'mcp-stdio', command, args, tools: { allow: ['read_file'] } }] });
+    for (const args of [['-y', '@scope/some-mcp-server'], ['-y', 'some-mcp-server@next'], ['some-mcp-server@^1.2.0'], ['some-mcp-server@*'], ['-y', '--package=tool@1.x', 'tool']]) {
+      expect(stdio('npx', args)).toMatchObject({ ok: false, error: expect.stringContaining('no exact version') });
+    }
+    expect(stdio('C:\\Program Files\\nodejs\\npx.cmd', ['-y', 'some-mcp-server'])).toMatchObject({ ok: false });
+    expect(stdio('pnpm', ['dlx', 'some-mcp-server@~1.2.0'])).toMatchObject({ ok: false });
+    expect(stdio('bunx', ['some-mcp-server'])).toMatchObject({ ok: false });
+    // an exact version, a prerelease, a local path and a command that is not a runner pass.
+    expect(stdio('npx', ['-y', '@scope/some-mcp-server@1.2.3', '--root', 'C:\\notes'])).toMatchObject({ ok: true });
+    expect(stdio('npx', ['-y', '--package', 'tool@2.0.0-beta.1', 'tool-bin', 'serve'])).toMatchObject({ ok: true });
+    expect(stdio('npx', ['./servers/notes'])).toMatchObject({ ok: true });
+    expect(stdio('pnpm', ['run', 'server'])).toMatchObject({ ok: true });
+    expect(stdio('node', ['server.js'])).toMatchObject({ ok: true });
+  });
+
   it('treats a missing file as no integrations and a broken file as an error', () => {
     const dir = mkdtempSync(join(tmpdir(), 'okc-integrations-'));
     expect(loadIntegrations(join(dir, 'missing.json'))).toEqual({ ok: true, value: [] });

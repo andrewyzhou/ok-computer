@@ -55,9 +55,18 @@ const httpEntry = z
 
 const entry = z
   .discriminatedUnion('kind', [stdioEntry, httpEntry])
-  // a server that changes under a moving tag can change its tools without a review.
+  // a server that changes under a moving tag can change its tools and its code without a review.
   .refine((each) => each.kind !== 'mcp-stdio' || ![each.command, ...each.args].some((part) => /@latest\b/.test(part)), {
     message: 'pin an exact version instead of @latest',
+  })
+  .superRefine((each, ctx) => {
+    const spec = each.kind === 'mcp-stdio' ? unpinnedPackage(each.command, each.args) : undefined;
+    if (spec !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `the package ${JSON.stringify(spec)} has no exact version. a tag, a range or no version lets the server change without a review. use, for example, some-server@1.4.2`,
+      });
+    }
   })
   .refine((each) => Object.keys(each.risk).every((tool) => each.tools.allow.includes(tool)), {
     message: 'every tool in risk must also be in tools.allow',
@@ -69,6 +78,42 @@ const fileSchema = z
   .refine((file) => new Set(file.integrations.map((each) => each.id)).size === file.integrations.length, {
     message: 'each integration needs its own id',
   });
+
+// these runners download a package from the registry at each start, so the package must name an exact version. the
+// value is the words after the command that select the runner, for example dlx in pnpm dlx.
+const RUNNERS: Record<string, string[]> = { npx: [], pnpx: [], bunx: [], pnpm: ['dlx'], yarn: ['dlx'], npm: ['exec'], bun: ['x'] };
+const EXACT = /^\d+\.\d+\.\d+(?:-[0-9a-z.-]+)?(?:\+[0-9a-z.-]+)?$/i;
+// a path to a local package is the owner's own code, so it needs no version.
+const LOCAL = /^(?:\.{1,2}[\\/]|[\\/]|[a-z]:[\\/]|file:)/i;
+
+// unpinnedPackage gives the first package that a runner downloads without an exact version.
+export function unpinnedPackage(command: string, args: string[]): string | undefined {
+  const runner = command.replace(/\\/g, '/').split('/').pop()!.toLowerCase().replace(/\.(cmd|exe|ps1)$/, '');
+  const prefix = RUNNERS[runner];
+  if (!prefix || !prefix.every((word, i) => args[i] === word)) return undefined;
+  const packages: string[] = [];
+  let explicit = false;
+  for (let i = prefix.length; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === '--') {
+      if (!explicit && args[i + 1] !== undefined) packages.push(args[i + 1]!);
+      break;
+    }
+    const named = /^--package=(.+)$/.exec(arg)?.[1];
+    if (named !== undefined) {
+      packages.push(named);
+      explicit = true;
+    } else if (arg === '-p' || arg === '--package') {
+      if (args[i + 1] !== undefined) packages.push(args[++i]!);
+      explicit = true;
+    } else if (!arg.startsWith('-')) {
+      // the first argument that is not an option is the command. without --package, it is also the package.
+      if (!explicit) packages.push(arg);
+      break;
+    }
+  }
+  return packages.find((spec) => !LOCAL.test(spec) && !EXACT.test(/^(@[^/@]+\/)?[^@]+@(.+)$/.exec(spec)?.[2] ?? ''));
+}
 
 export type IntegrationEntry = z.infer<typeof entry>;
 export type StdioEntry = z.infer<typeof stdioEntry>;
