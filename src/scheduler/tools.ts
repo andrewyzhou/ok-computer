@@ -53,6 +53,12 @@ function unionTaint(a: TaintSource[], b: TaintSource[]): TaintSource[] {
 
 export function createAutomationTools(deps: { db: Db; replan: () => void }): Tool[] {
   const { db } = deps;
+  // the code makes the heartbeat, the polls and the routines. they watch the owner's accounts and goals, so a pause, a
+  // new schedule or a delete always asks the owner. else text that a session read could stop them without a word.
+  const codeMade = (id: string) => {
+    const type = getAutomation(db, id)?.payload.type;
+    return type !== undefined && type !== 'agent' && type !== 'system_event';
+  };
 
   const list = defineTool({
     name: 'automations_list',
@@ -104,6 +110,7 @@ export function createAutomationTools(deps: { db: Db; replan: () => void }): Too
       enabled: z.boolean().optional(),
     }),
     risk: 'write',
+    riskFor: (input) => (codeMade(input.id) && (input.enabled !== undefined || input.schedule !== undefined) ? 'external' : 'write'),
     async run({ id, ...patch }, ctx) {
       const current = getAutomation(db, id);
       if (!current) return { content: `no automation has the id ${id}`, isError: true };
@@ -144,6 +151,7 @@ export function createAutomationTools(deps: { db: Db; replan: () => void }): Too
     description: 'Delete an automation by id. To pause an automation, use automations_update with enabled false.',
     input: z.object({ id: z.string() }),
     risk: 'write',
+    riskFor: (input) => (codeMade(input.id) ? 'external' : 'write'),
     async run({ id }) {
       if (!deleteAutomation(db, id)) return { content: `no automation has the id ${id}`, isError: true };
       deps.replan();
