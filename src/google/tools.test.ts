@@ -112,7 +112,7 @@ describe('gmail_unsubscribe', () => {
   it('refuses a message whose from address is not exactly the sender', async () => {
     const posted: string[] = [];
     const call = await setup({ oneClick: async (target) => (posted.push(target), { ok: true, sent: true, text: 'x' }) });
-    for (const from of ['"bank@x.example" <evil@y.example>', 'bank@x.example.evil.example', 'Bank <bank@x.example>, Eve <evil@y.example>', 'not an address']) {
+    for (const from of ['"bank@x.example" <evil@y.example>', 'bank@x.example.evil.example', 'Bank <bank@x.example>, Eve <evil@y.example>', 'Eve <evil@y.example>, Bank <bank@x.example>', 'not an address']) {
       h.fake.deliver('personal', { ...newsletter, headers: { ...newsletter.headers, From: from } });
       const out = await call('gmail_unsubscribe', { account: 'personal', messageId: 'n1', sender: 'bank@x.example', target: 'https://shop.example/u/abc' });
       expect(out, from).toMatchObject({ isError: true, content: expect.stringContaining('not from "bank@x.example"') });

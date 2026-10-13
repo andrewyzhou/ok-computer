@@ -262,7 +262,14 @@ export function createApp(deps: AppDeps): App {
     signal: shutdown.signal,
     ...ids,
     // the signals are the same for every source that polls. only google polls now.
-    ...(google ? { signals: { digest: (now: Date) => signalDigest(db, now, config.timeZone), finish: (digest: Digest, runId: string | null, notified: boolean, now: Date) => finishDigest(db, digest, runId, notified, now) } } : {}),
+    ...(google
+      ? {
+          signals: {
+            digest: (now: Date) => signalDigest(db, now, config.timeZone),
+            finish: (digest: Digest, runId: string | null, notified: boolean, now: Date) => finishDigest(db, digest, runId, notified, now),
+          },
+        }
+      : {}),
   });
   const runJob = createJobRunner({
     db,

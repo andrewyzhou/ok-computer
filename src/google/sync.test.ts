@@ -246,6 +246,7 @@ describe('token health against the token endpoint', () => {
   it('sends one message for a dead sign-in, then makes no token request, and works again after a new sign-in', async () => {
     h = await createGoogleHarness({ accounts: ['personal'] });
     h.signedIn('personal');
+    await poll();
     h.fake.revoke(refreshOf('personal'));
     await poll();
     expect(h.alerts).toHaveLength(1);
@@ -255,6 +256,8 @@ describe('token health against the token endpoint', () => {
     expect(tokenRequests()).toBe(before);
     // the tokens stay in the credential manager. only the owner's connect replaces them.
     expect(h.secrets.values.get('google.personal')).toBe(refreshOf('personal'));
+    // mail that comes while the account waits for the owner is news after the new sign-in.
+    h.fake.deliver('personal', mail('during', 'while parked'));
 
     h.fake.nextSignIn = { alias: 'personal', refreshToken: '1//new-sign-in-after-revoke-0123456789' };
     const begun = await h.accounts.beginSignIn('personal');
@@ -263,7 +266,7 @@ describe('token health against the token endpoint', () => {
     h.fake.deliver('personal', mail('back', 'after the new sign-in'));
     const [report] = await poll();
     expect(report).toMatchObject({ ok: true });
-    expect(signals().map((each) => each.externalId)).toEqual(['back']);
+    expect(signals().map((each) => each.externalId)).toEqual(['during', 'back']);
   });
 
   // a mistyped client secret must not look like eight dead sign-ins.
@@ -330,7 +333,7 @@ describe('calendar sync', () => {
 
     // without a copy of the calendar, a cancelled event without an organizer makes no signal.
     h.fake.upsertEvent('personal', { id: 'e1', status: 'cancelled', start: {}, end: {} });
-    await poll();
+    expect(await poll()).toEqual([expect.objectContaining({ ok: true })]);
     expect(calendarSignals()).toHaveLength(1);
   });
 

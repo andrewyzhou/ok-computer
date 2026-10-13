@@ -8,8 +8,9 @@ import { headOf } from '../text.js';
 import { defineTool, type Tool, type ToolOutput } from '../tools/registry.js';
 import type { GoogleAccounts, GoogleApis } from './accounts.js';
 import type { GoogleConfig } from './config.js';
-import { GoogleError, toGoogleError } from './errors.js';
-import { badAddress, bodyText, header, rawMessage, type Draft } from './mime.js';
+import { toGoogleError } from './errors.js';
+import { badAddress, bodyText, header, rawMessage } from './mime.js';
+import { failed, sendDraft } from './send.js';
 import { requestContext } from './trace.js';
 import { oneClick as realOneClick, planUnsubscribe, unsubscribeTargets, type OneClickResult } from './unsubscribe.js';
 
@@ -39,21 +40,6 @@ function googleTool<I extends { account: string }>(tool: Omit<Tool<I>, 'source' 
     accountOf: (input) => input.account,
     run: (input, ctx) => requestContext.run({ runId: ctx.runId, ...(ctx.toolCallId ? { toolCallId: ctx.toolCallId } : {}) }, () => tool.run(input, ctx)),
   });
-}
-
-// a failed write says whether google can have acted. no answer after the request left means that the effect is
-// unknown. a refused connection, or a 4xx answer, means that google did not act, so a retry is safe.
-function failed(tool: string, alias: string, error: GoogleError, write: boolean): ToolOutput {
-  const hint =
-    error.kind === 'scope'
-      ? ' The sign-in lacks a permission; the owner connects the account again and ticks every box.'
-      : error.kind === 'rate'
-        ? ' Google limits the rate; try again in a few minutes.'
-        : '';
-  const answered = error.status !== undefined && error.status < 500;
-  const effect = !write || !error.reached || answered ? ('none' as const) : ('unknown' as const);
-  const unknown = effect === 'unknown' ? ' The request left, but no answer came, so it is unknown whether it worked. Check before you try again.' : '';
-  return { content: `${tool} failed for ${alias}: ${error.message}.${hint}${unknown}`, isError: true, ...(write ? { effect } : {}) };
 }
 
 // a header field with a line break could add a header that the owner did not approve.
@@ -96,39 +82,6 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
       return await accounts.run(alias, work);
     } catch (err) {
       return failed(tool, alias, toGoogleError(err), true);
-    }
-  };
-
-  const sendDraft = async (tool: string, alias: string, draft: Draft & { threadId?: string }): Promise<ToolOutput> => {
-    const bad = badAddress([...draft.to, ...(draft.cc ?? []), ...(draft.bcc ?? [])]);
-    if (bad !== undefined) return { content: `${tool} did not run: ${JSON.stringify(bad)} is not a plain email address.`, isError: true, effect: 'none' };
-    let draftId: string;
-    try {
-      const created = await accounts.run(alias, (apis) =>
-        apis.gmail.users.drafts.create({ userId: 'me', requestBody: { message: { raw: rawMessage(draft), ...(draft.threadId ? { threadId: draft.threadId } : {}) } } }),
-      );
-      draftId = created.data.id!;
-    } catch (err) {
-      // no mail left in this step. at worst a draft stays.
-      return { ...failed(tool, alias, toGoogleError(err), true), effect: 'none' };
-    }
-    // the send goes through a draft, because gmail has no idempotency key. when the answer is lost, the draft tells
-    // what happened: google deletes a draft when it sends it.
-    try {
-      const sent = await accounts.run(alias, (apis) => apis.gmail.users.drafts.send({ userId: 'me', requestBody: { id: draftId } }));
-      return { content: `sent from ${alias} to ${draft.to.join(', ')} as message ${sent.data.id}.` };
-    } catch (err) {
-      const error = toGoogleError(err);
-      if (!error.reached || (error.status !== undefined && error.status < 500)) {
-        return { content: `${tool} did not send from ${alias}: ${error.message}. The draft ${draftId} stays in Drafts.`, isError: true, effect: 'none' };
-      }
-      try {
-        await accounts.run(alias, (apis) => apis.gmail.users.drafts.get({ userId: 'me', id: draftId }));
-        return { content: `${tool} did not send from ${alias} (${error.message}). Google still has the draft ${draftId}, so the message did not go out.`, isError: true, effect: 'none' };
-      } catch (check) {
-        if (toGoogleError(check).kind === 'not_found') return { content: `sent from ${alias} to ${draft.to.join(', ')}. The answer was lost (${error.message}), but google no longer has the draft, so it went out.` };
-        return failed(tool, alias, error, true);
-      }
     }
   };
 
@@ -277,7 +230,7 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
         // effect field: a second approval of the same call cannot help.
         const plan = planUnsubscribe(message, sender, target, config.send);
         if (plan.way === 'refused') return { content: `${tool} did not run: ${plan.text}.`, isError: true };
-        if (plan.way === 'mailto') return sendDraft(tool, alias, { to: [plan.to], subject: plan.subject, body: plan.body });
+        if (plan.way === 'mailto') return sendDraft(accounts, tool, alias, { to: [plan.to], subject: plan.subject, body: plan.body });
         const result = await oneClick(target);
         if (result.ok) return { content: `unsubscribed: ${result.text}.` };
         return { content: `${tool} did not finish: ${result.text}.`, isError: true, ...(result.refused ? {} : { effect: result.sent ? 'unknown' : 'none' }) };
@@ -443,7 +396,7 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
         }),
         risk: 'external',
         needsApproval: true,
-        run: ({ account: alias, ...draft }) => sendDraft(name('gmail_send'), alias, draft),
+        run: ({ account: alias, ...draft }) => sendDraft(accounts, name('gmail_send'), alias, draft),
       }),
     );
   }
