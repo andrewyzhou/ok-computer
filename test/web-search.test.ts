@@ -1,5 +1,7 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getSetting } from '../src/db/settings.js';
+import type { BrowserWorker } from '../src/browser/worker.js';
+import { openDb } from '../src/db/index.js';
 import { createWebSearchTool, type Engine } from '../src/web/search.js';
 import { createBrowserHarness, hasChrome } from './browser-harness.js';
 import { startFixture, type Fixture } from './web-fixture.js';
@@ -112,5 +114,31 @@ describe.skipIf(!hasChrome())('web_search through the browser', { timeout: 60_00
     await Promise.all([s.search('one'), s.search('two')]);
     expect(s.waits.length).toBe(1);
     expect(s.waits[0]).toBeGreaterThan(0);
+  });
+});
+
+// the gap and the hourly count used the wall clock. after it went back one hour, the next search slept one hour, and
+// every later search of the app waited behind it.
+describe('web_search timing', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('waits at most the gap after the wall clock goes back, and never before the first search', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-13T18:00:00Z'));
+    const worker = {
+      inTab: async () => ({
+        value: { kind: 'results', results: [{ title: 'A', url: 'https://a.example/', snippet: 'a' }] },
+        result: { ok: true, note: '', url: '', title: '', blocked: [], sent: [], taskId: 't', acted: true },
+      }),
+    } as unknown as BrowserWorker;
+    const waits: number[] = [];
+    const tool = createWebSearchTool({ db: openDb(':memory:'), worker, clock: () => new Date(), timeZone: 'UTC', sleep: async (ms) => void waits.push(ms) });
+    const ctx = { runId: 'r', sessionKey: 'main', timeZone: 'UTC', clock: () => new Date(), signal: new AbortController().signal, toolCallId: 'c' };
+    expect((await tool.run({ query: 'one' }, ctx)).content).toContain('Results from Google');
+    expect(waits).toEqual([]);
+    vi.setSystemTime(new Date('2026-10-13T17:00:00Z'));
+    expect((await tool.run({ query: 'two' }, ctx)).content).toContain('Results from Google');
+    expect(waits).toHaveLength(1);
+    expect(waits[0]).toBeLessThanOrEqual(2_000);
   });
 });

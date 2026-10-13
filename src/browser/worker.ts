@@ -221,7 +221,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   let closing = false;
   let tracing: string | undefined;
   let userAgent: string | undefined;
-  let lastActivity = Date.now();
+  let lastActivity = performance.now();
 
   const now = () => clock().toISOString();
 
@@ -316,7 +316,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   async function newTab(ctx: BrowserContext, kind: Tab['kind'], step: StepInput, allowlist: string[]): Promise<Tab> {
     const page = await ctx.newPage();
     owned.add(page);
-    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), submit: false, blocked: [], sent: [], reached: new Set(), console: [], lastUsed: Date.now(), queue: Promise.resolve(), snapshot: 0 } as unknown as Tab;
+    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), submit: false, blocked: [], sent: [], reached: new Set(), console: [], lastUsed: performance.now(), queue: Promise.resolve(), snapshot: 0 } as unknown as Tab;
     tab.rules = {
       allows: (host) => allowedBy(tab.allowlist, host),
       submitting: () => tab.submit,
@@ -486,8 +486,8 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
         return { refused: `The browser tab of this task stopped (${reason}). Its task ended. Use browser_open to start again.` };
       }
       const started = performance.now();
-      tab.lastUsed = Date.now();
-      lastActivity = Date.now();
+      tab.lastUsed = performance.now();
+      lastActivity = performance.now();
       tab.topBlocked = false;
       const urlBefore = tab.page.url();
       let note = '';
@@ -568,8 +568,8 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   // a task that waits long frees the browser for other sessions, and chrome closes when nothing uses it, so the owner
   // can open the profile with okc browser login.
   const timer = setInterval(() => {
-    for (const tab of tasks.values()) if (Date.now() - tab.lastUsed > idleMs) void serial(tab, () => endTab(tab, 'closed', 'no browser action for a while'));
-    if (context && !tabs.size && Date.now() - lastActivity > idleMs) {
+    for (const tab of tasks.values()) if (performance.now() - tab.lastUsed > idleMs) void serial(tab, () => endTab(tab, 'closed', 'no browser action for a while'));
+    if (context && !tabs.size && performance.now() - lastActivity > idleMs) {
       closing = true;
       const ctx = context;
       context = undefined;

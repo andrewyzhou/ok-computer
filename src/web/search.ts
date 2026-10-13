@@ -111,6 +111,9 @@ const sleepFor = (ms: number, signal: AbortSignal) =>
 export function createWebSearchTool(deps: SearchDeps): Tool {
   const engines = deps.engines ?? ENGINES;
   const sleep = deps.sleep ?? sleepFor;
+  // the gap and the hourly count use performance.now(). the wall clock can go back, and the next search then slept for
+  // the size of the jump, with every later search behind it. only the pause after a captcha uses the wall clock,
+  // because it is kept across a restart.
   const recent = new Map<string, number[]>();
   const last = new Map<string, number>();
   // one search at a time, so the gap and the hourly limit hold also for calls in the same turn.
@@ -141,16 +144,16 @@ export function createWebSearchTool(deps: SearchDeps): Tool {
             notes.push(`${engine.label} is paused until ${localTime(new Date(state.until), deps.timeZone)} (${state.reason}).`);
             continue;
           }
-          const hour = (recent.get(engine.id) ?? []).filter((at) => Date.now() - at < 60 * 60_000);
+          const hour = (recent.get(engine.id) ?? []).filter((at) => performance.now() - at < 60 * 60_000);
           if (hour.length >= PER_HOUR) {
             notes.push(`${engine.label} had ${PER_HOUR} searches in the last hour, which is the limit.`);
             continue;
           }
-          const wait = GAP_MS - (Date.now() - (last.get(engine.id) ?? 0));
+          const wait = GAP_MS - (performance.now() - (last.get(engine.id) ?? -Infinity));
           if (wait > 0) await sleep(wait, ctx.signal);
           if (ctx.signal.aborted) return { content: 'web_search stopped, because the run stopped.', isError: true, effect: 'none' as const };
-          recent.set(engine.id, [...hour, Date.now()]);
-          last.set(engine.id, Date.now());
+          recent.set(engine.id, [...hour, performance.now()]);
+          last.set(engine.id, performance.now());
           const got = await deps.worker.inTab(
             { sessionKey: ctx.sessionKey, runId: ctx.runId, action: 'search', target: `${engine.id}: ${query}`, ...(ctx.toolCallId ? { toolCallId: ctx.toolCallId } : {}) },
             engine.hosts,

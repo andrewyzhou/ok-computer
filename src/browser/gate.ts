@@ -44,9 +44,9 @@ function cachedCheck(egress: Egress) {
   const cache = new Map<string, { at: number; result: Promise<Awaited<ReturnType<typeof checkHost>>> }>();
   return (host: string) => {
     const hit = cache.get(host);
-    if (hit && Date.now() - hit.at < 30_000) return hit.result;
+    if (hit && performance.now() - hit.at < 30_000) return hit.result;
     const result = checkHost(egress, host);
-    cache.set(host, { at: Date.now(), result });
+    cache.set(host, { at: performance.now(), result });
     return result;
   };
 }
