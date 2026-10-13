@@ -288,7 +288,7 @@ Every tool call, built-in or integration, goes through `decide(call, ctx)`, whic
 
 The decision depends on:
 
-1. **Static rules** in `okc.policy.json`: patterns on tool name and arguments, with allow or deny. The last matching rule wins. Example: allow `google__gmail_archive` for senders in a newsletter list.
+1. **Static rules** in `okc.policy.json`: patterns on tool name and arguments, with allow or deny. A matching deny rule always wins, in any position; otherwise the last matching allow rule decides. Example: allow `google__gmail_archive` for senders in a newsletter list.
 2. **Risk level**:
    - `read`: allow;
    - `write`: review;

@@ -23,7 +23,7 @@ const policyFileSchema = z.object({ rules: z.array(ruleSchema).default([]) }).st
 export type Rule = z.infer<typeof ruleSchema> & { id: string };
 
 // these tools change only the local database or the memory files, or they message the owner. they do not need a
-// review. a rule in okc.policy.json can still deny them, because the last matching rule wins.
+// review. a rule in okc.policy.json can still deny them, because a deny rule always wins.
 const LOCAL_WRITE_TOOLS = [
   'automations_create',
   'automations_delete',
@@ -72,13 +72,13 @@ export interface Verdict {
   reason: string;
 }
 
-// a deny rule always wins. taint makes every external call go to the owner, also when a rule allows the tool.
-// without a matching rule, the risk level decides.
+// a deny rule always wins, in any position in the file. so a broad allow rule that comes later cannot cancel a deny
+// rule. taint makes every external call go to the owner, also when a rule allows the tool. without a matching rule,
+// the risk level decides.
 export function decide(input: PolicyInput, rules: readonly Rule[]): Verdict {
-  const rule = rules.findLast((each) => matches(each, input));
-  if (rule?.effect === 'deny') {
-    return { decision: 'deny', rule: rule.id, reason: rule.note ?? `the policy rule ${rule.id} denies ${input.tool}` };
-  }
+  const deny = rules.find((each) => each.effect === 'deny' && matches(each, input));
+  if (deny) return { decision: 'deny', rule: deny.id, reason: deny.note ?? `the policy rule ${deny.id} denies ${input.tool}` };
+  const rule = rules.findLast((each) => each.effect === 'allow' && matches(each, input));
   if (input.alwaysApprove) {
     return { decision: 'approve', rule: 'tool', reason: `${input.tool} always needs the owner's approval` };
   }

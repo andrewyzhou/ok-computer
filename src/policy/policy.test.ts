@@ -23,17 +23,36 @@ describe('policy decisions', () => {
     expect(decide(call({ risk: 'external' }), [])).toMatchObject({ decision: 'approve', rule: 'risk:external' });
   });
 
-  it('uses the last matching rule, with patterns on the tool, the session and the arguments', () => {
+  it('uses the matching rules, with patterns on the tool, the session and the arguments', () => {
     const rules = [
-      rule('a', { tool: 'google__*', effect: 'deny' }),
+      rule('a', { tool: 'google__*', args: { from: '*@spam.example.com' }, effect: 'deny' }),
       rule('b', { tool: 'google__gmail_archive', args: { from: '*@letters.example.com' }, effect: 'allow', note: 'newsletters' }),
       rule('c', { tool: '*', session: 'heartbeat:*', effect: 'deny' }),
     ];
     expect(decide(call(), rules)).toEqual({ decision: 'allow', rule: 'b', reason: 'newsletters' });
-    expect(decide(call({ input: { from: 'boss@work.example.com' } }), rules)).toMatchObject({ decision: 'deny', rule: 'a' });
-    expect(decide(call({ input: {} }), rules)).toMatchObject({ decision: 'deny', rule: 'a' });
+    expect(decide(call({ input: { from: 'x@spam.example.com' } }), rules)).toMatchObject({ decision: 'deny', rule: 'a' });
+    expect(decide(call({ input: { from: 'boss@work.example.com' } }), rules)).toMatchObject({ decision: 'review', rule: 'risk:write' });
     expect(decide(call({ sessionKey: 'heartbeat:run-1' }), rules)).toMatchObject({ decision: 'deny', rule: 'c' });
     expect(decide(call({ tool: 'now', risk: 'read' }), rules)).toMatchObject({ decision: 'allow', rule: 'risk:read' });
+  });
+
+  it('lets a deny rule win over an allow rule in any order', () => {
+    const deny = rule('deny', { tool: 'send_*', args: { to: '*@evil.example' }, effect: 'deny' });
+    const allow = rule('allow', { tool: 'send_email', effect: 'allow' });
+    const send = (to: unknown) => call({ tool: 'send_email', risk: 'external', input: { to } });
+    for (const rules of [
+      [deny, allow],
+      [allow, deny],
+    ]) {
+      expect(decide(send('x@evil.example'), rules)).toMatchObject({ decision: 'deny', rule: 'deny' });
+      expect(decide(send(['ok@home.example', 'x@evil.example']), rules)).toMatchObject({ decision: 'deny', rule: 'deny' });
+      expect(decide(send('ok@home.example'), rules)).toMatchObject({ decision: 'allow', rule: 'allow' });
+    }
+  });
+
+  it('takes the reason from the last matching allow rule', () => {
+    const rules = [rule('any', { tool: '*', effect: 'allow', note: 'any' }), rule('google', { tool: 'google__*', effect: 'allow', note: 'google' })];
+    expect(decide(call(), rules)).toEqual({ decision: 'allow', rule: 'google', reason: 'google' });
   });
 
   it('matches an object argument against its json text', () => {
