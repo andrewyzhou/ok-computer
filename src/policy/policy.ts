@@ -115,7 +115,7 @@ function matches(rule: Rule, input: PolicyInput): boolean {
     // a deny rule matches its pattern anywhere in the text of the value, also in the json text of a list or an
     // object. so "Eve <eve@evil.example>", a trailing dot, or a list in one string cannot get past "*@evil.example".
     // a deny rule that matches too much stops a good call, but a deny rule that matches too little lets a bad call out.
-    if (rule.effect === 'deny') return glob(`*${pattern}*`, text(value));
+    if (rule.effect === 'deny') return denyForms(value).some((form) => glob(`*${pattern}*`, form));
     // an allow rule must match the whole value, and each item of a list, so one good recipient cannot carry a bad one.
     if (!Array.isArray(value)) return glob(pattern, text(value));
     return value.every((item) => glob(pattern, text(item)));
@@ -123,6 +123,33 @@ function matches(rule: Rule, input: PolicyInput): boolean {
 }
 
 const text = (value: unknown) => (typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value));
+
+// a url parser, a mail server, or a browser reads "ev%69l.example", fullwidth letters, and "evil。example" as
+// "evil.example". so a deny rule also tests the forms that such a reader makes: the nfkc form after percent decoding
+// with the other full stops as ".", and the href of each value that parses as a url. allow rules keep the raw text,
+// because a form that only looks like an allowed value must not pass.
+function denyForms(value: unknown): string[] {
+  const raw = text(value);
+  const forms = new Set([raw, percentDecoded(raw).normalize('NFKC').replace(/[。｡]/g, '.')]);
+  for (const item of Array.isArray(value) ? value : [value]) {
+    if (typeof item !== 'string') continue;
+    try {
+      forms.add(new URL(item.trim()).href);
+    } catch {
+      // a value that is not a url keeps its other forms.
+    }
+  }
+  return [...forms];
+}
+
+const percentDecoded = (value: string) =>
+  value.replace(/(?:%[0-9a-f]{2})+/gi, (run) => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run;
+    }
+  });
 
 // the fold is the same as in a regular expression with the i flag. it never changes a character outside ascii into
 // an ascii character, so the kelvin sign does not match the letter k in an allow rule.

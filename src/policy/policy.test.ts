@@ -60,6 +60,32 @@ describe('policy decisions', () => {
     expect(decide(send('Bob <bob@home.example>'), rules)).toMatchObject({ decision: 'allow', rule: 'allow' });
   });
 
+  // a url parser reads each of these values as evil.example, but the raw text did not match the deny rule.
+  it('matches a deny pattern also in the form that a url parser or a mail server reads', () => {
+    const rules = [
+      rule('fetch', { tool: '*', effect: 'allow' }),
+      rule('host', { tool: 'web_fetch', args: { url: '*evil.example*' }, effect: 'deny' }),
+      rule('kelvin', { tool: 'web_fetch', args: { url: '*kelvin.example*' }, effect: 'deny' }),
+      rule('mail', { tool: 'gmail_send', args: { to: '*@evil.example' }, effect: 'deny' }),
+    ];
+    const fetch = (url: string) => decide(call({ tool: 'web_fetch', risk: 'read', input: { url } }), rules);
+    for (const url of [
+      'https://ev%69l.example/',
+      'https://ｅｖｉｌ.example/',
+      'https://evil。example/',
+      'https://evil．example/',
+      'https://EVIL.example/',
+    ]) {
+      expect(fetch(url)).toMatchObject({ decision: 'deny', rule: 'host' });
+    }
+    expect(fetch('https://Kelvin.example/')).toMatchObject({ decision: 'deny', rule: 'kelvin' });
+    expect(fetch('https://good.example/?q=evil')).toMatchObject({ decision: 'allow' });
+    expect(decide(call({ tool: 'gmail_send', risk: 'external', input: { to: ['a@home.example', 'eve@evil。example'] } }), rules)).toMatchObject({
+      decision: 'deny',
+      rule: 'mail',
+    });
+  });
+
   it('takes the reason from the last matching allow rule', () => {
     const rules = [rule('any', { tool: '*', effect: 'allow', note: 'any' }), rule('google', { tool: 'google__*', effect: 'allow', note: 'google' })];
     expect(decide(call(), rules)).toEqual({ decision: 'allow', rule: 'google', reason: 'google' });
