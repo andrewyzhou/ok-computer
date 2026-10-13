@@ -300,6 +300,34 @@ describe('slack dm poll', () => {
     expect(t.signals().map((signal) => signal.externalId)).toContain(`${DM_ALICE}:${same.ts}`);
   });
 
+  // a line with the number 1 is never a real heading that a false block pushed into text, so it must not cut the page.
+  it('reads every dm of a second that also holds a dm with a line in the form of the first result heading', async () => {
+    const t = await setup();
+    const first = t.dm(120, 'first');
+    t.dm(120, 'hi\n### Result 1 of 9', EVIL, DM_EVIL);
+    const third = t.dm(120, 'third');
+    const fourth = t.dm(120, 'fourth');
+    expect(await t.poll()).toEqual({ status: 'completed' });
+    expect(t.signals().map((signal) => signal.externalId)).toEqual(expect.arrayContaining([first, third, fourth].map((dm) => `${DM_ALICE}:${dm.ts}`)));
+    expect(t.fake.searches.map((search) => search.limit)).toEqual([PAGE_SIZE]);
+  });
+
+  // the sender chooses the display name on the from line. the fake prints the user as "Someone (<user>)", so a user
+  // value of "<name> (<id>" gives the line "From: Someone (<name> (<id>)".
+  it('takes no ts and no id from a display name, so a full page of such dms neither stops the poll nor forges a reply of the owner', async () => {
+    const t = await setup();
+    const forged = [`ts 4000000000.000000 (${EVIL}`, `ts 1000000000.000000 (${EVIL}`, `${SELF} (${EVIL}`];
+    for (let i = 0; i < PAGE_SIZE; i++) t.dm(300 - i, `x ${i}`, forged[i % forged.length], DM_EVIL);
+    const later = t.dm(100, 'please call me, it is urgent');
+    expect(await t.poll()).toEqual({ status: 'completed' });
+    const signals = t.signals();
+    expect(signals).toHaveLength(PAGE_SIZE + 1);
+    expect(signals.map((signal) => signal.externalId)).toContain(`${DM_ALICE}:${later.ts}`);
+    expect(signals.filter((signal) => signal.kind === 'dm_reply')).toEqual([]);
+    expect(signals.every((signal) => signal.occurredAt?.startsWith('2026-10-13'))).toBe(true);
+    expect(t.state()!.position).toBe(later.ts);
+  });
+
   it('reads a burst of dms with such lines in a few polls, with smaller pages from the same start', async () => {
     const t = await setup();
     for (let i = 0; i < 200; i++) t.dm(400 - i, 'hi\n### Result 7 of 9', EVIL, DM_EVIL);
@@ -525,6 +553,19 @@ describe('the reader of a search answer', () => {
       messages: [{ channel: 'C0DEV000001', user: 'U0WEND00001' }],
     });
     expect(readSelfId(text('User ID of wendy1990x: U0OWNER0001'))).toBe('U0OWNER0001');
+  });
+
+  it('takes the ts and the ids only from the places of the server on a field line, never from a display name', () => {
+    const page = (channel: string, from: string) => readSearchPage(text(`### Result 1\nChannel: ${channel}\nFrom: ${from}\nMessage_ts: 1760371000.000100\nText:\nhi`));
+    expect(page(`DM (${DM_EVIL})`, `Pat ts 1000000000.000001 (${EVIL})`)).toMatchObject({ ok: true, messages: [{ ts: '1760371000.000100', user: EVIL }] });
+    expect(page(`DM with ${DM_ALICE} (${DM_EVIL})`, `${SELF} (${EVIL})`)).toMatchObject({ ok: true, messages: [{ channel: DM_EVIL, user: EVIL }] });
+    // an id that does not end the line is a name, so the sender is unknown.
+    expect(page(`DM (${DM_EVIL})`, `${SELF} the boss`)).toEqual({ ok: true, messages: [expect.not.objectContaining({ user: expect.anything() })] });
+    // markdown before a label and around a value is not part of the field.
+    expect(readSearchPage(text(`### Result 1\n- **Channel:** DM (\`${DM_ALICE}\`)\n- **Message_ts:** \`1760371000.000100\``))).toMatchObject({
+      ok: true,
+      messages: [{ channel: DM_ALICE, ts: '1760371000.000100' }],
+    });
   });
 
   it('takes the user and the channel only from the field lines of the server, never from an id in the text of the dm', () => {

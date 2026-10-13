@@ -230,16 +230,21 @@ function ascending(messages: SlackMessage[]): boolean {
 
 const TS_VALUE = /^\d{9,10}\.\d{6}$/;
 const HAS_TS = /\b\d{9,10}\.\d{6}\b/;
-const LABELED_TS = /\b(?:message_ts|msg_?id|ts)\b["'*\s:=]*(\d{9,10}\.\d{6})\b/i;
+// a field label is only at the start of a line, after markdown such as "- ", "> " or "**". the sender chooses the
+// display name on the from line, so a label inside a name, as in "From: Pat ts 1760000000.000000 (U0...)", is not a
+// field.
+const LEAD = String.raw`^[\s>*_\x60-]*`;
+const LABELED_TS = new RegExp(`${LEAD}(?:message_ts|msg_?id|ts)\\b["'*_\\x60\\s:=]*(\\d{9,10}\\.\\d{6})\\b`, 'i');
 // d is a dm, g an older private group or a group dm, and c a channel. a slack id has upper case letters and digits. so
 // the id patterns have no i flag, and they need a digit, because a name in capitals such as GREGORYSMITH is not an id.
 const id = (first: string) => `\\b([${first}](?=[A-Z0-9]*\\d)[A-Z0-9]{8,})\\b`;
 const USER = new RegExp(id('UW'));
-const CHANNEL_LABEL = /\b[Cc]hannel\b/;
-const USER_LABEL = /\b(?:[Ff]rom|[Uu]ser|[Aa]uthor)\b/;
-// only the label can be in upper or lower case. a name on the line, as in "From: Christopher (U0...)", is not the id.
-const CHANNEL_LINE = new RegExp(`\\b[Cc]hannel\\b[^\\n]*?${id('CDG')}`);
-const USER_LINE = new RegExp(`\\b(?:[Ff]rom|[Uu]ser|[Aa]uthor)\\b[^\\n]*?${id('UW')}`);
+const CHANNEL_LABEL = new RegExp(`${LEAD}[Cc]hannel\\b`);
+const USER_LABEL = new RegExp(`${LEAD}(?:[Ff]rom|[Uu]ser|[Aa]uthor)\\b`);
+// only the label can be in upper or lower case. the id of a field is the one at the end of its line, as in
+// "From: Christopher (U0...)". the name before it is chosen by a person, and it can hold an id too.
+const CHANNEL_LINE = new RegExp(`${id('CDG')}[)>*_\\x60\\s]*$`);
+const USER_LINE = new RegExp(`${id('UW')}[)>*_\\x60\\s]*$`);
 const USER_ID_LINE = new RegExp(`\\b[Uu]ser[ _]?(?:id|Id|ID)\\b[^\\n]*?${id('UW')}`);
 const HEADING = /^\s*#{1,6}\s+\S/;
 const NOTHING = /\bno (?:results|messages|matches)\b|\b0 (?:results|messages|matches)\b|^\s*$/i;
@@ -318,7 +323,9 @@ function messagesInMarkdown(text: string, limit: number): SlackPage {
     const number = numberOf(line);
     if (blocks.length < total && number === blocks.length + 1) blocks.push([]);
     else {
-      if (number !== undefined && number <= blocks.length) suspect ??= blocks.length;
+      // the real heading 1 is the first heading, so a later line with the number 1 is always text of a dm. it cannot
+      // show a false block, and it must not make the page give only its first message.
+      if (number !== undefined && number > 1 && number <= blocks.length) suspect ??= blocks.length;
       blocks.at(-1)!.push(line);
     }
   }
