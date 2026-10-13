@@ -53,6 +53,7 @@ import { createMessageOwnerTool } from './tools/message-owner.js';
 import { nowTool } from './tools/now.js';
 import { createToolRegistry } from './tools/registry.js';
 import { createResultReadTool } from './tools/result-read.js';
+import { createWeb, type WebOptions } from './web/web.js';
 
 export interface AppDeps {
   config: Config;
@@ -72,8 +73,10 @@ export interface AppDeps {
   secrets?: SecretStore;
   // tests connect in-memory servers. the app starts stdio processes and http connections.
   mcpTransport?: IntegrationsDeps['transport'];
-  // false in npm run chat. see start().
+  // false in npm run chat. see start(). the browser follows the same switch: one chrome can use its profile.
   connectIntegrations?: boolean;
+  // tests point the web tools at a local fixture site.
+  web?: WebOptions;
 }
 
 export interface App {
@@ -137,9 +140,10 @@ export function createApp(deps: AppDeps): App {
     ...(deps.setTimer ? { setTimer: deps.setTimer } : {}),
     connects: deps.connectIntegrations !== false,
   });
+  const web = createWeb({ db, blobs, logger, clock, config, enabled: deps.connectIntegrations !== false, ...deps.web });
   // each run gets the integration tools of its session. the list comes from the config, not from a catalog, so the
   // tools parameter of a session never changes when a server changes its tools.
-  const withIntegrations = (sessionKey: string, base: readonly string[]) => [...base, ...integrations.allowedNames(sessionKey)];
+  const withIntegrations = (sessionKey: string, base: readonly string[]) => [...base, ...web.toolsFor(sessionKey), ...integrations.allowedNames(sessionKey)];
   const activeRuns = new Set<string>();
 
   const approvals = createApprovalFlow({
@@ -166,6 +170,7 @@ export function createApp(deps: AppDeps): App {
       createMessageOwnerTool(owner),
       ...createSkillTools({ skillsDir: config.paths.skills }),
       createResultReadTool({ db, blobs }),
+      ...web.tools,
       ...integrations.tools,
     ],
     logger,
@@ -314,6 +319,7 @@ export function createApp(deps: AppDeps): App {
     scheduler,
     async start() {
       sweep(clock());
+      web.start();
       for (const channel of channels.values()) {
         // node stops the process on an unhandled rejection. a failed write in the reply to one message must not stop
         // the service.
@@ -340,6 +346,7 @@ export function createApp(deps: AppDeps): App {
       await queue.drain();
       await integrations.stop();
       await oauth?.close();
+      await web.stop();
     },
     integrations,
     // without compaction hooks the strategy only renders. it does not call a model or append an event.

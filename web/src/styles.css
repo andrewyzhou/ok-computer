@@ -596,3 +596,10 @@ pre {
 .timeline.nested {
   margin-top: 6px;
 }
+
+.shot {
+  display: block;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  margin: 8px 0;
+}
