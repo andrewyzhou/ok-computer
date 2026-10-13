@@ -532,6 +532,13 @@ We take fx's reviewer, lazy MCP schemas, output handles, and sub-agent limits. W
 - **A part with no plain text.** When Telegram refuses every format of a part and its plain text is empty, the send fails, so the router clears the reaction instead of showing the done mark.
 - **Card keys are redacted.** The model writes the keys of a tool input too, so the card redacts a key and marks its field, as it does for a value.
 
+### 7.3 Decisions from phase 2 M4, verification round 4
+
+- **One more try after a 429.** This changes 7.1: a 429 tells that Telegram did not carry out the request, so the adapter waits for `retry_after` (at most 30 seconds) and sends the same message once more. A second 429 goes up as before. The drafts, the typing and the reactions of a reply make a 429 on the reply more likely. A reply that still fails is only logged; the session does not learn about it (open).
+- **The split always ends.** A line that opens a code fence again in the next part is at most a quarter of the room. A longer line is replaced by its marker, and a longer marker is not carried. Before, a long one-line code span filled each later part, and the split ran until the heap ran out.
+- **Redacted keys never merge.** A redacted key that is already taken gets a number (`"[redacted] 2"`), so the card details and the dashboard show every value that the tool gets.
+- **Character references in the HTML fallback** show as their characters in text and in link addresses. Code keeps them as text. The converter knows the common named references; other names stay as text.
+
 ## 8. Remote access
 
 - **Dashboard over Tailscale.** Share the dashboard through Tailscale Serve, keep it bound to `127.0.0.1`, and set `DASHBOARD_TOKEN`.
