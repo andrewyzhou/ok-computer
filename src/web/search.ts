@@ -36,11 +36,14 @@ const PER_HOUR = 20;
 const GAP_MS = 2_000;
 const STATE_KEY = 'web_search.engines';
 
-interface EngineState {
+export interface EngineState {
   strikes: number;
   until?: string;
   reason?: string;
 }
+
+// the dashboard reads the pauses too.
+export const engineStates = (db: Db) => getSetting<Record<string, EngineState>>(db, STATE_KEY) ?? {};
 
 // the code runs in the page. the server code has no dom types, so the page objects are typed loosely here.
 type Loose = any;
@@ -113,7 +116,7 @@ export function createWebSearchTool(deps: SearchDeps): Tool {
   // one search at a time, so the gap and the hourly limit hold also for calls in the same turn.
   let queue: Promise<unknown> = Promise.resolve();
 
-  const states = () => getSetting<Record<string, EngineState>>(deps.db, STATE_KEY) ?? {};
+  const states = () => engineStates(deps.db);
   const save = (id: string, state: EngineState) => setSetting(deps.db, STATE_KEY, { ...states(), [id]: state }, deps.clock());
 
   return defineTool({

@@ -36,8 +36,7 @@ import {
   toMcpMessage,
 } from './queries.js';
 import { integrationDetail, summaryOf } from './integrations.js';
-import { browserTask, browserTasks, tracePathOf } from './browser.js';
-import { createByteStore } from '../observability/byte-blobs.js';
+import { mountBrowser } from './browser.js';
 import { createFeed } from './stream.js';
 import type { ContextView, MemoryFile, Meta } from './types.js';
 
@@ -69,7 +68,6 @@ export function createDashboard(deps: DashboardDeps): Hono {
   const logDir = join(config.paths.data, 'logs');
   const webDir = deps.webDir ?? WEB_DIR;
   const blobs = createBlobStore(db, join(config.paths.data, 'blobs'), clock);
-  const bytes = createByteStore(db, join(config.paths.data, 'blobs'), clock);
   const server = new Hono();
 
   // a web page in the browser can send requests to a loopback port. the host check stops dns rebinding, and the
@@ -131,31 +129,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
       return c.json({ error: (err as Error).message }, 500);
     }
   });
-  server.get('/api/browser/tasks', (c) => c.json(browserTasks(db)));
-  server.get('/api/browser/tasks/:id', (c) => {
-    const detail = browserTask(db, c.req.param('id'));
-    return detail ? c.json(detail) : notFound(c, 'browser task');
-  });
-  // a screenshot is bytes. only an image goes out, with its type fixed, so a blob of text never renders as a page.
-  server.get('/api/browser/screenshots/:hash', (c) => {
-    try {
-      const blob = bytes.read(c.req.param('hash'));
-      if (!blob || !blob.mime.startsWith('image/')) return notFound(c, 'screenshot');
-      return c.body(new Uint8Array(blob.bytes), 200, { 'content-type': blob.mime, 'x-content-type-options': 'nosniff' });
-    } catch (err) {
-      return c.json({ error: (err as Error).message }, 500);
-    }
-  });
-  // the trace holds the cookies and the requests of the task, so it goes out only to a client that passed the token.
-  server.get('/api/browser/tasks/:id/trace', (c) => {
-    const path = tracePathOf(db, c.req.param('id'));
-    const full = path && join(config.paths.data, 'browser', path);
-    if (!full || !existsSync(full)) return notFound(c, 'trace');
-    return c.body(new Uint8Array(readFileSync(full)), 200, {
-      'content-type': 'application/zip',
-      'content-disposition': `attachment; filename="${c.req.param('id')}.zip"`,
-    });
-  });
+  mountBrowser(server, { db, dataDir: config.paths.data, clock });
   server.get('/api/tool-catalogs/:hash', (c) => {
     const catalog = getToolCatalog(db, c.req.param('hash'));
     return catalog ? c.json(catalog) : notFound(c, 'tool catalog');
