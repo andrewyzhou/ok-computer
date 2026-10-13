@@ -85,6 +85,8 @@ describe('createAlwaysAllow', () => {
   it('gives the yes button an expiry 10 minutes ahead, and refuses an expired yes', async () => {
     const { path, always, id, expires, resolve } = setup();
     expect(expires).toEqual(new Date('2026-10-13T03:10:00Z'));
+    // taint does not follow text through goals or memory, so the owner must know that a clean session can be steered.
+    expect(always.confirm(id).text).toContain('text that such a session saved as a goal or in memory can steer a later session');
     expect(await always.apply(id, new Date(now.getTime() - 1000))).toMatch(/^That confirmation expired/);
     expect(existsSync(path)).toBe(false);
     expect(resolve).not.toHaveBeenCalled();

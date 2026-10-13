@@ -50,7 +50,7 @@ export function createAlwaysAllow(deps: AlwaysAllowDeps) {
       return {
         text: [
           `Always allow ${tool}? Each later call of ${tool}, with any input and in every session, then runs without asking you.`,
-          'A session that read outside content still asks. Each result of an integration counts as outside content, so in the main chat the rule helps mostly after /new and in automations.',
+          'A session that read outside content still asks. But text that such a session saved as a goal or in memory can steer a later session, for example after /new, and that session then runs the tool without asking.',
           'A deny rule in okc.policy.json still wins. The rule goes into okc.policy.json, where you can remove it.',
           'This question is valid for 10 minutes.',
         ].join('\n'),
