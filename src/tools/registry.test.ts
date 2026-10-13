@@ -35,7 +35,6 @@ describe('tool registry', () => {
           type: 'object',
           properties: { text: { type: 'string' } },
           required: ['text'],
-          additionalProperties: false,
         },
       },
       { name: 'now', description: expect.any(String), inputSchema: expect.objectContaining({ type: 'object' }) },

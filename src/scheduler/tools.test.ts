@@ -23,6 +23,12 @@ function setup() {
 }
 
 describe('automation tools', () => {
+  it('shows fields with a default as optional to the model', () => {
+    const { db } = setup();
+    const [spec] = createToolRegistry(createAutomationTools({ db, replan: () => {} })).specs(['automations_create']);
+    expect(spec?.inputSchema.required).toEqual(['name', 'schedule', 'payload']);
+  });
+
   it('pauses, moves and deletes an automation by id', async () => {
     const { db, call, replans } = setup();
     const created = await call('automations_create', {

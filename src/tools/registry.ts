@@ -91,6 +91,7 @@ export function createToolRegistry(tools: Tool[], options: { gate?: ApprovalGate
 }
 
 function toSpec(tool: Tool): ToolSpec {
-  const { $schema: _ignored, ...inputSchema } = z.toJSONSchema(tool.input) as Record<string, unknown>;
+  // the input mode shows a field with a default as optional, because the model can leave it out.
+  const { $schema: _ignored, ...inputSchema } = z.toJSONSchema(tool.input, { io: 'input' }) as Record<string, unknown>;
   return { name: tool.name, description: tool.description, inputSchema };
 }
