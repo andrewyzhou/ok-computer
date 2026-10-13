@@ -151,8 +151,10 @@ export interface OneClickResult {
 const TIMEOUT_MS = 15_000;
 export const ONE_CLICK_BODY = 'List-Unsubscribe=One-Click';
 
-// rfc 8058: a post with the fixed body, no cookies, no redirects. the answer body is read up to 64 kb and dropped.
-export function oneClick(target: string, lookup: LookupFunction = publicOnlyLookup): Promise<OneClickResult> {
+// rfc 8058: a post with the fixed body, no cookies, no redirects. the status line is the answer. the body is read up
+// to 64 kb and dropped. one deadline covers the whole request: an idle timeout alone let a sender that sends one byte
+// each second hold the approved call for hours.
+export function oneClick(target: string, lookup: LookupFunction = publicOnlyLookup, timeoutMs = TIMEOUT_MS): Promise<OneClickResult> {
   let url: URL;
   try {
     url = new URL(target);
@@ -170,25 +172,25 @@ export function oneClick(target: string, lookup: LookupFunction = publicOnlyLook
       {
         method: 'POST',
         lookup,
-        timeout: TIMEOUT_MS,
         headers: { 'content-type': 'application/x-www-form-urlencoded', 'content-length': Buffer.byteLength(ONE_CLICK_BODY), 'user-agent': 'ok-computer' },
       },
       (res) => {
+        const status = res.statusCode ?? 0;
+        if (status >= 200 && status < 300) resolve({ ok: true, sent: true, status, text: `the sender answered ${status}` });
+        else if (status >= 300 && status < 400) resolve({ ok: false, sent: true, status, text: `the sender answered with a redirect (${status}), which one-click does not follow. The unsubscribe probably did not finish.` });
+        else resolve({ ok: false, sent: true, status, text: `the sender answered ${status}` });
         let size = 0;
+        // the deadline can stop the body. the result is known then, so that error is not a failure.
+        res.on('error', () => {});
         res.on('data', (chunk: Buffer) => {
           size += chunk.length;
           if (size > 64 * 1024) res.destroy();
         });
-        res.on('close', () => {
-          const status = res.statusCode ?? 0;
-          if (status >= 200 && status < 300) resolve({ ok: true, sent: true, status, text: `the sender answered ${status}` });
-          else if (status >= 300 && status < 400) resolve({ ok: false, sent: true, status, text: `the sender answered with a redirect (${status}), which one-click does not follow. The unsubscribe probably did not finish.` });
-          else resolve({ ok: false, sent: true, status, text: `the sender answered ${status}` });
-        });
       },
     );
+    const deadline = setTimeout(() => req.destroy(new Error('the sender did not answer in time')), timeoutMs);
+    req.on('close', () => clearTimeout(deadline));
     req.on('socket', (socket) => socket.on('connect', () => (connected = true)));
-    req.on('timeout', () => req.destroy(new Error('the sender did not answer in time')));
     req.on('error', (err: NodeJS.ErrnoException) => resolve({ ok: false, sent: connected, ...(err.code === 'EPRIVATE' ? { refused: true } : {}), text: err.message }));
     req.end(ONE_CLICK_BODY);
   });

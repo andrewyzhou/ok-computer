@@ -1,3 +1,9 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer as createHttpsServer } from 'node:https';
+import type { AddressInfo, Socket } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createGoogleHarness, refreshOf, type GoogleHarness } from '../../test/google-harness.js';
 import { runTool } from '../../test/run-tool.js';
@@ -19,6 +25,20 @@ async function setup(options: { send?: boolean; oneClick?: (target: string) => P
   const ctx = (id = `call-${++calls}`): ToolContext => ({ runId: 'run-1', sessionKey: 'main', timeZone: 'America/Los_Angeles', clock: () => h.now.value, signal: new AbortController().signal, toolCallId: id });
   return (name: string, input: unknown, context = ctx()): Promise<ToolOutput> => runTool(registry, { id: context.toolCallId!, name: `google__${name}`, input }, allowed, context);
 }
+
+// a throwaway certificate for a local https sender. the repository keeps no private key, so openssl makes one for each
+// run. without openssl the test that needs it skips.
+const testCertificate = ((): { key: Buffer; cert: Buffer } | undefined => {
+  const dir = mkdtempSync(join(tmpdir(), 'okc-cert-'));
+  try {
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', join(dir, 'key.pem'), '-out', join(dir, 'cert.pem'), '-days', '1', '-subj', '/CN=sender.example'], { stdio: 'ignore' });
+    return { key: readFileSync(join(dir, 'key.pem')), cert: readFileSync(join(dir, 'cert.pem')) };
+  } catch {
+    return undefined;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+})();
 
 const SENDER = 'news@shop.example';
 const newsletter = {
@@ -228,6 +248,41 @@ describe('gmail_unsubscribe', () => {
     const out = await call('gmail_unsubscribe', { account: 'personal', messageId: 'n1', sender: SENDER, target: 'mailto:unsub@shop.example?subject=stop' });
     expect(out.content).toContain('sent from personal to unsub@shop.example');
     expect(h.fake.sent[0]!.raw).toContain('Subject: stop');
+  });
+
+  // a sender that answers 200 and then sends one byte each second held the approved call open for hours, and the
+  // approval flow then gave it the effect unknown.
+  it.skipIf(!testCertificate)('ends at the status line and holds a sender that does not answer only until the deadline', async () => {
+    const sockets = new Set<Socket>();
+    const server = createHttpsServer(testCertificate!, (req, res) => {
+      req.resume();
+      if (req.url === '/silent') return;
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      const timer = setInterval(() => res.write('.'), 50);
+      res.on('close', () => clearInterval(timer));
+    });
+    server.on('secureConnection', (socket) => sockets.add(socket));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as AddressInfo).port;
+    // the lookup stands in for a public address of the sender. the test is about time, not about the address check.
+    const lookup = ((_host: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) =>
+      options.all ? callback(null, [{ address: '127.0.0.1', family: 4 }]) : callback(null, '127.0.0.1', 4)) as never;
+    const before = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    try {
+      const start = Date.now();
+      expect(await oneClick(`https://sender.example:${port}/trickle`, lookup, 1_000)).toMatchObject({ ok: true, sent: true, status: 200 });
+      expect(Date.now() - start).toBeLessThan(800);
+      expect(await oneClick(`https://sender.example:${port}/silent`, lookup, 300)).toMatchObject({ ok: false, sent: true, text: 'the sender did not answer in time' });
+      // the deadline also ends the trickled body, so no socket stays open.
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      expect([...sockets].filter((socket) => !socket.destroyed)).toEqual([]);
+    } finally {
+      if (before === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      else process.env.NODE_TLS_REJECT_UNAUTHORIZED = before;
+      for (const socket of sockets) socket.destroy();
+      server.close();
+    }
   });
 
   it('keeps only https and mailto targets', () => {
