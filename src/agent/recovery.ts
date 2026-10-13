@@ -6,6 +6,7 @@ import type { ToolCall } from '../models/types.js';
 import { silentLogger, type Logger } from '../observability/logger.js';
 import { redactedJson } from '../observability/redact.js';
 import type { Clock } from '../time.js';
+import { integrationOf } from '../integrations/names.js';
 import { TOOL_CALL } from '../tools/registry.js';
 
 export const interruptedText = (name: string) =>
@@ -13,6 +14,8 @@ export const interruptedText = (name: string) =>
 const notRunText = (name: string) => `${name} did not run, because the app stopped first.`;
 const waitsText = (name: string, approvalId: number) =>
   `${name} did not run. It waits for the owner's approval #${approvalId}, and the decision comes back as a system event.`;
+// a repaired row of an integration tool counts for its integration, so the page shows the call whose effect is unknown.
+const sourceOf = (name: string) => [integrationOf(name) ? 'mcp' : 'builtin', integrationOf(name) ?? null] as const;
 
 // a call is dangling when the last assistant turn has no result event for it. the provider refuses a request with
 // such a call, so one dangling call stops every later run of the session. only the last turn can have one, because
@@ -85,8 +88,8 @@ function resultFromTrace(db: Db, runId: string | null, call: ToolCall, clock: Cl
     payload = { toolCallId: call.id, name: call.name, content, isError: !waits };
     if (runId !== null) {
       db.prepare(
-        `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, policyDecisionId, outcome)
-         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+        `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, policyDecisionId, outcome, source, serverId)
+         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
       ).run(
         runId,
         call.id,
@@ -97,6 +100,7 @@ function resultFromTrace(db: Db, runId: string | null, call: ToolCall, clock: Cl
         clock().toISOString(),
         decision ? Number(decision.id) : null,
         started ? 'interrupted' : null,
+        ...sourceOf(name),
       );
     }
   }
@@ -165,8 +169,8 @@ export function closeStaleWork(db: Db, now: Date, staleMs: number, live: LiveWor
     return (
       db
         .prepare(
-          `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, policyDecisionId, outcome)
-           SELECT ?, ?, ?, ?, ?, 1, 0, ?, (SELECT id FROM policy_decisions WHERE approvalId = ? ORDER BY id LIMIT 1), 'interrupted'
+          `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, policyDecisionId, outcome, source, serverId)
+           SELECT ?, ?, ?, ?, ?, 1, 0, ?, (SELECT id FROM policy_decisions WHERE approvalId = ? ORDER BY id LIMIT 1), 'interrupted', ?, ?
            WHERE NOT EXISTS (SELECT 1 FROM tool_calls WHERE runId IS ? AND toolCallId = ?)`,
         )
         .run(
@@ -177,6 +181,7 @@ export function closeStaleWork(db: Db, now: Date, staleMs: number, live: LiveWor
           redactedJson({ content, isError: true }),
           at,
           approval.id,
+          ...sourceOf(approval.toolName),
           approval.runId,
           callId,
         ).changes === 1

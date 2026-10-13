@@ -89,10 +89,13 @@ describe('repairSession', () => {
     repairSession(db, 'main', clock);
     // the event keeps the model's own name, so the provider pairs it with the call.
     expect(results()).toEqual([{ toolCallId: 'm1', name: 'tool_call', content: interruptedText('notes__add_note'), isError: true }]);
-    expect(db.prepare("SELECT name, input, outcome FROM tool_calls WHERE toolCallId = 'm1'").get()).toEqual({
+    // the row counts for the integration, so its page shows the call whose effect is unknown.
+    expect(db.prepare("SELECT name, input, outcome, source, serverId FROM tool_calls WHERE toolCallId = 'm1'").get()).toEqual({
       name: 'notes__add_note',
       input: '{"note":"buy milk"}',
       outcome: 'interrupted',
+      source: 'mcp',
+      serverId: 'notes',
     });
   });
 
@@ -172,6 +175,20 @@ describe('closeStaleWork', () => {
 
     // a second sweep finds nothing new.
     expect(closeStaleWork(db, now, hour)).toEqual({ runs: [], expired: [], interrupted: [] });
+  });
+
+  it('counts an interrupted approved call of an integration tool for its integration', () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r1', 'main', 'message', 'main', 'completed', 'x')").run();
+    db.prepare(
+      "INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt, resolvedAt, startedAt) VALUES ('r1', 'notes__add_note', '{}', 'add', 'approved', 'x', ?, ?)",
+    ).run(ago(2 * hour), ago(2 * hour));
+    expect(closeStaleWork(db, now, hour).interrupted).toHaveLength(1);
+    expect(db.prepare("SELECT outcome, source, serverId FROM tool_calls WHERE toolCallId = 'approval-1'").get()).toEqual({
+      outcome: 'interrupted',
+      source: 'mcp',
+      serverId: 'notes',
+    });
   });
 
   // the service and npm run chat can sweep at the same moment. here the second sweep runs between the select of the
