@@ -44,7 +44,7 @@ export interface DashboardDeps {
   config: Config;
   clock: Clock;
   logger: Logger;
-  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations'>;
+  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google'>;
   // with a token, every api request must give it. the browser gives it in the query, because EventSource has no
   // headers.
   token?: string;
@@ -208,6 +208,22 @@ export function createDashboard(deps: DashboardDeps): Hono {
     const input = await body(c, pausedBody);
     if (!input) return c.json({ error: 'give paused as true or false' }, 400);
     return (await app.integrations.setPaused(c.req.param('id'), input.paused)) ? c.json({ paused: input.paused }) : notFound(c, 'integration');
+  });
+  // the google accounts and their sync state. the client file goes to the credential manager, never to the database.
+  server.get('/api/google', (c) => {
+    if (!app.google) return notFound(c, 'google integration');
+    return c.json({ accounts: app.google.accounts.status(), sync: db.prepare('SELECT * FROM google_sync ORDER BY alias, api').all() });
+  });
+  server.post('/api/google/client', async (c) => {
+    if (!app.google) return notFound(c, 'google integration');
+    const file = await c.req.json().catch(() => undefined);
+    const result = await app.google.accounts.saveClient(file);
+    return c.json(result, 'error' in result ? 400 : 200);
+  });
+  server.post('/api/google/:alias/connect', async (c) => {
+    if (!app.google) return notFound(c, 'google integration');
+    const result = await app.google.accounts.beginSignIn(c.req.param('alias'));
+    return c.json(result, 'error' in result ? 400 : 200);
   });
   server.get('/api/mcp-messages/:id', (c) => {
     const row = db.prepare('SELECT * FROM mcp_messages WHERE id = ?').get(Number(c.req.param('id')));

@@ -81,6 +81,13 @@ describe('google sign-in', () => {
     expect(await visit(callback, `code=good-code&state=${state}`)).toContain('unknown or expired');
   });
 
+  it('stores a desktop client from its json file and refuses a web client', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    expect(await h.accounts.saveClient({ web: { client_id: 'w', client_secret: 'web-secret-123456' } })).toEqual({ error: expect.stringContaining('web client') });
+    expect(await h.accounts.saveClient({ installed: { client_id: 'd.apps.googleusercontent.com', client_secret: 'GOCSPX-desktop-secret', redirect_uris: ['http://localhost'] } })).toEqual({ saved: true });
+    expect(JSON.parse(h.secrets.values.get('google.client')!)).toEqual({ client_id: 'd.apps.googleusercontent.com', client_secret: 'GOCSPX-desktop-secret' });
+  });
+
   it('clears the needs_auth state and the alert mark after a new sign-in', async () => {
     h = await createGoogleHarness({ accounts: ['personal'] });
     h.signedIn('personal');

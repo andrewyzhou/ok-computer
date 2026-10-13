@@ -39,6 +39,8 @@ export interface GoogleAccounts {
   run<T>(alias: string, fn: (apis: GoogleApis) => Promise<T>): Promise<T>;
   // why the account cannot take a call now, or undefined.
   unavailable(alias: string): string | undefined;
+  // saveClient stores the oauth client from the json file that google cloud gives for a desktop app.
+  saveClient(file: unknown): Promise<{ saved: true } | { error: string }>;
   beginSignIn(alias: string): Promise<{ url: string } | { error: string }>;
   finishSignIn(state: string, code: string): Promise<{ email: string } | { error: string }>;
   status(): AccountStatus[];
@@ -292,6 +294,24 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
       }
       if (error.kind === 'auth') park(alias, error);
       throw error;
+    },
+    async saveClient(file) {
+      // a web client needs a registered redirect url, and the loopback flow with any port works only for a desktop
+      // client. the file of a desktop client has its fields under "installed".
+      const installed = (file as { installed?: { client_id?: unknown; client_secret?: unknown } } | null)?.installed;
+      if (!installed) {
+        return { error: (file as { web?: unknown } | null)?.web ? 'this is a web client. Create an OAuth client of type "Desktop app" instead.' : 'the file has no "installed" client. Upload the JSON file of a "Desktop app" OAuth client.' };
+      }
+      if (typeof installed.client_id !== 'string' || typeof installed.client_secret !== 'string') return { error: 'the client has no client_id or client_secret.' };
+      registerSecret(installed.client_secret, `${CLIENT_REF}.secret`);
+      try {
+        await secrets.set(CLIENT_REF, JSON.stringify({ client_id: installed.client_id, client_secret: installed.client_secret }));
+      } catch (err) {
+        logger.error('the google client was not stored', { err });
+        return { error: 'the credential manager did not take the client.' };
+      }
+      cached.clear();
+      return { saved: true };
     },
     async beginSignIn(alias) {
       if (!aliases.includes(alias)) return { error: `no google account has the alias ${alias}` };
