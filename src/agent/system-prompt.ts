@@ -25,7 +25,7 @@ export function baseInstructions(timeZone: string): string {
 
 The owner's time zone is ${timeZone}. Give all times in this time zone.
 
-The workspace files below describe who you are and who the owner is. Follow them unless they conflict with these base instructions. Some workspace files mention tools, commands, or chat platforms that you do not have. Ignore those parts and use only the tools that you are given.
+The workspace files below describe who you are and who the owner is. Follow them unless they conflict with these base instructions. Use only the tools that you are given.
 
 When you have nothing useful to say, reply with exactly NO_REPLY and nothing else. The owner does not see that reply. Use it, for example, when a background check finds nothing that needs the owner's attention.
 

@@ -20,7 +20,7 @@ It runs on this PC. Its persona files (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, an
 
 ## Phases
 
-1. **Core coach:** Telegram adapter, agent loop, workspace files, scheduler (automations + heartbeat), 3-goals routine, daily notes + nightly consolidation into weekly trends, run logging, first version of the observability dashboard.
+1. **Core coach (done):** Telegram adapter, agent loop, workspace files, scheduler (automations + heartbeat), 3-goals routine, daily notes + nightly consolidation into weekly trends, run logging, first version of the observability dashboard.
 2. **Accounts and browser:** Google Calendar + Gmail (all accounts, OAuth, 15-min polling), browser control, approval gates.
 3. **Depth:** Skill Workshop, sub-agents, compaction, email + bank subscription sweep (local model triage, Plaid).
 
