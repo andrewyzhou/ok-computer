@@ -57,6 +57,7 @@ export function createFakeTelegram() {
     calls.push({ method, payload: body });
     const ok = (result: unknown) => ({ ok: true as const, result }) as never;
     const code = refuse({ method, payload: body });
+    if (code === 429) return { ok: false as const, error_code: 429, description: 'Too Many Requests: retry after 3', parameters: { retry_after: 3 } } as never;
     if (code) return { ok: false as const, error_code: code, description: code === 400 ? "Bad Request: can't parse entities" : 'Internal Server Error' } as never;
     switch (method) {
       case 'sendRichMessage':

@@ -38,6 +38,8 @@ const DRAFT_WAIT_MS = 2000;
 const DRAFT_FAILURES = 3;
 // the updates that the bot reads. telegram keeps the list of the last call, so the bot always names it.
 export const ALLOWED_UPDATES = ['message', 'callback_query', 'stopped_message_generation'] as const;
+// the longest wait before a message goes again after a 429. a longer wait holds the queue of the owner's chat.
+const RATE_WAIT_MAX_MS = 30_000;
 // the room for the note that says how many characters of the details were cut.
 const CUT_NOTE_ROOM = 80;
 
@@ -98,9 +100,23 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
   type Delivery = { formats: string[]; refused: string[] };
   // telegram refuses a format with a 400. the caller then sends a simpler format. other errors can come after the
   // message reached the chat, so they go up, and the message is not sent twice.
-  const refusedAsUndefined = async <T>(delivery: Delivery, send: () => Promise<T>): Promise<T | undefined> => {
+  // telegram gives a 429 when the bot sends too fast, and then it did not carry out the request. so one more try
+  // after the wait cannot show a message twice. the drafts, the typing and the reactions of a reply go to the same
+  // chat just before the reply, so a 429 on the reply is not rare.
+  const retriedOnce = async <T>(send: () => Promise<T>): Promise<T> => {
     try {
       return await send();
+    } catch (err) {
+      if (!(err instanceof GrammyError) || err.error_code !== 429) throw err;
+      const wait = Math.min((err.parameters.retry_after ?? 1) * 1000, RATE_WAIT_MAX_MS);
+      logger.warn('telegram rate limit, the message waits and goes again', { waitMs: wait });
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      return send();
+    }
+  };
+  const refusedAsUndefined = async <T>(delivery: Delivery, send: () => Promise<T>): Promise<T | undefined> => {
+    try {
+      return await retriedOnce(send);
     } catch (err) {
       if (!(err instanceof GrammyError) || err.error_code !== 400) throw err;
       delivery.refused.push(err.description);
@@ -136,7 +152,7 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
       // not count it as sent.
       if (!pieces.length) throw new Error('telegram refused the formatted text, and its plain text is empty');
       for (const [j, piece] of pieces.entries()) {
-        const plain = await bot.api.sendMessage(chatId, piece, markup(last && j === pieces.length - 1));
+        const plain = await retriedOnce(() => bot.api.sendMessage(chatId, piece, markup(last && j === pieces.length - 1)));
         delivery.formats.push('plain');
         messageId = String(plain.message_id);
       }

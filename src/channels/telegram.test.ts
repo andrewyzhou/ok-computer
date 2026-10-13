@@ -142,6 +142,40 @@ describe('telegram formats', () => {
     ]);
   });
 
+  // a 429 tells that telegram did not carry out the request, so the same message goes once more after the wait.
+  it('sends a message again once after a 429, and gives up after a second 429', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const fake = createFakeTelegram();
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
+    let limited = 0;
+    fake.refuse((c) => (c.method === 'sendRichMessage' && limited++ === 0 ? 429 : false));
+    const rich = channel.send({ chatId: '777', text: 'the **reply**', markdown: true });
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(methods(fake)).toEqual(['sendRichMessage']);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await rich).toEqual({ messageId: '100' });
+    expect(methods(fake)).toEqual(['sendRichMessage', 'sendRichMessage']);
+
+    // the plain parts of a card go again too.
+    const plain = createFakeTelegram();
+    const other = createTelegramChannel({ bot: plain.bot, ownerId: '777', logger: silentLogger, clock });
+    let plainLimited = 0;
+    plain.refuse((c) => (c.method === 'sendMessage' && plainLimited++ === 0 ? 429 : false));
+    const card = other.send({ chatId: '777', text: 'Approval needed' });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(await card).toEqual({ messageId: '100' });
+    expect(methods(plain)).toEqual(['sendMessage', 'sendMessage']);
+
+    const always = createFakeTelegram();
+    const third = createTelegramChannel({ bot: always.bot, ownerId: '777', logger: silentLogger, clock });
+    always.refuse((c) => (c.method === 'sendRichMessage' ? 429 : false));
+    const failed = expect(third.send({ chatId: '777', text: 'hi', markdown: true })).rejects.toThrow(/Too Many Requests/);
+    await vi.advanceTimersByTimeAsync(3000);
+    await failed;
+    expect(methods(always)).toEqual(['sendRichMessage', 'sendRichMessage']);
+    vi.useRealTimers();
+  });
+
   it('falls back to html parts when telegram refuses the rich message, and to plain text for a part it refuses', async () => {
     const fake = createFakeTelegram();
     const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
