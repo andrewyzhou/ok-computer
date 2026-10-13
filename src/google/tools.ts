@@ -1,14 +1,15 @@
 import { createHash } from 'node:crypto';
+import type { calendar_v3 } from '@googleapis/calendar';
 import type { gmail_v1 } from '@googleapis/gmail';
 import { z } from 'zod';
 import type { Logger } from '../observability/logger.js';
+import { cleanLine } from '../signals/store.js';
 import { headOf } from '../text.js';
 import { defineTool, type Tool, type ToolOutput } from '../tools/registry.js';
 import type { GoogleAccounts, GoogleApis } from './accounts.js';
 import type { GoogleConfig } from './config.js';
 import { GoogleError, toGoogleError } from './errors.js';
-import { badAddress, rawMessage, type Draft } from './mime.js';
-import { cleanLine } from '../signals/store.js';
+import { badAddress, bodyText, header, rawMessage, type Draft } from './mime.js';
 import { oneClick as realOneClick, unsubscribeTargets, type OneClickResult } from './unsubscribe.js';
 
 export const GOOGLE = 'google';
@@ -27,6 +28,11 @@ const MAX_RESULTS = 20;
 // text must first fit in memory and in a blob.
 const THREAD_LIMIT = 200_000;
 
+// every google tool names its account. the trace row keeps it, so the page counts the calls of each account.
+function googleTool<I extends { account: string }>(tool: Omit<Tool<I>, 'source' | 'serverId' | 'accountOf'>): Tool {
+  return defineTool<I>({ ...tool, source: GOOGLE, serverId: GOOGLE, accountOf: (input) => input.account });
+}
+
 // a failed write says whether google can have acted. no answer after the request left means that the effect is
 // unknown. a refused connection, or a 4xx answer, means that google did not act, so a retry is safe.
 function failed(tool: string, alias: string, error: GoogleError, write: boolean): ToolOutput {
@@ -42,12 +48,16 @@ function failed(tool: string, alias: string, error: GoogleError, write: boolean)
   return { content: `${tool} failed for ${alias}: ${error.message}.${hint}${unknown}`, isError: true, ...(write ? { effect } : {}) };
 }
 
+// a header field with a line break could add a header that the owner did not approve.
+const headerLine = (max: number) => z.string().max(max).regex(/^[^\r\n]*$/, 'a line break is not allowed');
+
 export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
   const { accounts, config } = deps;
   const aliases = config.accounts.map((each) => each.alias) as [string, ...string[]];
   const account = z.enum(aliases).describe('the alias of the google account');
   const anyAccount = z.enum([...aliases, 'all']).describe('the alias of the google account, or all');
   const addresses = z.array(z.string()).max(50);
+  const time = z.iso.datetime({ offset: true });
   const oneClick = deps.oneClick ?? realOneClick;
 
   // a read tool runs on each account that it names. one account that fails does not hide the others.
@@ -72,16 +82,14 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
     };
   };
 
-  const write = async (tool: string, alias: string, work: (apis: GoogleApis) => Promise<string>): Promise<ToolOutput> => {
+  // work gives the output itself, so a check before the change can refuse the call.
+  const write = async (tool: string, alias: string, work: (apis: GoogleApis) => Promise<ToolOutput>): Promise<ToolOutput> => {
     try {
-      return { content: await accounts.run(alias, work) };
+      return await accounts.run(alias, work);
     } catch (err) {
       return failed(tool, alias, toGoogleError(err), true);
     }
   };
-
-  const header = (message: gmail_v1.Schema$Message, key: string) =>
-    message.payload?.headers?.find((each) => each.name?.toLowerCase() === key.toLowerCase())?.value ?? '';
 
   const sendDraft = async (tool: string, alias: string, draft: Draft & { threadId?: string }): Promise<ToolOutput> => {
     const bad = badAddress([...draft.to, ...(draft.cc ?? []), ...(draft.bcc ?? [])]);
@@ -116,15 +124,32 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
     }
   };
 
+  // the owner approved a change of the event with this title. when the event has another title now, the call is not
+  // the one that the owner approved. a refusal is not "no effect", because a second approval of it cannot help.
+  const titleChanged = async (apis: GoogleApis, tool: string, eventId: string, currentTitle: string): Promise<ToolOutput | 'gone' | undefined> => {
+    let event: calendar_v3.Schema$Event;
+    try {
+      event = (await apis.calendar.events.get({ calendarId: 'primary', eventId })).data;
+    } catch (err) {
+      const error = toGoogleError(err);
+      if (error.kind === 'not_found' || error.kind === 'gone') return 'gone';
+      throw err;
+    }
+    if (event.status === 'cancelled') return 'gone';
+    const title = event.summary ?? '';
+    if (title === currentTitle) return undefined;
+    return { content: `${tool} did not run: the event ${eventId} is called ${JSON.stringify(title)}, not ${JSON.stringify(currentTitle)}.`, isError: true };
+  };
+
+  const messageIds = z.array(z.string().min(1).max(100)).min(1).max(100);
+
   const tools: Tool[] = [
-    defineTool({
+    googleTool({
       name: name('gmail_search'),
       description: 'Search Gmail with Gmail search syntax (for example "from:school is:unread newer_than:7d"). Gives the id, thread, date, sender and subject of each message.',
       input: z.object({ account: anyAccount, query: z.string().max(500), max: z.number().int().min(1).max(MAX_RESULTS).default(10) }),
       risk: 'read',
       untrustedOutput: 'gmail',
-      source: GOOGLE,
-      serverId: GOOGLE,
       run: ({ account: which, query, max }) =>
         eachAccount(name('gmail_search'), which, 'gmail', async (apis, alias) => {
           const list = await apis.gmail.users.messages.list({ userId: 'me', q: query, maxResults: max });
@@ -141,19 +166,17 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
           );
         }),
     }),
-    defineTool({
+    googleTool({
       name: name('gmail_read_thread'),
       description: 'Read a Gmail thread: the headers and the text of each message, and the unsubscribe targets that the sender offers.',
       input: z.object({ account, threadId: z.string().min(1).max(100) }),
       risk: 'read',
       untrustedOutput: 'gmail',
-      source: GOOGLE,
-      serverId: GOOGLE,
       run: ({ account: alias, threadId }) =>
         eachAccount(name('gmail_read_thread'), alias, 'gmail', async (apis) => {
           const { data } = await apis.gmail.users.threads.get({ userId: 'me', id: threadId, format: 'full' });
           const text = (data.messages ?? [])
-            .map((message) => {
+            .map((message: gmail_v1.Schema$Message) => {
               const targets = unsubscribeTargets(header(message, 'List-Unsubscribe'));
               const oneClickOk = /List-Unsubscribe=One-Click/i.test(header(message, 'List-Unsubscribe-Post'));
               return [
@@ -168,27 +191,23 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
           return [headOf(text, THREAD_LIMIT)];
         }),
     }),
-    defineTool({
+    googleTool({
       name: name('gmail_list_labels'),
       description: 'List the Gmail labels of an account, with their ids.',
       input: z.object({ account: anyAccount }),
       risk: 'read',
       untrustedOutput: 'gmail',
-      source: GOOGLE,
-      serverId: GOOGLE,
       run: ({ account: which }) =>
         eachAccount(name('gmail_list_labels'), which, 'gmail', async (apis, alias) => {
           const { data } = await apis.gmail.users.labels.list({ userId: 'me' });
           return (data.labels ?? []).map((label) => cleanLine(`[${alias}] ${label.id}: ${label.name}`, 200));
         }),
     }),
-    defineTool({
+    googleTool({
       name: name('gmail_draft'),
       description: 'Save a draft in Gmail. It does not send it.',
-      input: z.object({ account, to: addresses.min(1), cc: addresses.optional(), subject: z.string().max(500), body: z.string().max(100_000), threadId: z.string().max(100).optional() }),
+      input: z.object({ account, to: addresses.min(1), cc: addresses.optional(), subject: headerLine(500), body: z.string().max(100_000), threadId: z.string().max(100).optional() }),
       risk: 'write',
-      source: GOOGLE,
-      serverId: GOOGLE,
       async run(input) {
         const bad = badAddress([...input.to, ...(input.cc ?? [])]);
         if (bad !== undefined) return { content: `${JSON.stringify(bad)} is not a plain email address.`, isError: true, effect: 'none' };
@@ -197,57 +216,46 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
             userId: 'me',
             requestBody: { message: { raw: rawMessage(input), ...(input.threadId ? { threadId: input.threadId } : {}) } },
           });
-          return `saved draft ${data.id} in ${input.account}.`;
+          return { content: `saved draft ${data.id} in ${input.account}.` };
         });
       },
     }),
     ...(
       [
-        ['gmail_archive', 'Archive Gmail messages (remove them from the inbox).', { removeLabelIds: ['INBOX'] }],
-        ['gmail_mark_read', 'Mark Gmail messages as read.', { removeLabelIds: ['UNREAD'] }],
+        ['gmail_archive', 'Archive Gmail messages (remove them from the inbox).', 'INBOX'],
+        ['gmail_mark_read', 'Mark Gmail messages as read.', 'UNREAD'],
       ] as const
-    ).map(([tool, description, change]) =>
-      defineTool({
+    ).map(([tool, description, label]) =>
+      googleTool({
         name: name(tool),
         description,
-        input: z.object({ account, messageIds: z.array(z.string().min(1).max(100)).min(1).max(100) }),
+        input: z.object({ account, messageIds }),
         risk: 'write',
-        source: GOOGLE,
-        serverId: GOOGLE,
-        run: ({ account: alias, messageIds }) =>
+        run: ({ account: alias, messageIds: ids }) =>
           write(name(tool), alias, async (apis) => {
-            await apis.gmail.users.messages.batchModify({ userId: 'me', requestBody: { ids: messageIds, removeLabelIds: [...change.removeLabelIds] } });
-            return `${tool.replace('gmail_', '')}: ${messageIds.length} messages in ${alias}.`;
+            await apis.gmail.users.messages.batchModify({ userId: 'me', requestBody: { ids, removeLabelIds: [label] } });
+            return { content: `${tool.replace('gmail_', '')}: ${ids.length} messages in ${alias}.` };
           }),
       }),
     ),
-    defineTool({
+    googleTool({
       name: name('gmail_label'),
       description: 'Add or remove Gmail labels (by label id) on messages.',
-      input: z.object({
-        account,
-        messageIds: z.array(z.string().min(1).max(100)).min(1).max(100),
-        add: z.array(z.string().max(100)).default([]),
-        remove: z.array(z.string().max(100)).default([]),
-      }),
+      input: z.object({ account, messageIds, add: z.array(z.string().max(100)).default([]), remove: z.array(z.string().max(100)).default([]) }),
       risk: 'write',
-      source: GOOGLE,
-      serverId: GOOGLE,
-      run: ({ account: alias, messageIds, add, remove }) =>
+      run: ({ account: alias, messageIds: ids, add, remove }) =>
         write(name('gmail_label'), alias, async (apis) => {
-          await apis.gmail.users.messages.batchModify({ userId: 'me', requestBody: { ids: messageIds, addLabelIds: add, removeLabelIds: remove } });
-          return `labels changed on ${messageIds.length} messages in ${alias}.`;
+          await apis.gmail.users.messages.batchModify({ userId: 'me', requestBody: { ids, addLabelIds: add, removeLabelIds: remove } });
+          return { content: `labels changed on ${ids.length} messages in ${alias}.` };
         }),
     }),
-    defineTool({
+    googleTool({
       name: name('gmail_unsubscribe'),
       description:
         'Unsubscribe from a mailing list with the List-Unsubscribe header of a message. target must be one of the unsubscribe targets that gmail_read_thread shows for that message. The owner approves each call.',
       input: z.object({ account, messageId: z.string().min(1).max(100), target: z.string().min(1).max(2000) }),
       risk: 'external',
       needsApproval: true,
-      source: GOOGLE,
-      serverId: GOOGLE,
       async run({ account: alias, messageId, target }) {
         const tool = name('gmail_unsubscribe');
         let message: gmail_v1.Schema$Message;
@@ -281,14 +289,12 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
         return { content: `${tool} did not finish: ${result.text}.`, isError: true, effect: result.sent ? 'unknown' : 'none' };
       },
     }),
-    defineTool({
+    googleTool({
       name: name('calendar_list_events'),
       description: 'List calendar events between two times (ISO 8601 with an offset). account all merges every account.',
-      input: z.object({ account: anyAccount, from: z.iso.datetime({ offset: true }), to: z.iso.datetime({ offset: true }) }),
+      input: z.object({ account: anyAccount, from: time, to: time }),
       risk: 'read',
       untrustedOutput: 'calendar',
-      source: GOOGLE,
-      serverId: GOOGLE,
       run: async ({ account: which, from, to }) => {
         const output = await eachAccount(name('calendar_list_events'), which, 'calendar', async (apis, alias) => {
           const { data } = await apis.calendar.events.list({ calendarId: 'primary', timeMin: from, timeMax: to, singleEvents: true, orderBy: 'startTime', maxResults: 100 });
@@ -300,35 +306,37 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
         return { ...output, content: output.content.split('\n').sort().join('\n') };
       },
     }),
-    defineTool({
+    googleTool({
       name: name('calendar_freebusy'),
       description: 'Show the busy times between two times (ISO 8601 with an offset).',
-      input: z.object({ account: anyAccount, from: z.iso.datetime({ offset: true }), to: z.iso.datetime({ offset: true }) }),
+      input: z.object({ account: anyAccount, from: time, to: time }),
       risk: 'read',
       untrustedOutput: 'calendar',
-      source: GOOGLE,
-      serverId: GOOGLE,
       run: ({ account: which, from, to }) =>
         eachAccount(name('calendar_freebusy'), which, 'calendar', async (apis, alias) => {
           const { data } = await apis.calendar.freebusy.query({ requestBody: { timeMin: from, timeMax: to, items: [{ id: 'primary' }] } });
           return (data.calendars?.primary?.busy ?? []).map((busy) => `[${alias}] busy ${busy.start} to ${busy.end}`);
         }),
     }),
-    defineTool({
+    googleTool({
       name: name('calendar_create_event'),
-      description: 'Create an event on the owner\'s own calendar. It invites nobody; use calendar_update_event to add attendees.',
+      description:
+        "Create an event on the owner's calendar. With attendees, google sends each of them an invitation, and the owner approves the call.",
       input: z.object({
         account,
         summary: z.string().min(1).max(500),
-        start: z.iso.datetime({ offset: true }),
-        end: z.iso.datetime({ offset: true }),
+        start: time,
+        end: time,
         description: z.string().max(5000).optional(),
         location: z.string().max(500).optional(),
+        attendees: addresses.optional(),
       }),
       risk: 'write',
-      source: GOOGLE,
-      serverId: GOOGLE,
-      async run(input, ctx) {
+      // an invitation goes to other people, so it is external. the caller then always asks the owner.
+      riskFor: (input) => (input.attendees?.length ? 'external' : 'write'),
+      async run({ attendees, ...input }, ctx) {
+        const bad = attendees ? badAddress(attendees) : undefined;
+        if (bad !== undefined) return { content: `${JSON.stringify(bad)} is not a plain email address.`, isError: true, effect: 'none' };
         // the id comes from the call, so a second run of the same approved call finds the first event instead of a
         // copy. hex digits are valid base32hex, which google needs for an event id.
         const id = `okc${createHash('sha256').update(`${ctx.runId}:${ctx.toolCallId ?? ''}`).digest('hex').slice(0, 32)}`;
@@ -337,7 +345,7 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
           const { data } = await accounts.run(input.account, (apis) =>
             apis.calendar.events.insert({
               calendarId: 'primary',
-              sendUpdates: 'none',
+              sendUpdates: attendees?.length ? 'all' : 'none',
               requestBody: {
                 id,
                 summary: input.summary,
@@ -345,10 +353,11 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
                 end: { dateTime: input.end },
                 ...(input.description ? { description: input.description } : {}),
                 ...(input.location ? { location: input.location } : {}),
+                ...(attendees?.length ? { attendees: attendees.map((email) => ({ email })) } : {}),
               },
             }),
           );
-          return { content: `created event ${data.id} in ${input.account}.` };
+          return { content: `created event ${data.id} in ${input.account}${attendees?.length ? ` and invited ${attendees.join(', ')}` : ''}.` };
         } catch (err) {
           const error = toGoogleError(err);
           if (error.status === 409) return { content: `the event ${id} already exists in ${input.account}, so this call made it before.` };
@@ -356,27 +365,31 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
         }
       },
     }),
-    defineTool({
+    googleTool({
       name: name('calendar_update_event'),
-      description: 'Change an event. attendees replaces the attendee list, and google sends each attendee an update. The owner approves each call.',
+      description:
+        'Change an event. currentTitle is the title that the event has now; the call does not run when it differs. attendees replaces the attendee list, and google sends each attendee an update. The owner approves each call.',
       input: z.object({
         account,
         eventId: z.string().min(1).max(1024),
+        currentTitle: z.string().max(500),
         summary: z.string().max(500).optional(),
-        start: z.iso.datetime({ offset: true }).optional(),
-        end: z.iso.datetime({ offset: true }).optional(),
+        start: time.optional(),
+        end: time.optional(),
         description: z.string().max(5000).optional(),
         location: z.string().max(500).optional(),
         attendees: addresses.optional(),
       }),
       risk: 'external',
       needsApproval: true,
-      source: GOOGLE,
-      serverId: GOOGLE,
-      async run({ account: alias, eventId, attendees, start, end, ...fields }) {
+      async run({ account: alias, eventId, currentTitle, attendees, start, end, ...fields }) {
+        const tool = name('calendar_update_event');
         const bad = attendees ? badAddress(attendees) : undefined;
         if (bad !== undefined) return { content: `${JSON.stringify(bad)} is not a plain email address.`, isError: true, effect: 'none' };
-        return write(name('calendar_update_event'), alias, async (apis) => {
+        return write(tool, alias, async (apis) => {
+          const changed = await titleChanged(apis, tool, eventId, currentTitle);
+          if (changed === 'gone') return { content: `${tool} did not run: the event ${eventId} does not exist in ${alias}.`, isError: true };
+          if (changed) return changed;
           await apis.calendar.events.patch({
             calendarId: 'primary',
             eventId,
@@ -388,35 +401,40 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
               ...(attendees ? { attendees: attendees.map((email) => ({ email })) } : {}),
             },
           });
-          return `updated event ${eventId} in ${alias}.`;
+          return { content: `updated event ${eventId} in ${alias}.` };
         });
       },
     }),
-    defineTool({
+    googleTool({
       name: name('calendar_delete_event'),
-      description: 'Delete an event. Google tells its attendees. The owner approves each call.',
-      input: z.object({ account, eventId: z.string().min(1).max(1024) }),
+      description: 'Delete an event. currentTitle is the title that the event has now; the call does not run when it differs. Google tells its attendees. The owner approves each call.',
+      input: z.object({ account, eventId: z.string().min(1).max(1024), currentTitle: z.string().max(500) }),
       risk: 'external',
       needsApproval: true,
-      source: GOOGLE,
-      serverId: GOOGLE,
-      async run({ account: alias, eventId }) {
-        try {
-          await accounts.run(alias, (apis) => apis.calendar.events.delete({ calendarId: 'primary', eventId, sendUpdates: 'all' }));
+      run: ({ account: alias, eventId, currentTitle }) => {
+        const tool = name('calendar_delete_event');
+        // a delete that comes again after a lost answer finds the event gone. that is the result that the owner wanted.
+        const done = { content: `the event ${eventId} is already deleted in ${alias}.` };
+        return write(tool, alias, async (apis) => {
+          const changed = await titleChanged(apis, tool, eventId, currentTitle);
+          if (changed === 'gone') return done;
+          if (changed) return changed;
+          try {
+            await apis.calendar.events.delete({ calendarId: 'primary', eventId, sendUpdates: 'all' });
+          } catch (err) {
+            const error = toGoogleError(err);
+            if (error.kind === 'gone' || error.kind === 'not_found') return done;
+            throw err;
+          }
           return { content: `deleted event ${eventId} in ${alias}.` };
-        } catch (err) {
-          const error = toGoogleError(err);
-          // a delete that comes again after a lost answer finds the event gone. that is the result that the owner wanted.
-          if (error.kind === 'gone' || error.kind === 'not_found') return { content: `the event ${eventId} is already deleted in ${alias}.` };
-          return failed(name('calendar_delete_event'), alias, error, true);
-        }
+        });
       },
     }),
   ];
 
   if (config.send) {
     tools.push(
-      defineTool({
+      googleTool({
         name: name('gmail_send'),
         description: 'Send an email. Recipients are plain addresses in lists. The owner approves each call.',
         input: z.object({
@@ -424,49 +442,18 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
           to: addresses.min(1),
           cc: addresses.optional(),
           bcc: addresses.optional(),
-          subject: z.string().max(500),
+          subject: headerLine(500),
           body: z.string().max(100_000),
           threadId: z.string().max(100).optional(),
-          inReplyTo: z.string().max(500).optional(),
+          inReplyTo: headerLine(500).optional(),
         }),
         risk: 'external',
         needsApproval: true,
-        source: GOOGLE,
-        serverId: GOOGLE,
         run: ({ account: alias, ...draft }) => sendDraft(name('gmail_send'), alias, draft),
       }),
     );
   }
   return tools;
-}
-
-// the text of a message: the first text/plain part, or the text/html part without its tags.
-function bodyText(part: gmail_v1.Schema$MessagePart | undefined): string {
-  const plain = findPart(part, 'text/plain');
-  if (plain?.body?.data) return Buffer.from(plain.body.data, 'base64url').toString('utf8');
-  const html = findPart(part, 'text/html');
-  if (html?.body?.data) {
-    return Buffer.from(html.body.data, 'base64url')
-      .toString('utf8')
-      .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/[ \t]+/g, ' ');
-  }
-  return '(no text part)';
-}
-
-function findPart(part: gmail_v1.Schema$MessagePart | undefined, mimeType: string): gmail_v1.Schema$MessagePart | undefined {
-  if (!part) return undefined;
-  if (part.mimeType === mimeType && part.body?.data) return part;
-  for (const child of part.parts ?? []) {
-    const found = findPart(child, mimeType);
-    if (found) return found;
-  }
-  return undefined;
 }
 
 export function googleToolNames(config: Pick<GoogleConfig, 'send'>): string[] {

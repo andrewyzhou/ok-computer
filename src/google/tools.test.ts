@@ -67,13 +67,15 @@ describe('gmail_send', () => {
     expect(out).toMatchObject({ isError: true, effect: 'unknown' });
   });
 
-  it('refuses an address that could add a recipient or a header, and folds a line break in the subject', async () => {
+  it('refuses an address that could add a recipient or a header, and a line break in a header field', async () => {
     const call = await setup();
     for (const to of ['a@example.com\r\nBcc: eve@evil.example', 'a@example.com, eve@evil.example', 'Eve <eve@evil.example>']) {
       expect(await call('gmail_send', { account: 'personal', to: [to], subject: 'x', body: 'x' })).toMatchObject({ isError: true, effect: 'none' });
     }
-    await call('gmail_send', { account: 'personal', to: ['a@example.com'], subject: 'hi\r\nBcc: eve@evil.example', body: 'x' });
-    expect(h.fake.sent[0]!.raw).not.toMatch(/^Bcc:/m);
+    for (const field of [{ subject: 'hi\r\nBcc: eve@evil.example' }, { subject: 'x', inReplyTo: '<a@b>\nBcc: eve@evil.example' }]) {
+      expect(await call('gmail_send', { account: 'personal', to: ['a@example.com'], body: 'x', ...field })).toMatchObject({ isError: true, content: expect.stringContaining('a line break is not allowed') });
+    }
+    expect(h.fake.sent).toEqual([]);
   });
 
   it('is not a tool while sending is off', async () => {
@@ -177,7 +179,30 @@ describe('calendar writes', () => {
   it('treats a repeated delete as done', async () => {
     const call = await setup();
     h.fake.upsertEvent('personal', { id: 'e1', summary: 'x', start: { dateTime: '2026-10-20T09:00:00Z' }, end: { dateTime: '2026-10-20T10:00:00Z' } });
-    expect((await call('calendar_delete_event', { account: 'personal', eventId: 'e1' })).content).toContain('deleted event e1');
-    expect((await call('calendar_delete_event', { account: 'personal', eventId: 'e1' })).content).toContain('already deleted');
+    expect((await call('calendar_delete_event', { account: 'personal', eventId: 'e1', currentTitle: 'x' })).content).toContain('deleted event e1');
+    expect((await call('calendar_delete_event', { account: 'personal', eventId: 'e1', currentTitle: 'x' })).content).toContain('already deleted');
+  });
+
+  // the owner approved a change of the event with the title on the card. another event under that id is not it.
+  it('changes or deletes nothing when the event has another title now, and the refusal is not a call without effect', async () => {
+    const call = await setup();
+    h.fake.upsertEvent('personal', { id: 'e1', summary: 'Board meeting', start: { dateTime: '2026-10-20T09:00:00Z' }, end: { dateTime: '2026-10-20T10:00:00Z' } });
+    const update = await call('calendar_update_event', { account: 'personal', eventId: 'e1', currentTitle: 'Lunch', summary: 'moved' });
+    expect(update).toEqual({ content: 'google__calendar_update_event did not run: the event e1 is called "Board meeting", not "Lunch".', isError: true });
+    expect(await call('calendar_delete_event', { account: 'personal', eventId: 'e1', currentTitle: 'Lunch' })).toMatchObject({ isError: true });
+    expect(h.fake.mailbox('personal').events.get('e1')).toMatchObject({ summary: 'Board meeting', status: 'confirmed' });
+    expect((await call('calendar_update_event', { account: 'personal', eventId: 'e1', currentTitle: 'Board meeting', summary: 'moved' })).content).toBe('updated event e1 in personal.');
+    expect(h.fake.mailbox('personal').events.get('e1')).toMatchObject({ summary: 'moved' });
+  });
+
+  it('invites the attendees of a new event, and sends no update for a private one', async () => {
+    const call = await setup();
+    const base = { account: 'personal', summary: 'Kickoff', start: '2026-10-20T09:00:00-07:00', end: '2026-10-20T10:00:00-07:00' };
+    expect((await call('calendar_create_event', { ...base, attendees: ['ana@example.com'] })).content).toMatch(/invited ana@example.com/);
+    await call('calendar_create_event', base);
+    const inserts = h.fake.requests.filter((each) => each.method === 'POST' && each.path.startsWith('/calendar/v3/calendars/primary/events'));
+    expect(inserts.map((each) => new URL(each.path, 'http://x').searchParams.get('sendUpdates'))).toEqual(['all', 'none']);
+    expect(JSON.parse(inserts[0]!.body).attendees).toEqual([{ email: 'ana@example.com' }]);
+    expect(await call('calendar_create_event', { ...base, attendees: ['Ana <ana@example.com>'] })).toMatchObject({ isError: true, effect: 'none' });
   });
 });

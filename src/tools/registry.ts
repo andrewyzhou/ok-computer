@@ -32,6 +32,11 @@ export interface Tool<I = unknown> {
   input: z.ZodType<I>;
   // external means that the tool sends data off the machine or changes an account.
   risk: Risk;
+  // the risk of one call when it depends on the input. an event with attendees sends invitations, so it is external,
+  // and the same event without attendees is a write. an external result also asks the owner like needsApproval.
+  riskFor?: (input: I) => Risk;
+  // the account of an integration with several accounts that one call uses. the trace row keeps it.
+  accountOf?: (input: I) => string;
   // an external tool always needs approval. this flag also asks for approval on other tools.
   needsApproval?: boolean;
   // the source of all outputs of a tool that returns outside text. the registry marks each output with it, also an

@@ -1,3 +1,5 @@
+import type { gmail_v1 } from '@googleapis/gmail';
+
 // a plain address. a name part, a comma or a line break could add a recipient or a header that the owner did not
 // approve, so the tools take bare addresses only.
 const ADDRESS = /^[^\s@<>,;:"()[\]\\]+@[^\s@<>,;:"()[\]\\]+\.[^\s@<>,;:"()[\]\\]+$/;
@@ -39,3 +41,35 @@ export function rawMessage(draft: Draft): string {
   ];
   return Buffer.from(lines.join('\r\n'), 'utf8').toString('base64url');
 }
+
+// the text of a message: the first text/plain part, or the text/html part without its tags.
+export function bodyText(part: gmail_v1.Schema$MessagePart | undefined): string {
+  const plain = findPart(part, 'text/plain');
+  if (plain?.body?.data) return Buffer.from(plain.body.data, 'base64url').toString('utf8');
+  const html = findPart(part, 'text/html');
+  if (html?.body?.data) {
+    return Buffer.from(html.body.data, 'base64url')
+      .toString('utf8')
+      .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/[ \t]+/g, ' ');
+  }
+  return '(no text part)';
+}
+
+function findPart(part: gmail_v1.Schema$MessagePart | undefined, mimeType: string): gmail_v1.Schema$MessagePart | undefined {
+  if (!part) return undefined;
+  if (part.mimeType === mimeType && part.body?.data) return part;
+  for (const child of part.parts ?? []) {
+    const found = findPart(child, mimeType);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+export const header = (message: gmail_v1.Schema$Message, key: string) =>
+  message.payload?.headers?.find((each) => each.name?.toLowerCase() === key.toLowerCase())?.value ?? '';

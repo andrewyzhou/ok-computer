@@ -207,6 +207,7 @@ export async function startFakeGoogle(): Promise<FakeGoogle> {
         res.writeHead(204).end();
         return;
       }
+      if (req.method === 'GET') return json(res, 200, event);
       fake.upsertEvent(alias, { ...event, ...(JSON.parse(body) as Partial<FakeEvent>) });
       return json(res, 200, box.events.get(event.id));
     }
