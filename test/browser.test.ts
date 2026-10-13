@@ -1,6 +1,8 @@
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { browserLogin } from '../src/browser/login.js';
 import { profileBusy } from '../src/browser/worker.js';
 import { createBrowserHarness, hasChrome, killChrome } from './browser-harness.js';
 import { startFixture, type Fixture } from './web-fixture.js';
@@ -153,6 +155,19 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(out).toMatchObject({ isError: true, effect: 'none', content: expect.stringContaining('in use by another Chrome window') });
     // the second worker must not mark the live task of the first as interrupted.
     expect(first.tasks()[0]).toMatchObject({ status: 'open' });
+  });
+
+  it('refuses okc browser login while the agent holds the profile, and allows it after', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'okc-login-'));
+    const h = harness({ dir: join(dataDir, 'browser') });
+    await h.run('browser_open', { url: site.url('shop.test') });
+    const launched: string[][] = [];
+    const login = () => browserLogin({ dataDir, chrome: 'chrome.exe', launch: async (_chrome, args) => (launched.push(args), 0) });
+    expect(await login()).toContain('profile is open now');
+    expect(launched).toEqual([]);
+    await h.worker.stop();
+    expect(await login()).toContain('sign-ins are saved');
+    expect(launched).toHaveLength(1);
   });
 
   it('refuses in a process that does not own the browser', async () => {
