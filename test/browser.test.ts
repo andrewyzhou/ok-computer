@@ -180,6 +180,27 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(sent.content).toContain(`POST ${site.url('shop.test', '/buy')}`);
   });
 
+  it('sends the form whose button it checked, and names a button as the snapshot does', async () => {
+    const h = harness();
+    const page = await h.run('browser_open', { url: site.url('shop.test', '/forms') });
+    // the snapshot names the donate button "Buy now", and the hidden "Buy now" of the other form is not in it.
+    expect(page.content).toMatch(/button "Buy now"/);
+    expect(page.content).toMatch(/button "Send message"/);
+    site.hits.length = 0;
+    const posts = () => site.hitsOn('shop.test').filter((hit) => hit.method === 'POST');
+    // the fields of the order form, with the name of the donate button: the check reads the donate form, so it refuses.
+    const mixed = await h.run('browser_submit', { url: site.url('shop.test', '/forms'), button: 'Buy now', fields: { note: 'hello' } });
+    expect(mixed).toMatchObject({ isError: true, content: expect.stringContaining('the form now has these fields: {}') });
+    // the text of a button is not its name.
+    const text = await h.run('browser_submit', { url: site.url('shop.test', '/forms'), button: 'Send', fields: { msg: 'hi' } });
+    expect(text).toMatchObject({ isError: true, content: expect.stringContaining('no button is named "Send"') });
+    expect(posts()).toEqual([]);
+    const sent = await h.run('browser_submit', { url: site.url('shop.test', '/forms'), button: 'Send message', fields: { msg: 'hi' } });
+    expect(sent.isError).toBe(false);
+    expect(sent.content).toContain('Message sent');
+    expect(posts()).toEqual([expect.objectContaining({ path: '/send', body: 'msg=hi' })]);
+  });
+
   it('masks a password in every snapshot, and refuses to type or send one', async () => {
     const h = harness();
     const page = await h.run('browser_open', { url: site.url('shop.test', '/login') });

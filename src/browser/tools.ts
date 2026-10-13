@@ -1,4 +1,4 @@
-import type { Locator, Page } from 'playwright-core';
+import type { ElementHandle, Locator, Page } from 'playwright-core';
 import { z } from 'zod';
 import { defineTool, type Tool, type ToolContext, type ToolOutput } from '../tools/registry.js';
 import { extractIsolated } from '../web/extract-run.js';
@@ -69,17 +69,12 @@ interface PageControl {
   getAttribute(name: string): string | null;
   matches(selector: string): boolean;
   form: { action: string; method: string; elements: ArrayLike<PageField> } | null;
-  innerText?: string;
-  value?: string;
 }
 interface PageField {
   name: string;
   type: string;
   value: string;
   checked: boolean;
-}
-interface PageDocument {
-  querySelectorAll(selector: string): ArrayLike<PageControl>;
 }
 
 // a get form only reads, for example a search box, so a click may send it. the gate allows only get anyway.
@@ -102,33 +97,25 @@ async function find(page: Page, tab: ActTab, id: string): Promise<Locator> {
 }
 
 interface FormState {
-  name: string;
-  action: string;
   fields: Record<string, string>;
   password: boolean;
 }
 
 // the fields that the owner reads on the card: every named field that a person sees and can change. a password
-// shows as its length only.
-async function submitControls(page: Page): Promise<FormState[]> {
-  return untraced(page, () => page.evaluate((selector) => {
-    const out: FormState[] = [];
-    const doc = (globalThis as unknown as { document: PageDocument }).document;
-    for (const control of Array.from(doc.querySelectorAll(selector))) {
-      const form = control.form;
-      if (!form) continue;
-      const name = (control.innerText || control.value || control.getAttribute('aria-label') || '').trim();
-      const fields: Record<string, string> = {};
-      let password = false;
-      for (const item of Array.from(form.elements)) {
-        if (item.type === 'password') password = true;
-        if (!item.name || ['hidden', 'submit', 'button', 'image', 'reset', 'file'].includes(item.type)) continue;
-        if ((item.type === 'checkbox' || item.type === 'radio') && !item.checked) continue;
-        fields[item.name] = item.type === 'password' ? `(password of ${item.value.length} characters)` : item.value;
-      }
-      out.push({ name, action: form.action, fields, password });
+// shows as its length only. the result is null when the element does not send a form.
+async function formOf(page: Page, control: ElementHandle): Promise<FormState | null> {
+  return untraced(page, () => control.evaluate((el, selector) => {
+    const button = el as unknown as PageControl;
+    if (!button.matches(selector) || !button.form) return null;
+    const fields: Record<string, string> = {};
+    let password = false;
+    for (const item of Array.from(button.form.elements)) {
+      if (item.type === 'password') password = true;
+      if (!item.name || ['hidden', 'submit', 'button', 'image', 'reset', 'file'].includes(item.type)) continue;
+      if ((item.type === 'checkbox' || item.type === 'radio') && !item.checked) continue;
+      fields[item.name] = item.type === 'password' ? `(password of ${item.value.length} characters)` : item.value;
     }
-    return out;
+    return { fields, password };
   }, SUBMIT_CONTROL));
 }
 
@@ -248,21 +235,26 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
         'If the page differs when the owner approves, nothing is sent.',
       input: z.object({
         url: z.string().min(1).max(2000).describe('the address of the page with the form'),
-        button: z.string().min(1).max(200).describe('the text of the button'),
+        button: z.string().min(1).max(200).describe('the name of the button, as the snapshot shows it'),
         fields: z.record(z.string(), z.string().max(5000)).describe('each named field of the form and its value'),
       }),
       risk: 'external',
       async run({ url, button, fields }, ctx) {
         const result = await act(ctx, 'submit', { url, button, fields }, async (page, tab) => {
           if (!sameAddress(page.url(), url)) throw new Error(`the page is now ${page.url()}, not ${url}. Nothing was sent`);
-          const matches = (await submitControls(page)).filter((each) => each.name === button.trim());
-          if (matches.length !== 1) throw new Error(`${matches.length ? 'more than one' : 'no'} button of a form is named ${JSON.stringify(button)}. Nothing was sent`);
-          const form = matches[0]!;
+          // the snapshot names a button by its accessible name, and so does this lookup, which also leaves out hidden
+          // elements. the check and the click use the same element, so the form that is sent is the form that was checked.
+          const name = button.trim();
+          const buttons = page.getByRole('button', { name, exact: true });
+          const count = await buttons.count();
+          if (count !== 1) throw new Error(`${count ? 'more than one' : 'no'} button is named ${JSON.stringify(name)}. Nothing was sent. Use the name that the snapshot shows`);
+          const control = await buttons.elementHandle();
+          const form = await formOf(page, control);
+          if (!form) throw new Error(`the button ${JSON.stringify(name)} does not send a form. Nothing was sent. Use browser_click`);
           if (form.password) throw new Error('the form has a password field. The agent never sends a password. Nothing was sent. The owner signs in with okc browser login');
           const want = JSON.stringify(Object.entries(fields).sort());
           const have = JSON.stringify(Object.entries(form.fields).sort());
           if (want !== have) throw new Error(`the form now has these fields: ${JSON.stringify(form.fields)}. Nothing was sent. Ask again with these values`);
-          const control = page.getByRole('button', { name: button.trim(), exact: true });
           tab.setSubmit(true);
           try {
             await control.click();

