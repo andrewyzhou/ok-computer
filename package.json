@@ -19,10 +19,13 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
+    "@googleapis/calendar": "20.1.0",
+    "@googleapis/gmail": "22.0.1",
     "@hono/node-server": "^2.1.4",
     "@modelcontextprotocol/client": "^2.3.1",
     "@napi-rs/keyring": "^2.1.1",
     "croner": "^10.0.1",
+    "google-auth-library": "11.3.0",
     "grammy": "^1.46.0",
     "hono": "^4.13.13",
     "openai": "^7.32.0",

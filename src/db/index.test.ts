@@ -64,7 +64,8 @@ describe('migrations 006 and 007', () => {
         VALUES ('a1', 'daily', '{}', '{}', 'isolated', 'main', 1, 'owner', 'x', 'x');
     `);
 
-    expect(migrate(db, real)).toEqual(['006_trace_contract.sql', '007_automation_taint.sql']);
+    // later milestones add migrations after 007, so the test checks only the start of the list.
+    expect(migrate(db, real).slice(0, 2)).toEqual(['006_trace_contract.sql', '007_automation_taint.sql']);
     // an automation from before 007 has no taint.
     expect(db.prepare('SELECT id, taint FROM automations').all()).toEqual([{ id: 'a1', taint: null }]);
     const columns = (table: string) => db.prepare('SELECT name FROM pragma_table_info(?)').all(table).map((row) => row.name);
@@ -74,7 +75,8 @@ describe('migrations 006 and 007', () => {
     expect(columns('blobs')).not.toContain('refCount');
     expect(columns('policy_decisions')).toContain('taint');
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name);
-    for (const dropped of ['browser_steps', 'sandbox_execs', 'integration_events', 'subagent_runs']) expect(tables).not.toContain(dropped);
+    // migration 008 creates integration_events again, with the columns that the google sync writes.
+    for (const dropped of ['browser_steps', 'sandbox_execs', 'subagent_runs']) expect(tables).not.toContain(dropped);
     expect(db.prepare('SELECT COUNT(*) AS n FROM mcp_messages').get()).toEqual({ n: 1 });
 
     expect(db.prepare('SELECT toolCallId, rawResultBlob, resultHandle, outcome, policyDecisionId FROM tool_calls').all()).toEqual([
