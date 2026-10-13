@@ -139,15 +139,27 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
           note(approvalNote(db, approval, (summary) => `The owner denied #${id} (${summary}). The tool did not run.`));
           return `Denied #${id}.`;
         }
-        let result: { started: boolean; output: ToolOutput };
+        // the owner was told that the effect is unknown, so the owner also gets the result that comes later. without
+        // it, the owner can approve the same send again.
+        const onLate = (late: ToolOutput) => {
+          const text = `Approval #${id} (${approval.toolName}) finished after all.${late.isError ? ' It failed.' : ''} Result: ${headOf(late.content, SUMMARY_LIMIT)}`;
+          deps.owner.send(text).catch((err: unknown) => logger.error('late approval result did not reach the owner', { approvalId: id, err }));
+        };
+        let result: Awaited<ReturnType<ToolCaller['callApproved']>>;
         try {
           // the timeout abandons a stuck tool as the timeout of a run does. a late result then goes to the session.
-          result = await deps.caller().callApproved(approval, AbortSignal.any([deps.signal, AbortSignal.timeout(deps.timeoutMs)]));
+          result = await deps.caller().callApproved(approval, AbortSignal.any([deps.signal, AbortSignal.timeout(deps.timeoutMs)]), onLate);
         } finally {
           active.delete(id);
         }
-        const { started, output } = result;
-        // the words come from what happened. a call that never started must not read as a call that ran and failed.
+        const { started, abandoned, output } = result;
+        // the words come from what happened. a call that never started must not read as a call that ran and failed,
+        // and a call that did not finish in time can still have acted.
+        if (abandoned) {
+          const unknown = 'The tool started, but it did not finish in time, so its effect is unknown.';
+          note(approvalNote(db, approval, (summary) => `The owner approved #${id} (${summary}). ${unknown} If it finishes later, its result comes as a system event.`));
+          return `Approved #${id}. ${unknown} You get a message if it finishes later.`;
+        }
         const what = !started ? 'The tool did not run.' : output.isError ? 'The tool ran. It failed.' : 'The tool ran.';
         // an untrusted result taints the session, as it does for a tool result event.
         const taint: TaintSource[] = output.untrustedSource

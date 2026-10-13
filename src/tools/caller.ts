@@ -56,7 +56,13 @@ export interface ToolCaller {
   notRun(call: ToolCall, ctx: CallContext, text: string): ToolOutput;
   // callApproved runs the stored input of an approval one time. the call goes into the trace of the original run.
   // started tells whether the tool began to run, so the note to the session does not say that a skipped call ran.
-  callApproved(approval: Approval, signal: AbortSignal): Promise<{ started: boolean; output: ToolOutput }>;
+  // abandoned tells that the tool started and did not finish before the signal, so its effect is unknown. onLate gets
+  // the redacted view of a result that comes after that, because the owner who approved the call must learn it.
+  callApproved(
+    approval: Approval,
+    signal: AbortSignal,
+    onLate?: (late: ToolOutput) => void,
+  ): Promise<{ started: boolean; abandoned?: boolean; output: ToolOutput }>;
 }
 
 interface Trace {
@@ -184,11 +190,19 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         appendEvent(db, { sessionKey, runId: null, type: 'system_event', payload: { text, ...(taint.length ? { taint } : {}) } }, clock());
       })
       .catch((err: unknown) => logger.error('late tool result event failed', { runId, toolCallId: call.id, err }));
+    return { content: view.content, ...(late.isError ? { isError: true } : {}) };
   };
 
   // a tool that ignores the abort signal keeps running. the run does not wait for it, so a stuck tool cannot hold the
   // session queue.
-  const run = async (tool: Tool, input: unknown, ctx: ToolContext, call: ToolCall, finish: (output: ToolOutput, outcome?: 'abandoned') => ToolOutput & { rowId?: number }) => {
+  const run = async (
+    tool: Tool,
+    input: unknown,
+    ctx: ToolContext,
+    call: ToolCall,
+    finish: (output: ToolOutput, outcome?: 'abandoned') => ToolOutput & { rowId?: number },
+    onLate?: (late: ToolOutput) => void,
+  ) => {
     if (ctx.signal.aborted) return finish({ content: `${tool.name} did not run, because the run stopped first.`, isError: true });
     const running = tools.execute(tool, input, ctx);
     let onAbort = () => {};
@@ -201,7 +215,11 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
     const recorded = finish({ content: abandonedText(tool.name), isError: true }, 'abandoned');
     // nobody waits for this chain, so an error in it must go to the log. an unhandled rejection stops the process.
     void running
-      .then((late) => recordLate(ctx.runId, ctx.sessionKey, call, recorded.rowId, late))
+      .then((late) => {
+        // the record must not be an argument of onLate?.(), because an optional call skips its arguments.
+        const view = recordLate(ctx.runId, ctx.sessionKey, call, recorded.rowId, late);
+        onLate?.(view);
+      })
       .catch((err: unknown) => logger.error('late tool result failed', { runId: ctx.runId, toolCallId: call.id, err }));
     return recorded;
   };
@@ -309,7 +327,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       return strip(record(ctx.runId, call, { content: text, isError: true }, performance.now(), {}));
     },
 
-    async callApproved(approval, signal) {
+    async callApproved(approval, signal, onLate) {
       const started = performance.now();
       const call = { id: `approval-${approval.id}`, name: approval.toolName, input: approval.input };
       const toolCtx: ToolContext = {
@@ -345,10 +363,14 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       }
       const resolved = tools.resolve(call, [approval.toolName]);
       if (!resolved.ok) return { started: false, output: strip(record(approval.runId, call, resolved.output, started, trace)) };
-      const finish = (output: ToolOutput, outcome?: 'abandoned') =>
-        record(approval.runId, call, output, started, { ...trace, risk: resolved.tool.risk, ...(outcome ? { outcome } : {}) });
+      let abandoned = false;
+      const finish = (output: ToolOutput, outcome?: 'abandoned') => {
+        abandoned = outcome === 'abandoned';
+        return record(approval.runId, call, output, started, { ...trace, risk: resolved.tool.risk, ...(outcome ? { outcome } : {}) });
+      };
       // no await comes between the check of the signal and this line, so the tool starts.
-      return { started: true, output: strip(await run(resolved.tool, resolved.input, toolCtx, call, finish)) };
+      const output = strip(await run(resolved.tool, resolved.input, toolCtx, call, finish, onLate));
+      return { started: true, ...(abandoned ? { abandoned } : {}), output };
     },
   };
 }

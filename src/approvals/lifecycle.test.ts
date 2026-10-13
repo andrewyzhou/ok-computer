@@ -115,7 +115,7 @@ describe('the life of an approved call', () => {
     const w = world(() => new Promise((resolve) => (finish = () => resolve({ content: 'sent late' }))), { timeoutMs: 50 });
     await w.ask();
     const reply = await w.flow.resolve(1, 'approve', 'button');
-    expect(reply).toMatch(/^Approved #1\. The tool failed: send did not finish before the run stopped/);
+    expect(reply).toMatch(/^Approved #1\. The tool started, but it did not finish in time, so its effect is unknown\./);
     let later = false;
     await w.queue.enqueue('main', async () => void (later = true));
     expect(later).toBe(true);

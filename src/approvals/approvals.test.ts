@@ -11,7 +11,7 @@ import { createToolRegistry, defineTool } from '../tools/registry.js';
 import { createApprovalFlow, describeInput } from './flow.js';
 import { expireApprovals, getApproval, parseApprovalButton } from './store.js';
 
-function setup() {
+function setup(options: { timeoutMs?: number; gate?: Promise<void> } = {}) {
   const db = openDb(':memory:');
   db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r1', 'main', 'message', 'main', 'completed', 'x')").run();
   let now = new Date('2026-10-13T03:00:00Z');
@@ -24,15 +24,17 @@ function setup() {
     input: z.object({ to: z.string() }),
     risk: 'external',
     async run({ to }) {
+      await options.gate;
       delivered.push(to);
       return { content: `sent to ${to}` };
     },
   });
+  const queue = createRunQueue();
   const flow = createApprovalFlow({
     db,
     clock,
     logger: silentLogger,
-    queue: createRunQueue(),
+    queue,
     owner: {
       remember() {},
       chat: () => ({ channel: 'cli', chatId: 'local' }),
@@ -44,13 +46,13 @@ function setup() {
     },
     caller: () => caller,
     signal: new AbortController().signal,
-    timeoutMs: 60_000,
+    timeoutMs: options.timeoutMs ?? 60_000,
     timeZone: 'America/Los_Angeles',
   });
   const { caller } = createTestCaller(db, createToolRegistry([sendEmail]), clock, { requestApproval: flow.request });
   const ctx = { runId: 'r1', sessionKey: 'main', allowed: ['send_email'], signal: new AbortController().signal };
   const request = () => caller.call({ id: 't1', name: 'send_email', input: { to: 'bob@example.com' } }, ctx);
-  return { db, flow, sent, delivered, request, advance: (ms: number) => (now = new Date(now.getTime() + ms)) };
+  return { db, flow, sent, delivered, request, queue, advance: (ms: number) => (now = new Date(now.getTime() + ms)) };
 }
 
 describe('approvals', () => {
@@ -115,6 +117,27 @@ describe('approvals', () => {
     ]);
     expect(await flow.resolve(1, 'approve', 'command')).toBe('Approval #1 is already approved.');
     expect(delivered).toHaveLength(1);
+  });
+
+  // the abandoned text has isError, so the owner and the session were told that the tool failed, while the mail
+  // could still go out. the owner never heard the late result and could approve the same send again.
+  it('says that the effect is unknown when an approved call does not finish in time, and tells the owner a late result', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { db, flow, sent, delivered, request, queue } = setup({ timeoutMs: 20, gate });
+    await request();
+    const reply = await flow.resolve(1, 'approve', 'button');
+    expect(reply).toBe('Approved #1. The tool started, but it did not finish in time, so its effect is unknown. You get a message if it finishes later.');
+    const note = () => listEvents(db, 'main').map((e) => (e.type === 'system_event' ? String(e.payload.text) : ''));
+    expect(note()).toEqual([expect.stringContaining('The tool started, but it did not finish in time, so its effect is unknown.')]);
+    expect(note()[0]).not.toContain('failed');
+    expect(db.prepare("SELECT outcome FROM tool_calls WHERE toolCallId = 'approval-1'").get()).toEqual({ outcome: 'abandoned' });
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await queue.drain();
+    expect(delivered).toEqual(['bob@example.com']);
+    expect(sent.at(-1)!.text).toBe('Approval #1 (send_email) finished after all. Result: sent to bob@example.com');
+    expect(note()[1]).toContain('finished after its run stopped');
   });
 
   it('does not run the tool after a denial', async () => {
