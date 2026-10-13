@@ -192,6 +192,8 @@ export function searchArgs(after: number): Record<string, unknown> {
   return {
     filters: `after:${new Date((after - 2 * 24 * 60 * 60) * 1000).toISOString().slice(0, 10)}`,
     channel_types: 'im,mpim',
+    // the search gives files too. a file result has no message ts, so the reader would fail the page on it.
+    content_types: 'messages',
     after: String(after),
     sort: 'timestamp',
     sort_dir: 'asc',

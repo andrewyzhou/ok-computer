@@ -25,6 +25,8 @@ export interface FakeMessage {
   text: string;
   // the unix time when the search index shows the message. the slack search index can be late.
   indexedAt?: number;
+  // a file that the user shared in the conversation. the search gives it unless content_types leaves out files.
+  file?: true;
 }
 
 export interface SlackFake {
@@ -68,11 +70,12 @@ export function createSlackFake(now: () => number): SlackFake {
         tools: [
           {
             name: 'slack_search_public_and_private',
-            description: 'Searches for messages in all Slack channels, including DMs and group DMs. Require at least one of keywords or filters.',
+            description: 'Searches for messages, files in all Slack channels, including DMs and group DMs. Require at least one of keywords or filters.',
             inputSchema: object({
               keywords: { type: 'array', items: { type: 'string' } },
               filters: { type: 'string' },
               channel_types: { type: 'string' },
+              content_types: { type: 'string' },
               after: { type: 'string' },
               before: { type: 'string' },
               sort: { type: 'string', enum: ['score', 'timestamp'] },
@@ -152,6 +155,7 @@ async function search(fake: SlackFake, args: Record<string, unknown>) {
   if (!filters && !keywords.length) return text('Require at least one of keywords or filters.', true);
   if (fake.faults.format === 'garbage') return text('The search service has a new look! Your messages are in a widget now.');
   const types = String(args.channel_types ?? 'public_channel,private_channel,mpim,im').split(',');
+  const contents = String(args.content_types ?? 'messages,files').split(',');
   // slack reads the day of after: in the time zone of the user, and gives only the later days.
   const afterDay = /after:(\d{4}-\d{2}-\d{2})/.exec(filters)?.[1];
   const after = Number(args.after ?? 0);
@@ -160,6 +164,7 @@ async function search(fake: SlackFake, args: Record<string, unknown>) {
     .filter(
       (m) =>
         types.includes(kindOf(m.channel)) &&
+        contents.includes(m.file ? 'files' : 'messages') &&
         Number(m.ts) >= after &&
         (afterDay === undefined || new Date(Number(m.ts) * 1000).toLocaleDateString('en-CA', { timeZone: fake.timeZone }) > afterDay) &&
         (m.indexedAt ?? 0) <= fake.now() &&
@@ -171,8 +176,11 @@ async function search(fake: SlackFake, args: Record<string, unknown>) {
     return text(JSON.stringify({ messages: visible.map((m) => ({ channel: { id: m.channel }, ts: m.ts, user: m.user, text: m.text })) }));
   }
   if (!visible.length) return text('No results found.');
-  const blocks = visible.map(
-    (m, i) => `### Result ${i + 1} of ${visible.length}\nChannel: ${kindOf(m.channel) === 'im' ? 'DM' : 'Group DM'} (${m.channel})\nFrom: Someone (${m.user})\nMessage_ts: ${m.ts}\nText:\n${m.text}`,
+  // the form of a file result is a guess. it has no message ts, so the reader cannot read it as a message.
+  const blocks = visible.map((m, i) =>
+    m.file
+      ? `### Result ${i + 1} of ${visible.length}\nFile: ${m.text}\nChannel: DM (${m.channel})\nShared by: Someone (${m.user})\nCreated: ${m.ts.split('.')[0]}`
+      : `### Result ${i + 1} of ${visible.length}\nChannel: ${kindOf(m.channel) === 'im' ? 'DM' : 'Group DM'} (${m.channel})\nFrom: Someone (${m.user})\nMessage_ts: ${m.ts}\nText:\n${m.text}`,
   );
   return text(`Found ${visible.length} results.\n\n${blocks.join('\n\n')}`);
 }

@@ -131,12 +131,21 @@ describe('slack dm poll', () => {
     expect(t.fake.searches[0]).toEqual({
       filters: 'after:2026-10-10',
       channel_types: 'im,mpim',
+      content_types: 'messages',
       after: String(t.nowS() - FIRST_LOOKBACK_S),
       sort: 'timestamp',
       sort_dir: 'asc',
       limit: 20,
       include_context: false,
     });
+  });
+
+  it('asks for messages only, so a file shared in a dm cannot stop the poll', async () => {
+    const t = await setup();
+    t.fake.messages.push({ channel: DM_ALICE, ts: `${t.nowS() - 120}.000001`, user: ALICE, text: 'budget.xlsx', file: true });
+    const after = t.dm(60, 'the numbers are in the file');
+    expect(await t.poll()).toEqual({ status: 'completed' });
+    expect(t.signals().map((signal) => signal.externalId)).toEqual([`${DM_ALICE}:${after.ts}`]);
   });
 
   it('reads a day back at first, and later from the position minus the overlap, so a dm that the index showed late is found', async () => {
