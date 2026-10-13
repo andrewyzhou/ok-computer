@@ -7,7 +7,7 @@ import type { SlotRunner } from '../models/slots.js';
 import type { Logger } from '../observability/logger.js';
 import type { Clock } from '../time.js';
 import type { ToolCaller } from '../tools/caller.js';
-import type { ToolOutput, ToolRegistry } from '../tools/registry.js';
+import type { ToolRegistry } from '../tools/registry.js';
 import { repairSession } from './recovery.js';
 import { buildVolatilePrompt } from './system-prompt.js';
 
@@ -159,11 +159,12 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
       }
 
       // every tool call gets a result, also when the reply was cut. a call without a result makes the next request fail.
+      const callCtx = { runId, sessionKey: input.sessionKey, allowed: input.allowedTools, signal: abort.signal };
       const outputs = await Promise.all(
         response.toolCalls.map((call) =>
           response.stopReason === 'tool_use'
-            ? deps.caller.call(call, { runId, sessionKey: input.sessionKey, allowed: input.allowedTools, signal: abort.signal })
-            : Promise.resolve<ToolOutput>({ content: 'this tool call was not run because the reply was cut off', isError: true }),
+            ? deps.caller.call(call, callCtx)
+            : deps.caller.notRun(call, callCtx, 'this tool call was not run because the reply was cut off'),
         ),
       );
       response.toolCalls.forEach((call, i) => {

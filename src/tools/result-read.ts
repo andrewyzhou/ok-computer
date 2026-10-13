@@ -3,8 +3,10 @@ import type { Db } from '../db/index.js';
 import type { BlobStore } from '../observability/blobs.js';
 import { defineTool } from './registry.js';
 
-// the limit keeps a page under the handle limit, so a page never gets a handle of its own.
+// the limit keeps a page under the handle limit, so a page never gets a handle of its own. the output also repeats
+// the query, so the query has a limit too.
 export const READ_LIMIT = 3500;
+export const QUERY_LIMIT = 200;
 const AROUND = 150;
 
 export function createResultReadTool(deps: { db: Db; blobs: BlobStore }) {
@@ -13,7 +15,7 @@ export function createResultReadTool(deps: { db: Db; blobs: BlobStore }) {
     description: `Read a long tool result that came back as a preview with a handle such as res_0123456789ab. Give query to find the passages that contain any of its words, or give from (a character offset) and length to read one part. At most ${READ_LIMIT} characters come back.`,
     input: z.object({
       handle: z.string().regex(/^res_[0-9a-f]{12}$/, 'use a handle such as res_0123456789ab'),
-      query: z.string().min(1).optional(),
+      query: z.string().min(1).max(QUERY_LIMIT).optional(),
       from: z.number().int().min(0).default(0),
       length: z.number().int().min(1).max(READ_LIMIT).default(READ_LIMIT),
     }),
@@ -59,7 +61,8 @@ function search(text: string, handle: string, query: string): string {
     const passage = `[at ${start}] ${text.slice(start, end)}`;
     if (used + passage.length > READ_LIMIT && passages.length) break;
     passages.push(passage.slice(0, READ_LIMIT));
-    used += passage.length;
+    // the separator between two passages counts too.
+    used += passage.length + 2;
   }
   const rest = merged.length - passages.length;
   const more = rest ? `\n\n[${rest} more passages match. use a narrower query, or from and length.]` : '';

@@ -2,7 +2,7 @@
 // find (abandoned, late, interrupted). the other words come from the row, its decision and its approval, so they
 // can never go out of step with them. isError stays as it is, because it controls what the model sees.
 // - ran, failed: the tool ran (failed also covers a call that failed before it could run).
-// - invalid: an unknown tool or bad input, so the call never reached the policy.
+// - invalid: the call never reached the policy: an unknown tool, bad input, or a reply that the token limit cut.
 // - denied: a policy rule said no. held: the reviewer said no.
 // - waiting, approved, declined, expired: the call asked the owner. the run after an approval has its own row.
 export type Outcome =

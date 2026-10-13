@@ -20,6 +20,14 @@ describe('redact', () => {
     expect(redactedJson({ text: `the password is ${secret}` })).toBe('{"text":"the password is [redacted]"}');
   });
 
+  it('removes a secret with a quote from json text inside json text, as in a tool result that is json', () => {
+    const secret = 'qu"ote\\slash-2026';
+    registerSecret(secret);
+    const result = JSON.stringify({ apiKey: secret, list: [`x ${secret}`] });
+    expect(redactedJson({ type: 'tool_result', content: result })).not.toContain('slash-2026');
+    expect(redactedJson({ outer: JSON.stringify({ content: result }) })).not.toContain('slash-2026');
+  });
+
   it('gives the same text for a string and for the same string inside json', () => {
     const text = `a result\n${TOKEN}\nmore`;
     expect(JSON.parse(redactedJson({ content: text })).content).toBe(redact(text));

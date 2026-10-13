@@ -7,12 +7,13 @@ import { createTestCaller } from '../../test/harness.js';
 import { openDb } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import { createBlobStore } from '../observability/blobs.js';
+import { registerSecret } from '../observability/redact.js';
 import { BUILTIN_RULES, type Reviewer, type Rule } from '../policy/policy.js';
 import { sessionTaint } from '../policy/store.js';
 import type { ToolCallerDeps } from './caller.js';
 import { createToolRegistry, defineTool } from './registry.js';
-import { createResultReadTool } from './result-read.js';
-import { HANDLE_OVER, newHandle } from './results.js';
+import { createResultReadTool, QUERY_LIMIT } from './result-read.js';
+import { HANDLE_OVER, newHandle, PREVIEW_HEAD, PREVIEW_TAIL } from './results.js';
 
 const LONG = Array.from({ length: 300 }, (_, i) => `line ${i}: ${i === 150 ? 'the hidden needle' : 'filler text'}`).join('\n');
 
@@ -131,6 +132,32 @@ describe('tool caller', () => {
     expect(first.resultHandle).not.toBe(second.resultHandle);
     expect(first.rawResultBlob).toBe(second.rawResultBlob);
     expect(db.prepare('SELECT COUNT(*) AS n FROM blobs').get()).toEqual({ n: 1 });
+  });
+
+  it('keeps the output of result_read under the handle limit, also for the longest query and a dense match', async () => {
+    const { call, row } = setup();
+    await call('echo', { text: 'a'.repeat(10_000) }, 'r1', 'dense');
+    const handle = String(row('dense').resultHandle);
+    const query = 'a '.repeat(QUERY_LIMIT / 2);
+    const found = await call('result_read', { handle, query }, 'r1', 'read-dense');
+    expect(found.content.length).toBeLessThanOrEqual(HANDLE_OVER);
+    expect(row('read-dense')).toMatchObject({ truncated: 0, resultHandle: null });
+    expect((await call('result_read', { handle, query: `${query}a` }, 'r1', 'too-long')).isError).toBe(true);
+  });
+
+  it('redacts a secret before the preview cuts it, so no part of it reaches the trace', async () => {
+    const { call, row, blobs } = setup();
+    const secret = `secret-${'k'.repeat(30)}-end-of-key`;
+    registerSecret(secret);
+    for (const at of [PREVIEW_HEAD - 20, 6000 - PREVIEW_TAIL - 20]) {
+      const text = `${'x'.repeat(at)}${secret}${'y'.repeat(6000 - at)}`;
+      const output = await call('echo', { text }, 'r1', `cut-${at}`);
+      const recorded = row(`cut-${at}`);
+      for (const stored of [output.content, String(recorded.output), blobs.read(String(recorded.rawResultBlob))]) {
+        expect(stored).not.toContain('kkkkkkkkkk');
+        expect(stored).not.toContain('end-of-key');
+      }
+    }
   });
 
   it('keeps the raw text of a short wrapped result in a blob, so rawResultBlob ?? output gives the raw text', async () => {

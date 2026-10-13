@@ -4,7 +4,7 @@ import { appendEvent } from '../events/log.js';
 import type { ToolCall } from '../models/types.js';
 import type { BlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
-import { redactedJson } from '../observability/redact.js';
+import { redact, redactedJson } from '../observability/redact.js';
 import { decide, type ReviewResult, type Reviewer, type Risk, type Rule, type TaintSource } from '../policy/policy.js';
 import { decisionOfApproval, recordDecision, sessionTaint, updateDecision } from '../policy/store.js';
 import type { RunQueue } from '../sessions/queue.js';
@@ -53,6 +53,9 @@ export interface ToolCaller {
   // output keeps untrustedSource, so the result event taints the session. call never throws, because a tool call
   // without a result makes every later request of the session fail.
   call(call: ToolCall, ctx: CallContext): Promise<ToolOutput>;
+  // notRun records a call that never reaches the policy, for example a call in a reply that the token limit cut. the
+  // model gets the text as an error, and the call gets a row like every other call.
+  notRun(call: ToolCall, ctx: CallContext, text: string): ToolOutput;
   // callApproved runs the stored input of an approval one time. the call goes into the trace of the original run.
   callApproved(approval: Approval, signal: AbortSignal): Promise<ToolOutput>;
 }
@@ -79,8 +82,15 @@ export const abandonedText = (name: string) =>
 export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
   const { db, blobs, tools, clock, logger } = deps;
 
-  const record = (runId: string, call: ToolCall, output: ToolOutput, started: number, trace: Trace): ToolOutput & { rowId?: number } => {
-    const view = modelView(output, deps.newHandle ?? newHandle);
+  // the preview cuts the text, and a secret that the cut splits no longer matches the redaction. so the redaction
+  // comes first. the model sees the redacted text in each later request anyway, because the events are redacted.
+  const viewOf = (output: ToolOutput) => {
+    const clean = { ...output, content: redact(output.content) };
+    return { clean, view: modelView(clean, deps.newHandle ?? newHandle) };
+  };
+
+  const record = (runId: string, call: ToolCall, raw: ToolOutput, started: number, trace: Trace): ToolOutput & { rowId?: number } => {
+    const { clean: output, view } = viewOf(raw);
     const result: ToolOutput = {
       content: view.content,
       ...(output.isError ? { isError: true } : {}),
@@ -123,12 +133,12 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
   // the model got the abandoned text. the late result goes into the same row, and a system event tells the session,
   // so the model does not repeat an action that worked.
   const recordLate = (runId: string, sessionKey: string, call: ToolCall, rowId: number | undefined, late: ToolOutput) => {
-    const view = modelView(late, deps.newHandle ?? newHandle);
+    const { clean, view } = viewOf(late);
     try {
       if (rowId !== undefined) {
         db.prepare(
           "UPDATE tool_calls SET outcome = 'late', isError = ?, rawResultBlob = ?, resultHandle = ?, untrustedSource = ? WHERE id = ?",
-        ).run(late.isError ? 1 : 0, blobs.put(late.content), view.handle ?? null, late.untrustedSource ?? null, rowId);
+        ).run(late.isError ? 1 : 0, blobs.put(clean.content), view.handle ?? null, late.untrustedSource ?? null, rowId);
       }
       logger.warn('an abandoned tool call finished late', { runId, toolCallId: call.id, tool: call.name });
     } catch (err) {
@@ -249,6 +259,10 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         record(ctx.runId, call, output, started, { ...trace, ...(outcome ? { outcome } : {}) });
       if (gate.held) return strip(finish(gate.held));
       return strip(await run(tool, input, toolCtx, call, finish));
+    },
+
+    notRun(call, ctx, text) {
+      return strip(record(ctx.runId, call, { content: text, isError: true }, performance.now(), {}));
     },
 
     async callApproved(approval, signal) {

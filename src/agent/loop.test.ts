@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createHarness } from '../../test/harness.js';
+import { getRunDetail } from '../dashboard/queries.js';
 import { textStep, toolStep } from '../models/fake.js';
 import { ModelError } from '../models/types.js';
 
@@ -59,7 +60,7 @@ describe('agent loop', () => {
   });
 
   it('gives an error result to tool calls in a reply that was cut off', async () => {
-    const { run, rows, model } = createHarness([
+    const { db, run, rows, model } = createHarness([
       { toolCalls: [{ id: 't1', name: 'now', input: {} }], stopReason: 'max_tokens' },
       textStep('ok'),
     ]);
@@ -67,7 +68,18 @@ describe('agent loop', () => {
     expect(model.calls[1]?.messages[2]?.content).toEqual([
       { type: 'tool_result', toolCallId: 't1', content: expect.stringContaining('not run'), isError: true },
     ]);
-    expect(rows('SELECT * FROM tool_calls')).toEqual([]);
+    // the call never reached the policy, but it has a row, so the run timeline shows it.
+    expect(rows('SELECT runId, toolCallId, isError, policyDecisionId, output FROM tool_calls')).toEqual([
+      {
+        runId: 'run-1',
+        toolCallId: 't1',
+        isError: 1,
+        policyDecisionId: null,
+        output: JSON.stringify({ content: 'this tool call was not run because the reply was cut off', isError: true }),
+      },
+    ]);
+    const timeline = getRunDetail(db, 'run-1')!.timeline;
+    expect(timeline.flatMap((item) => (item.kind === 'model' ? item.tools : [item.call])).map((call) => call.toolCallId)).toEqual(['t1']);
   });
 
   it('fails the run when the model chain fails', async () => {
