@@ -4,7 +4,7 @@ import type { Db } from '../db/index.js';
 import type { BlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
 import type { SetTimer } from '../scheduler/scheduler.js';
-import type { Clock } from '../time.js';
+import { localTime, type Clock } from '../time.js';
 import { TOOL_CALL, type Tool } from '../tools/registry.js';
 import { createCatalogStore, riskOf, type Catalog, type CatalogTool } from './catalog.js';
 import { sessionProfile, type IntegrationEntry } from './config.js';
@@ -29,12 +29,9 @@ export interface IntegrationsDeps {
   // gets the text of the server, when the failed sign-in step had one.
   onNeedsAuth?: (integrationId: string, serverText: string | undefined) => void;
   setTimer?: SetTimer;
-}
-
-// the text says why a call did not run, and whether a retry can help.
-function unavailable(id: string, state: ConnectionState): string {
-  if (state.status === 'connecting') return `${id} is not connected yet. The app connects it now; try again in a moment.`;
-  return `${id} is ${state.status}${state.error ? ` (${state.error})` : ''}.`;
+  // false in a process that never connects (npm run chat). two processes would start each server twice and could
+  // refresh the same oauth token at once, which a server with rotation punishes.
+  connects?: boolean;
 }
 
 export interface IntegrationStatus {
@@ -85,6 +82,34 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
   // a sign-in that the owner starts from the dashboard can end in needs_auth too. the owner needs no message then.
   const authorizing = new Set<string>();
   const stateOf = (id: string): ConnectionState => parked.get(id) ?? states.get(id) ?? { status: 'stopped' };
+  const paused = new Set(
+    deps.db
+      .prepare('SELECT integrationId FROM integration_state WHERE paused = 1')
+      .all()
+      .map((row) => String(row.integrationId)),
+  );
+
+  // the text says why an integration cannot take a call now, and whether a retry can help. the model can then tell the
+  // owner what to do. undefined means that it is connected.
+  const unavailable = (id: string, timeZone: string): string | undefined => {
+    if (deps.connects === false) return `the ${id} integration runs only in the background app, not in this chat process.`;
+    if (paused.has(id)) return `the owner paused the ${id} integration.`;
+    const state = stateOf(id);
+    switch (state.status) {
+      case 'connected':
+        return undefined;
+      case 'connecting':
+        return `${id} is not connected yet. The app connects it now; try again in a moment.`;
+      case 'error':
+        return `${id} is not connected: ${state.error ?? 'unknown error'}.${state.retryAt ? ` The app tries again at ${localTime(new Date(state.retryAt), timeZone)}.` : ''}`;
+      case 'needs_auth':
+        return parked.has(id)
+          ? `${id} is not signed in yet. The owner connects it on the dashboard.`
+          : `${id} needs the owner to sign in again on the dashboard.`;
+      case 'stopped':
+        return `${id} is stopped.`;
+    }
+  };
   // a tool object depends on the catalog version, so a new version gives new objects with new validators.
   const built = new Map<string, { hash: string; tool: Tool }>();
 
@@ -175,8 +200,8 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       async run(input, ctx) {
         // a call does not wait for a server that is not connected. a wait would hold the session queue, and the tool
         // did not run, so the model can safely try again.
-        const state = stateOf(entry.id);
-        if (state.status !== 'connected') return { content: `${item.name} did not run: ${unavailable(entry.id, state)}`, isError: true };
+        const why = unavailable(entry.id, ctx.timeZone);
+        if (why) return { content: `${item.name} did not run: ${why}`, isError: true };
         const outcome = await connection.callTool(item.mcpName, input as Record<string, unknown>, { runId: ctx.runId, toolCallId: ctx.toolCallId ?? '' });
         return outcomeOutput(item.name, entry.id, outcome);
       },
@@ -197,18 +222,17 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
     return tool;
   };
 
-  const status = (entry: IntegrationEntry): string => stateOf(entry.id).status;
-
   const discovery = {
-    visible(sessionKey: string): Discoverable[] {
-      return visibleTo(sessionKey).flatMap((entry) =>
-        (catalogs.get(entry.id)?.snapshot.tools ?? []).map((tool) => ({
+    visible(sessionKey: string, timeZone: string): Discoverable[] {
+      return visibleTo(sessionKey).flatMap((entry) => {
+        const why = unavailable(entry.id, timeZone);
+        return (catalogs.get(entry.id)?.snapshot.tools ?? []).map((tool) => ({
           tool,
           risk: riskOf(entry, tool),
           untrusted: entry.untrustedOutput,
-          status: status(entry),
-        })),
-      );
+          ...(why ? { unavailable: why } : {}),
+        }));
+      });
     },
   };
 
@@ -222,12 +246,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       return [TOOL_SEARCH, TOOL_CALL, ...visible.flatMap((entry) => entry.tools.allow.map((mcpName) => toolName(entry.id, mcpName)))];
     },
     async start() {
-      const paused = new Set(
-        deps.db
-          .prepare('SELECT integrationId FROM integration_state WHERE paused = 1')
-          .all()
-          .map((row) => String(row.integrationId)),
-      );
+      if (deps.connects === false) return;
       // the servers start side by side. one slow server must not hold the others.
       await Promise.all(
         [...connections].filter(([id]) => !paused.has(id)).map(([id, connection]) => begin(byId.get(id)!, connection)),
@@ -256,7 +275,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
         };
       });
     },
-    async setPaused(id, paused) {
+    async setPaused(id, pause) {
       const connection = connections.get(id);
       if (!connection) return false;
       const now = deps.clock().toISOString();
@@ -265,8 +284,11 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
           `INSERT INTO integration_state (integrationId, paused, updatedAt) VALUES (?, ?, ?)
            ON CONFLICT (integrationId) DO UPDATE SET paused = excluded.paused, updatedAt = excluded.updatedAt`,
         )
-        .run(id, paused ? 1 : 0, now);
-      if (paused) {
+        .run(id, pause ? 1 : 0, now);
+      if (pause) paused.add(id);
+      else paused.delete(id);
+      if (deps.connects === false) return true;
+      if (pause) {
         parked.delete(id);
         await connection.stop();
       } else {

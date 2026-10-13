@@ -135,6 +135,7 @@ export function createApp(deps: AppDeps): App {
         .catch((err: unknown) => logger.error('needs-auth message failed', { integration: id, err })),
     ...(deps.mcpTransport ? { transport: deps.mcpTransport } : {}),
     ...(deps.setTimer ? { setTimer: deps.setTimer } : {}),
+    connects: deps.connectIntegrations !== false,
   });
   // each run gets the integration tools of its session. the list comes from the config, not from a catalog, so the
   // tools parameter of a session never changes when a server changes its tools.
@@ -326,12 +327,9 @@ export function createApp(deps: AppDeps): App {
       syncHeartbeat(db, config, clock());
       // missed jobs can take minutes, so the start does not wait for them.
       void scheduler.start().catch((err: unknown) => logger.error('scheduler start failed', { err }));
-      // a server can need many seconds to start. a call waits for its server, and tool_search reads the stored catalog.
-      // a second process (npm run chat) keeps the same tools and catalogs but does not connect: two processes would
-      // start each server twice and could refresh the same oauth token at once, which a server with rotation punishes.
-      if (deps.connectIntegrations !== false) {
-        void integrations.start().catch((err: unknown) => logger.error('integrations start failed', { err }));
-      }
+      // a server can need many seconds to start, so the start does not wait. tool_search reads the stored catalog.
+      // a second process (npm run chat) keeps the same tools and catalogs but does not connect.
+      void integrations.start().catch((err: unknown) => logger.error('integrations start failed', { err }));
     },
     idle: () => queue.drain(),
     async stop() {

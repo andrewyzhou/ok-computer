@@ -94,7 +94,7 @@ export function createToolRegistry(tools: Tool[], logger: Logger = silentLogger,
         const { name, arguments: args } = outer.data as { name: string; arguments: unknown };
         // only an integration tool goes through tool_call. a built-in tool has its own entry in the tools parameter.
         if (byName.has(name) || !dynamic(name, sessionKey) || !allowed.includes(name)) {
-          return { ok: false, output: { content: `unknown integration tool: ${name}. use tool_search to find the exact name.`, isError: true } };
+          return { ok: false, output: { content: `no integration tool is named ${name}. Use tool_search to find the tool and its exact name.`, isError: true } };
         }
         return resolveOne({ id: call.id, name, input: args }, allowed, sessionKey);
       }

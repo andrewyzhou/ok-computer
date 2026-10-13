@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { headOf } from '../text.js';
 import { HANDLE_OVER } from '../tools/results.js';
 import { defineTool, TOOL_CALL, type Tool, type ToolOutput } from '../tools/registry.js';
+import type { Risk } from '../policy/policy.js';
 import type { CatalogTool } from './catalog.js';
 import type { CallOutcome } from './mcp.js';
 
@@ -15,15 +16,25 @@ const LIST_DESCRIPTION = 300;
 // a visible tool with what the search shows. risk and source come from the config of its integration.
 export interface Discoverable {
   tool: CatalogTool;
-  risk: string;
+  risk: Risk;
   // the integration's catalog text is outside text unless the owner trusts that integration.
   untrusted: boolean;
-  status: string;
+  // why the integration cannot take a call now. it is absent when the integration is connected.
+  unavailable?: string;
 }
 
 export interface Discovery {
-  visible(sessionKey: string): Discoverable[];
+  visible(sessionKey: string, timeZone: string): Discoverable[];
 }
+
+// the model can tell the owner before a call that it waits for an approval.
+const RISK_TEXT: Record<Risk, string> = {
+  read: 'risk read: it runs without approval.',
+  write: 'risk write: it is reviewed first, and until a reviewer exists the owner approves each call.',
+  external: 'risk external: the owner approves each call.',
+};
+// a list of names helps the model when no word matched. this limit keeps it well inside the search budget.
+const NAMES_LIMIT = 1_500;
 
 // the descriptions are fixed text, so the tools parameter of every request stays the same, whatever the servers do.
 export function createDiscoveryTools(discovery: Discovery): Tool[] {
@@ -40,7 +51,7 @@ export function createDiscoveryTools(discovery: Discovery): Tool[] {
       }),
       risk: 'read',
       async run({ query, limit }, ctx) {
-        return search(discovery.visible(ctx.sessionKey), query, limit);
+        return search(discovery.visible(ctx.sessionKey, ctx.timeZone), query, limit);
       },
     }),
     defineTool({
@@ -78,20 +89,36 @@ export function search(visible: Discoverable[], query: string, limit: number): T
         .sort((a, b) => b.score - a.score || a.each.tool.name.localeCompare(b.each.tool.name))
         .slice(0, limit)
         .map(({ each }) => each);
+  const untrusted = (list: Discoverable[]) => {
+    const ids = [...new Set(list.filter((each) => each.untrusted).map((each) => each.tool.integrationId))];
+    return ids.length ? { untrustedSource: `mcp catalog: ${ids.join(', ')}` } : {};
+  };
   if (!ranked.length) {
-    const total = visible.length;
-    return { content: total ? `no tool matches "${query}". ${total} integration tools exist; try other words.` : 'no integration tools are available.' };
+    if (!visible.length) return { content: 'No integration tools are available.' };
+    let names = '';
+    let shown = 0;
+    for (const each of visible) {
+      if (names.length + each.tool.name.length + 2 > NAMES_LIMIT) break;
+      names += `${shown ? ', ' : ''}${each.tool.name}`;
+      shown++;
+    }
+    const more = visible.length - shown;
+    // the names are text of the servers too, so the answer keeps their source.
+    return { content: `No tool matched "${query}". The tools are: ${names}${more ? `, and ${more} more` : ''}.`, ...untrusted(visible.slice(0, shown)) };
   }
   const blocks: string[] = [];
   let used = 0;
   let left = 0;
   for (const each of ranked) {
-    const schema = JSON.stringify(each.tool.inputSchema);
+    // $schema picks the dialect of the check. the model does not need it, and it costs room in the budget.
+    const { $schema: _dialect, ...shown } = each.tool.inputSchema;
+    const schema = JSON.stringify(shown);
     const description = exact ? each.tool.description : headOf(each.tool.description, LIST_DESCRIPTION);
-    const head = `${each.tool.name} (risk: ${each.risk}${each.status === 'connected' ? '' : `, server ${each.status}`})\n${description}`;
+    const status = each.unavailable ? ` Not available now: ${each.unavailable}` : '';
+    const head = `${each.tool.name}\nintegration: ${each.tool.integrationId}. ${RISK_TEXT[each.risk]}${status}\n${description}`;
     // an exact name always gets its full schema. a long one then goes through a handle, which the model can page.
-    const full = `${head}\ninput: ${schema}`;
-    const block = exact || used + full.length <= SEARCH_BUDGET ? full : `${head}\ninput: ${schema.length} characters; search for the exact name to see it.`;
+    const full = `${head}\ninput schema: ${schema}`;
+    const block = exact || used + full.length <= SEARCH_BUDGET ? full : `${head}\ninput schema: ${schema.length} characters; search for the exact name to see it.`;
     if (!exact && used + block.length > SEARCH_BUDGET) {
       left++;
       continue;
@@ -99,9 +126,8 @@ export function search(visible: Discoverable[], query: string, limit: number): T
     blocks.push(block);
     used += block.length + 2;
   }
-  if (left) blocks.push(`${left} more matching tools did not fit. use other words or a lower limit.`);
-  const untrusted = [...new Set(ranked.filter((each) => each.untrusted).map((each) => each.tool.integrationId))];
-  return { content: blocks.join('\n\n'), ...(untrusted.length ? { untrustedSource: `mcp catalog: ${untrusted.join(', ')}` } : {}) };
+  if (left) blocks.push(`${left} more matching tools did not fit. Use other words or a lower limit.`);
+  return { content: blocks.join('\n\n'), ...untrusted(ranked) };
 }
 
 // the model gets text. content that is not text gets a short line, so the model knows that it exists.

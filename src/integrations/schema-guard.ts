@@ -68,7 +68,12 @@ export function createValidatorSet() {
     const check = ajv.getValidator(schema);
     return (input) => {
       const result = check(input);
-      return result.valid ? { ok: true } : { ok: false, message: String(result.errorMessage ?? 'the input does not match the schema').slice(0, 1_000) };
+      if (result.valid) return { ok: true };
+      // ajv names the input "data", as in "data/text must be string". the model knows the field path, not that name.
+      const message = String(result.errorMessage ?? 'the input does not match the schema')
+        .replace(/(^|, )data\//g, '$1')
+        .replace(/(^|, )data /g, '$1the input ');
+      return { ok: false, message: message.slice(0, 1_000) };
     };
   };
 }

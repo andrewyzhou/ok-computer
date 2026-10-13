@@ -165,7 +165,7 @@ describe('mcp acceptance', () => {
     await expect.poll(() => t2.app.integrations.status()[0]!.state.status).toBe('connected');
     await t2.say('try again');
     const results = listEvents(db, 'main').filter((event) => event.type === 'tool_result').map((event) => (event.payload as { content: string }).content);
-    expect(results[0]).toContain('server connecting');
+    expect(results[0]).toContain('Not available now: notes is not connected yet.');
     expect(results[1]).toContain('notes__echo did not run: notes is not connected yet. The app connects it now; try again in a moment.');
     expect(results[2]).toContain('after restart');
     // the early call never reached the server, so only the second call has a tools/call request.
@@ -205,12 +205,43 @@ describe('mcp acceptance', () => {
     const results = listEvents(t.db, 'main')
       .filter((event) => event.type === 'tool_result')
       .map((event) => (event.payload as { content: string }).content);
-    expect(results[0]).toContain('invalid input for notes__echo');
+    // the text names the field, so the model can fix it.
+    expect(results[0]).toBe('invalid input for notes__echo:\n✖ text must be string');
     // a tool outside the allow list and a built-in tool are not reachable through tool_call.
-    expect(results[1]).toContain('unknown integration tool: notes__hidden_admin');
-    expect(results[2]).toContain('unknown integration tool: now');
+    expect(results[1]).toBe('no integration tool is named notes__hidden_admin. Use tool_search to find the tool and its exact name.');
+    expect(results[2]).toBe('no integration tool is named now. Use tool_search to find the tool and its exact name.');
     expect(t.rows("SELECT count(*) AS n FROM mcp_messages WHERE method = 'tools/call'")).toEqual([{ n: 0 }]);
     expect(t.rows('SELECT count(*) AS n FROM policy_decisions')).toEqual([{ n: 0 }]);
+  });
+
+  it('tells the model why an integration cannot take a call, and when the app tries again', async () => {
+    const db = openDb(':memory:');
+    const two = [notesEntry(), notesEntry({ id: 'other' })];
+    // the first process stores both catalogs.
+    const t1 = createTestApp([], { start, deps: { db, integrations: two, mcpTransport: memoryServers().transport } });
+    await t1.app.start();
+    await expect.poll(() => t1.app.integrations.status().map((each) => each.state.status)).toEqual(['connected', 'connected']);
+    await t1.app.stop();
+
+    const failing = async (): Promise<Transport> => {
+      throw new Error('spawn notes-server ENOENT');
+    };
+    const servers = memoryServers();
+    const t2 = createTestApp([call('c1', 'notes__echo', { text: 'x' }), call('c2', 'other__echo', { text: 'x' }), textStep('ok')], {
+      start,
+      deps: { db, integrations: two, mcpTransport: async (entry) => (entry.id === 'notes' ? failing() : servers.transport()) },
+    });
+    apps.push(t2);
+    await t2.app.start();
+    await expect.poll(() => t2.app.integrations.status().map((each) => each.state.status)).toEqual(['error', 'connected']);
+    await t2.app.integrations.setPaused('other', true);
+    await t2.say('try both');
+    const results = listEvents(db, 'main')
+      .filter((event) => event.type === 'tool_result')
+      .map((event) => (event.payload as { content: string }).content);
+    // the first retry comes 1 s after 09:00, in the owner's time zone.
+    expect(results[0]).toContain('notes__echo did not run: notes is not connected: spawn notes-server ENOENT. The app tries again at 09:00.');
+    expect(results[1]).toContain('other__echo did not run: the owner paused the other integration.');
   });
 
   it('changes nothing for an app without integrations, so an upgrade keeps the cached prefix', async () => {
@@ -243,7 +274,9 @@ describe('mcp acceptance', () => {
     await chat.say('echo from the chat process');
     expect(JSON.stringify(chat.model.calls[0]!.tools)).toBe(JSON.stringify(service.model.calls[0]!.tools));
     expect(second.servers).toHaveLength(0);
-    expect(db.prepare("SELECT output FROM tool_calls WHERE toolCallId = 'c1'").all()).toEqual([{ output: expect.stringContaining('did not run: notes is stopped') }]);
+    expect(db.prepare("SELECT output FROM tool_calls WHERE toolCallId = 'c1'").all()).toEqual([
+      { output: expect.stringContaining('notes__echo did not run: the notes integration runs only in the background app, not in this chat process.') },
+    ]);
   });
 
   it('shows each integration on the dashboard api, and a pause stays over a restart', async () => {

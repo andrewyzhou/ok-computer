@@ -66,7 +66,6 @@ describe('tool_search', () => {
     } satisfies CatalogTool,
     risk: 'external',
     untrusted: true,
-    status: 'connected',
   });
 
   it('stays under the handle limit with its wrapper, so the model never gets a cut list', () => {
@@ -83,7 +82,27 @@ describe('tool_search', () => {
     expect(output.content.startsWith('notes__tool_2')).toBe(true);
   });
 
-  it('says how many tools exist when nothing matches', () => {
-    expect(search([big(1)], 'calendar', 5).content).toContain('1 integration tools exist');
+  it('names the tools when nothing matches, and keeps their text untrusted', () => {
+    expect(search([big(1), big(2)], 'calendar', 5)).toEqual({
+      content: 'No tool matched "calendar". The tools are: notes__tool_1, notes__tool_2.',
+      untrustedSource: 'mcp catalog: notes',
+    });
+    // a long list stops inside its own limit and counts the rest.
+    const many = search(Array.from({ length: 300 }, (_, i) => big(i)), 'calendar', 5).content;
+    expect(many.length).toBeLessThan(1_700);
+    expect(many).toMatch(/, and \d+ more\.$/);
+  });
+
+  it('gives each hit its integration, its risk line and its state, without the dialect of the schema', () => {
+    const hit = { ...big(1), tool: { ...big(1).tool, inputSchema: { $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object' } } };
+    expect(search([hit], 'notes__tool_1', 5).content.split('\n').slice(0, 2)).toEqual([
+      'notes__tool_1',
+      'integration: notes. risk external: the owner approves each call.',
+    ]);
+    expect(search([hit], 'notes__tool_1', 5).content).toContain('input schema: {"type":"object"}');
+    const paused = { ...big(1), risk: 'read' as const, unavailable: 'the owner paused the notes integration.' };
+    expect(search([paused], 'notes__tool_1', 5).content.split('\n')[1]).toBe(
+      'integration: notes. risk read: it runs without approval. Not available now: the owner paused the notes integration.',
+    );
   });
 });
