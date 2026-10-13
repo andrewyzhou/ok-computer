@@ -76,6 +76,8 @@ export interface AppDeps {
   mcpTransport?: IntegrationsDeps['transport'];
   // false in npm run chat. see start().
   connectIntegrations?: boolean;
+  // false in npm run chat. background jobs that message the owner, such as the skill review, run only in the service.
+  background?: boolean;
 }
 
 export interface App {
@@ -238,7 +240,7 @@ export function createApp(deps: AppDeps): App {
     agent,
     heartbeat,
     consolidation: createConsolidation({ db, clock, config, memoryDir, queue, agent, signal: shutdown.signal, ...ids }),
-    workshop: createWorkshop({ db, clock, config, queue, agent, signal: shutdown.signal, ...ids }),
+    workshop: createWorkshop({ db, clock, config, queue, agent, signal: shutdown.signal, background: deps.background !== false, ...ids }),
     signal: shutdown.signal,
     ...ids,
   });

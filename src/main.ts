@@ -87,6 +87,7 @@ async function main(): Promise<void> {
     integrations: integrations.value,
     ...(integrations.value.length ? { secrets: createKeyringStore() } : {}),
     connectIntegrations: !chatMode,
+    background: !chatMode,
   });
   process.on('SIGINT', () => void stop('SIGINT'));
   process.on('SIGTERM', () => void stop('SIGTERM'));

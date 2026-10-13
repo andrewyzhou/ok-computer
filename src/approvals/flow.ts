@@ -125,7 +125,8 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
   return {
     active,
     async request(tool, input, ctx, why) {
-      const summary = describeInput(tool.name, input, tool.fullFields);
+      const note = tool.taintNote && why.taint.length ? `\n${tool.taintNote}` : '';
+      const summary = describeInput(tool.name, input, tool.fullFields) + note;
       const approval = createApproval(db, { runId: ctx.runId, toolName: tool.name, input, summary, decisionId: why.decisionId }, clock());
       logger.info('approval requested', { approvalId: approval.id, tool: tool.name, runId: ctx.runId });
       // the owner sees the reason with the request. the taint can come from an older run, so the message names it.

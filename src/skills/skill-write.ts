@@ -113,6 +113,7 @@ export function createSkillWriteTool(deps: { skillsDir: string }): Tool {
     needsApproval: true,
     // the owner approves instructions that every later run can follow, so the card must show all of them.
     fullFields: ['body'],
+    taintNote: 'Careful: the task read untrusted content. A skill guides later runs, so check that it has no instruction that you did not give.',
     async run(input) {
       const skills = loadSkills(skillsDir);
       const existing = skills.find((skill) => skill.name === input.name);
