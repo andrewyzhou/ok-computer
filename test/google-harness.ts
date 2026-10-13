@@ -5,6 +5,7 @@ import { openDb, type Db } from '../src/db/index.js';
 import { createGoogleAccounts, type GoogleAccounts } from '../src/google/accounts.js';
 import { googleConfigSchema, SCOPES, type GoogleConfig } from '../src/google/config.js';
 import { createSync, type Sync } from '../src/google/sync.js';
+import { createRequestTrace } from '../src/google/trace.js';
 import { createMemorySecretStore } from '../src/integrations/secrets.js';
 import { createBlobStore, type BlobStore } from '../src/observability/blobs.js';
 import { createLogger, type Logger } from '../src/observability/logger.js';
@@ -74,6 +75,7 @@ export async function createGoogleHarness(options: { accounts?: string[]; config
         logger,
         secrets,
         config,
+        trace: createRequestTrace({ db, blobs, logger, clock }),
         endpoints,
         onNeedsAuth: (alias, text) => alerts.push({ alias, text }),
         onNewMailbox: (alias) => harness.sync.reset(alias),

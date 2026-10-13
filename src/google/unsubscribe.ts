@@ -94,11 +94,12 @@ export interface OneClickResult {
   sent: boolean;
   // true when the app refused the target, for example a private address. a second approval cannot help then.
   refused?: boolean;
+  status?: number;
   text: string;
 }
 
 const TIMEOUT_MS = 15_000;
-const BODY = 'List-Unsubscribe=One-Click';
+export const ONE_CLICK_BODY = 'List-Unsubscribe=One-Click';
 
 // rfc 8058: a post with the fixed body, no cookies, no redirects. the answer body is read up to 64 kb and dropped.
 export function oneClick(target: string, lookup: LookupFunction = publicOnlyLookup): Promise<OneClickResult> {
@@ -120,7 +121,7 @@ export function oneClick(target: string, lookup: LookupFunction = publicOnlyLook
         method: 'POST',
         lookup,
         timeout: TIMEOUT_MS,
-        headers: { 'content-type': 'application/x-www-form-urlencoded', 'content-length': Buffer.byteLength(BODY), 'user-agent': 'ok-computer' },
+        headers: { 'content-type': 'application/x-www-form-urlencoded', 'content-length': Buffer.byteLength(ONE_CLICK_BODY), 'user-agent': 'ok-computer' },
       },
       (res) => {
         let size = 0;
@@ -130,15 +131,15 @@ export function oneClick(target: string, lookup: LookupFunction = publicOnlyLook
         });
         res.on('close', () => {
           const status = res.statusCode ?? 0;
-          if (status >= 200 && status < 300) resolve({ ok: true, sent: true, text: `the sender answered ${status}` });
-          else if (status >= 300 && status < 400) resolve({ ok: false, sent: true, text: `the sender answered with a redirect (${status}), which one-click does not follow. The unsubscribe probably did not finish.` });
-          else resolve({ ok: false, sent: true, text: `the sender answered ${status}` });
+          if (status >= 200 && status < 300) resolve({ ok: true, sent: true, status, text: `the sender answered ${status}` });
+          else if (status >= 300 && status < 400) resolve({ ok: false, sent: true, status, text: `the sender answered with a redirect (${status}), which one-click does not follow. The unsubscribe probably did not finish.` });
+          else resolve({ ok: false, sent: true, status, text: `the sender answered ${status}` });
         });
       },
     );
     req.on('socket', (socket) => socket.on('connect', () => (connected = true)));
     req.on('timeout', () => req.destroy(new Error('the sender did not answer in time')));
     req.on('error', (err: NodeJS.ErrnoException) => resolve({ ok: false, sent: connected, ...(err.code === 'EPRIVATE' ? { refused: true } : {}), text: err.message }));
-    req.end(BODY);
+    req.end(ONE_CLICK_BODY);
   });
 }

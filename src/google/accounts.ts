@@ -10,6 +10,7 @@ import { registerSecret } from '../observability/redact.js';
 import type { Clock } from '../time.js';
 import { requiredScopes, scopeWords, type GoogleConfig } from './config.js';
 import { CLIENT_REFUSED, fromSdk, GoogleError, toGoogleError } from './errors.js';
+import { requestContext, tracedFetch, type RequestTrace } from './trace.js';
 
 export interface GoogleApis {
   gmail: gmail_v1.Gmail;
@@ -53,6 +54,8 @@ export interface AccountsDeps {
   logger: Logger;
   secrets: SecretStore;
   config: GoogleConfig;
+  // every request of the clients goes through the trace, the token requests too.
+  trace: RequestTrace;
   endpoints?: GoogleEndpoints;
   // the owner hears once when a sign-in that worked stops working.
   onNeedsAuth: (alias: string, text: string) => void;
@@ -106,6 +109,7 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
       // new token and tries once more, so the answer of the token endpoint decides. invalid_grant is a dead sign-in,
       // and a 5xx is an outage.
       forceRefreshOnFailure: true,
+      transporterOptions: { fetchImplementation: tracedFetch(deps.trace) },
       endpoints: {
         ...(endpoints.tokenUrl ? { oauth2TokenUrl: endpoints.tokenUrl } : {}),
         ...(endpoints.authUrl ? { oauth2AuthBaseUrl: endpoints.authUrl } : {}),
@@ -224,7 +228,13 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
     });
   };
 
+  // the requests of a sign-in belong to the account, without a run.
   async function finishSignIn(state: string, code: string): Promise<{ email: string } | { error: string }> {
+    const alias = flows.get(state)?.alias;
+    return alias ? requestContext.run({ account: alias }, () => exchange(state, code)) : exchange(state, code);
+  }
+
+  async function exchange(state: string, code: string): Promise<{ email: string } | { error: string }> {
     const flow = flows.get(state);
     // a state works once, so a replayed callback cannot sign in a second time.
     flows.delete(state);
@@ -283,7 +293,7 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
         throw toGoogleError(err);
       }
       try {
-        return await fn(client.apis);
+        return await requestContext.run({ ...requestContext.getStore(), account: alias }, () => fn(client.apis));
       } catch (err) {
         if (!fromSdk(err)) throw err;
         const error = toGoogleError(err);

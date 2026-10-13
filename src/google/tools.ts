@@ -10,6 +10,7 @@ import type { GoogleAccounts, GoogleApis } from './accounts.js';
 import type { GoogleConfig } from './config.js';
 import { GoogleError, toGoogleError } from './errors.js';
 import { badAddress, bodyText, header, rawMessage, type Draft } from './mime.js';
+import { requestContext } from './trace.js';
 import { oneClick as realOneClick, planUnsubscribe, unsubscribeTargets, type OneClickResult } from './unsubscribe.js';
 
 export const GOOGLE = 'google';
@@ -28,9 +29,16 @@ const MAX_RESULTS = 20;
 // text must first fit in memory and in a blob.
 const THREAD_LIMIT = 200_000;
 
-// every google tool names its account. the trace row keeps it, so the page counts the calls of each account.
+// every google tool names its account. the trace row keeps it, so the page counts the calls of each account. the
+// requests of a call, a token refresh too, carry the run and the call, so the run timeline shows them.
 function googleTool<I extends { account: string }>(tool: Omit<Tool<I>, 'source' | 'serverId' | 'accountOf'>): Tool {
-  return defineTool<I>({ ...tool, source: GOOGLE, serverId: GOOGLE, accountOf: (input) => input.account });
+  return defineTool<I>({
+    ...tool,
+    source: GOOGLE,
+    serverId: GOOGLE,
+    accountOf: (input) => input.account,
+    run: (input, ctx) => requestContext.run({ runId: ctx.runId, ...(ctx.toolCallId ? { toolCallId: ctx.toolCallId } : {}) }, () => tool.run(input, ctx)),
+  });
 }
 
 // a failed write says whether google can have acted. no answer after the request left means that the effect is

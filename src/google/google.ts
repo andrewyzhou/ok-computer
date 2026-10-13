@@ -17,6 +17,8 @@ import { createGoogleAccounts, type GoogleAccounts, type GoogleEndpoints } from 
 import type { GoogleConfig } from './config.js';
 import { createSync, type AccountPoll, type Sync } from './sync.js';
 import { createGoogleTools, googleToolNames } from './tools.js';
+import { createRequestTrace, requestContext } from './trace.js';
+import { ONE_CLICK_BODY, oneClick, type OneClickResult } from './unsubscribe.js';
 
 export interface Google {
   accounts: GoogleAccounts;
@@ -45,6 +47,8 @@ export interface GoogleDeps {
   polls?: boolean;
   signal?: AbortSignal;
   newId?: () => string;
+  // tests replace the https post of a one-click unsubscribe.
+  oneClick?: (target: string) => Promise<OneClickResult>;
 }
 
 // the poll automation follows the config at each start, as the heartbeat does. a pause by the owner stays until the
@@ -74,18 +78,27 @@ const CHECK_WINDOW_MS = 3 * 24 * 60 * 60_000;
 export function createGoogle(deps: GoogleDeps): Google {
   const { db, clock, logger, config } = deps;
   const newId = deps.newId ?? randomUUID;
+  const trace = createRequestTrace({ db, blobs: deps.blobs, logger, clock });
   const accounts = createGoogleAccounts({
     db,
     clock,
     logger,
     secrets: deps.secrets,
     config,
+    trace,
     ...(deps.endpoints ? { endpoints: deps.endpoints } : {}),
     onNeedsAuth: (_alias, text) => deps.notifyOwner(text),
     onNewMailbox: (alias) => sync.reset(alias),
   });
   const sync = createSync({ db, clock, logger, blobs: deps.blobs, accounts, timeZone: deps.timeZone });
-  const tools = createGoogleTools({ accounts, config, logger });
+  // the one-click post goes to the sender, not to google, and it is in the same trace as the read that checked it.
+  const recordedOneClick = async (target: string) => {
+    const done = trace('POST', target, ONE_CLICK_BODY);
+    const result = await oneClick(target);
+    done({ ...(result.status ? { status: result.status } : {}), ...(result.ok ? {} : { error: result.text }) });
+    return result;
+  };
+  const tools = createGoogleTools({ accounts, config, logger, oneClick: deps.oneClick ? (target) => deps.oneClick!(target) : recordedOneClick });
   const names = googleToolNames(config);
 
   // the detectors run before the classifier, so a label never hides a hit. the date detector uses the calendars that
@@ -132,7 +145,7 @@ export function createGoogle(deps: GoogleDeps): Google {
       db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES (?, ?, 'poll', 'utility', 'running', ?)").run(runId, POLL_SESSION, clock().toISOString());
       let note: string;
       try {
-        const polls = await sync.pollAll(runId);
+        const polls = await requestContext.run({ runId }, () => sync.pollAll(runId));
         for (const each of polls.filter((poll) => !poll.ok && poll.failures === STALL_POLLS)) {
           deps.notifyOwner(`The Google poll of the ${each.alias} account has failed ${each.failures} times in a row: ${each.error}`);
         }
