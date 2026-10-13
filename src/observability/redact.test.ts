@@ -69,6 +69,18 @@ describe('redact', () => {
     expect(redactValue({ [secret]: [`a ${secret}`, 3, null] })).toEqual({ '[redacted]': ['a [redacted]', 3, null] });
   });
 
+  // keys that redact to the same text made one key, and the card, its details and the dashboard lost a value that
+  // the approved call still sent.
+  it('keeps each value when redacted keys meet each other or a key of the object', () => {
+    const one = `111111111:${'A'.repeat(30)}`;
+    const two = `222222222:${'B'.repeat(30)}`;
+    expect(redactValue({ [one]: 'first', [two]: 'second', to: 'x' })).toEqual({ '[redacted]': 'first', '[redacted] 2': 'second', to: 'x' });
+    // the key of the object keeps its name, and the redacted key gets a number.
+    expect(redactValue({ properties: { [one]: 'hidden', '[redacted]': 'decoy', '[redacted] 2': 'other' } })).toEqual({
+      properties: { '[redacted] 3': 'hidden', '[redacted]': 'decoy', '[redacted] 2': 'other' },
+    });
+  });
+
   // an oauth refresh gives new tokens each hour. a list that only grew made each trace write slower for the life of
   // the process: 100 refreshes took one redaction of a tool list from 15 ms to 488 ms.
   it('keeps only the newest value of a source, and every value without a source', () => {

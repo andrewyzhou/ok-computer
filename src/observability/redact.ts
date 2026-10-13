@@ -59,10 +59,22 @@ export function redactValue<T>(value: T): T {
   return JSON.parse(redactedJson(value)) as T;
 }
 
+// two keys can redact to the same text, or a redacted key can match a key that the object already has. one value
+// would then replace the other, and a card or the dashboard would not show it. so a redacted key that is already
+// taken gets a number.
 function redactLeaf(_key: string, value: unknown): unknown {
   if (typeof value === 'string') return redact(value);
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-    return Object.fromEntries(Object.entries(value).map(([key, each]) => [redact(key), each]));
+    const taken = new Set(Object.keys(value));
+    return Object.fromEntries(
+      Object.entries(value).map(([key, each]) => {
+        const redacted = redact(key);
+        let name = redacted;
+        for (let n = 2; name !== key && taken.has(name); n++) name = `${redacted} ${n}`;
+        taken.add(name);
+        return [name, each];
+      }),
+    );
   }
   return value;
 }
