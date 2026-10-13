@@ -6,6 +6,7 @@ import { createTelegramChannel, TELEGRAM } from './channels/telegram.js';
 import type { ChannelAdapter } from './channels/types.js';
 import { loadConfig, loadDotEnv, loadSecrets } from './config/load.js';
 import { openDb } from './db/index.js';
+import { startDashboard, type RunningDashboard } from './dashboard/server.js';
 import { createClients } from './models/clients.js';
 import { createLogger } from './observability/logger.js';
 import { registerSecret } from './observability/redact.js';
@@ -33,11 +34,13 @@ async function main(): Promise<void> {
   }
   const db = openDb(join(config.paths.data, 'okc.sqlite'));
 
+  let dashboard: RunningDashboard | undefined;
   let stopping = false;
   const stop = async (reason: string) => {
     if (stopping) return;
     stopping = true;
     logger.info('shutting down', { reason });
+    await dashboard?.close();
     await app.stop();
     db.close();
     process.exit(0);
@@ -64,6 +67,16 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void stop('SIGTERM'));
 
   await app.start();
+  // npm run chat is the cli only. a dashboard that cannot start does not stop the agent.
+  if (!chatMode) {
+    try {
+      const token = secrets.dashboardToken ? { token: secrets.dashboardToken } : {};
+      dashboard = await startDashboard({ db, config, clock: systemClock, logger, app, port: config.dashboard.port, ...token });
+      logger.info('dashboard started', { url: `http://127.0.0.1:${dashboard.port}` });
+    } catch (err) {
+      logger.error('dashboard did not start', { port: config.dashboard.port, err });
+    }
+  }
   if (chatMode) process.stdout.write('ok computer is ready. type a message, /new for a fresh session, ctrl+c to quit.\n');
 }
 

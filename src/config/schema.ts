@@ -113,6 +113,11 @@ export const configSchema = z.object({
       consolidateAt: timeOfDay.default('03:00'),
     })
     .prefault({}),
+  dashboard: z
+    .object({
+      port: z.number().int().min(1).max(65535).default(4317),
+    })
+    .prefault({}),
 });
 
 // the result is in milliseconds. "0" gives 0.

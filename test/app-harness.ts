@@ -49,6 +49,7 @@ export function createTestApp(steps: FakeStep[], options: { start: string; confi
     db,
     model,
     dataDir,
+    clock,
     config: parsed.value,
     printed: () => printed,
     async say(line: string) {

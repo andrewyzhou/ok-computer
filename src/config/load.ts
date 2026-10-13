@@ -32,6 +32,7 @@ export interface Secrets {
   openaiCompatBaseUrl?: string;
   openaiCompatApiKey?: string;
   telegramBotToken?: string;
+  dashboardToken?: string;
   // the owner id is not a secret, but it comes from .env with the token.
   telegramOwnerId?: string;
 }
@@ -42,6 +43,7 @@ export function loadSecrets(env: NodeJS.ProcessEnv = process.env): Secrets {
     openaiCompatBaseUrl: env.OPENAI_COMPAT_BASE_URL || undefined,
     openaiCompatApiKey: env.OPENAI_COMPAT_API_KEY || undefined,
     telegramBotToken: env.TELEGRAM_BOT_TOKEN || undefined,
+    dashboardToken: env.DASHBOARD_TOKEN || undefined,
     telegramOwnerId: env.TELEGRAM_OWNER_ID || undefined,
   };
 }
