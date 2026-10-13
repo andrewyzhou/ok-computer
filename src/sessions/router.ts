@@ -19,6 +19,7 @@ export const MAIN_TOOLS: readonly string[] = [
   'goals_set',
   'goals_stats',
   'heartbeat_checklist_set',
+  'memory_write',
   'now',
 ];
 export const NO_REPLY = 'NO_REPLY';
@@ -35,6 +36,8 @@ export interface RouterDeps {
   rememberOwnerChat?: (chat: { channel: string; chatId: string }) => void;
   // resolve gives the text of the reply to the owner.
   approvals?: (id: number, decision: Decision, via: ResolvedVia) => Promise<string>;
+  // the router calls this on /new before the reset event goes into the log.
+  onReset?: () => void;
   signal?: AbortSignal;
 }
 
@@ -89,6 +92,7 @@ export function createRouter(deps: RouterDeps): Router {
       // tool call and its result in a run that is still active.
       await queue.enqueue(MAIN_SESSION, async () => {
         if (message.text === '/new') {
+          deps.onReset?.();
           appendEvent(db, { sessionKey: MAIN_SESSION, runId: null, type: 'session_reset', payload: {} }, clock());
           await reply('Started a new session.');
           return;

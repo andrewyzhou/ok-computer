@@ -18,7 +18,7 @@ describe('buildStablePrompt', () => {
     expect(prompt).toContain('NO_REPLY');
     expect(prompt).toContain('<untrusted');
     expect(prompt.indexOf('## SOUL.md')).toBeLessThan(prompt.indexOf('## USER.md'));
-    expect(prompt).not.toContain('MEMORY.md');
+    expect(prompt).not.toContain('## MEMORY.md');
   });
 
   it('adds MEMORY.md only when a memory path is given', () => {

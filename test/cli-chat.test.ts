@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -40,12 +40,12 @@ function setup(steps: FakeStep[]) {
     await new Promise((resolve) => setImmediate(resolve));
     await app.idle();
   };
-  return { app, db, model, say, printed: () => printed };
+  return { app, db, model, say, printed: () => printed, dataDir: join(workspace, 'data') };
 }
 
 describe('cli chat through the full loop', () => {
   it('holds a conversation with tools, silence and a session reset', async () => {
-    const { app, db, model, say, printed } = setup([
+    const { app, db, model, say, printed, dataDir } = setup([
       toolStep({ id: 't1', name: 'now', input: {} }),
       textStep('It is 20:15.'),
       textStep('NO_REPLY'),
@@ -66,6 +66,7 @@ describe('cli chat through the full loop', () => {
       'goals_set',
       'goals_stats',
       'heartbeat_checklist_set',
+      'memory_write',
       'now',
     ]);
 
@@ -75,6 +76,9 @@ describe('cli chat through the full loop', () => {
 
     await say('/new');
     expect(printed()).toContain('okc> Started a new session.');
+    expect(readFileSync(join(dataDir, 'memory', 'daily', '2026-10-12.md'), 'utf8')).toContain(
+      '## notes\n\nSession closed with /new at 20:15. The last messages:\n- owner: what time is it?\n- assistant: It is 20:15.\n- owner: just listen',
+    );
     await say('hi');
     expect(printed()).toContain('okc> Hello again.');
     expect(model.calls[3]?.messages).toHaveLength(1);

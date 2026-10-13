@@ -22,6 +22,7 @@ export const AUTOMATION_TOOLS: readonly string[] = [
   'goals_list',
   'goals_set',
   'goals_stats',
+  'memory_write',
   'message_owner',
   'now',
 ];

@@ -1,7 +1,7 @@
 import type { Config } from '../config/schema.js';
 import type { Db } from '../db/index.js';
 import { getSetting, setSetting } from '../db/settings.js';
-import { appendDailyNote } from '../memory/daily.js';
+import { appendToDailyNote } from '../memory/daily.js';
 import { createAutomation } from '../scheduler/store.js';
 import { localTime } from '../time.js';
 import { closeCheckins, listGoals, type Goal } from './store.js';
@@ -48,7 +48,7 @@ export function installRoutine(db: Db, config: Pick<Config, 'timeZone' | 'routin
 }
 
 // the results come from the database. a check-in without an answer at the end of the day becomes no_answer.
-export function writeDayResults(db: Db, memoryDir: string, day: string, now: Date, timeZone: string): string {
+export function writeDayResults(db: Db, memoryDir: string, day: string, now: Date, timeZone: string): void {
   const goals = listGoals(db, day);
   closeCheckins(
     db,
@@ -59,7 +59,7 @@ export function writeDayResults(db: Db, memoryDir: string, day: string, now: Dat
   const done = goals.filter((goal) => goal.status === 'done');
   const slipped = goals.filter((goal) => goal.status !== 'done');
 
-  const lines = ['## goals', ''];
+  const lines: string[] = [];
   if (!goals.length) lines.push('No goals were set today.');
   else {
     lines.push(`${done.length} of ${goals.length} goals done.`);
@@ -71,15 +71,13 @@ export function writeDayResults(db: Db, memoryDir: string, day: string, now: Dat
       lines.push(`- [${goal.status}] ${goal.title}${details.length ? ` (${details.join(', ')})` : ''}`);
     }
   }
-  if (done.length) lines.push('', '## done', '', ...done.map((goal) => `- ${goal.title}`));
+  appendToDailyNote(memoryDir, day, 'goals', lines.join('\n'));
+  if (done.length) appendToDailyNote(memoryDir, day, 'done', done.map((goal) => `- ${goal.title}`).join('\n'));
   if (slipped.length) {
-    lines.push('', '## slipped and why', '');
-    for (const goal of slipped) {
+    const reasons = slipped.map((goal) => {
       const state = goal.status === 'dropped' ? 'dropped' : 'still open at the end of the day';
-      lines.push(`- ${goal.title}: ${state}.${goal.note ? ` Reason: ${goal.note}` : ''}`);
-    }
+      return `- ${goal.title}: ${state}.${goal.note ? ` Reason: ${goal.note}` : ''}`;
+    });
+    appendToDailyNote(memoryDir, day, 'slipped and why', reasons.join('\n'));
   }
-  const text = lines.join('\n');
-  appendDailyNote(memoryDir, day, text);
-  return text;
 }

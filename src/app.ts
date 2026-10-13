@@ -5,10 +5,13 @@ import { createApprovalFlow } from './approvals/flow.js';
 import { expireApprovals } from './approvals/store.js';
 import type { ChannelAdapter } from './channels/types.js';
 import type { Config } from './config/schema.js';
-import { fullHistory } from './context/full-history.js';
+import { fullHistory, sinceLastReset } from './context/full-history.js';
 import type { Db } from './db/index.js';
+import { listEvents } from './events/log.js';
 import { installRoutine } from './goals/routine.js';
 import { createGoalTools } from './goals/tools.js';
+import { appendToDailyNote, sessionExcerpt } from './memory/daily.js';
+import { createMemoryTools } from './memory/tools.js';
 import { createSlotRunner } from './models/slots.js';
 import type { ModelClient } from './models/types.js';
 import type { Logger } from './observability/logger.js';
@@ -26,7 +29,7 @@ import { createAutomationTools } from './scheduler/tools.js';
 import { createOwnerMessenger } from './sessions/owner.js';
 import { createRunQueue } from './sessions/queue.js';
 import { createRouter, MAIN_SESSION } from './sessions/router.js';
-import type { Clock } from './time.js';
+import { localDay, localTime, type Clock } from './time.js';
 import { createMessageOwnerTool } from './tools/message-owner.js';
 import { nowTool } from './tools/now.js';
 import { createToolRegistry } from './tools/registry.js';
@@ -56,7 +59,8 @@ export function createApp(deps: AppDeps): App {
   const { config, db, logger, clock } = deps;
   const shutdown = new AbortController();
   const queue = createRunQueue();
-  const memoryPath = join(config.paths.data, 'memory', 'MEMORY.md');
+  const memoryDir = join(config.paths.data, 'memory');
+  const memoryPath = join(memoryDir, 'MEMORY.md');
   const channels = new Map(deps.channels.map((channel) => [channel.id, channel]));
   const owner = createOwnerMessenger({ db, channels, logger, clock });
   const ids = deps.newId ? { newId: deps.newId } : {};
@@ -79,6 +83,7 @@ export function createApp(deps: AppDeps): App {
       ...createGoalTools({ db, replan }),
       ...createAutomationTools({ db, replan }),
       ...createHeartbeatTools({ db }),
+      ...createMemoryTools({ memoryDir }),
       createMessageOwnerTool(owner),
     ],
     { gate: approvals.gate },
@@ -142,6 +147,11 @@ export function createApp(deps: AppDeps): App {
     isOwner: (message) => message.channel === 'cli',
     rememberOwnerChat: owner.remember,
     approvals: approvals.resolve,
+    onReset: () => {
+      const now = clock();
+      const excerpt = sessionExcerpt(sinceLastReset(listEvents(db, MAIN_SESSION)), localTime(now, config.timeZone));
+      if (excerpt) appendToDailyNote(memoryDir, localDay(now, config.timeZone), 'notes', excerpt);
+    },
     signal: shutdown.signal,
   });
 
