@@ -249,10 +249,7 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
       if (before && before !== email) deps.onNewMailbox?.(flow.alias);
       // the gmail baseline is the moment of the sign-in, not the first poll that works. mail that comes between the
       // two is news. a cursor that exists stays, so a sign-in after needs_auth still finds the mail of the outage.
-      db.prepare(
-        `INSERT INTO google_sync (alias, api, cursor) VALUES (?, 'gmail', ?)
-         ON CONFLICT (alias, api) DO UPDATE SET cursor = COALESCE(google_sync.cursor, excluded.cursor)`,
-      ).run(flow.alias, String(profile.data.historyId));
+      db.prepare('UPDATE google_accounts SET historyId = COALESCE(historyId, ?) WHERE alias = ?').run(String(profile.data.historyId), flow.alias);
       logger.info('google account signed in', { alias: flow.alias });
       return { email };
     } catch (err) {

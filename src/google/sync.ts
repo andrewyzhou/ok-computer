@@ -4,26 +4,29 @@ import type { Db } from '../db/index.js';
 import type { BlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
 import { redactedJson } from '../observability/redact.js';
-import type { Clock } from '../time.js';
+import type { CalendarItem } from '../signals/detectors.js';
+import { addSignals, cleanLine, inTransaction, type NewSignal } from '../signals/store.js';
+import { zonedToUtc, type Clock } from '../time.js';
 import type { GoogleAccounts } from './accounts.js';
 import { GoogleError } from './errors.js';
-import { addSignals, cleanLine, inTransaction, type NewSignal } from './signals.js';
 
-export interface SyncReport {
+// the result of one account in one poll. events is the live range of the calendar for the detectors, or undefined
+// when it was not read.
+export interface AccountPoll {
   alias: string;
-  api: 'gmail' | 'calendar';
   ok: boolean;
-  added: number;
   error?: string;
+  // the gmail history id was too old, so only the inbox mail of the last days became signals.
   resync?: boolean;
+  failures: number;
+  events?: CalendarItem[];
 }
 
 export interface Sync {
   // pollAll polls every signed-in account. one account that fails does not stop the others. a second call during a
   // poll joins the running poll.
-  pollAll(): Promise<SyncReport[]>;
-  // reset forgets the cursors, the calendar copy and the open signals of an account, for example after it got a new
-  // mailbox.
+  pollAll(runId: string): Promise<AccountPoll[]>;
+  // reset forgets the cursors and the open signals of an account, for example after it got a new mailbox.
   reset(alias: string): void;
 }
 
@@ -33,6 +36,7 @@ export interface SyncDeps {
   logger: Logger;
   blobs: BlobStore;
   accounts: GoogleAccounts;
+  timeZone: string;
 }
 
 // a poll reads at most this many history pages. a large import of mail then moves the cursor in steps, and each
@@ -45,48 +49,45 @@ const RESYNC_MAX = 100;
 // the details of at most this many new messages per account and poll. the rest wait for the next poll.
 const HYDRATE_MAX = 50;
 const CALENDAR_PAGES = 20;
+const DAY_MS = 24 * 60 * 60_000;
+// the first calendar read starts one day back. a full read of an old calendar with every instance of each recurring
+// event can be too large to finish.
+const FIRST_READ_BACK_MS = DAY_MS;
+// the detectors read the calendars from yesterday to this many days ahead. the date detector looks 60 days ahead.
+const RANGE_AHEAD_DAYS = 61;
+const RANGE_PAGES = 4;
 const HEADERS = ['From', 'Subject', 'Date', 'List-Unsubscribe', 'List-Unsubscribe-Post'];
 
 type Gmail = gmail_v1.Gmail;
-type Calendar = calendar_v3.Calendar;
+
+class CursorMoved extends Error {}
 
 export function createSync(deps: SyncDeps): Sync {
-  const { db, clock, logger, accounts } = deps;
-  let running: Promise<SyncReport[]> | undefined;
+  const { db, clock, logger, accounts, timeZone } = deps;
+  let running: Promise<AccountPoll[]> | undefined;
 
-  const cursorOf = (alias: string, api: string): string | null => {
-    db.prepare('INSERT INTO google_sync (alias, api) VALUES (?, ?) ON CONFLICT DO NOTHING').run(alias, api);
-    return (db.prepare('SELECT cursor FROM google_sync WHERE alias = ? AND api = ?').get(alias, api)?.cursor as string | null) ?? null;
-  };
+  const cursorOf = (alias: string, column: 'historyId' | 'calendarSyncToken'): string | null =>
+    (db.prepare(`SELECT ${column} AS cursor FROM google_accounts WHERE alias = ?`).get(alias)?.cursor as string | null | undefined) ?? null;
 
   // the compare and set fails when another process moved the cursor first. the transaction then rolls back the rows
   // too. they are idempotent, so nothing is lost, and the poll counts as done.
-  const moveCursor = (alias: string, api: string, from: string | null, to: string) => {
-    const result = db.prepare('UPDATE google_sync SET cursor = ? WHERE alias = ? AND api = ? AND cursor IS ?').run(to, alias, api, from);
+  const moveCursor = (alias: string, column: 'historyId' | 'calendarSyncToken', from: string | null, to: string | null) => {
+    const result = db.prepare(`UPDATE google_accounts SET ${column} = ? WHERE alias = ? AND ${column} IS ?`).run(to, alias, from);
     if (Number(result.changes) !== 1) throw new CursorMoved();
-  };
-
-  const record = (alias: string, api: string, error?: GoogleError | Error) => {
-    const now = clock().toISOString();
-    if (error) {
-      db.prepare('UPDATE google_sync SET lastPollAt = ?, failures = failures + 1, lastError = ? WHERE alias = ? AND api = ?').run(now, error.message, alias, api);
-    } else {
-      db.prepare('UPDATE google_sync SET lastPollAt = ?, lastOkAt = ?, failures = 0, lastError = NULL WHERE alias = ? AND api = ?').run(now, now, alias, api);
-    }
   };
 
   // phase one finds the ids of new inbox mail and moves the cursor in one transaction. it fetches no message, so its
   // work is small and a crash between pages loses nothing: the cursor did not move.
-  const discoverMail = async (alias: string): Promise<{ added: number; resync?: boolean }> => {
-    const cursor = cursorOf(alias, 'gmail');
+  const discoverMail = async (alias: string, runId: string): Promise<{ resync?: boolean }> => {
+    const cursor = cursorOf(alias, 'historyId');
     if (cursor === null) {
-      // the first poll takes the current history id as its start. the mail that is already there is not news.
+      // the sign-in takes the baseline. an account without one starts now: the mail that is already there is not news.
       const profile = await accounts.run(alias, (apis) => apis.gmail.users.getProfile({ userId: 'me' }));
-      inTransaction(db, () => moveCursor(alias, 'gmail', null, String(profile.data.historyId)));
-      return { added: 0 };
+      inTransaction(db, () => moveCursor(alias, 'historyId', null, String(profile.data.historyId)));
+      return {};
     }
-    // the api calls run inside accounts.run, and the commit runs after it. a retry after a 401 then never repeats a
-    // write, and an error of the database stays a database error.
+    // the api calls run inside accounts.run, and the commit runs after it. an error of the database then stays a
+    // database error.
     let found: { ids: string[]; next: string };
     let resync = false;
     try {
@@ -98,7 +99,11 @@ export function createSync(deps: SyncDeps): Sync {
       found = await accounts.run(alias, (apis) => resyncMail(apis.gmail));
       resync = true;
     }
-    return { added: commitMail(alias, cursor, found.next, found.ids), ...(resync ? { resync } : {}) };
+    inTransaction(db, () => {
+      addSignals(db, found.ids.map((id) => ({ source: 'gmail', account: alias, externalId: id, kind: 'mail', state: 'new', runId })), clock());
+      moveCursor(alias, 'historyId', cursor, found.next);
+    });
+    return resync ? { resync } : {};
   };
 
   const readHistory = async (api: Gmail, cursor: string) => {
@@ -115,8 +120,7 @@ export function createSync(deps: SyncDeps): Sync {
       });
       for (const record of data.history ?? []) {
         for (const added of record.messagesAdded ?? []) {
-          const labels = added.message?.labelIds ?? [];
-          if (added.message?.id && labels.includes('INBOX')) ids.push(added.message.id);
+          if (added.message?.id && (added.message.labelIds ?? []).includes('INBOX')) ids.push(added.message.id);
         }
         // a history record id is the newest point that this poll has fully read.
         if (record.id) next = record.id;
@@ -138,13 +142,6 @@ export function createSync(deps: SyncDeps): Sync {
     const ids = (data.messages ?? []).map((each) => each.id).filter((id): id is string => !!id);
     return { ids, next: String(profile.data.historyId) };
   };
-
-  const commitMail = (alias: string, from: string, to: string, ids: string[]) =>
-    inTransaction(db, () => {
-      const added = addSignals(db, ids.map((id) => ({ source: 'gmail', account: alias, externalId: id, kind: 'mail', state: 'new' })), clock());
-      moveCursor(alias, 'gmail', from, to);
-      return added;
-    });
 
   // phase two fetches the headers of the new rows. each row is done on its own, so a failure in the middle keeps the
   // rows before it, and the next poll goes on from there.
@@ -170,8 +167,7 @@ export function createSync(deps: SyncDeps): Sync {
       }
       const header = (name: string) => message.payload?.headers?.find((each) => each.name?.toLowerCase() === name.toLowerCase())?.value ?? '';
       const fields = { from: header('From'), subject: header('Subject'), date: header('Date'), snippet: message.snippet ?? '', threadId: message.threadId ?? '' };
-      const summary = cleanLine(`from ${fields.from}: "${fields.subject}" ${fields.snippet}`);
-      const occursAt = Number(message.internalDate) ? new Date(Number(message.internalDate)).toISOString() : null;
+      const arrived = Number(message.internalDate) ? new Date(Number(message.internalDate)) : clock();
       // the blob keeps the fields for the dashboard. a failed blob write keeps the row, as the trace does.
       let blob: string | null = null;
       try {
@@ -179,145 +175,154 @@ export function createSync(deps: SyncDeps): Sync {
       } catch (err) {
         logger.error('signal blob write failed', { alias, id: row.id, err });
       }
-      db.prepare("UPDATE integration_events SET state = 'ready', summary = ?, occursAt = ?, payloadBlob = ? WHERE id = ? AND state = 'new'").run(summary, occursAt, blob, row.id);
+      db.prepare("UPDATE integration_events SET state = 'ready', summary = ?, occursAt = ?, payloadBlob = ? WHERE id = ? AND state = 'new'").run(
+        cleanLine(`from ${fields.from}: "${fields.subject}" ${fields.snippet}`),
+        arrived.toISOString(),
+        blob,
+        row.id,
+      );
     }
   };
 
-  const syncCalendar = async (alias: string): Promise<{ added: number; resync?: boolean }> => {
-    const cursor = cursorOf(alias, 'calendar');
+  const syncCalendar = async (alias: string, runId: string): Promise<void> => {
+    const cursor = cursorOf(alias, 'calendarSyncToken');
     try {
-      return await readCalendar(alias, cursor);
+      await readCalendar(alias, cursor, runId);
     } catch (err) {
-      // a sync token that google no longer knows gives 410. the copy of the calendar starts again from nothing.
+      // a sync token that google no longer knows gives 410. the read starts again like a first read.
       if (!(err instanceof GoogleError) || err.kind !== 'gone' || cursor === null) throw err;
       logger.warn('calendar sync token expired, so the account syncs again', { alias });
-      inTransaction(db, () => {
-        db.prepare('DELETE FROM calendar_events WHERE alias = ?').run(alias);
-        moveCursor(alias, 'calendar', cursor, '');
-      });
-      return { ...(await readCalendar(alias, '')), resync: true };
+      inTransaction(db, () => moveCursor(alias, 'calendarSyncToken', cursor, null));
+      await readCalendar(alias, null, runId);
     }
   };
 
-  // an empty cursor means a full read. a full read writes the copy of the calendar but makes no signals, because the
-  // events in it are not changes.
-  const readCalendar = async (alias: string, cursor: string | null) => {
-    const full = !cursor;
+  // a first read (no cursor) only gets the sync token, and it makes no signals, because the events in it are not
+  // changes. a later read uses the same singleEvents, because google ties the token to the parameters of the first read.
+  const readCalendar = async (alias: string, cursor: string | null, runId: string) => {
+    const timeMin = new Date(clock().getTime() - FIRST_READ_BACK_MS).toISOString();
     let pageToken: string | undefined;
-    let added = 0;
     for (let page = 0; page < CALENDAR_PAGES; page++) {
-      const { data } = await accounts.run(alias, (apis: { calendar: Calendar }) =>
+      const { data } = await accounts.run(alias, (apis) =>
         apis.calendar.events.list({
           calendarId: 'primary',
           singleEvents: true,
           maxResults: 250,
-          ...(full ? {} : { syncToken: cursor!, showDeleted: true }),
+          ...(cursor === null ? { timeMin } : { syncToken: cursor, showDeleted: true }),
           ...(pageToken ? { pageToken } : {}),
         }),
       );
-      // each page commits its rows. the cursor moves only after the last page, and a page that comes again changes
-      // nothing, because the copy keeps the newest version and the signal key holds the version.
-      added += inTransaction(db, () => {
-        const signals = (data.items ?? []).flatMap((event) => saveEvent(alias, event));
-        return full ? 0 : addSignals(db, signals, clock());
-      });
+      // each page commits its signals. the cursor moves only after the last page, and a page that comes again adds
+      // nothing, because the signal key holds the version of the event.
+      if (cursor !== null) inTransaction(db, () => addSignals(db, (data.items ?? []).flatMap((event) => calendarSignal(alias, event, runId)), clock()));
       pageToken = data.nextPageToken ?? undefined;
       if (!pageToken) {
         if (!data.nextSyncToken) throw new GoogleError('request', 'the calendar list ended without a sync token');
-        inTransaction(db, () => moveCursor(alias, 'calendar', cursor, data.nextSyncToken!));
-        return { added };
+        inTransaction(db, () => moveCursor(alias, 'calendarSyncToken', cursor, data.nextSyncToken!));
+        return;
       }
     }
     throw new GoogleError('request', `the calendar has more than ${CALENDAR_PAGES} pages of changes. the next poll goes on.`);
   };
 
-  const saveEvent = (alias: string, event: calendar_v3.Schema$Event): NewSignal[] => {
-    if (!event.id || !event.updated) return [];
-    const stored = db.prepare('SELECT summary, startAt, organizerSelf, updated FROM calendar_events WHERE alias = ? AND eventId = ?').get(alias, event.id) as
-      | { summary: string; startAt: string | null; organizerSelf: number; updated: string }
-      | undefined;
-    if (stored && stored.updated >= event.updated) return [];
-    // a cancelled event in an incremental list has only its id and status. the copy keeps what it knew before.
-    const allDay = !event.start?.dateTime;
-    const startText = event.start?.dateTime ?? event.start?.date;
-    const endText = event.end?.dateTime ?? event.end?.date;
-    const start = startText ? toIso(startText, allDay) : (stored?.startAt ?? null);
-    const end = endText ? toIso(endText, allDay) : null;
-    const summary = typeof event.summary === 'string' ? cleanLine(event.summary, 200) : (stored?.summary ?? '');
-    const organizerSelf = event.organizer ? event.organizer.self === true : (stored?.organizerSelf ?? 1) === 1;
-    db.prepare(
-      `INSERT INTO calendar_events (alias, eventId, status, summary, startAt, endAt, allDay, organizerSelf, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (alias, eventId) DO UPDATE SET status = excluded.status, summary = excluded.summary, startAt = excluded.startAt,
-         endAt = excluded.endAt, allDay = excluded.allDay, organizerSelf = excluded.organizerSelf, updated = excluded.updated`,
-    ).run(alias, event.id, event.status ?? 'confirmed', summary, start, end, allDay ? 1 : 0, organizerSelf ? 1 : 0, event.updated);
-    // a change that the owner made, for example through the agent, is not news. a change by another person is.
-    if (organizerSelf) return [];
+  // only a change by another person is news. a change that the owner made, for example through the agent, is not.
+  // a cancelled event in an incremental list often has no organizer, and without a copy of the calendar the poll
+  // cannot tell whose it was, so it makes no signal.
+  const calendarSignal = (alias: string, event: calendar_v3.Schema$Event, runId: string): NewSignal[] => {
+    if (!event.id || !event.updated || !event.organizer || event.organizer.self === true) return [];
     const invite = event.attendees?.some((each) => each.self && each.responseStatus === 'needsAction');
-    const kind = event.status === 'cancelled' ? 'event_cancelled' : invite ? 'invite' : 'event_change';
+    const start = startOf(event);
+    const title = typeof event.summary === 'string' ? cleanLine(event.summary, 200) : '(no title)';
     return [
       {
         source: 'calendar',
         account: alias,
         externalId: `${event.id}@${event.updated}`,
-        kind,
-        summary: cleanLine(`${event.organizer?.email ?? 'someone'}: "${summary}"${start ? ` at ${start}` : ''}`),
-        ...(start ? { occursAt: start } : {}),
+        kind: invite ? 'invite' : 'event_change',
+        summary: cleanLine(`${event.organizer.email ?? 'someone'}: "${title}"${event.status === 'cancelled' ? ' (cancelled)' : ''}${start ? ` at ${start}` : ''}`),
+        ...(start ? { occursAt: occursAt(start) } : {}),
+        runId,
       },
     ];
   };
 
-  const pollAccount = async (alias: string): Promise<SyncReport[]> => {
-    const reports: SyncReport[] = [];
-    try {
-      const mail = await discoverMail(alias);
-      await hydrateMail(alias);
-      record(alias, 'gmail');
-      reports.push({ alias, api: 'gmail', ok: true, ...mail });
-    } catch (err) {
-      reports.push(failure(alias, 'gmail', err));
+  // an all-day event has a date only. its time is midnight of that date in the owner's zone, so the digest shows the
+  // right day.
+  const occursAt = (start: string) => (start.length === 10 ? zonedToUtc(start, '00:00', timeZone) : new Date(start)).toISOString();
+
+  // one live read of the calendar for the detectors. events that the owner declined are not on the calendar.
+  const readRange = async (alias: string): Promise<CalendarItem[]> => {
+    const now = clock().getTime();
+    const items: CalendarItem[] = [];
+    let pageToken: string | undefined;
+    for (let page = 0; page < RANGE_PAGES; page++) {
+      const { data } = await accounts.run(alias, (apis) =>
+        apis.calendar.events.list({
+          calendarId: 'primary',
+          singleEvents: true,
+          orderBy: 'startTime',
+          maxResults: 250,
+          timeMin: new Date(now - DAY_MS).toISOString(),
+          timeMax: new Date(now + RANGE_AHEAD_DAYS * DAY_MS).toISOString(),
+          ...(pageToken ? { pageToken } : {}),
+        }),
+      );
+      for (const event of data.items ?? []) {
+        const start = startOf(event);
+        const declined = event.attendees?.some((each) => each.self && each.responseStatus === 'declined');
+        if (!event.id || !start || event.status === 'cancelled' || declined) continue;
+        items.push({ account: alias, id: event.id, summary: event.summary ?? '', start, allDay: start.length === 10 });
+      }
+      pageToken = data.nextPageToken ?? undefined;
+      if (!pageToken) break;
     }
-    // a parked account stops here. a second call with a dead token would only repeat the error.
-    if (accounts.unavailable(alias)) return reports;
-    try {
-      reports.push({ alias, api: 'calendar', ok: true, ...(await syncCalendar(alias)) });
-      record(alias, 'calendar');
-    } catch (err) {
-      reports.push(failure(alias, 'calendar', err));
-    }
-    return reports;
+    return items;
   };
 
-  const failure = (alias: string, api: 'gmail' | 'calendar', err: unknown): SyncReport => {
-    if (err instanceof CursorMoved) {
-      logger.info('another process moved the sync cursor first', { alias, api });
-      return { alias, api, ok: true, added: 0 };
+  const pollAccount = async (alias: string, runId: string): Promise<AccountPoll> => {
+    let resync = false;
+    try {
+      resync = !!(await discoverMail(alias, runId)).resync;
+      await hydrateMail(alias);
+      await syncCalendar(alias, runId);
+      const events = await readRange(alias);
+      db.prepare("UPDATE google_accounts SET failures = 0, lastError = NULL, lastErrorAt = NULL WHERE alias = ? AND status = 'ok'").run(alias);
+      return { alias, ok: true, failures: 0, events, ...(resync ? { resync } : {}) };
+    } catch (err) {
+      if (err instanceof CursorMoved) {
+        logger.info('another process moved the sync cursor first', { alias });
+        return { alias, ok: true, failures: 0, ...(resync ? { resync } : {}) };
+      }
+      const error = err instanceof Error ? err : new Error(String(err));
+      const now = clock().toISOString();
+      const row = db
+        .prepare('UPDATE google_accounts SET failures = failures + 1, lastError = ?, lastErrorAt = ?, updatedAt = ? WHERE alias = ? RETURNING failures')
+        .get(error.message, now, now, alias);
+      logger.warn('google poll failed', { alias, err: error });
+      return { alias, ok: false, error: error.message, failures: Number(row?.failures ?? 0), ...(resync ? { resync } : {}) };
     }
-    const error = err instanceof Error ? err : new Error(String(err));
-    record(alias, api, error);
-    logger.warn('google poll failed', { alias, api, err: error });
-    return { alias, api, ok: false, added: 0, error: error.message };
   };
 
   return {
-    pollAll() {
-      running ??= Promise.all(accounts.aliases.filter((alias) => !accounts.unavailable(alias)).map(pollAccount))
-        .then((each) => each.flat())
-        .finally(() => (running = undefined));
+    pollAll(runId) {
+      running ??= Promise.all(accounts.aliases.filter((alias) => !accounts.unavailable(alias)).map((alias) => pollAccount(alias, runId))).finally(
+        () => (running = undefined),
+      );
       return running;
     },
     reset(alias) {
       inTransaction(db, () => {
-        db.prepare('DELETE FROM google_sync WHERE alias = ?').run(alias);
-        db.prepare('DELETE FROM calendar_events WHERE alias = ?').run(alias);
-        db.prepare("UPDATE integration_events SET handledAt = ?, handledBy = 'reset' WHERE account = ? AND handledAt IS NULL").run(clock().toISOString(), alias);
+        db.prepare('UPDATE google_accounts SET historyId = NULL, calendarSyncToken = NULL WHERE alias = ?').run(alias);
+        db.prepare("UPDATE integration_events SET handledAt = ?, handledAs = 'stale', handledBy = 'reset' WHERE account = ? AND source IN ('gmail', 'calendar') AND handledAt IS NULL").run(
+          clock().toISOString(),
+          alias,
+        );
       });
     },
   };
 }
 
-class CursorMoved extends Error {}
-
-// an all-day event has a date only. it is stored as midnight utc of that date, which the detectors compare by day.
-function toIso(value: string, allDay: boolean): string {
-  return allDay ? `${value}T00:00:00.000Z` : new Date(value).toISOString();
+// the start of an event: an iso time, or a date (YYYY-MM-DD) for an all-day event.
+function startOf(event: calendar_v3.Schema$Event): string | undefined {
+  return event.start?.dateTime ? new Date(event.start.dateTime).toISOString() : (event.start?.date ?? undefined);
 }

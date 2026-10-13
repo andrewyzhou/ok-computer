@@ -1,19 +1,21 @@
+import { randomUUID } from 'node:crypto';
 import type { Config } from '../config/schema.js';
 import type { Db } from '../db/index.js';
 import type { SecretStore } from '../integrations/secrets.js';
 import type { SlotRunner } from '../models/slots.js';
 import type { BlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
+import { redact } from '../observability/redact.js';
 import type { JobResult } from '../scheduler/scheduler.js';
 import { createAutomation, listAutomations, updateAutomation } from '../scheduler/store.js';
+import { classifySignals } from '../signals/classify.js';
+import { dateHits, soonSignals, type CalendarItem, type MailItem } from '../signals/detectors.js';
+import { addSignals, saveHits } from '../signals/store.js';
 import type { Clock } from '../time.js';
-import type { Tool } from '../tools/registry.js';
+import { errorText, type Tool } from '../tools/registry.js';
 import { createGoogleAccounts, type GoogleAccounts, type GoogleEndpoints } from './accounts.js';
-import { classifySignals } from './classify.js';
 import type { GoogleConfig } from './config.js';
-import { runDetectors } from './detectors.js';
-import { markHandled, signalDigest, type Digest } from './signals.js';
-import { createSync, type Sync } from './sync.js';
+import { createSync, type AccountPoll, type Sync } from './sync.js';
 import { createGoogleTools, googleToolNames } from './tools.js';
 
 export interface Google {
@@ -23,10 +25,8 @@ export interface Google {
   // the google tool names of a session profile (main or auto). they depend only on the config, so the tools
   // parameter of a session never changes.
   toolNames(profile: string): string[];
-  // poll is the job of the poll automation: sync every account, label the new signals, run the detectors.
+  // poll is the job of the poll automation: sync every account, run the detectors, then label the new mail.
   poll(): Promise<JobResult>;
-  digest(now: Date): Digest | undefined;
-  handled(ids: number[], by: string, now: Date): void;
   close(): Promise<void>;
 }
 
@@ -44,6 +44,7 @@ export interface GoogleDeps {
   // false in npm run chat. the background app polls, so two processes do not poll the same accounts.
   polls?: boolean;
   signal?: AbortSignal;
+  newId?: () => string;
 }
 
 // the poll automation follows the config at each start, as the heartbeat does. a pause by the owner stays until the
@@ -66,9 +67,13 @@ export function syncGooglePoll(db: Db, config: Pick<Config, 'google' | 'timeZone
 // after this many failed polls in a row (about three hours at 15 minutes), the owner hears one time. a long outage
 // would otherwise hide every deadline without a word.
 const STALL_POLLS = 12;
+export const POLL_SESSION = 'poll:google';
+// the detectors check mail that arrived in the last three days. older mail is closed as stale anyway.
+const CHECK_WINDOW_MS = 3 * 24 * 60 * 60_000;
 
 export function createGoogle(deps: GoogleDeps): Google {
   const { db, clock, logger, config } = deps;
+  const newId = deps.newId ?? randomUUID;
   const accounts = createGoogleAccounts({
     db,
     clock,
@@ -79,9 +84,41 @@ export function createGoogle(deps: GoogleDeps): Google {
     onNeedsAuth: (_alias, text) => deps.notifyOwner(text),
     onNewMailbox: (alias) => sync.reset(alias),
   });
-  const sync = createSync({ db, clock, logger, blobs: deps.blobs, accounts });
+  const sync = createSync({ db, clock, logger, blobs: deps.blobs, accounts, timeZone: deps.timeZone });
   const tools = createGoogleTools({ accounts, config, logger });
   const names = googleToolNames(config);
+
+  // the detectors run before the classifier, so a label never hides a hit. the date detector uses the calendars that
+  // this poll could read. a calendar that failed can then give a false hit, but never hide a deadline.
+  const detect = (polls: AccountPoll[], runId: string) => {
+    const events: CalendarItem[] = polls.flatMap((each) => each.events ?? []);
+    addSignals(db, soonSignals(events, clock(), deps.timeZone, runId), clock());
+    const rows = db
+      .prepare(
+        `SELECT id, summary, occursAt, payloadBlob FROM integration_events
+         WHERE source = 'gmail' AND state = 'ready' AND detectors IS NULL AND handledAt IS NULL AND seenAt >= ?`,
+      )
+      .all(new Date(clock().getTime() - CHECK_WINDOW_MS).toISOString());
+    for (const row of rows) saveHits(db, Number(row.id), dateHits(mailItem(row), events, deps.timeZone));
+  };
+
+  // the subject names the matter of a mail. it is in the payload blob. without the blob the summary stands in.
+  const mailItem = (row: Record<string, unknown>): MailItem => {
+    let fields: { subject?: string; snippet?: string } = {};
+    try {
+      fields = row.payloadBlob ? (JSON.parse(deps.blobs.read(String(row.payloadBlob)) ?? '{}') as typeof fields) : {};
+    } catch (err) {
+      logger.warn('signal blob read failed', { id: row.id, err });
+    }
+    const subject = fields.subject ?? String(row.summary ?? '');
+    const arrived = row.occursAt ? new Date(String(row.occursAt)) : clock();
+    return { id: Number(row.id), subject, text: `${subject} ${fields.snippet ?? ''}`, arrived };
+  };
+
+  const notes = (polls: AccountPoll[]) => [
+    ...polls.filter((each) => each.resync).map((each) => `the gmail history of ${each.alias} was too old, so only its inbox mail of the last 2 days made signals`),
+    ...polls.filter((each) => !each.ok).map((each) => `${each.alias}: ${each.error}`),
+  ];
 
   return {
     accounts,
@@ -90,27 +127,31 @@ export function createGoogle(deps: GoogleDeps): Google {
     toolNames: (profile) => (config.sessions.includes(profile as 'main' | 'auto') ? names : []),
     async poll() {
       if (deps.polls === false) return { status: 'skipped', error: 'the google poll runs only in the background app' };
-      const reports = await sync.pollAll();
-      for (const report of reports.filter((each) => !each.ok)) {
-        const failures = Number(db.prepare('SELECT failures FROM google_sync WHERE alias = ? AND api = ?').get(report.alias, report.api)?.failures ?? 0);
-        if (failures === STALL_POLLS) deps.notifyOwner(`The ${report.api} poll of the ${report.alias} Google account has failed ${failures} times in a row: ${report.error}`);
-      }
-      // the labels and the detectors work on what the database has. a failed classifier leaves rows unlabeled, and
-      // the detectors still run.
+      // the poll is a run of its own, so its requests and its classifier calls show in one timeline with their cost.
+      const runId = newId();
+      db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES (?, ?, 'poll', 'utility', 'running', ?)").run(runId, POLL_SESSION, clock().toISOString());
+      let note: string;
       try {
-        await classifySignals({ db, slots: deps.slots, logger, ...(deps.signal ? { signal: deps.signal } : {}) });
+        const polls = await sync.pollAll(runId);
+        for (const each of polls.filter((poll) => !poll.ok && poll.failures === STALL_POLLS)) {
+          deps.notifyOwner(`The Google poll of the ${each.alias} account has failed ${each.failures} times in a row: ${each.error}`);
+        }
+        detect(polls, runId);
+        try {
+          await classifySignals({ db, slots: deps.slots, logger, runId, ...(deps.signal ? { signal: deps.signal } : {}) });
+        } catch (err) {
+          logger.error('signal classification failed', { runId, err });
+        }
+        note = notes(polls).join('; ');
       } catch (err) {
-        logger.error('signal classification failed', { err });
+        logger.error('google poll failed', { runId, err });
+        note = `the poll stopped: ${redact(errorText(err))}`;
       }
-      const found = runDetectors(db, clock(), deps.timeZone);
-      const failed = reports.filter((each) => !each.ok);
-      logger.info('google poll done', { reports: reports.length, failed: failed.length, detected: found });
+      db.prepare("UPDATE runs SET status = 'completed', endedAt = ?, error = ? WHERE id = ?").run(clock().toISOString(), note || null, runId);
       // a poll with failed accounts still completes. a failed job backs off and is turned off after five failures,
       // and a google outage must not turn the poll off for good.
-      return { status: 'completed', ...(failed.length ? { error: failed.map((each) => `${each.alias} ${each.api}: ${each.error}`).join('; ') } : {}) };
+      return { status: 'completed', runId, ...(note ? { error: note } : {}) };
     },
-    digest: (now) => signalDigest(db, now, deps.timeZone),
-    handled: (ids, by, now) => markHandled(db, ids, by, now),
     close: () => accounts.close(),
   };
 }

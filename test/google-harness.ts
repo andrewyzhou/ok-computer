@@ -77,7 +77,7 @@ export async function createGoogleHarness(options: { accounts?: string[]; config
         onNeedsAuth: (alias, text) => alerts.push({ alias, text }),
         onNewMailbox: (alias) => harness.sync.reset(alias),
       });
-      harness.sync = createSync({ db, clock, logger, blobs, accounts: harness.accounts });
+      harness.sync = createSync({ db, clock, logger, blobs, accounts: harness.accounts, timeZone: 'America/Los_Angeles' });
     },
     rows: (sql, ...params) => db.prepare(sql).all(...params) as Array<Record<string, unknown>>,
     async close() {

@@ -34,13 +34,13 @@ describe('google sign-in', () => {
     expect(await visit(callback, `code=good-code&state=${state}`)).toContain('Signed in as personal@example.com');
     expect(h.secrets.values.get('google.personal')).toBe(NEW_REFRESH);
     expect(h.rows('SELECT status, email, alertedAt FROM google_accounts')).toEqual([{ status: 'ok', email: 'personal@example.com', alertedAt: null }]);
-    expect(h.rows("SELECT cursor FROM google_sync WHERE api = 'gmail'")).toEqual([{ cursor: '1000' }]);
+    expect(h.rows('SELECT historyId FROM google_accounts')).toEqual([{ historyId: '1000' }]);
 
     // mail after the sign-in is news, also when the first polls fail.
     h.fake.deliver('personal', { id: 'm1', headers: { Subject: 'right after connect' } });
     h.fake.fault({ route: 'GET /gmail/v1/users/me/history', status: 503, times: 1 });
-    await h.sync.pollAll();
-    await h.sync.pollAll();
+    await h.sync.pollAll('poll-run');
+    await h.sync.pollAll('poll-run');
     expect(h.rows('SELECT externalId FROM integration_events')).toEqual([{ externalId: 'm1' }]);
 
     // the state works once, and the callback listens only while a flow waits.

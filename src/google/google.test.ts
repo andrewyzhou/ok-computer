@@ -28,8 +28,8 @@ describe('google poll job', () => {
       endpoints: { apiRoot: h.fake.url, tokenUrl: `${h.fake.url}token` },
     });
     h.fake.fault({ route: 'GET /gmail/v1/users/me/profile', status: 503, times: 14 });
-    for (let i = 0; i < 14; i++) expect(await google.poll()).toMatchObject({ status: 'completed', error: expect.stringContaining('personal gmail: 503') });
-    expect(told).toEqual([expect.stringContaining('The gmail poll of the personal Google account has failed 12 times in a row')]);
+    for (let i = 0; i < 14; i++) expect(await google.poll()).toMatchObject({ status: 'completed', error: expect.stringContaining('personal: 503') });
+    expect(told).toEqual([expect.stringContaining('The Google poll of the personal account has failed 12 times in a row')]);
     await google.close();
   });
 

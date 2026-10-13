@@ -215,7 +215,18 @@ export async function startFakeGoogle(): Promise<FakeGoogle> {
       if (syncToken && since < box.oldestSyncVersion) return apiError(res, 410, 'Sync token is no longer valid, a full sync is required.', 'fullSyncRequired');
       const max = Number(url.searchParams.get('maxResults') ?? 250);
       const from = Number(url.searchParams.get('pageToken') ?? 0);
-      const changed = [...box.events.values()].filter((each) => each.version > since && (syncToken || each.status !== 'cancelled'));
+      // google keeps an event that ends after timeMin and starts before timeMax.
+      const timeMin = url.searchParams.get('timeMin');
+      const timeMax = url.searchParams.get('timeMax');
+      const at = (when: { dateTime?: string; date?: string }) => Date.parse(when.dateTime ?? `${when.date}T00:00:00Z`);
+      const changed = [...box.events.values()].filter(
+        (each) =>
+          each.version > since &&
+          (syncToken || each.status !== 'cancelled') &&
+          (!timeMin || at(each.end) > Date.parse(timeMin)) &&
+          (!timeMax || at(each.start) < Date.parse(timeMax)),
+      );
+      if (url.searchParams.get('orderBy') === 'startTime') changed.sort((a, b) => at(a.start) - at(b.start));
       const page = changed.slice(from, from + max);
       const last = from + max >= changed.length;
       return json(res, 200, {

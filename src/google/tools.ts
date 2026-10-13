@@ -8,7 +8,7 @@ import type { GoogleAccounts, GoogleApis } from './accounts.js';
 import type { GoogleConfig } from './config.js';
 import { GoogleError, toGoogleError } from './errors.js';
 import { badAddress, rawMessage, type Draft } from './mime.js';
-import { cleanLine } from './signals.js';
+import { cleanLine } from '../signals/store.js';
 import { oneClick as realOneClick, unsubscribeTargets, type OneClickResult } from './unsubscribe.js';
 
 export const GOOGLE = 'google';

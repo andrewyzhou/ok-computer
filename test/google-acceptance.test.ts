@@ -27,7 +27,7 @@ function router(onMain: (call: ModelCall) => ReturnType<typeof fakeResponse>) {
     }
     if (last.includes('tool_result')) return fakeResponse({ text: 'NO_REPLY' });
     if (call.system.includes('This is a heartbeat run.')) {
-      const notify = last.includes('deadline_missing');
+      const notify = last.includes('date_not_on_calendar');
       return fakeResponse({ toolCalls: [{ id: 'h1', name: 'heartbeat_respond', input: notify ? { notify: true, text: 'Your essay is due Oct 20, and it is not on your calendar.' } : { notify: false } }] });
     }
     return onMain(call);
@@ -88,7 +88,7 @@ describe('google acceptance', () => {
 
     // the first poll fails at the token endpoint. the second poll is the baseline, and the mail after it is news.
     await t.at(pdt('09:15'));
-    expect(t.rows("SELECT COUNT(*) AS n FROM google_sync WHERE lastError LIKE '%injected fault%'")).toEqual([{ n: 2 }]);
+    expect(t.rows("SELECT COUNT(*) AS n FROM google_accounts WHERE lastError LIKE '%injected fault%'")).toEqual([{ n: 2 }]);
     await t.at(pdt('09:30'));
     fake.deliver('school', { id: 'm1', headers: { From: 'Teacher <t@school.example>', Subject: 'Essay due Oct 20', Date: 'Tue, 13 Oct 2026 09:20:00 -0700' }, snippet: 'please submit the essay by Oct 20' });
     fake.deliver('personal', {
@@ -108,24 +108,22 @@ describe('google acceptance', () => {
     await t.at(pdt('10:00'));
     await t.at(pdt('10:15'));
 
-    const signals = t.rows("SELECT source, kind, account, label FROM integration_events WHERE state = 'ready' ORDER BY id");
-    expect(signals).toEqual(
-      expect.arrayContaining([
-        { source: 'gmail', kind: 'mail', account: 'school', label: 'deadline' },
-        { source: 'detector', kind: 'deadline_missing', account: 'school', label: null },
-      ]),
-    );
+    // the detectors ran before the classifier, and the label links to its model call in the poll run.
+    const [essay] = t.rows("SELECT label, detectors, labelModelCallId, runId FROM integration_events WHERE externalId = 'm1'");
+    expect(essay).toMatchObject({ label: 'deadline', detectors: expect.stringContaining('date_not_on_calendar') });
+    expect(t.rows('SELECT runId, slot FROM model_calls WHERE id = ?', Number(essay!.labelModelCallId))).toEqual([{ runId: essay!.runId, slot: 'utility' }]);
+    expect(t.rows('SELECT trigger, status FROM runs WHERE id = ?', String(essay!.runId))).toEqual([{ trigger: 'poll', status: 'completed' }]);
     expect(t.rows("SELECT COUNT(*) AS n FROM model_calls WHERE slot = 'utility'")).not.toEqual([{ n: 0 }]);
 
     // the heartbeat runs each hour. the one at 10:00 can run before or after the poll of 10:00.
     await t.at(pdt('11:00'));
     expect(t.printed()).toContain('okc> Your essay is due Oct 20, and it is not on your calendar.');
     // the digest is shown one time: the run that saw the deadline marked it handled, and that run read school mail.
-    const [deadline] = t.rows("SELECT handledBy FROM integration_events WHERE kind = 'deadline_missing'");
-    const key = String(deadline!.handledBy);
-    expect(key).toMatch(/^heartbeat:/);
+    const [deadline] = t.rows("SELECT handledAs, handledBy FROM integration_events WHERE externalId = 'm1'");
+    expect(deadline!.handledAs).toBe('notified');
+    const key = `heartbeat:${String(deadline!.handledBy)}`;
     expect(sessionTaint(t.db, key).map((each) => each.source)).toEqual(expect.arrayContaining(['gmail:school']));
-    expect(JSON.stringify(t.model.calls.find((call) => JSON.stringify(call.messages).includes('deadline_missing'))?.messages)).toMatch(/<untrusted source=[^>]*gmail:school/);
+    expect(JSON.stringify(t.model.calls.find((call) => JSON.stringify(call.messages).includes('date_not_on_calendar'))?.messages)).toMatch(/<untrusted source=[^>]*gmail:school/);
     // a notification that went out once is not sent again by a later heartbeat.
     expect(t.printed().split('Your essay is due Oct 20').length - 1).toBe(1);
 

@@ -9,6 +9,7 @@ import type { Logger } from '../observability/logger.js';
 import type { TaintSource } from '../policy/policy.js';
 import { sessionTaint } from '../policy/store.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
+import type { Digest } from '../signals/digest.js';
 import type { RunQueue } from '../sessions/queue.js';
 import { MAIN_SESSION } from '../sessions/router.js';
 import { localTime, type Clock } from '../time.js';
@@ -133,8 +134,8 @@ export interface HeartbeatDeps {
   newId?: () => string;
   // the signals of the integrations: a bounded digest of the unhandled ones, and the mark after a completed run.
   signals?: {
-    digest(now: Date): { ids: number[]; text: string; taint: TaintSource[] } | undefined;
-    handled(ids: number[], by: string, now: Date): void;
+    digest(now: Date): Digest | undefined;
+    finish(digest: Digest, runId: string | null, notified: boolean, now: Date): void;
   };
 }
 
@@ -148,10 +149,14 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
       return { status: 'skipped', error: 'outside active hours' };
     }
     const checklist = getChecklist(db);
+    if (queue.busy(MAIN_SESSION)) return { status: 'skipped', error: 'the main session has a run in progress' };
     // new signals are a reason to run without a checklist.
     const digest = deps.signals?.digest(clock());
-    if (!checklist && !digest) return { status: 'skipped', error: 'the checklist is empty' };
-    if (queue.busy(MAIN_SESSION)) return { status: 'skipped', error: 'the main session has a run in progress' };
+    if (!checklist && !digest?.shown.length) {
+      // newsletters and noise need no model call. they are closed now, so they do not wait for ever.
+      if (digest) deps.signals!.finish(digest, null, false, clock());
+      return { status: 'skipped', error: 'the checklist is empty' };
+    }
 
     const recent = recentNotifications(db);
     const text = [
@@ -159,7 +164,7 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
       '',
       'Checklist:',
       checklist || '- none',
-      ...(digest
+      ...(digest?.shown.length
         ? [
             '',
             "New signals from the owner's accounts, newest first. Tell the owner about a signal only when it needs attention soon, for example a deadline that is not on the calendar. Each signal is shown one time.",
@@ -196,7 +201,8 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
     }
     // the mark comes after the send. a crash between the two shows the signals again, and the recent notifications
     // tell the next heartbeat not to repeat itself. a lost deadline is worse than a repeated one.
-    if (digest) deps.signals!.handled(digest.ids, `heartbeat:${runId}`, clock());
+    const notified = !!(answer?.notify && answer.text);
+    if (digest) deps.signals!.finish(digest, runId, notified, clock());
     if (answer?.notify && answer.text) {
       // the notification can repeat untrusted content that the heartbeat read, so it carries that taint, and its text
       // is wrapped.
