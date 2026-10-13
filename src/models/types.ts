@@ -1,0 +1,81 @@
+import type { Effort } from '../config/schema.js';
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  input: unknown;
+}
+
+export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'refusal' | 'other';
+
+export interface Usage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
+// an assistant turn keeps the provider blocks exactly as they arrived. the adapter of the same provider replays
+// them unchanged. other adapters use the normalized text and tool calls.
+export interface AssistantTurn {
+  provider: string;
+  model: string;
+  content: unknown[];
+  text: string;
+  toolCalls: ToolCall[];
+  stopReason: StopReason;
+}
+
+export type UserBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_result'; toolCallId: string; content: string; isError: boolean };
+
+export type ModelMessage = { role: 'user'; content: UserBlock[] } | ({ role: 'assistant' } & AssistantTurn);
+
+export interface ToolSpec {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+export interface ModelRequest {
+  system: string;
+  messages: ModelMessage[];
+  tools: ToolSpec[];
+}
+
+export interface ModelCall extends ModelRequest {
+  model: string;
+  maxTokens: number;
+  effort?: Effort;
+}
+
+export interface ModelResponse {
+  content: unknown[];
+  toolCalls: ToolCall[];
+  text: string;
+  stopReason: StopReason;
+  usage: Usage;
+  model: string;
+  latencyMs: number;
+}
+
+export interface ModelClient {
+  provider: string;
+  // complete throws ModelError when the provider fails.
+  complete(call: ModelCall, signal?: AbortSignal): Promise<ModelResponse>;
+}
+
+// transient errors can succeed on a retry. request errors fail again with the same request.
+export type ModelErrorKind = 'transient' | 'request' | 'aborted';
+
+export class ModelError extends Error {
+  constructor(
+    readonly kind: ModelErrorKind,
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = 'ModelError';
+  }
+}
