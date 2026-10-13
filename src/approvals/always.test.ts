@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -98,6 +98,26 @@ describe('createAlwaysAllow', () => {
     expect(await always.apply(id, expires)).toBe(`Approval #${id} is already approved.`);
     expect(resolve).toHaveBeenCalledTimes(1);
     expect(JSON.parse(readFileSync(path, 'utf8')).rules).toHaveLength(1);
+  });
+
+  // on windows a read-only or locked okc.policy.json refuses the rename. elsewhere the rename replaces a read-only
+  // file, so the test runs on windows only.
+  it.runIf(process.platform === 'win32')('tells the owner why the rule could not be added when the file cannot be replaced', async () => {
+    const { path, rules, always, id, expires, resolve } = setup();
+    writeFileSync(path, '{"rules": []}\n');
+    chmodSync(path, 0o444);
+    let answer: string;
+    try {
+      answer = await always.apply(id, expires);
+    } finally {
+      chmodSync(path, 0o644);
+    }
+    expect(answer.startsWith(`I could not add the rule, so nothing changed: ${path} could not be written`)).toBe(true);
+    expect(existsSync(`${path}.tmp`)).toBe(false);
+    expect(readFileSync(path, 'utf8')).toBe('{"rules": []}\n');
+    expect(rules).toEqual(BUILTIN_RULES);
+    expect(resolve).not.toHaveBeenCalled();
+    expect(getApproval(db, id)!.status).toBe('pending');
   });
 
   it('leaves the approval pending with the rule in place when the approval fails after the write', async () => {

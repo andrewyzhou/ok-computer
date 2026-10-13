@@ -102,12 +102,19 @@ export function addRule(path: string, rule: Omit<Rule, 'id'>): Result<Rule[]> {
   });
   if (same) return loadPolicy(path);
   const temporary = `${path}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify({ ...file, rules: [...rules, rule] }, null, 2)}\n`);
-  const checked = loadPolicy(temporary);
-  if (!checked.ok) {
+  // on windows an editor or a virus scanner can lock the file, so the write or the rename can fail. the old file
+  // then stays, and the owner gets the reason.
+  try {
+    writeFileSync(temporary, `${JSON.stringify({ ...file, rules: [...rules, rule] }, null, 2)}\n`);
+    const checked = loadPolicy(temporary);
+    if (!checked.ok) {
+      rmSync(temporary, { force: true });
+      return { ok: false, error: checked.error.replaceAll(temporary, path) };
+    }
+    renameSync(temporary, path);
+  } catch (err) {
     rmSync(temporary, { force: true });
-    return { ok: false, error: checked.error.replaceAll(temporary, path) };
+    return { ok: false, error: `${path} could not be written: ${(err as Error).message}` };
   }
-  renameSync(temporary, path);
   return loadPolicy(path);
 }
