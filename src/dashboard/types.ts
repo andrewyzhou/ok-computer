@@ -83,6 +83,80 @@ export interface ToolCallRow {
   // abandoned, late or interrupted.
   outcome: string;
   policy: PolicyDecisionRow | null;
+  // the integration that ran the tool, and the json-rpc messages of the call. a built-in tool has none.
+  serverId: string | null;
+  mcpMessages: McpMessageRow[];
+}
+
+// a payload over 8 kb is in the blob store. payload is then null, and the page loads it on demand. unsent marks a
+// request that the transport refused after its out row was written.
+export interface McpMessageRow {
+  id: number;
+  serverId: string;
+  direction: 'out' | 'in' | 'unsent';
+  method: string | null;
+  rpcId: string | null;
+  runId: string | null;
+  toolCallId: string | null;
+  latencyMs: number | null;
+  createdAt: string;
+  payload: unknown;
+  payloadBlob: string | null;
+  // the message of a json-rpc error, of a tool result with isError, or of a refused send.
+  error: string | null;
+}
+
+export interface IntegrationToolRow {
+  name: string;
+  mcpName: string;
+  description: string;
+  risk: string;
+  // okc.integrations.json, or the default with the hint of the server.
+  riskFrom: string;
+  inputSchema: Record<string, unknown>;
+}
+
+// the live state of the dashboard's own process, with counts from the database.
+export interface IntegrationSummary {
+  id: string;
+  kind: string;
+  target: string;
+  sessions: string[];
+  untrustedOutput: boolean;
+  state: { status: string; error?: string; retryAt?: string; server?: { name: string; version: string } };
+  paused: boolean;
+  auth: string;
+  authorizedAt: string | null;
+  tokenExpiresAt: string | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  authUrl?: string;
+  catalogHash?: string;
+  catalogStored?: boolean;
+  tools: IntegrationToolRow[];
+  rejected: Array<{ mcpName: string; reason: string }>;
+  // missing: tools.allow names them, and the last tool list does not have them. hidden: the server has them, and
+  // tools.allow does not name them. unknown: no tool list was seen since tools.allow named them.
+  missing: string[];
+  hidden: string[];
+  unknown: string[];
+  calls24h: number;
+  errors24h: number;
+  lastMessageAt: string | null;
+}
+
+export interface CatalogVersion {
+  hash: string;
+  createdAt: string;
+  toolCount: number;
+  // the change from the version before. the first version has none.
+  diff: { added: string[]; removed: string[]; changed: Array<{ name: string; fields: string[] }> } | null;
+}
+
+export interface IntegrationDetail extends IntegrationSummary {
+  catalogs: CatalogVersion[];
+  calls: ToolCallRow[];
+  messages: McpMessageRow[];
 }
 
 // a model call holds the tool calls that its response asked for. a tool call that ran after an approval has no

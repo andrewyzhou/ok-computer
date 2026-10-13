@@ -41,8 +41,9 @@ export interface Tool<I = unknown> {
 
 // call is the call that runs. it differs from the model's call when tool_call names an integration tool: the policy,
 // the approval and the trace then see that tool and its arguments, never tool_call. unknown marks a name that no tool
-// of the session has, so an approved call can say that its tool is gone.
-export type Resolved = { ok: true; tool: Tool; input: unknown; call: ToolCall } | { ok: false; output: ToolOutput; unknown?: true };
+// of the session has, so an approved call can say that its tool is gone. a failed tool_call carries the call that it
+// names, so the trace row names the integration tool too.
+export type Resolved = { ok: true; tool: Tool; input: unknown; call: ToolCall } | { ok: false; output: ToolOutput; unknown?: true; call?: ToolCall };
 
 export const TOOL_CALL = 'tool_call';
 
@@ -93,10 +94,12 @@ export function createToolRegistry(tools: Tool[], logger: Logger = silentLogger,
         }
         const { name, arguments: args } = outer.data as { name: string; arguments: unknown };
         // only an integration tool goes through tool_call. a built-in tool has its own entry in the tools parameter.
+        const inner = { id: call.id, name, input: args };
         if (byName.has(name) || !dynamic(name, sessionKey) || !allowed.includes(name)) {
-          return { ok: false, output: { content: `no integration tool is named ${name}. Use tool_search to find the tool and its exact name.`, isError: true } };
+          return { ok: false, output: { content: `no integration tool is named ${name}. Use tool_search to find the tool and its exact name.`, isError: true }, call: inner };
         }
-        return resolveOne({ id: call.id, name, input: args }, allowed, sessionKey);
+        const resolved = resolveOne(inner, allowed, sessionKey);
+        return resolved.ok ? resolved : { ...resolved, call: inner };
       }
       return resolveOne(call, allowed, sessionKey);
     },

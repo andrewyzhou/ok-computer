@@ -4,6 +4,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDashboard } from '../src/dashboard/server.js';
 import { openDb } from '../src/db/index.js';
+import type { IntegrationDetail } from '../src/dashboard/types.js';
 import type { IntegrationStatus } from '../src/integrations/integrations.js';
 import { silentLogger } from '../src/observability/logger.js';
 import { listEvents } from '../src/events/log.js';
@@ -212,6 +213,12 @@ describe('mcp acceptance', () => {
     expect(results[2]).toBe('no integration tool is named now. Use tool_search to find the tool and its exact name.');
     expect(t.rows("SELECT count(*) AS n FROM mcp_messages WHERE method = 'tools/call'")).toEqual([{ n: 0 }]);
     expect(t.rows('SELECT count(*) AS n FROM policy_decisions')).toEqual([{ n: 0 }]);
+    // the trace names the tool that the model asked for, with its arguments, not tool_call.
+    expect(t.rows('SELECT name, input FROM tool_calls ORDER BY toolCallId')).toEqual([
+      { name: 'notes__echo', input: '{"text":42}' },
+      { name: 'notes__hidden_admin', input: '{}' },
+      { name: 'now', input: '{}' },
+    ]);
   });
 
   it('tells the model why an integration cannot take a call, and when the app tries again', async () => {
@@ -288,14 +295,13 @@ describe('mcp acceptance', () => {
     await expect.poll(() => t.app.integrations.status()[0]!.state.status).toBe('connected');
     const dashboard = createDashboard({ db, config: t.config, clock: t.clock, logger: silentLogger, app: t.app });
     const status = (await (await dashboard.request('/api/integrations')).json()) as IntegrationStatus[];
-    expect(status[0]).toMatchObject({ id: 'notes', state: { status: 'connected' }, paused: false, rejected: [{ mcpName: 'calendar_lookup' }] });
+    expect(status[0]).toMatchObject({ id: 'notes', state: { status: 'connected' }, paused: false, missing: ['calendar_lookup'] });
     expect(status[0]!.tools.map((tool) => tool.name)).toContain('notes__echo');
 
     const json = (body: unknown) => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     expect((await dashboard.request('/api/integrations/notes/pause', json({ paused: true }))).status).toBe(200);
     expect(t.app.integrations.status()[0]).toMatchObject({ paused: true, state: { status: 'stopped' } });
     expect((await dashboard.request('/api/integrations/nope/pause', json({ paused: true }))).status).toBe(404);
-    expect(await (await dashboard.request('/api/integrations/notes/connect', json({}))).json()).toEqual({ error: 'notes does not use oauth' });
 
     const again = memoryServers();
     const restarted = createTestApp([], { start, deps: { db, integrations: [notesEntry()], mcpTransport: again.transport } });
@@ -303,8 +309,9 @@ describe('mcp acceptance', () => {
     await restarted.app.start();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(again.servers).toHaveLength(0);
-    const history = (await (await createDashboard({ db, config: t.config, clock: t.clock, logger: silentLogger, app: restarted.app }).request('/api/integrations/notes/catalogs')).json()) as unknown[];
-    expect(history).toHaveLength(1);
+    const detail = (await (await createDashboard({ db, config: t.config, clock: t.clock, logger: silentLogger, app: restarted.app }).request('/api/integrations/notes')).json()) as IntegrationDetail;
+    expect(detail).toMatchObject({ paused: true, catalogStored: true });
+    expect(detail.catalogs).toHaveLength(1);
   });
 
   it('does not run an approved call when its tool is gone, its session lost it, or its input no longer matches the schema', async () => {

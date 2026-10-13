@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/index.js';
 import { silentLogger } from '../observability/logger.js';
 import { HANDLE_OVER, modelView } from '../tools/results.js';
-import { buildSnapshot, createCatalogStore, riskOf, type CatalogTool } from './catalog.js';
+import { buildSnapshot, createCatalogStore, diffCatalogs, riskFrom, riskOf, type CatalogTool } from './catalog.js';
 import { parseIntegrations, type IntegrationEntry } from './config.js';
 import { search, type Discoverable } from './discovery.js';
 import type { McpTool } from './mcp.js';
@@ -27,9 +27,33 @@ describe('catalog', () => {
     ]);
     expect(snapshot.tools.map((each) => each.mcpName)).toEqual(['echo', 'files.read']);
     expect(snapshot.tools[0]!.description).toHaveLength(1_024);
-    expect(snapshot.rejected).toEqual([
-      { mcpName: 'bad', reason: expect.stringContaining('bytes') },
-      { mcpName: 'gone', reason: 'the server does not offer this tool' },
+    expect(snapshot.rejected).toEqual([{ mcpName: 'bad', reason: expect.stringContaining('bytes') }]);
+    expect(snapshot.missing).toEqual(['gone']);
+    expect(snapshot.hidden).toEqual(['hidden_admin']);
+  });
+
+  it('keeps the names of hidden tools out of the version, so a server that changes only those makes no new version', () => {
+    const db = openDb(':memory:');
+    const store = createCatalogStore({ db, clock, logger: silentLogger, entries: [entry(['a'])] });
+    const first = store.update(entry(['a']), [tool('a'), tool('x')]);
+    const second = store.update(entry(['a']), [tool('a'), tool('y'), tool('z'.repeat(500))]);
+    // the compiled catalog stays too, so a server that changes only hidden tools costs no compile.
+    expect(second).toBe(first);
+    expect(db.prepare('SELECT count(*) AS n FROM integration_catalogs').get()).toEqual({ n: 1 });
+    // the page shows the newest hidden names, each cut to a short length.
+    expect(second.hidden).toEqual(['y', 'z'.repeat(100)]);
+  });
+
+  it('names the change of each version, and the source of each risk', () => {
+    const e = entry(['a', 'b', 'c'], { c: 'read' });
+    const before = buildSnapshot(e, [tool('a', { description: 'old' }), tool('b')]).tools;
+    const after = buildSnapshot(e, [tool('a', { description: 'new' }), tool('c', { annotations: { readOnlyHint: true } })]).tools;
+    expect(diffCatalogs(before, after)).toEqual({ added: ['notes__c'], removed: ['notes__b'], changed: [{ name: 'notes__a', fields: ['description'] }] });
+    const hinted = buildSnapshot(entry(['h']), [tool('h', { annotations: { readOnlyHint: true } })]).tools[0]!;
+    expect([riskFrom(e, after[1]!), riskFrom(e, before[1]!), riskFrom(entry(['h']), hinted)]).toEqual([
+      'okc.integrations.json',
+      'default: the server does not say read only',
+      'default: the server says read only',
     ]);
   });
 

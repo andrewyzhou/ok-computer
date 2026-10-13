@@ -50,6 +50,8 @@ export interface OAuth {
   // the text of the last failed sign-in step of an integration, as the server wrote it. a success clears it.
   serverError(integrationId: string): string | undefined;
   hasTokens(integrationId: string): Promise<boolean>;
+  // closeIfIdle closes the callback port when no flow waits, for example after a connect with working tokens.
+  closeIfIdle(): Promise<void>;
   // the authorization link of the last flow of an integration that has not ended, for the dashboard.
   pendingUrl(integrationId: string): string | undefined;
   // callback finishes a flow. it is the handler of the loopback server, and tests call it without the server.
@@ -288,6 +290,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
     fetchFor: (entry) => singleFlight(observed(entry)),
     serverError: (id) => serverErrors.get(id),
     hasTokens: async (id) => (await secrets.get(tokensRef(id))) !== undefined,
+    closeIfIdle: closeWhenIdle,
     pendingUrl(id) {
       prune();
       return [...flows.values()].find((flow) => flow.integrationId === id)?.url;

@@ -32,6 +32,14 @@ const STATUS_TONE: Record<string, string> = {
   abandoned: 'serious',
   late: 'warning',
   interrupted: 'serious',
+  connected: 'good',
+  connecting: 'info',
+  needs_auth: 'warning',
+  paused: 'muted',
+  stopped: 'muted',
+  read: 'muted',
+  write: 'warning',
+  external: 'serious',
 };
 
 // a status always shows its word, so the color is never the only signal.

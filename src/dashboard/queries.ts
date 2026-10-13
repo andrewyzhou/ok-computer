@@ -18,6 +18,7 @@ import type {
   GoalRow,
   GoalsPage,
   HeartbeatStatus,
+  McpMessageRow,
   ModelCallBody,
   ModelCallRow,
   Overview,
@@ -115,7 +116,7 @@ function toModelCall(row: Row): ModelCallRow {
   };
 }
 
-function toDecision(row: Row): PolicyDecisionRow {
+export function toDecision(row: Row): PolicyDecisionRow {
   return {
     id: Number(row.id),
     decision: String(row.decision),
@@ -131,7 +132,37 @@ function toDecision(row: Row): PolicyDecisionRow {
   };
 }
 
-function toToolCall(row: Row, decisions: Map<number, PolicyDecisionRow>): ToolCallRow {
+// the error is read from the payload, so the page can mark a failed message without a new column. a payload in the
+// blob store is not read here, so its error shows only when the owner opens it.
+export function toMcpMessage(row: Row): McpMessageRow {
+  const payload = row.payload === null ? null : (JSON.parse(String(row.payload)) as Record<string, unknown>);
+  const error = payload?.error as { message?: unknown } | string | undefined;
+  const result = payload?.result as { isError?: unknown; content?: Array<{ type?: string; text?: unknown }> } | undefined;
+  const failed =
+    typeof error === 'string'
+      ? error
+      : typeof error?.message === 'string'
+        ? error.message
+        : result?.isError === true
+          ? String(result.content?.find((block) => block.type === 'text')?.text ?? 'the tool gave an error')
+          : null;
+  return {
+    id: Number(row.id),
+    serverId: String(row.serverId),
+    direction: row.direction === 'in' ? 'in' : row.direction === 'unsent' ? 'unsent' : 'out',
+    method: str(row.method),
+    rpcId: str(row.rpcId),
+    runId: str(row.runId),
+    toolCallId: str(row.toolCallId),
+    latencyMs: num(row.latencyMs),
+    createdAt: String(row.createdAt),
+    payload,
+    payloadBlob: str(row.payloadBlob),
+    error: failed,
+  };
+}
+
+export function toToolCall(row: Row, decisions: Map<number, PolicyDecisionRow>, messages: McpMessageRow[] = []): ToolCallRow {
   const policy = row.policyDecisionId === null ? null : (decisions.get(Number(row.policyDecisionId)) ?? null);
   return {
     id: Number(row.id),
@@ -158,6 +189,8 @@ function toToolCall(row: Row, decisions: Map<number, PolicyDecisionRow>): ToolCa
       decision: policy,
     }),
     policy,
+    serverId: str(row.serverId),
+    mcpMessages: messages.filter((message) => message.toolCallId === String(row.toolCallId) && message.serverId === row.serverId),
   };
 }
 
@@ -194,10 +227,11 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
       .all(id)
       .map((row) => [Number(row.id), toDecision(row)]),
   );
+  const messages = db.prepare('SELECT * FROM mcp_messages WHERE runId = ? ORDER BY id').all(id).map(toMcpMessage);
   const tools = db
     .prepare('SELECT * FROM tool_calls WHERE runId = ? ORDER BY id')
     .all(id)
-    .map((row) => toToolCall(row, decisions));
+    .map((row) => toToolCall(row, decisions, messages));
   const placed = new Set<number>();
   const timeline: TimelineItem[] = [];
   for (const row of modelRows) {

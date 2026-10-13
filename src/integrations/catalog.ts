@@ -27,8 +27,10 @@ export interface CatalogTool {
 export interface CatalogSnapshot {
   integrationId: string;
   tools: CatalogTool[];
-  // tools that the config allows but the catalog left out, with the reason. the dashboard shows them.
+  // tools that the config allows and the server offers, but the catalog left out, with the reason.
   rejected: Array<{ mcpName: string; reason: string }>;
+  // tools that the config allows and the server does not offer, for example a typo or a server upgrade.
+  missing: string[];
 }
 
 export interface Catalog {
@@ -39,21 +41,66 @@ export interface Catalog {
   validators: Map<string, Validate>;
   // the hash of the snapshot before the compile. an equal list from the server keeps this catalog.
   source?: string;
+  // the names of the server's tools that the config does not allow. they are not part of the version, so a server
+  // that changes only such tools makes no new version. a stored catalog does not know them.
+  hidden: string[];
 }
+
+// the page shows at most this many hidden names, each cut to a short length. the server writes them.
+const HIDDEN_LIMIT = 200;
+const HIDDEN_NAME_LIMIT = 100;
 
 export function riskOf(entry: IntegrationEntry, tool: CatalogTool): Risk {
   // a hint of the server never makes a tool read. the config decides, and the default asks for a review at least.
   return entry.risk[tool.mcpName] ?? (tool.readOnlyHint ? 'write' : 'external');
 }
 
+// the owner sees where a risk comes from, so a default that asks for each call is easy to find and change.
+export function riskFrom(entry: IntegrationEntry, tool: CatalogTool): string {
+  if (entry.risk[tool.mcpName]) return 'okc.integrations.json';
+  return tool.readOnlyHint ? 'default: the server says read only' : 'default: the server does not say read only';
+}
+
+// the change from one version to the next. a new description is new text in front of the model, so the page marks it.
+export interface CatalogDiff {
+  added: string[];
+  removed: string[];
+  changed: Array<{ name: string; fields: string[] }>;
+}
+
+export function diffCatalogs(before: CatalogTool[], after: CatalogTool[]): CatalogDiff {
+  const old = new Map(before.map((tool) => [tool.name, tool]));
+  const now = new Map(after.map((tool) => [tool.name, tool]));
+  const changed: CatalogDiff['changed'] = [];
+  for (const tool of after) {
+    const was = old.get(tool.name);
+    if (!was) continue;
+    const fields = [
+      ...(was.description !== tool.description ? ['description'] : []),
+      ...(JSON.stringify(was.inputSchema) !== JSON.stringify(tool.inputSchema) ? ['input schema'] : []),
+      ...(was.readOnlyHint !== tool.readOnlyHint ? ['read only hint'] : []),
+    ];
+    if (fields.length) changed.push({ name: tool.name, fields });
+  }
+  return {
+    added: after.filter((tool) => !old.has(tool.name)).map((tool) => tool.name),
+    removed: before.filter((tool) => !now.has(tool.name)).map((tool) => tool.name),
+    changed,
+  };
+}
+
 // the server's list goes through the allow list of the config first. tools outside it never reach the model.
-export function buildSnapshot(entry: IntegrationEntry, listed: McpTool[]): CatalogSnapshot {
+export function buildSnapshot(entry: IntegrationEntry, listed: McpTool[]): CatalogSnapshot & { hidden: string[] } {
   const tools: CatalogTool[] = [];
   const rejected: CatalogSnapshot['rejected'] = [];
+  const hidden: string[] = [];
   const allowed = new Set(entry.tools.allow);
   const seen = new Map<string, string>();
   for (const tool of listed) {
-    if (!allowed.has(tool.name)) continue;
+    if (!allowed.has(tool.name)) {
+      if (!entry.tools.allow.includes(tool.name) && hidden.length < HIDDEN_LIMIT) hidden.push(headOf(String(tool.name), HIDDEN_NAME_LIMIT));
+      continue;
+    }
     allowed.delete(tool.name);
     const name = toolName(entry.id, tool.name);
     const other = seen.get(name);
@@ -76,13 +123,12 @@ export function buildSnapshot(entry: IntegrationEntry, listed: McpTool[]): Catal
       readOnlyHint: tool.annotations?.readOnlyHint === true,
     });
   }
-  for (const missing of allowed) rejected.push({ mcpName: missing, reason: 'the server does not offer this tool' });
   tools.sort((a, b) => a.name.localeCompare(b.name));
-  return { integrationId: entry.id, tools, rejected };
+  return { integrationId: entry.id, tools, rejected, missing: [...allowed], hidden: hidden.sort() };
 }
 
 // compile turns a snapshot into a catalog. a schema that ajv cannot compile moves the tool to the rejected list.
-function compile(snapshot: CatalogSnapshot, stored: boolean, logger: Logger): Catalog {
+function compile(snapshot: CatalogSnapshot, stored: boolean, logger: Logger, hidden: string[] = []): Catalog {
   const validatorFor = createValidatorSet();
   const validators = new Map<string, Validate>();
   const tools: CatalogTool[] = [];
@@ -96,8 +142,8 @@ function compile(snapshot: CatalogSnapshot, stored: boolean, logger: Logger): Ca
       rejected.push({ mcpName: tool.mcpName, reason: `the input schema does not compile: ${(err as Error).message}` });
     }
   }
-  const final = { ...snapshot, tools, rejected };
-  return { snapshot: final, hash: hashOf(final), stored, validators };
+  const final: CatalogSnapshot = { integrationId: snapshot.integrationId, tools, rejected, missing: snapshot.missing };
+  return { snapshot: final, hash: hashOf(final), stored, validators, hidden };
 }
 
 const hashOf = (snapshot: CatalogSnapshot) => createHash('sha256').update(redactedJson(snapshot)).digest('hex');
@@ -125,7 +171,20 @@ export function createCatalogStore(deps: { db: Db; clock: Clock; logger: Logger;
       const stored = JSON.parse(String(row.tools)) as CatalogSnapshot;
       // the config can have changed since the snapshot. a tool that the config no longer allows stays hidden.
       const allowed = new Set(entry.tools.allow);
-      catalogs.set(entry.id, compile({ ...stored, tools: stored.tools.filter((tool) => allowed.has(tool.mcpName)) }, true, logger));
+      const keep = (name: string) => allowed.has(name);
+      catalogs.set(
+        entry.id,
+        compile(
+          {
+            integrationId: entry.id,
+            tools: stored.tools.filter((tool) => keep(tool.mcpName)),
+            rejected: stored.rejected.filter((each) => keep(each.mcpName)),
+            missing: (stored.missing ?? []).filter(keep),
+          },
+          true,
+          logger,
+        ),
+      );
     } catch (err) {
       logger.warn('stored mcp catalog is not readable', { integration: entry.id, err });
     }
@@ -136,11 +195,14 @@ export function createCatalogStore(deps: { db: Db; clock: Clock; logger: Logger;
     update(entry, listed) {
       // a server can send list_changed often. the compile of 200 schemas takes about 120 ms on the event loop, so an
       // unchanged list keeps the catalog that exists.
-      const built = buildSnapshot(entry, listed);
+      const { hidden, ...built } = buildSnapshot(entry, listed);
       const source = hashOf(built);
       const current = catalogs.get(entry.id);
-      if (current && !current.stored && current.source === source) return current;
-      const catalog = { ...compile(built, false, logger), source };
+      if (current && !current.stored && current.source === source) {
+        current.hidden = hidden;
+        return current;
+      }
+      const catalog = { ...compile(built, false, logger, hidden), source };
       const last = db.prepare('SELECT hash FROM integration_catalogs WHERE integrationId = ? ORDER BY id DESC LIMIT 1').get(entry.id);
       if (last?.hash !== catalog.hash) {
         const now = clock().toISOString();

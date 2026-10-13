@@ -7,6 +7,7 @@ import { Approvals } from './pages/Approvals';
 import { Automations } from './pages/Automations';
 import { Cost } from './pages/Cost';
 import { Goals } from './pages/Goals';
+import { IntegrationDetail, Integrations } from './pages/Integrations';
 import { Logs } from './pages/Logs';
 import { Memory } from './pages/Memory';
 import { Overview } from './pages/Overview';
@@ -22,6 +23,7 @@ const NAV = [
   ['goals', 'Goals'],
   ['memory', 'Memory'],
   ['approvals', 'Approvals'],
+  ['integrations', 'Integrations'],
   ['cost', 'Cost'],
   ['logs', 'Logs'],
 ] as const;
@@ -55,6 +57,8 @@ export function route(path: string): ReactNode {
       return <Memory />;
     case 'approvals':
       return <Approvals />;
+    case 'integrations':
+      return param ? <IntegrationDetail key={param} id={param} /> : <Integrations />;
     case 'cost':
       return <Cost />;
     case 'logs':

@@ -320,7 +320,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         toolCallId: modelCall.id,
       };
       const resolved = tools.resolve(modelCall, ctx.allowed, ctx.sessionKey);
-      if (!resolved.ok) return strip(record(ctx.runId, modelCall, resolved.output, started, {}));
+      if (!resolved.ok) return strip(record(ctx.runId, resolved.call ?? modelCall, resolved.output, started, {}));
       // for tool_call this is the integration tool that it names, with the same id.
       const { tool, input, call } = resolved;
 

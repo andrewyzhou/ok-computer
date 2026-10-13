@@ -16,6 +16,7 @@ import type { Logger } from '../observability/logger.js';
 import { setChecklist } from '../scheduler/heartbeat.js';
 import { getAutomation, updateAutomation } from '../scheduler/store.js';
 import type { Clock } from '../time.js';
+import { errorText } from '../tools/registry.js';
 import { createLogTail, isLevel, readLogs } from './logs.js';
 import {
   automationRuns,
@@ -32,7 +33,9 @@ import {
   listSessions,
   overview,
   sessionEvents,
+  toMcpMessage,
 } from './queries.js';
+import { integrationDetail, summaryOf } from './integrations.js';
 import { createFeed } from './stream.js';
 import type { ContextView, MemoryFile, Meta } from './types.js';
 
@@ -190,15 +193,32 @@ export function createDashboard(deps: DashboardDeps): Hono {
 
   // the integrations page reads the live state of each server. the sign-in link opens on this pc only, because the
   // callback listens on loopback.
-  server.get('/api/integrations', (c) => c.json(app.integrations.status()));
-  server.get('/api/integrations/:id/catalogs', (c) =>
-    c.json(db.prepare('SELECT hash, createdAt FROM integration_catalogs WHERE integrationId = ? ORDER BY id DESC LIMIT 50').all(c.req.param('id'))),
-  );
-  server.post('/api/integrations/:id/connect', async (c) => c.json(await app.integrations.authorize(c.req.param('id'))));
+  const integration = (id: string) => app.integrations.status().find((each) => each.id === id);
+  server.get('/api/integrations', (c) => c.json(app.integrations.status().map((status) => summaryOf(db, status, clock()))));
+  server.get('/api/integrations/:id', (c) => {
+    const status = integration(c.req.param('id'));
+    return status ? c.json(integrationDetail(db, status, clock())) : notFound(c, 'integration');
+  });
+  // connect starts a new attempt. for a server that needs a sign-in, the answer has the link for the owner.
+  server.post('/api/integrations/:id/connect', async (c) => {
+    if (!integration(c.req.param('id'))) return notFound(c, 'integration');
+    return c.json(await app.integrations.connect(c.req.param('id')));
+  });
   server.post('/api/integrations/:id/pause', async (c) => {
     const input = await body(c, pausedBody);
     if (!input) return c.json({ error: 'give paused as true or false' }, 400);
     return (await app.integrations.setPaused(c.req.param('id'), input.paused)) ? c.json({ paused: input.paused }) : notFound(c, 'integration');
+  });
+  server.get('/api/mcp-messages/:id', (c) => {
+    const row = db.prepare('SELECT * FROM mcp_messages WHERE id = ?').get(Number(c.req.param('id')));
+    if (!row) return notFound(c, 'mcp message');
+    const message = toMcpMessage(row);
+    if (!message.payloadBlob) return c.json(message);
+    try {
+      return c.json({ ...message, payload: JSON.parse(blobs.read(message.payloadBlob) ?? 'null') });
+    } catch (err) {
+      return c.json({ error: `the payload of this message cannot be read: ${errorText(err)}` }, 500);
+    }
   });
 
   server.get('/api/cost', (c) => c.json(costPage(db, clock(), tz)));

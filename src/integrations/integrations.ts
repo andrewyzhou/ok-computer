@@ -6,7 +6,9 @@ import type { Logger } from '../observability/logger.js';
 import type { SetTimer } from '../scheduler/scheduler.js';
 import { localTime, type Clock } from '../time.js';
 import { TOOL_CALL, type Tool } from '../tools/registry.js';
-import { createCatalogStore, riskOf, type Catalog, type CatalogTool } from './catalog.js';
+import { redact } from '../observability/redact.js';
+import type { Risk } from '../policy/policy.js';
+import { createCatalogStore, riskFrom, riskOf, type Catalog, type CatalogTool } from './catalog.js';
 import { sessionProfile, type IntegrationEntry } from './config.js';
 import type { OAuth } from './oauth.js';
 import { createDiscoveryTools, outcomeOutput, TOOL_SEARCH, type Discoverable } from './discovery.js';
@@ -37,17 +39,29 @@ export interface IntegrationsDeps {
 export interface IntegrationStatus {
   id: string;
   kind: IntegrationEntry['kind'];
+  // the pinned command or the url. a secret in it is redacted.
+  target: string;
+  sessions: string[];
+  untrustedOutput: boolean;
   state: ConnectionState;
-  catalogHash?: string;
-  catalogStored?: boolean;
-  tools: Array<{ name: string; mcpName: string; risk: string }>;
-  rejected: Array<{ mcpName: string; reason: string }>;
   paused: boolean;
+  auth: 'none' | 'bearer' | 'oauth';
+  authorizedAt: string | null;
   tokenExpiresAt: string | null;
   lastError: string | null;
   lastErrorAt: string | null;
   // the sign-in link that waits for the owner.
   authUrl?: string;
+  catalogHash?: string;
+  // stored means that the tool list is the one from the database, and the server has not answered since the start.
+  catalogStored?: boolean;
+  tools: Array<{ name: string; mcpName: string; description: string; risk: Risk; riskFrom: string; inputSchema: Record<string, unknown> }>;
+  rejected: Array<{ mcpName: string; reason: string }>;
+  // missing: tools.allow names them, and the last tool list does not have them. hidden: the server has them, and
+  // tools.allow does not name them. unknown: tools.allow names them, and no tool list was seen since then.
+  missing: string[];
+  hidden: string[];
+  unknown: string[];
 }
 
 export interface Integrations {
@@ -63,9 +77,9 @@ export interface Integrations {
   stop(): Promise<void>;
   status(): IntegrationStatus[];
   connection(id: string): McpConnection | undefined;
-  // authorize starts a sign-in from the dashboard. it gives the link for the owner, or connected when the stored
-  // tokens still work.
-  authorize(id: string): Promise<{ connected: true } | { url: string } | { error: string }>;
+  // connect starts a new attempt from the dashboard, and resumes a paused integration. for an oauth integration it
+  // gives the sign-in link for the owner, or connected when the stored tokens still work.
+  connect(id: string): Promise<{ connected: true } | { url: string } | { error: string }>;
   // a paused integration stays stopped over a restart. its tools stay in the catalog, and a call says that it is paused.
   setPaused(id: string, paused: boolean): Promise<boolean>;
 }
@@ -140,6 +154,17 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
     // the owner hears once when a sign-in that worked stops working. a first sign-in and a crash loop send nothing:
     // the owner just added the first, and the app retries the second by itself.
     if (state.status === 'needs_auth' && before !== 'needs_auth' && authorizedAt && !authorizing.has(id)) deps.onNeedsAuth?.(id, said);
+  };
+
+  const writePaused = (id: string, pause: boolean) => {
+    deps.db
+      .prepare(
+        `INSERT INTO integration_state (integrationId, paused, updatedAt) VALUES (?, ?, ?)
+         ON CONFLICT (integrationId) DO UPDATE SET paused = excluded.paused, updatedAt = excluded.updatedAt`,
+      )
+      .run(id, pause ? 1 : 0, deps.clock().toISOString());
+    if (pause) paused.add(id);
+    else paused.delete(id);
   };
 
   // begin connects an integration, or parks an oauth integration that has no tokens.
@@ -258,35 +283,45 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
     status() {
       return entries.map((entry) => {
         const catalog = catalogs.get(entry.id);
-        const row = deps.db.prepare('SELECT paused, tokenExpiresAt, lastError, lastErrorAt FROM integration_state WHERE integrationId = ?').get(entry.id);
+        const row = deps.db.prepare('SELECT authorizedAt, tokenExpiresAt, lastError, lastErrorAt FROM integration_state WHERE integrationId = ?').get(entry.id);
+        const text = (key: string) => (row?.[key] as string | null | undefined) ?? null;
         const authUrl = deps.oauth?.pendingUrl(entry.id);
+        const snapshot = catalog?.snapshot;
+        const seen = new Set([...(snapshot?.tools.map((tool) => tool.mcpName) ?? []), ...(snapshot?.rejected.map((each) => each.mcpName) ?? []), ...(snapshot?.missing ?? [])]);
         return {
           id: entry.id,
           kind: entry.kind,
+          target: redact(entry.kind === 'mcp-stdio' ? [entry.command, ...entry.args].join(' ') : entry.url),
+          sessions: entry.sessions,
+          untrustedOutput: entry.untrustedOutput,
           state: stateOf(entry.id),
-          ...(catalog ? { catalogHash: catalog.hash, catalogStored: catalog.stored } : {}),
-          tools: (catalog?.snapshot.tools ?? []).map((tool) => ({ name: tool.name, mcpName: tool.mcpName, risk: riskOf(entry, tool) })),
-          rejected: catalog?.snapshot.rejected ?? [],
-          paused: row?.paused === 1,
-          tokenExpiresAt: (row?.tokenExpiresAt as string | null | undefined) ?? null,
-          lastError: (row?.lastError as string | null | undefined) ?? null,
-          lastErrorAt: (row?.lastErrorAt as string | null | undefined) ?? null,
+          paused: paused.has(entry.id),
+          auth: entry.kind === 'mcp-http' && entry.auth ? entry.auth.type : 'none',
+          authorizedAt: text('authorizedAt'),
+          tokenExpiresAt: text('tokenExpiresAt'),
+          lastError: text('lastError'),
+          lastErrorAt: text('lastErrorAt'),
           ...(authUrl ? { authUrl } : {}),
+          ...(catalog ? { catalogHash: catalog.hash, catalogStored: catalog.stored } : {}),
+          tools: (snapshot?.tools ?? []).map((tool) => ({
+            name: tool.name,
+            mcpName: tool.mcpName,
+            description: tool.description,
+            risk: riskOf(entry, tool),
+            riskFrom: riskFrom(entry, tool),
+            inputSchema: tool.inputSchema,
+          })),
+          rejected: snapshot?.rejected ?? [],
+          missing: snapshot?.missing ?? [],
+          hidden: catalog?.hidden ?? [],
+          unknown: entry.tools.allow.filter((name) => !seen.has(name)),
         };
       });
     },
     async setPaused(id, pause) {
       const connection = connections.get(id);
       if (!connection) return false;
-      const now = deps.clock().toISOString();
-      deps.db
-        .prepare(
-          `INSERT INTO integration_state (integrationId, paused, updatedAt) VALUES (?, ?, ?)
-           ON CONFLICT (integrationId) DO UPDATE SET paused = excluded.paused, updatedAt = excluded.updatedAt`,
-        )
-        .run(id, pause ? 1 : 0, now);
-      if (pause) paused.add(id);
-      else paused.delete(id);
+      writePaused(id, pause);
       if (deps.connects === false) return true;
       if (pause) {
         parked.delete(id);
@@ -297,25 +332,26 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       return true;
     },
     connection: (id) => connections.get(id),
-    async authorize(id) {
+    async connect(id) {
       const entry = byId.get(id);
       const connection = connections.get(id);
-      if (!entry || entry.kind !== 'mcp-http' || entry.auth?.type !== 'oauth' || !connection || !deps.oauth) {
-        return { error: `${id} does not use oauth` };
+      if (!entry || !connection) return { error: `no integration has the id ${id}` };
+      const oauth = entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' ? deps.oauth : undefined;
+      if (oauth) {
+        try {
+          await oauth.listen(
+            (integrationId) => connections.get(integrationId)?.transport(),
+            (integrationId) => {
+              const done = connections.get(integrationId);
+              void done?.stop().then(() => done.start()).catch((err: unknown) => logger.error('mcp restart after sign-in failed', { integration: integrationId, err }));
+            },
+          );
+        } catch (err) {
+          // another process, for example a second copy of the app, can hold the port.
+          return { error: `the sign-in callback cannot listen: ${(err as Error).message}` };
+        }
       }
-      const oauth = deps.oauth;
-      try {
-        await oauth.listen(
-          (integrationId) => connections.get(integrationId)?.transport(),
-          (integrationId) => {
-            const done = connections.get(integrationId);
-            void done?.stop().then(() => done.start()).catch((err: unknown) => logger.error('mcp restart after sign-in failed', { integration: integrationId, err }));
-          },
-        );
-      } catch (err) {
-        // another process, for example a second copy of the app, can hold the port.
-        return { error: `the sign-in callback cannot listen: ${(err as Error).message}` };
-      }
+      if (paused.has(id)) writePaused(id, false);
       // a new attempt makes the sdk create a new flow, or connect with the stored tokens.
       parked.delete(id);
       authorizing.add(id);
@@ -325,9 +361,10 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       } finally {
         authorizing.delete(id);
       }
+      const url = oauth?.pendingUrl(id);
+      if (!url) await oauth?.closeIfIdle();
       if (connection.state().status === 'connected') return { connected: true };
-      const url = oauth.pendingUrl(id);
-      return url ? { url } : { error: connection.state().error ?? 'no sign-in link was made' };
+      return url ? { url } : { error: connection.state().error ?? 'the connection did not start' };
     },
   };
 }

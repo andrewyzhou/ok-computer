@@ -70,7 +70,7 @@ async function consent(url: string): Promise<{ callback: string; response: Respo
 }
 
 async function connect(integrations: Integrations) {
-  const started = await integrations.authorize('remote');
+  const started = await integrations.connect('remote');
   if (!('url' in started)) throw new Error(`expected a link, got ${JSON.stringify(started)}`);
   const { response, callback } = await consent(started.url);
   expect(response.status).toBe(200);
@@ -136,7 +136,7 @@ describe('oauth', () => {
     const { as, db, integrations, needsAuth } = await setup();
     await integrations.start();
     as.refuseCodes();
-    const started = await integrations.authorize('remote');
+    const started = await integrations.connect('remote');
     if (!('url' in started)) throw new Error('expected a link');
     const { response } = await consent(started.url);
     expect(response.status).toBe(400);
@@ -159,13 +159,13 @@ describe('oauth', () => {
     expect(await oauth.callback(new URL(callback), finish)).toMatchObject({ status: 400 });
 
     // with working tokens a new sign-in is not needed.
-    expect(await integrations.authorize('remote')).toEqual({ connected: true });
+    expect(await integrations.connect('remote')).toEqual({ connected: true });
   });
 
   it('refuses a flow that the owner finishes after the time limit', async () => {
     const { oauth, integrations, advance } = await setup();
     await integrations.start();
-    const started = await integrations.authorize('remote');
+    const started = await integrations.connect('remote');
     if (!('url' in started)) throw new Error('expected a link');
     advance(FLOW_TTL_MS + 1);
     const { response } = await consent(started.url);
@@ -200,7 +200,7 @@ describe('oauth', () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(as.stats.mcpRequests).toBe(requests);
     // the owner presses connect. the new flow waits for the owner, and the owner gets no second message.
-    expect(await integrations.authorize('remote')).toMatchObject({ url: expect.any(String) });
+    expect(await integrations.connect('remote')).toMatchObject({ url: expect.any(String) });
     expect(needsAuth).toHaveLength(1);
   });
 
@@ -233,7 +233,7 @@ describe('oauth', () => {
     const blocker = createOAuth({ db: openDb(':memory:'), clock: () => new Date(), logger: silentLogger, secrets: createMemorySecretStore(), port: Number(new URL(oauth.provider({ id: 'remote', kind: 'mcp-http', url: 'http://x', tools: { allow: ['x'] }, risk: {}, untrustedOutput: true, sessions: ['main'] }).redirectUrl as string).port) });
     await blocker.listen(() => undefined, () => {});
     cleanup.push(() => blocker.close());
-    expect(await integrations.authorize('remote')).toMatchObject({ error: expect.stringContaining('EADDRINUSE') });
+    expect(await integrations.connect('remote')).toMatchObject({ error: expect.stringContaining('EADDRINUSE') });
   });
 });
 

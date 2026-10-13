@@ -5,6 +5,12 @@ import { time, tokens } from './format';
 type Payload = Record<string, unknown>;
 const text = (payload: Payload, key = 'text') => String(payload[key] ?? '');
 
+// a call of tool_call names the integration tool in its input. the label shows it, so the owner sees the real tool.
+function callLabel(call: { name: string; input: unknown }): string {
+  const inner = call.name === 'tool_call' ? (call.input as { name?: unknown } | null)?.name : undefined;
+  return typeof inner === 'string' ? `tool call tool_call → ${inner}` : `tool call ${call.name}`;
+}
+
 // the raw log shows each event as it is stored. a compaction and a reset show as markers across the log.
 export function EventView({ event, summarized = false }: { event: EventRow; summarized?: boolean }) {
   const payload = event.payload;
@@ -51,7 +57,7 @@ export function EventView({ event, summarized = false }: { event: EventRow; summ
           {head}
           {text(payload) ? <p className="message">{text(payload)}</p> : null}
           {calls.map((call) => (
-            <Expand key={call.id} label={`tool call ${call.name}`}>
+            <Expand key={call.id} label={callLabel(call)}>
               {() => <Json value={call.input} />}
             </Expand>
           ))}
@@ -97,7 +103,7 @@ export function ContextMessageView({ message, index }: { message: ContextMessage
         </div>
         {message.text ? <p className="message">{message.text}</p> : null}
         {message.toolCalls.map((call) => (
-          <Expand key={call.id} label={`tool call ${call.name}`}>
+          <Expand key={call.id} label={callLabel(call)}>
             {() => <Json value={call.input} />}
           </Expand>
         ))}

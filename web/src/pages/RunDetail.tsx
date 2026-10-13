@@ -11,6 +11,7 @@ import { useApi } from '../api';
 import { Expand, Json, Load, Page, Panel, Status } from '../components';
 import { EventView } from '../events';
 import { bytes, duration, ms, time, tokens, usd } from '../format';
+import { McpMessages } from './Integrations';
 import { sessionHref } from './Runs';
 
 function ModelCallBodyView({ id }: { id: number }) {
@@ -204,6 +205,11 @@ function ToolCallItem({ call }: { call: ToolCallRow }) {
     <li className={`step step-tool${call.isError ? ' is-error' : ''}`}>
       <div className="step-head">
         <strong>tool call</strong> {call.name} <Status value={call.outcome} />
+        {call.serverId ? (
+          <span className="muted">
+            on <a href={`#/integrations/${encodeURIComponent(call.serverId)}`}>{call.serverId}</a>
+          </span>
+        ) : null}
         {call.policy ? (
           <span className="muted">
             <Status value={call.policy.decision} /> by {call.policy.rule}
@@ -217,6 +223,9 @@ function ToolCallItem({ call }: { call: ToolCallRow }) {
       <Expand label="input">{() => <Json value={call.input} />}</Expand>
       <Expand label="result and what the model saw">{() => <ResultView call={call} />}</Expand>
       {call.policy ? <Expand label="policy decision">{() => <PolicyView policy={call.policy!} />}</Expand> : null}
+      {call.serverId ? (
+        <Expand label={`${call.mcpMessages.length} json-rpc messages with ${call.serverId}`}>{() => <McpMessages messages={call.mcpMessages} />}</Expand>
+      ) : null}
     </li>
   );
 }
