@@ -83,6 +83,7 @@ export const configSchema = z.object({
     .object({
       data: z.string().default('data'),
       workspace: z.string().default('workspace'),
+      skills: z.string().default('skills'),
     })
     .prefault({}),
   scheduler: z

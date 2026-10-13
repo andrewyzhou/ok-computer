@@ -40,6 +40,7 @@ import { createOwnerMessenger } from './sessions/owner.js';
 import { createRunQueue } from './sessions/queue.js';
 import { createRouter, MAIN_SESSION, MAIN_TOOLS } from './sessions/router.js';
 import { localDay, localTime, type Clock } from './time.js';
+import { createSkillTools } from './skills/skills.js';
 import { createMessageOwnerTool } from './tools/message-owner.js';
 import { nowTool } from './tools/now.js';
 import { createToolRegistry } from './tools/registry.js';
@@ -111,6 +112,7 @@ export function createApp(deps: AppDeps): App {
       ...createMemoryTools({ db, memoryDir }),
       ...createConsolidationTools({ db, memoryDir }),
       createMessageOwnerTool(owner),
+      ...createSkillTools({ skillsDir: config.paths.skills }),
     ],
     { gate: approvals.gate },
   );
@@ -130,6 +132,7 @@ export function createApp(deps: AppDeps): App {
         workspaceDir: config.paths.workspace,
         timeZone: config.timeZone,
         ...(sessionKey === MAIN_SESSION ? { memoryPath } : {}),
+        ...(sessionTools(sessionKey).includes('skill_read') ? { skillsDir: config.paths.skills } : {}),
         // the heartbeat runs often on a small model, so it gets a light prompt.
         ...(sessionKey.startsWith(HEARTBEAT_PREFIX)
           ? { personaFiles: ['USER.md'], extraInstructions: HEARTBEAT_INSTRUCTIONS }

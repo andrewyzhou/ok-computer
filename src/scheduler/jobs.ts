@@ -27,6 +27,7 @@ export const AUTOMATION_TOOLS: readonly string[] = [
   'memory_write',
   'message_owner',
   'now',
+  'skill_read',
 ];
 
 export interface JobDeps {

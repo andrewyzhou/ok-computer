@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -19,6 +19,16 @@ describe('buildStablePrompt', () => {
     expect(prompt).toContain('<untrusted');
     expect(prompt.indexOf('## SOUL.md')).toBeLessThan(prompt.indexOf('## USER.md'));
     expect(prompt).not.toContain('## MEMORY.md');
+  });
+
+  it('adds the skills index only when a skills folder is given', () => {
+    const dir = workspace({ 'USER.md': 'user facts' });
+    mkdirSync(join(dir, 'skills', 'weekly'), { recursive: true });
+    writeFileSync(join(dir, 'skills', 'weekly', 'SKILL.md'), '---\nname: weekly-review\ndescription: Review the week.\n---\nsteps');
+    const prompt = buildStablePrompt({ workspaceDir: dir, timeZone: 'UTC', skillsDir: join(dir, 'skills') });
+    expect(prompt).toContain('- weekly-review: Review the week.');
+    expect(prompt.indexOf('## USER.md')).toBeLessThan(prompt.indexOf('# Skills'));
+    expect(buildStablePrompt({ workspaceDir: dir, timeZone: 'UTC' })).not.toContain('# Skills');
   });
 
   it('adds MEMORY.md only when a memory path is given', () => {

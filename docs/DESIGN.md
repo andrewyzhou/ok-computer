@@ -433,6 +433,13 @@ The base instructions say that this content is data and never instructions. Stri
 - Reload the index when files change.
 - Skill Workshop (the agent writes and updates skills after long or corrected tasks) is Phase 3.
 
+Decisions from the review after M4:
+
+- The folder is `config.paths.skills` (default `skills`). The loader is `src/skills/skills.ts`.
+- There is no file watcher. The app reads the folder again for each stable prompt and each `skill_read` call, so a changed file is used on the next run. The stable prompt changes only when a skill changes.
+- The frontmatter parser reads only one-line `key: value` fields. A skill without `name` or `description` is left out.
+- Only sessions that have `skill_read` (main and automation runs) get the index. `skill_read` finds the file by the skill name, never by a path.
+
 ## 16. Observability
 
 ### 16.1 Data

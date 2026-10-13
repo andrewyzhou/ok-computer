@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { loadSkills, skillsIndex } from '../skills/skills.js';
 import { formatLocal } from '../time.js';
 
 export const PERSONA_FILES = ['AGENTS.md', 'SOUL.md', 'IDENTITY.md', 'USER.md'] as const;
@@ -15,6 +16,8 @@ export interface StablePromptInput {
   personaFiles?: readonly string[];
   // instructions for one session type, after the base instructions.
   extraInstructions?: string;
+  // only sessions with the skill_read tool get the skills index.
+  skillsDir?: string;
 }
 
 export function baseInstructions(timeZone: string): string {
@@ -65,7 +68,8 @@ export function buildStablePrompt(input: StablePromptInput): string {
   }
   const workspace = sections.length ? `\n\n# Workspace files\n\n${sections.join('\n\n')}` : '';
   const extra = input.extraInstructions ? `\n\n${input.extraInstructions}` : '';
-  return baseInstructions(input.timeZone) + extra + workspace;
+  const index = input.skillsDir ? skillsIndex(loadSkills(input.skillsDir)) : '';
+  return baseInstructions(input.timeZone) + extra + workspace + (index ? `\n\n${index}` : '');
 }
 
 export function buildVolatilePrompt(input: { now: Date; timeZone: string; channel: string; extra?: string }): string {
