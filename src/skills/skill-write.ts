@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { z } from 'zod';
 import { redact } from '../observability/redact.js';
@@ -104,20 +104,45 @@ function inside(dir: string, path: string): boolean {
 export type Rename = (from: string, to: string) => void;
 
 // the write goes to a temporary file in the same folder and a rename puts it in place, so the loader never reads half
-// a skill. a failed write removes the temporary file and keeps the old file.
+// a skill. a failed write removes the temporary file and keeps the old file. it also removes the folder of a new
+// skill, because an empty folder blocks the next write of that name.
 export function writeSkillFile(dir: string, path: string, content: string, rename: Rename = renameSync): string | undefined {
   mkdirSync(dir, { recursive: true });
   if (!inside(dir, path)) return 'the path of the skill is outside the skills folder';
   const temporary = `${path}.${randomUUID()}.tmp`;
+  const folder = dirname(path);
+  const made = !existsSync(folder);
   try {
-    mkdirSync(dirname(path), { recursive: true });
+    mkdirSync(folder, { recursive: true });
     writeFileSync(temporary, content, 'utf8');
     rename(temporary, path);
     return undefined;
   } catch (err) {
     rmSync(temporary, { force: true });
+    if (made) {
+      try {
+        rmdirSync(folder);
+      } catch {
+        // the folder is not empty, so another writer uses it now. it stays.
+      }
+    }
     return err instanceof Error ? err.message : String(err);
   }
+}
+
+// a process that stopped in writeSkillFile can leave the folder of a new skill with only its temporary files. such a
+// folder holds no skill, so a new skill can use it. the temporary files are removed first.
+const LEFTOVER = /^SKILL\.md\..+\.tmp$/;
+function clearLeftover(folder: string): boolean {
+  let files: string[];
+  try {
+    files = readdirSync(folder);
+  } catch {
+    return false;
+  }
+  if (!files.every((file) => LEFTOVER.test(file))) return false;
+  for (const file of files) rmSync(join(folder, file), { force: true });
+  return true;
 }
 
 const failed = (content: string) => ({ content, isError: true });
@@ -161,7 +186,7 @@ export function createSkillWriteTool(deps: { skillsDir: string }): Tool {
       // tell the case of a name apart, so the check ignores case.
       const taken = (other: string) => other.toLowerCase() === input.name;
       const folders = existsSync(skillsDir) ? readdirSync(skillsDir) : [];
-      if (skills.some((skill) => taken(skill.name)) || folders.some(taken)) {
+      if (skills.some((skill) => taken(skill.name)) || folders.some((other) => taken(other) && !clearLeftover(join(skillsDir, other)))) {
         return failed(`a skill or a folder with the name ${input.name} exists now, so the new skill was not written`);
       }
       const error = writeSkillFile(skillsDir, path, content);

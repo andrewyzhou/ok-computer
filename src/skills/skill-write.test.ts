@@ -169,4 +169,27 @@ describe('writeSkillFile', () => {
     expect(readFileSync(path, 'utf8')).toBe('old text');
     expect(readdirSync(join(dir, 'weekly'))).toEqual(['SKILL.md']);
   });
+
+  it('removes the folder of a new skill when the write fails, so a retry can write the skill', async () => {
+    const dir = folder();
+    const error = writeSkillFile(dir, join(dir, 'calendar-booking', 'SKILL.md'), 'text', () => {
+      throw new Error('EPERM: the file is locked');
+    });
+    expect(error).toBe('EPERM: the file is locked');
+    expect(readdirSync(dir)).toEqual([]);
+    expect(await write(dir, {})).toEqual({ content: 'wrote the new skill calendar-booking' });
+  });
+
+  it('writes a new skill into a folder that a stopped write left with only its temporary file', async () => {
+    const dir = folder();
+    mkdirSync(join(dir, 'calendar-booking'), { recursive: true });
+    writeFileSync(join(dir, 'calendar-booking', 'SKILL.md.0b3c.tmp'), '---\nname: calendar-booking\n');
+    expect(await write(dir, {})).toEqual({ content: 'wrote the new skill calendar-booking' });
+    expect(readdirSync(join(dir, 'calendar-booking'))).toEqual(['SKILL.md']);
+    // a folder with another file of the owner stays taken.
+    const owned = folder();
+    mkdirSync(join(owned, 'calendar-booking'), { recursive: true });
+    writeFileSync(join(owned, 'calendar-booking', 'notes.txt'), 'mine');
+    expect((await write(owned, {})).content).toContain('exists now, so the new skill was not written');
+  });
 });
