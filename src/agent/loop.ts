@@ -8,6 +8,7 @@ import type { Logger } from '../observability/logger.js';
 import type { Clock } from '../time.js';
 import type { ToolCaller } from '../tools/caller.js';
 import type { ToolOutput, ToolRegistry } from '../tools/registry.js';
+import { repairSession } from './recovery.js';
 import { buildVolatilePrompt } from './system-prompt.js';
 
 export type Trigger = 'message' | 'automation' | 'heartbeat' | 'consolidation' | 'system';
@@ -87,6 +88,10 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
   const append = (event: EventInput) => appendEvent(db, { ...event, sessionKey: input.sessionKey, runId }, clock());
 
   try {
+    // a crash or a failed write can leave a tool call without a result. the provider refuses such a request, so the
+    // run first gives each such call a result.
+    const repaired = repairSession(db, input.sessionKey, clock);
+    if (repaired) logger.warn('gave results to tool calls that had none', { calls: repaired });
     for (const event of input.events) append(event);
     append({
       type: 'context',

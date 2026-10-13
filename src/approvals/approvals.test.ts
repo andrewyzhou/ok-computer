@@ -123,7 +123,7 @@ describe('approvals', () => {
     const { db, flow, delivered, request, advance } = setup();
     await request();
     advance(23 * 60 * 60_000);
-    expect(expireApprovals(db, new Date('2026-10-14T02:00:00Z'))).toBe(0);
+    expect(expireApprovals(db, new Date('2026-10-14T02:00:00Z'))).toEqual([]);
     advance(60 * 60_000);
     expect(await flow.resolve(1, 'approve', 'button')).toBe('Approval #1 is already expired.');
     expect(delivered).toEqual([]);

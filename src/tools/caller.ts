@@ -261,8 +261,11 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       };
       let trace: Trace;
       try {
-        // the start mark is a compare and set. a second call for the same approval never runs the tool again.
-        const claimed = db.prepare('UPDATE approvals SET startedAt = ? WHERE id = ? AND startedAt IS NULL').run(clock().toISOString(), approval.id).changes;
+        // the start mark is a compare and set. a second call for the same approval never runs the tool again, and an
+        // approval that expired in the meantime never runs.
+        const claimed = db
+          .prepare("UPDATE approvals SET startedAt = ? WHERE id = ? AND startedAt IS NULL AND status = 'approved'")
+          .run(clock().toISOString(), approval.id).changes;
         if (!claimed) return { content: `approval #${approval.id} already ran, so it did not run again`, isError: true };
         trace = { decisionId: decisionOfApproval(db, approval.id), tainted: sessionTaint(db, approval.sessionKey).length > 0 };
       } catch (err) {

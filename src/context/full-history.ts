@@ -22,8 +22,12 @@ export function renderEvents(events: StoredEvent[]): ModelMessage[] {
   const messages: ModelMessage[] = [];
   const pushUser = (block: UserBlock) => {
     const last = messages.at(-1);
-    if (last?.role === 'user') last.content.push(block);
-    else messages.push({ role: 'user', content: [block] });
+    if (last?.role !== 'user') messages.push({ role: 'user', content: [block] });
+    // the provider wants the tool results first in their message. a repaired result can come after a system event,
+    // so it goes before the first text. in a log without a repair, no result follows text, so no request changes.
+    else if (block.type === 'tool_result' && last.content.some((each) => each.type === 'text')) {
+      last.content.splice(last.content.findIndex((each) => each.type === 'text'), 0, block);
+    } else last.content.push(block);
   };
   for (const event of events) {
     switch (event.type) {

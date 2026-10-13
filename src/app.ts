@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { runAgent, type AgentDeps } from './agent/loop.js';
+import { closeStaleWork, interruptedText } from './agent/recovery.js';
 import { buildStablePrompt } from './agent/system-prompt.js';
 import { createApprovalFlow, type ApprovalFlow } from './approvals/flow.js';
 import { expireApprovals } from './approvals/store.js';
@@ -8,7 +9,7 @@ import type { Config } from './config/schema.js';
 import { sinceLastReset } from './context/full-history.js';
 import { createTrimAndCompact } from './context/trim-and-compact.js';
 import type { Db } from './db/index.js';
-import { listEvents } from './events/log.js';
+import { appendEvent, listEvents } from './events/log.js';
 import { installRoutine } from './goals/routine.js';
 import { createGoalTools } from './goals/tools.js';
 import {
@@ -75,6 +76,9 @@ export interface App {
   contextView(sessionKey: string): Promise<ModelRequest>;
   resolveApproval: ApprovalFlow['resolve'];
 }
+
+// a run ends at its timeout. the margin covers the end of the run itself, so a live run is never closed as stale.
+const STALE_MARGIN_MS = 5 * 60_000;
 
 function sessionTools(sessionKey: string): readonly string[] {
   if (sessionKey === MAIN_SESSION) return MAIN_TOOLS;
@@ -193,7 +197,7 @@ export function createApp(deps: AppDeps): App {
     config,
     execute: runJob,
     notifyOwner: async (text) => void (await owner.send(text)),
-    onTick: (now) => expireApprovals(db, now),
+    onTick: (now) => sweep(now),
     ...(deps.setTimer ? { setTimer: deps.setTimer } : {}),
   });
 
@@ -216,9 +220,41 @@ export function createApp(deps: AppDeps): App {
     signal: shutdown.signal,
   });
 
+  // the sweep closes the work of a stopped process and tells the sessions and the owner. it runs at the start and on
+  // each scheduler tick. events go through the session queue, so they never land inside an active run.
+  const staleMs = Math.max(config.agent.chatTimeoutMs, config.agent.backgroundTimeoutMs) + STALE_MARGIN_MS;
+  const note = (sessionKey: string, text: string) =>
+    void queue
+      .enqueue(sessionKey, async () => void appendEvent(db, { sessionKey, runId: null, type: 'system_event', payload: { text } }, clock()))
+      .catch((err: unknown) => logger.error('sweep note failed', { sessionKey, err }));
+  function sweep(now: Date) {
+    try {
+      for (const approval of expireApprovals(db, now)) {
+        note(approval.sessionKey, `Approval #${approval.id} (${approval.summary}) expired after 24 hours without an answer. The tool did not run.`);
+      }
+      // the next run of each session repairs its calls. a repair here could answer the calls of a live turn in
+      // another process.
+      const stale = closeStaleWork(db, now, staleMs);
+      if (stale.runs.length) logger.warn('closed the runs of a stopped process', { runs: stale.runs.map((run) => run.id) });
+      for (const approval of stale.expired) {
+        const text = `Approval #${approval.id} (${approval.summary}) was approved, but the app stopped before it ran, so it expired and did not run. Ask again if you still want it.`;
+        note(approval.sessionKey, text);
+        void owner.send(text);
+      }
+      for (const approval of stale.interrupted) {
+        const text = `Approval #${approval.id} (${approval.summary}) started, but the app stopped while it ran. ${interruptedText(approval.toolName)}`;
+        note(approval.sessionKey, text);
+        void owner.send(text);
+      }
+    } catch (err) {
+      logger.error('sweep failed', { err });
+    }
+  }
+
   return {
     scheduler,
     async start() {
+      sweep(clock());
       for (const channel of channels.values()) {
         await channel.start((message) => void router.handle(message));
         logger.info('channel started', { channel: channel.id });

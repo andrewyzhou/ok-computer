@@ -1,0 +1,135 @@
+import { getApproval, type Approval } from '../approvals/store.js';
+import { sinceLastReset } from '../context/full-history.js';
+import type { Db } from '../db/index.js';
+import { appendEvent, listEvents } from '../events/log.js';
+import type { ToolCall } from '../models/types.js';
+import { redactedJson } from '../observability/redact.js';
+import type { Clock } from '../time.js';
+
+export const interruptedText = (name: string) =>
+  `The app stopped while ${name} ran. It is unknown whether it finished. Check the result before you try it again.`;
+const notRunText = (name: string) => `${name} did not run, because the app stopped first.`;
+const waitsText = (name: string, approvalId: number) =>
+  `${name} did not run. It waits for the owner's approval #${approvalId}, and the decision comes back as a system event.`;
+
+// a call is dangling when the last assistant turn has no result event for it. the provider refuses a request with
+// such a call, so one dangling call stops every later run of the session. only the last turn can have one, because
+// each run starts with this repair.
+function danglingCalls(db: Db, sessionKey: string): Array<{ runId: string | null; call: ToolCall }> {
+  const open = new Map<string, { runId: string | null; call: ToolCall }>();
+  for (const event of sinceLastReset(listEvents(db, sessionKey))) {
+    if (event.type === 'assistant_message') {
+      open.clear();
+      for (const call of event.payload.toolCalls) open.set(call.id, { runId: event.runId, call });
+    } else if (event.type === 'tool_result') {
+      open.delete(event.payload.toolCallId);
+    }
+  }
+  return [...open.values()];
+}
+
+// repairSession gives each dangling call a result event, chosen from the trace:
+// - a tool_calls row exists: the recorded model view, with its untrusted source, so the taint stays.
+// - the decision let the tool start: a note that the outcome is unknown, and a row with outcome 'interrupted'.
+// - otherwise: a note that the tool did not run (or waits for the owner).
+// the caller of this function holds the session queue, so no other run of the session can add a result.
+export function repairSession(db: Db, sessionKey: string, clock: Clock): number {
+  const dangling = danglingCalls(db, sessionKey);
+  for (const { runId, call } of dangling) {
+    const row = db
+      .prepare('SELECT output, isError, untrustedSource FROM tool_calls WHERE runId IS ? AND toolCallId = ? ORDER BY id DESC LIMIT 1')
+      .get(runId, call.id);
+    let payload: { toolCallId: string; name: string; content: string; isError: boolean; untrustedSource?: string };
+    if (row) {
+      const output = JSON.parse(String(row.output)) as { content: string };
+      payload = { toolCallId: call.id, name: call.name, content: output.content, isError: Number(row.isError) === 1 };
+      if (row.untrustedSource !== null) payload.untrustedSource = String(row.untrustedSource);
+    } else {
+      const decision = db
+        .prepare('SELECT id, decision, reviewerVerdict, approvalId FROM policy_decisions WHERE runId IS ? AND toolCallId = ? ORDER BY id DESC LIMIT 1')
+        .get(runId, call.id);
+      // the caller writes the decision just before the tool runs. an allowed decision without a row means that the
+      // tool started, and the process stopped before the row.
+      const started = decision?.decision === 'allow' || (decision?.decision === 'review' && decision.reviewerVerdict === 'allow');
+      const waits = !started && decision?.approvalId != null;
+      const content = started ? interruptedText(call.name) : waits ? waitsText(call.name, Number(decision!.approvalId)) : notRunText(call.name);
+      payload = { toolCallId: call.id, name: call.name, content, isError: !waits };
+      if (runId !== null) {
+        db.prepare(
+          `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, policyDecisionId, outcome)
+           VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+        ).run(
+          runId,
+          call.id,
+          call.name,
+          redactedJson(call.input),
+          redactedJson({ content, ...(payload.isError ? { isError: true } : {}) }),
+          payload.isError ? 1 : 0,
+          clock().toISOString(),
+          decision ? Number(decision.id) : null,
+          started ? 'interrupted' : null,
+        );
+      }
+    }
+    appendEvent(db, { sessionKey, runId, type: 'tool_result', payload }, clock());
+  }
+  return dangling.length;
+}
+
+export interface StaleWork {
+  // the runs that were still running long after their timeout. their process is gone.
+  runs: Array<{ id: string; sessionKey: string }>;
+  // the owner approved these calls, and the process stopped before they started. they expire and never run.
+  expired: Approval[];
+  // these approved calls started, and the process stopped while they ran. their outcome is unknown.
+  interrupted: Approval[];
+}
+
+// a run ends at its timeout, and a stuck tool is abandoned then. so a run that is still running long after the
+// longest timeout belongs to a process that stopped. the age test, and not the start of this process, decides,
+// because a second process (for example npm run chat) can share the database with a live one.
+export function closeStaleWork(db: Db, now: Date, staleMs: number): StaleWork {
+  const cutoff = new Date(now.getTime() - staleMs).toISOString();
+  const at = now.toISOString();
+  const runs = db
+    .prepare(
+      `UPDATE runs SET status = 'aborted', endedAt = ?, error = 'the process stopped during the run'
+       WHERE status = 'running' AND startedAt < ? RETURNING id, sessionKey`,
+    )
+    .all(at, cutoff)
+    .map((row) => ({ id: String(row.id), sessionKey: String(row.sessionKey) }));
+
+  const expired = db
+    .prepare(
+      `UPDATE approvals SET status = 'expired' WHERE status = 'approved' AND startedAt IS NULL AND resolvedAt < ?
+       RETURNING id`,
+    )
+    .all(cutoff)
+    .map((row) => getApproval(db, Number(row.id))!);
+
+  const interrupted = db
+    .prepare(
+      `SELECT id FROM approvals WHERE status = 'approved' AND startedAt < ?
+         AND NOT EXISTS (SELECT 1 FROM tool_calls WHERE tool_calls.runId = approvals.runId
+                         AND tool_calls.toolCallId = 'approval-' || approvals.id)
+       ORDER BY id`,
+    )
+    .all(cutoff)
+    .map((row) => getApproval(db, Number(row.id))!);
+  for (const approval of interrupted) {
+    const content = interruptedText(approval.toolName);
+    db.prepare(
+      `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, policyDecisionId, outcome)
+       VALUES (?, ?, ?, ?, ?, 1, 0, ?, (SELECT id FROM policy_decisions WHERE approvalId = ? ORDER BY id LIMIT 1), 'interrupted')`,
+    ).run(
+      approval.runId,
+      `approval-${approval.id}`,
+      approval.toolName,
+      redactedJson(approval.input),
+      redactedJson({ content, isError: true }),
+      at,
+      approval.id,
+    );
+  }
+  return { runs, expired, interrupted };
+}

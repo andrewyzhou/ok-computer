@@ -62,25 +62,24 @@ export function getApproval(db: Db, id: number): Approval | undefined {
   };
 }
 
-export function expireApprovals(db: Db, now: Date): number {
+// expireApprovals gives the approvals that it expired, so their sessions can get a note.
+export function expireApprovals(db: Db, now: Date): Approval[] {
   const cutoff = new Date(now.getTime() - APPROVAL_TTL_MS).toISOString();
-  return Number(
-    db
-      .prepare("UPDATE approvals SET status = 'expired', resolvedAt = ? WHERE status = 'pending' AND requestedAt <= ?")
-      .run(now.toISOString(), cutoff).changes,
-  );
+  return db
+    .prepare("UPDATE approvals SET status = 'expired', resolvedAt = ? WHERE status = 'pending' AND requestedAt <= ? RETURNING id")
+    .all(now.toISOString(), cutoff)
+    .map((row) => getApproval(db, Number(row.id))!);
 }
 
 export function resolveApproval(db: Db, id: number, decision: Decision, via: ResolvedVia, now: Date): Result<Approval> {
   expireApprovals(db, now);
   const approval = getApproval(db, id);
   if (!approval) return { ok: false, error: `No approval has the id ${id}.` };
-  if (approval.status !== 'pending') return { ok: false, error: `Approval #${id} is already ${approval.status}.` };
-  db.prepare('UPDATE approvals SET status = ?, resolvedAt = ?, resolvedBy = ? WHERE id = ?').run(
-    decision === 'approve' ? 'approved' : 'denied',
-    now.toISOString(),
-    via,
-    id,
-  );
+  // the status check is part of the update, so two decisions for one approval (a button and the dashboard) cannot
+  // both win.
+  const changed = db
+    .prepare("UPDATE approvals SET status = ?, resolvedAt = ?, resolvedBy = ? WHERE id = ? AND status = 'pending'")
+    .run(decision === 'approve' ? 'approved' : 'denied', now.toISOString(), via, id).changes;
+  if (!changed) return { ok: false, error: `Approval #${id} is already ${getApproval(db, id)!.status}.` };
   return { ok: true, value: getApproval(db, id)! };
 }
