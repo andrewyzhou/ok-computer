@@ -69,6 +69,8 @@ export interface FakeGoogle {
   clearFaults(): void;
   // the scopes that the next code exchange grants.
   grant: string[];
+  // the authorization code that the token endpoint accepts.
+  code: string;
   // the account of the next code exchange.
   nextSignIn: { alias: string; refreshToken: string } | undefined;
   close(): Promise<void>;
@@ -120,7 +122,7 @@ export async function startFakeGoogle(): Promise<FakeGoogle> {
       }
       if (form.get('grant_type') === 'authorization_code') {
         const next = fake.nextSignIn;
-        if (!next || form.get('code') !== 'good-code' || !form.get('code_verifier')) return json(res, 400, { error: 'invalid_grant' });
+        if (!next || form.get('code') !== fake.code || !form.get('code_verifier')) return json(res, 400, { error: 'invalid_grant' });
         refreshTokens.set(next.refreshToken, next.alias);
         return json(res, 200, { access_token: newAccess(next.alias), refresh_token: next.refreshToken, expires_in: 3599, token_type: 'Bearer', scope: fake.grant.join(' ') });
       }
@@ -288,6 +290,7 @@ export async function startFakeGoogle(): Promise<FakeGoogle> {
     sent,
     grant: [],
     nextSignIn: undefined,
+    code: 'good-code',
     mailbox: (alias) => mailboxes.get(alias)!,
     addAccount(alias, email, refreshToken) {
       refreshTokens.set(refreshToken, alias);
