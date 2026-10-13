@@ -77,10 +77,26 @@ export interface Window {
 export function reviewWindow(db: Db, now: Date, timeZone: string): Window {
   const today = localDay(now, timeZone);
   const end = zonedToUtc(today, '00:00', timeZone);
-  const until = getSetting<string>(db, REVIEWED_UNTIL);
+  const yesterday = zonedToUtc(addDays(today, -1), '00:00', timeZone);
   const floor = zonedToUtc(addDays(today, -MAX_DAYS), '00:00', timeZone).getTime();
-  const start = until === undefined ? zonedToUtc(addDays(today, -1), '00:00', timeZone) : new Date(Math.max(Date.parse(until), floor));
-  return { start, end };
+  const marks = [getSetting<string>(db, REVIEWED_UNTIL), proposedUntil(db, timeZone)].filter((mark) => mark !== undefined).map((mark) => Date.parse(mark));
+  if (!marks.length) return { start: yesterday, end };
+  const until = Math.max(...marks);
+  // a mark after the end comes from a clock that was ahead. it would stop every review until that date, so the
+  // review starts yesterday, and the end of that review writes a correct mark.
+  if (until > end.getTime()) return { start: yesterday, end };
+  return { start: new Date(Math.max(until, floor)), end };
+}
+
+// a review that sent a draft to the owner counts as done for its window, also when it failed or the app stopped
+// after the draft. a second review of the same window would send a second draft for the same task. a review runs on
+// the day after its window, so its window ends at the start of the day that it started on.
+function proposedUntil(db: Db, timeZone: string): string | undefined {
+  const row = db
+    .prepare("SELECT MAX(r.startedAt) AS startedAt FROM runs r JOIN approvals a ON a.runId = r.id WHERE r.sessionKey LIKE ? AND a.toolName = 'skill_write'")
+    .get(`${WORKSHOP_PREFIX}%`);
+  const startedAt = row?.startedAt;
+  return typeof startedAt === 'string' ? zonedToUtc(localDay(new Date(startedAt), timeZone), '00:00', timeZone).toISOString() : undefined;
 }
 
 export interface Task {
@@ -173,6 +189,7 @@ function taskOf(events: StoredEvent[], runIds: string[], reasons: string[]): Tas
   return { runIds, reasons: [...new Set(reasons)], events: shown, taint: [...taint.values()] };
 }
 
+const indent = (entry: string) => entry.replace(/\r\n|[\n\r\v\f\u0085\u2028\u2029]/g, '\n    ');
 const cut = (text: string, limit: number) => (text.length > limit ? `${headOf(text, limit)} [cut]` : text);
 const leftOut = (text: string, sources: string[]) => `[${text.length} characters of untrusted content from ${headOf(sources.join(', '), 120)}, left out]`;
 
@@ -205,10 +222,12 @@ function entriesOf(event: StoredEvent): string[] {
 }
 
 // a task often calls one tool many times with the same result, so a line that repeats becomes one line with a count.
-// a long task keeps its start and its end. the cut is between entries, so no entry is cut in its middle.
+// a long task keeps its start and its end. the cut is between entries, so no entry is cut in its middle. each line
+// in an entry after its first line is indented, so only code starts a line with "owner:" or "## Task". a tool result
+// or an assistant text then cannot show itself as an owner correction.
 export function taskTranscript(events: StoredEvent[]): string {
   const lines: string[] = [];
-  for (const entry of events.flatMap(entriesOf)) {
+  for (const entry of events.flatMap(entriesOf).map(indent)) {
     const last = lines.at(-1);
     const count = last === undefined ? undefined : /^([\s\S]*) \(x(\d+)\)$/.exec(last);
     if (last === entry) lines[lines.length - 1] = `${entry} (x2)`;
