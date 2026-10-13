@@ -19,7 +19,7 @@ describe('the browser api', () => {
     const { dashboard, snapshot, shot } = seedBrowser();
     const detail = (await (await dashboard.request('/api/browser/tasks/bt_1')).json()) as BrowserTaskDetail;
     expect(detail.steps).toEqual([
-      expect.objectContaining({ action: 'open', snapshotBlob: snapshot, screenshotBlob: shot, blockedRequests: [expect.objectContaining({ url: 'https://evil.example/x' })], sent: [], decision: null }),
+      expect.objectContaining({ action: 'open', target: 'https://shop.example/', snapshotBlob: snapshot, screenshotBlob: shot, blockedRequests: [expect.objectContaining({ url: 'https://evil.example/x' })], sent: [], decision: null }),
       expect.objectContaining({ action: 'submit', sent: [{ method: 'POST', url: 'https://shop.example/buy' }], risk: 'external', decision: 'approve', rule: 'risk:external', approvalId: 7 }),
     ]);
   });

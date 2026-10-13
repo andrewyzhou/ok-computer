@@ -50,38 +50,40 @@ export function BrowserTasks() {
               </p>
             </Panel>
             {tasks.length ? (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Task</th>
-                    <th>Session</th>
-                    <th>Allowlist</th>
-                    <th>Status</th>
-                    <th>Steps</th>
-                    <th>Requests</th>
-                    <th>Started</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tasks.map((task) => (
-                    <tr key={task.id}>
-                      <td>
-                        <a href={`#/browser/${encodeURIComponent(task.id)}`}>{task.kind === 'search' ? 'search' : task.id.slice(0, 11)}</a>
-                      </td>
-                      <td>{task.sessionKey}</td>
-                      <td className="wrap">{task.allowlist.join(', ')}</td>
-                      <td>
-                        <Status value={task.status} /> {task.endReason ? <span className="muted">{task.endReason}</span> : null}
-                      </td>
-                      <td>{task.steps}</td>
-                      <td>
-                        <Counts blocked={task.blocked} sent={task.sent} />
-                      </td>
-                      <td>{time(task.startedAt)}</td>
+              <Panel title="Tasks and searches">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Task</th>
+                      <th>Session</th>
+                      <th>Allowlist</th>
+                      <th>Status</th>
+                      <th>Steps</th>
+                      <th>Requests</th>
+                      <th>Started</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {tasks.map((task) => (
+                      <tr key={task.id}>
+                        <td>
+                          <a href={`#/browser/${encodeURIComponent(task.id)}`}>{task.kind === 'search' ? 'search' : task.id.slice(0, 11)}</a>
+                        </td>
+                        <td>{task.sessionKey}</td>
+                        <td className="wrap">{task.allowlist.join(', ')}</td>
+                        <td>
+                          <Status value={task.status} /> {task.endReason ? <span className="muted">{task.endReason}</span> : null}
+                        </td>
+                        <td>{task.steps}</td>
+                        <td>
+                          <Counts blocked={task.blocked} sent={task.sent} />
+                        </td>
+                        <td>{time(task.startedAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Panel>
             ) : (
               <Empty>The agent has not used the browser yet.</Empty>
             )}
@@ -144,7 +146,8 @@ export function BrowserTask({ id }: { id: string }) {
           </Panel>
           {steps.length ? (
             steps.map((step) => (
-              <Panel key={step.id} title={`${step.action}${step.target ? ` ${step.target.slice(0, 120)}` : ''}`} actions={<span className="muted">{time(step.createdAt)} · {ms(step.durationMs)}</span>}>
+              <Panel key={step.id} title={step.action} actions={<span className="muted">{time(step.createdAt)} · {ms(step.durationMs)}</span>}>
+                {step.target ? <p className="wrap muted">{step.target}</p> : null}
                 <p className="wrap">{step.urlBefore === step.urlAfter ? step.urlAfter : `${step.urlBefore} → ${step.urlAfter}`}</p>
                 <Policy step={step} />
                 {step.error ? <p className="error-box">{step.error}</p> : null}

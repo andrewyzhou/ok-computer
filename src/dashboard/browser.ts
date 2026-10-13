@@ -56,10 +56,11 @@ export function searchEngines(db: Db, now: Date): SearchEngineState[] {
 }
 
 // a step joins its tool call by run and call id: the risk of the call, and the decision that let it run. an approved
-// submit runs under the run and the call id of its request, so it shows the approval.
+// call runs in the run of its request with the call id approval-<id>, so it finds its decision through the approval.
 const STEP = `SELECT s.*, (SELECT riskLevel FROM tool_calls c WHERE c.runId = s.runId AND c.toolCallId = s.toolCallId LIMIT 1) AS risk,
   d.decision, d.rule, d.approvalId
-  FROM browser_steps s LEFT JOIN policy_decisions d ON d.runId = s.runId AND d.toolCallId = s.toolCallId
+  FROM browser_steps s LEFT JOIN policy_decisions d ON d.runId = s.runId
+    AND (d.toolCallId = s.toolCallId OR (d.approvalId IS NOT NULL AND s.toolCallId = 'approval-' || d.approvalId))
   WHERE s.taskId = ? ORDER BY s.id`;
 
 export function browserTask(db: Db, id: string): BrowserTaskDetail | undefined {
@@ -74,7 +75,8 @@ export function browserTask(db: Db, id: string): BrowserTaskDetail | undefined {
         runId: (step.runId as string | null) ?? null,
         toolCallId: (step.toolCallId as string | null) ?? null,
         action: String(step.action),
-        target: (step.target as string | null) ?? null,
+        // the row keeps the target as json text, so a url or the input of a submit shows without escapes.
+        target: json<string | null>(step.target, null),
         urlBefore: (step.urlBefore as string | null) ?? null,
         urlAfter: (step.urlAfter as string | null) ?? null,
         snapshotBlob: (step.snapshotBlob as string | null) ?? null,

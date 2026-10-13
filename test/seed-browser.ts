@@ -25,7 +25,7 @@ export function seedBrowser() {
     INSERT INTO policy_decisions (runId, toolCallId, toolName, decision, rule, reason, approvalId, createdAt)
       VALUES ('run-1', 'c2', 'browser_submit', 'approve', 'risk:external', 'external', 7, '2026-10-13T17:00:02Z');
     INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, riskLevel)
-      VALUES ('run-1', 'c2', 'browser_submit', '{}', '{}', 0, 10, '2026-10-13T17:00:03Z', 'external');
+      VALUES ('run-1', 'approval-7', 'browser_submit', '{}', '{}', 0, 10, '2026-10-13T17:00:03Z', 'external');
     INSERT INTO browser_tasks (id, kind, sessionKey, runId, allowlist, status, endReason, tracePath, traceBytes, startedAt, endedAt)
       VALUES ('bt_1', 'task', 'main', 'run-1', '["shop.example"]', 'closed', 'the agent closed it', 'traces/bt_1.zip', 4, '2026-10-13T17:00:00Z', '2026-10-13T17:01:00Z');
     INSERT INTO browser_tasks (id, kind, sessionKey, allowlist, status, endReason, tracePath, traceError, startedAt)
@@ -34,7 +34,7 @@ export function seedBrowser() {
       VALUES ('bt_1', 'run-1', 'c1', 'open', '"https://shop.example/"', 'about:blank', 'https://shop.example/', '${snapshot}', '${shot}',
         '[{"url":"https://evil.example/x","reason":"evil.example is not on the allowlist of this task"}]', 120, '2026-10-13T17:00:01Z');
     INSERT INTO browser_steps (taskId, runId, toolCallId, action, target, urlBefore, urlAfter, snapshotBlob, screenshotBlob, sent, durationMs, createdAt)
-      VALUES ('bt_1', 'run-1', 'c2', 'submit', '{"button":"Buy now"}', 'https://shop.example/', 'https://shop.example/buy', '${snapshot}', '${shot}',
+      VALUES ('bt_1', 'run-1', 'approval-7', 'submit', '"{\\"button\\":\\"Buy now\\"}"', 'https://shop.example/', 'https://shop.example/buy', '${snapshot}', '${shot}',
         '[{"method":"POST","url":"https://shop.example/buy"}]', 90, '2026-10-13T17:00:05Z');
   `);
   setSetting(t.db, 'web_search.engines', { google: { strikes: 2, until: '2026-10-13T18:00:00Z', reason: 'a CAPTCHA' } }, clock());

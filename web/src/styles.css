@@ -597,6 +597,12 @@ pre {
   margin-top: 6px;
 }
 
+/* a step of the browser page shows long addresses and form inputs. */
+p.wrap,
+li.wrap {
+  overflow-wrap: anywhere;
+}
+
 .shot {
   display: block;
   max-width: 100%;
