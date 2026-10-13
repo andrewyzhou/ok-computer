@@ -183,6 +183,8 @@ export interface ReviewRequest {
   risk: Risk;
   reason: string;
   taint: string[];
+  // the run stops at its timeout. the call of a reviewer model must stop with it.
+  signal: AbortSignal;
 }
 
 export interface ReviewResult {

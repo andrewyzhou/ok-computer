@@ -121,6 +121,44 @@ describe('the tool caller before the tool acts', () => {
   });
 });
 
+describe('the tool caller when the run stops before the tool acts', () => {
+  // a request to the owner or a reviewer that hangs held the run and its session queue past the run timeout.
+  it('does not wait for a request to the owner that hangs', async () => {
+    const { tool, ran } = counted('send', 'external');
+    const { logger, lines } = memoryLogger();
+    let reject!: (err: Error) => void;
+    const { call, decisions } = setup([tool], { logger, requestApproval: () => new Promise((_resolve, fail) => (reject = fail)) });
+    const abort = new AbortController();
+    const pending = call('send', 'send-1', abort.signal);
+    await new Promise((resolve) => setImmediate(resolve));
+    abort.abort(new Error('timeout'));
+    expect(await pending).toEqual({ content: expect.stringMatching(/^send did not run\. The run stopped while the request/), isError: true });
+    expect(ran).toEqual([]);
+    expect(decisions()).toMatchObject([{ reason: expect.stringContaining('the run stopped while the request') }]);
+    reject(new Error('telegram timed out'));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(lines).toContainEqual(expect.objectContaining({ level: 'error', msg: 'approval request failed after its run stopped' }));
+  });
+
+  it('does not wait for a reviewer that hangs, and gives the reviewer the signal of the run', async () => {
+    const { tool, ran } = counted('archive', 'write');
+    const signals: AbortSignal[] = [];
+    const { call } = setup([tool], {
+      reviewer: (request) => {
+        signals.push(request.signal);
+        return new Promise(() => {});
+      },
+    });
+    const abort = new AbortController();
+    const pending = call('archive', 'archive-1', abort.signal);
+    await new Promise((resolve) => setImmediate(resolve));
+    abort.abort(new Error('timeout'));
+    expect(await pending).toEqual({ content: 'archive did not run, because the run stopped first.', isError: true });
+    expect(ran).toEqual([]);
+    expect(signals).toEqual([abort.signal]);
+  });
+});
+
 describe('the tool caller after the tool acts', () => {
   it('gives the model the output when the trace write fails, and logs the error', async () => {
     const { tool, ran } = counted('fetch', 'read');
@@ -131,17 +169,59 @@ describe('the tool caller after the tool acts', () => {
       },
       read: () => undefined,
     };
-    const { call, row } = setup([tool], { logger, blobs: broken });
+    const { db, call, row } = setup([tool], { logger, blobs: broken });
     const output = await call('fetch');
     expect(ran).toEqual(['fetch']);
     expect(output.content).toContain('the full result is res_');
     expect(output.isError).toBeUndefined();
-    expect(row('fetch-call')).toBeUndefined();
+    // a failed blob write loses only the raw text. the row keeps the decision, the input and the model view.
+    expect(row('fetch-call')).toMatchObject({ rawResultBlob: null, policyDecisionId: expect.any(Number), resultHandle: expect.stringMatching(/^res_/) });
+    expect(JSON.parse(String(row('fetch-call')!.output))).toEqual({ content: output.content });
     expect(lines).toContainEqual({
       level: 'error',
-      msg: 'tool call trace write failed',
+      msg: 'tool result blob write failed',
       fields: expect.objectContaining({ runId: 'r1', toolCallId: 'fetch-call', tool: 'fetch', err: expect.any(Error) }),
     });
+
+    // when the row itself cannot be written, the model still gets the output.
+    db.exec("CREATE TRIGGER no_rows BEFORE INSERT ON tool_calls BEGIN SELECT RAISE(ABORT, 'disk is full'); END");
+    const second = await call('fetch', 'fetch-2');
+    expect(second.content).toContain('the full result is res_');
+    expect(row('fetch-2')).toBeUndefined();
+    expect(lines).toContainEqual(expect.objectContaining({ level: 'error', msg: 'tool call trace write failed' }));
+  });
+
+  it('marks an abandoned call late also when the blob of its late result cannot be written', async () => {
+    let finish!: (output: { content: string }) => void;
+    const slow = defineTool({ name: 'slow', description: 'Slow.', input: z.object({}), risk: 'read', run: () => new Promise((resolve) => (finish = resolve)) });
+    const broken: BlobStore = {
+      put: () => {
+        throw new Error('EPERM: operation not permitted');
+      },
+      read: () => undefined,
+    };
+    const queue = createRunQueue();
+    const { call, row } = setup([slow], { queue, blobs: broken });
+    const abort = new AbortController();
+    const pending = call('slow', 'slow-1', abort.signal);
+    await new Promise((resolve) => setImmediate(resolve));
+    abort.abort(new Error('timeout'));
+    await pending;
+    finish({ content: 'done' });
+    await new Promise((resolve) => setImmediate(resolve));
+    await queue.drain();
+    expect(row('slow-1')).toMatchObject({ outcome: 'late', rawResultBlob: null });
+  });
+
+  it('gives a result after a tool that returns content that is not text', async () => {
+    for (const odd of [{ content: undefined }, { content: 42 }, { content: { a: 1 } }, undefined]) {
+      const { tool, ran } = counted('odd', 'read', async () => odd as unknown as { content: string });
+      const { call, row } = setup([tool]);
+      const output = await call('odd');
+      expect(ran).toEqual(['odd']);
+      expect(typeof output.content).toBe('string');
+      expect(row('odd-call')).toMatchObject({ outcome: null });
+    }
   });
 
   it('logs the stack of a tool that throws with the ids of the run and the call', async () => {

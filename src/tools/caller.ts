@@ -69,6 +69,24 @@ interface Trace {
 
 const STOPPED = Symbol('stopped');
 
+// the owner's message or a reviewer model can hang. the run must not wait for them after it stops, because the run
+// holds its session queue. work that fails after the stop goes to the log, so it is not an unhandled rejection.
+function untilStopped<T>(work: Promise<T>, signal: AbortSignal, onLateError: (err: unknown) => void): Promise<T | typeof STOPPED> {
+  if (signal.aborted) {
+    work.catch(onLateError);
+    return Promise.resolve(STOPPED);
+  }
+  let onAbort = () => {};
+  const stopped = new Promise<typeof STOPPED>((resolve) => {
+    onAbort = () => {
+      work.catch(onLateError);
+      resolve(STOPPED);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  return Promise.race([work, stopped]).finally(() => signal.removeEventListener('abort', onAbort));
+}
+
 export const abandonedText = (name: string) =>
   `${name} did not finish before the run stopped. It can still finish later, so its effect is unknown. Check the result before you try it again.`;
 
@@ -95,6 +113,14 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       ...(output.isError ? { isError: true } : {}),
       ...(output.untrustedSource ? { untrustedSource: output.untrustedSource } : {}),
     };
+    // a failed blob write loses only the raw text. the row with the decision, the input and the model view stays.
+    let rawResultBlob: string | null = null;
+    try {
+      // the raw text needs a blob only when the model saw other text: a preview, or a wrapped text.
+      if (view.content !== output.content) rawResultBlob = blobs.put(output.content);
+    } catch (err) {
+      logger.error('tool result blob write failed', { runId, toolCallId: call.id, tool: call.name, err });
+    }
     try {
       const row = db
         .prepare(
@@ -115,8 +141,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
           trace.decisionId ?? null,
           trace.tainted ? 1 : 0,
           output.untrustedSource ?? null,
-          // the raw text needs a blob only when the model saw other text: a preview, or a wrapped text.
-          view.content === output.content ? null : blobs.put(output.content),
+          rawResultBlob,
           view.truncated ? 1 : 0,
           view.handle ?? null,
           trace.outcome ?? null,
@@ -133,11 +158,17 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
   // so the model does not repeat an action that worked.
   const recordLate = (runId: string, sessionKey: string, call: ToolCall, rowId: number | undefined, late: ToolOutput) => {
     const { clean, view } = viewOf(late);
+    let rawResultBlob: string | null = null;
+    try {
+      rawResultBlob = blobs.put(clean.content);
+    } catch (err) {
+      logger.error('late tool result blob write failed', { runId, toolCallId: call.id, tool: call.name, err });
+    }
     try {
       if (rowId !== undefined) {
         db.prepare(
           "UPDATE tool_calls SET outcome = 'late', isError = ?, rawResultBlob = ?, resultHandle = ?, untrustedSource = ? WHERE id = ?",
-        ).run(late.isError ? 1 : 0, blobs.put(clean.content), view.handle ?? null, late.untrustedSource ?? null, rowId);
+        ).run(late.isError ? 1 : 0, rawResultBlob, view.handle ?? null, late.untrustedSource ?? null, rowId);
       }
       logger.warn('an abandoned tool call finished late', { runId, toolCallId: call.id, tool: call.name });
     } catch (err) {
@@ -196,7 +227,15 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
 
     const askOwner = async (): Promise<ToolOutput> => {
       try {
-        return await deps.requestApproval(tool, input, toolCtx, { decisionId, reason, taint });
+        const asked = await untilStopped(deps.requestApproval(tool, input, toolCtx, { decisionId, reason, taint }), ctx.signal, (err) =>
+          logger.error('approval request failed after its run stopped', { runId: ctx.runId, toolCallId: call.id, tool: tool.name, err }),
+        );
+        if (asked !== STOPPED) return asked;
+        updateDecision(db, decisionId, { reason: `${reason}. the run stopped while the request for the owner's approval was sent` });
+        return {
+          content: `${tool.name} did not run. The run stopped while the request for the owner's approval was sent. If the request reached the owner, the decision comes back as a system event.`,
+          isError: true,
+        };
       } catch (err) {
         logger.error('approval request failed, so the tool did not run', { runId: ctx.runId, toolCallId: call.id, tool: tool.name, err });
         updateDecision(db, decisionId, { reason: `${reason}. the request for the owner's approval failed, so the call did not run` });
@@ -209,15 +248,22 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
     }
     if (verdict.decision === 'approve' || (verdict.decision === 'review' && !deps.reviewer)) return { ...gate, held: await askOwner() };
     if (verdict.decision === 'review' && deps.reviewer) {
-      let review: ReviewResult;
+      let review: ReviewResult | typeof STOPPED;
       try {
-        review = await deps.reviewer({ runId: ctx.runId, sessionKey: ctx.sessionKey, tool: tool.name, input, risk: tool.risk, reason, taint: sources });
+        const request = { runId: ctx.runId, sessionKey: ctx.sessionKey, tool: tool.name, input, risk: tool.risk, reason, taint: sources, signal: ctx.signal };
+        review = await untilStopped(deps.reviewer(request), ctx.signal, (err) =>
+          logger.warn('reviewer failed after its run stopped', { runId: ctx.runId, toolCallId: call.id, tool: tool.name, err }),
+        );
       } catch (err) {
         // a reviewer that fails must not allow the call. the owner decides instead.
         logger.warn('reviewer failed, so the owner decides', { runId: ctx.runId, toolCallId: call.id, tool: tool.name, err });
         reason = `${reason}. the reviewer failed (${errorText(err)}), so the owner decides`;
         updateDecision(db, decisionId, { reason });
         return { ...gate, held: await askOwner() };
+      }
+      if (review === STOPPED) {
+        updateDecision(db, decisionId, { reason: `${reason}. the run stopped before the reviewer answered` });
+        return { ...gate, held: { content: `${tool.name} did not run, because the run stopped first.`, isError: true } };
       }
       updateDecision(db, decisionId, { review });
       if (review.verdict === 'hold') {

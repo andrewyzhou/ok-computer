@@ -38,7 +38,8 @@ describe('a failed write and a crash', () => {
       },
     }).caller;
     expect((await run('read the long thing')).status).toBe('completed');
-    expect(rows('SELECT COUNT(*) AS n FROM tool_calls')).toEqual([{ n: 0 }]);
+    // only the raw text is lost. the row keeps the decision and the model view.
+    expect(rows('SELECT rawResultBlob, policyDecisionId IS NOT NULL AS decided FROM tool_calls')).toEqual([{ rawResultBlob: null, decided: 1 }]);
     expect((await run('hello again')).status).toBe('completed');
     expect(danglingToolCalls(model.calls.at(-1)!.messages)).toEqual([]);
   });

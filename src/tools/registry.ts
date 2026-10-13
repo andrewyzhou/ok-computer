@@ -80,6 +80,13 @@ export function createToolRegistry(tools: Tool[], logger: Logger = silentLogger)
         logger.error('tool crashed', { tool: tool.name, runId: ctx.runId, toolCallId: ctx.toolCallId, err });
         output = { content: `${tool.name} failed: ${errorText(err)}`, isError: true };
       }
+      // a tool from outside, for example an mcp adapter, can give no output or content that is not text. the caller
+      // works on text after the tool acted, and a throw there would hide a result.
+      if (typeof output?.content !== 'string') {
+        logger.warn('tool gave content that is not text', { tool: tool.name, runId: ctx.runId, toolCallId: ctx.toolCallId });
+        const content = output?.content;
+        output = { ...output, content: content === undefined || content === null ? '' : typeof content === 'object' ? JSON.stringify(content) : String(content) };
+      }
       return tool.untrustedOutput && !output.untrustedSource ? { ...output, untrustedSource: tool.untrustedOutput } : output;
     },
   };
