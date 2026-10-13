@@ -6,6 +6,7 @@ import type { ToolCall } from '../models/types.js';
 import { silentLogger, type Logger } from '../observability/logger.js';
 import { redactedJson } from '../observability/redact.js';
 import type { Clock } from '../time.js';
+import { TOOL_CALL } from '../tools/registry.js';
 
 export const interruptedText = (name: string) =>
   `The app stopped while ${name} ran. It is unknown whether it finished. Check the result before you try it again.`;
@@ -70,13 +71,17 @@ function resultFromTrace(db: Db, runId: string | null, call: ToolCall, clock: Cl
     if (row.untrustedSource !== null) payload.untrustedSource = String(row.untrustedSource);
   } else {
     const decision = db
-      .prepare('SELECT id, decision, reviewerVerdict, approvalId FROM policy_decisions WHERE runId IS ? AND toolCallId = ? ORDER BY id DESC LIMIT 1')
+      .prepare('SELECT id, toolName, decision, reviewerVerdict, approvalId FROM policy_decisions WHERE runId IS ? AND toolCallId = ? ORDER BY id DESC LIMIT 1')
       .get(runId, call.id);
     // the caller writes the decision just before the tool runs. an allowed decision without a row means that the
     // tool started, and the process stopped before the row.
     const started = decision?.decision === 'allow' || (decision?.decision === 'review' && decision.reviewerVerdict === 'allow');
     const waits = !started && decision?.approvalId != null;
-    const content = started ? interruptedText(call.name) : waits ? waitsText(call.name, Number(decision!.approvalId)) : notRunText(call.name);
+    // a tool_call names an integration tool, and the decision has the name of that tool. the text and the row use it,
+    // with the arguments that the decision saw.
+    const name = decision ? String(decision.toolName) : call.name;
+    const input = name !== call.name && call.name === TOOL_CALL ? (call.input as { arguments?: unknown }).arguments ?? {} : call.input;
+    const content = started ? interruptedText(name) : waits ? waitsText(name, Number(decision!.approvalId)) : notRunText(name);
     payload = { toolCallId: call.id, name: call.name, content, isError: !waits };
     if (runId !== null) {
       db.prepare(
@@ -85,8 +90,8 @@ function resultFromTrace(db: Db, runId: string | null, call: ToolCall, clock: Cl
       ).run(
         runId,
         call.id,
-        call.name,
-        redactedJson(call.input),
+        name,
+        redactedJson(input),
         redactedJson({ content, ...(payload.isError ? { isError: true } : {}) }),
         payload.isError ? 1 : 0,
         clock().toISOString(),

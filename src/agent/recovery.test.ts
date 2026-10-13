@@ -68,6 +68,34 @@ describe('repairSession', () => {
     expect(repairSession(db, 'main', clock)).toBe(0);
   });
 
+  it('names the integration tool of a tool_call, and keeps the arguments that the decision saw', () => {
+    const { db, results } = setup();
+    appendEvent(db, {
+      sessionKey: 'main',
+      runId: 'r1',
+      type: 'assistant_message',
+      payload: {
+        provider: 'fake',
+        model: 'm',
+        content: [],
+        text: '',
+        toolCalls: [{ id: 'm1', name: 'tool_call', input: { name: 'notes__add_note', arguments: { note: 'buy milk' } } }],
+        stopReason: 'tool_use',
+      },
+    });
+    db.prepare(
+      `INSERT INTO policy_decisions (runId, toolCallId, toolName, decision, rule, reason, createdAt) VALUES ('r1', 'm1', 'notes__add_note', 'allow', 'test', 'test', 'x')`,
+    ).run();
+    repairSession(db, 'main', clock);
+    // the event keeps the model's own name, so the provider pairs it with the call.
+    expect(results()).toEqual([{ toolCallId: 'm1', name: 'tool_call', content: interruptedText('notes__add_note'), isError: true }]);
+    expect(db.prepare("SELECT name, input, outcome FROM tool_calls WHERE toolCallId = 'm1'").get()).toEqual({
+      name: 'notes__add_note',
+      input: '{"note":"buy milk"}',
+      outcome: 'interrupted',
+    });
+  });
+
   // a call without input could not be bound, and the repair threw at each run start, so the session was blocked.
   it('repairs each call on its own, so one odd call does not block the session', () => {
     const { db, decide, results } = setup();
