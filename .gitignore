@@ -5,5 +5,8 @@ node_modules/
 dist/
 web/dist/
 *.log
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 
 workspace/USER.md
