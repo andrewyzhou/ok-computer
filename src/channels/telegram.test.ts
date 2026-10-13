@@ -107,6 +107,19 @@ describe('telegram channel', () => {
     expect(inbound.map((m) => m.button)).toEqual(['approval:1:approve']);
     await channel.stop();
   });
+
+  // telegram refuses the answer to a press that waited while the app restarted. the press must still reach the app.
+  it('passes on a press when telegram refuses the answer to it', async () => {
+    const fake = createFakeTelegram();
+    fake.refuse((c) => (c.method === 'answerCallbackQuery' ? 400 : false));
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
+    const inbound: InboundMessage[] = [];
+    await channel.start((message) => inbound.push(message));
+    fake.push(buttonUpdate(777, 'approval:1:approve'));
+    await until(() => inbound.length === 1);
+    expect(inbound[0]).toMatchObject({ button: 'approval:1:approve' });
+    await channel.stop();
+  });
 });
 
 describe('telegram formats', () => {
@@ -215,6 +228,21 @@ describe('telegram formats', () => {
     await channel.send({ chatId: '777', text: 'Card', details: '{ "a": 1 }' });
     expect(fake.calls.at(-1)!.payload).toEqual({ chat_id: '777', text: 'Card\n\n{ "a": 1 }', link_preview_options: { is_disabled: true } });
   });
+
+  // the html of a card cuts the details, but its plain fallback holds them all.
+  it('splits the plain fallback of a refused card into parts within the limit, with the buttons on the last part', async () => {
+    const fake = createFakeTelegram();
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
+    fake.refuse((c) => (c.payload.parse_mode === 'HTML' ? 400 : false));
+    const details = JSON.stringify({ note: 'n '.repeat(4500) }, null, 2);
+    await channel.send({ chatId: '777', text: 'Approval needed (#1)', details, buttons });
+    const plain = fake.sent().filter((p) => p.parse_mode === undefined);
+    expect(plain.length).toBeGreaterThan(2);
+    expect(plain.every((p) => String(p.text).length <= TELEGRAM_LIMIT)).toBe(true);
+    expect(plain.map((p) => 'reply_markup' in p)).toEqual([...Array<boolean>(plain.length - 1).fill(false), true]);
+    const words = (text: string) => text.split(/\s+/).filter(Boolean);
+    expect(words(plain.map((p) => String(p.text)).join(' '))).toEqual(words(`Approval needed (#1) ${details}`));
+  });
 });
 
 describe('telegram progress', () => {
@@ -246,12 +274,36 @@ describe('telegram progress', () => {
     await vi.advanceTimersByTimeAsync(2000);
     await progress.end();
     progress.done(true);
+    await vi.advanceTimersByTimeAsync(0);
     expect(texts(fake, 'sendMessageDraft')).toEqual(['', '⏳ calendar_list', 'Let me look.\n\n⏳ calendar_list', 'Let me look. You are free.']);
     expect(fake.calls.filter((c) => c.method === 'sendChatAction')).toHaveLength(1);
     expect(fake.calls.filter((c) => c.method === 'setMessageReaction').map((c) => c.payload.reaction)).toEqual([
       [{ type: 'emoji', emoji: '👀' }],
       [{ type: 'emoji', emoji: '👌' }],
     ]);
+  });
+
+  // telegram applies each request when it arrives, so a slow start reaction could replace the end reaction.
+  it('sends the end reaction only after the start reaction is done', async () => {
+    const fake = createFakeTelegram();
+    let release: (() => void) | undefined;
+    fake.bot.api.config.use(async (prev, method, payload, signal) => {
+      if (method === 'setMessageReaction' && (payload as { reaction: Array<{ emoji: string }> }).reaction[0]?.emoji === '👀') {
+        await new Promise<void>((resolve) => (release = resolve));
+      }
+      return prev(method, payload, signal);
+    });
+    const reactions = () => fake.calls.filter((c) => c.method === 'setMessageReaction').map((c) => c.payload.reaction);
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
+    const progress = channel.progress!(owner, () => {});
+    await progress.end();
+    progress.done(true);
+    await until(() => release !== undefined);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(reactions()).toEqual([]);
+    release!();
+    await until(() => reactions().length === 2);
+    expect(reactions()).toEqual([[{ type: 'emoji', emoji: '👀' }], [{ type: 'emoji', emoji: '👌' }]]);
   });
 
   it('waits for a slow draft before the end, but at most 2 seconds', async () => {

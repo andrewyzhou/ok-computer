@@ -114,21 +114,28 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
     delivery: Delivery,
   ) => {
     let messageId = '';
+    // a link preview makes the telegram servers fetch a url without a click. the model chose the urls in a reply and
+    // in the input of a card, and a url can carry data in its query.
+    const markup = (last: boolean) => ({ link_preview_options: { is_disabled: true }, ...(last && keyboard ? { reply_markup: keyboard } : {}) });
     for (const [i, part] of parts.entries()) {
-      // a link preview makes the telegram servers fetch a url without a click. the model chose the urls in a reply
-      // and in the input of a card, and a url can carry data in its query.
-      const markup = { link_preview_options: { is_disabled: true }, ...(i === parts.length - 1 && keyboard ? { reply_markup: keyboard } : {}) };
+      const last = i === parts.length - 1;
       const html = part.html;
-      let sent =
+      const sent =
         html !== undefined
-          ? await refusedAsUndefined(delivery, () => bot.api.sendMessage(chatId, html, { parse_mode: 'HTML', ...markup }))
+          ? await refusedAsUndefined(delivery, () => bot.api.sendMessage(chatId, html, { parse_mode: 'HTML', ...markup(last) }))
           : undefined;
-      if (sent) delivery.formats.push('html');
-      else {
-        sent = await bot.api.sendMessage(chatId, part.plain, markup);
-        delivery.formats.push('plain');
+      if (sent) {
+        delivery.formats.push('html');
+        messageId = String(sent.message_id);
+        continue;
       }
-      messageId = String(sent.message_id);
+      // the plain text of a card holds the full details, which the html cut. so the plain text can need more parts.
+      const pieces = splitMessage(part.plain);
+      for (const [j, piece] of pieces.entries()) {
+        const plain = await bot.api.sendMessage(chatId, piece, markup(last && j === pieces.length - 1));
+        delivery.formats.push('plain');
+        messageId = String(plain.message_id);
+      }
     }
     return { messageId };
   };
@@ -156,13 +163,17 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
       });
       bot.on('callback_query:data', async (ctx) => {
         const data = buttons.check(ctx.callbackQuery.data);
-        // telegram shows a spinner on the button until the bot answers the press.
+        // telegram shows a spinner on the button until the bot answers the press. the answer only stops the spinner.
+        // telegram refuses the answer to a press that waited during a restart, so a failed answer must not lose the
+        // press.
+        const answer = (other?: { text: string; show_alert: boolean }) =>
+          ctx.answerCallbackQuery(other).catch((err: unknown) => logger.warn('telegram answer to a button failed', { err }));
         if (data === undefined) {
           logger.warn('a button without a valid mark was pressed, so it was ignored', { data: ctx.callbackQuery.data });
-          await ctx.answerCallbackQuery({ text: 'That button is not from one of my cards. Send /approvals to see the real ones.', show_alert: true });
+          void answer({ text: 'That button is not from one of my cards. Send /approvals to see the real ones.', show_alert: true });
           return;
         }
-        await ctx.answerCallbackQuery();
+        void answer();
         if (!isPrivate(ctx.chat)) return logger.info('button outside a private chat ignored', { chatId: String(ctx.chat?.id) });
         received({
           senderId: String(ctx.from.id),
@@ -279,7 +290,8 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
             inFlight = undefined;
           });
       };
-      void react(WORKING);
+      // the end reaction waits for the start reaction. if not, a slow start reaction can come after the end one.
+      const working = react(WORKING);
       draft();
       const timer = setInterval(() => {
         ticks++;
@@ -304,7 +316,7 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
           clearTimeout(wait);
         },
         done(ok) {
-          void react(ok ? DONE : undefined);
+          void working.then(() => react(ok ? DONE : undefined));
         },
       };
     },
