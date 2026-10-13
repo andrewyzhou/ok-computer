@@ -6,6 +6,7 @@ import { appendEvent } from '../src/events/log.js';
 import { textStep, toolStep, type FakeStep } from '../src/models/fake.js';
 import { BUILTIN_RULES, type TaintSource } from '../src/policy/policy.js';
 import { loadSkills } from '../src/skills/skills.js';
+import { skillVersion } from '../src/skills/skill-write.js';
 import { WORKSHOP_INSTRUCTIONS } from '../src/skills/workshop.js';
 import { createTestApp } from './app-harness.js';
 
@@ -34,9 +35,9 @@ function setup(steps: FakeStep[], rules = BUILTIN_RULES) {
   return { ...t, skillsDir, skillFile: join(skillsDir, 'calendar-booking', 'SKILL.md') };
 }
 
-// a long task with 6 tool calls, then a message that corrects it. this is the fixture task of the acceptance test.
+// a long task with 8 tool calls, then a message that corrects it. this is the fixture task of the acceptance test.
 const task: FakeStep[] = [
-  toolStep(...Array.from({ length: 6 }, (_, i) => ({ id: `n${i}`, name: 'now', input: {} }))),
+  toolStep(...Array.from({ length: 8 }, (_, i) => ({ id: `n${i}`, name: 'now', input: {} }))),
   textStep('Booked on the personal calendar.'),
   textStep('Sorry, I will use the work calendar.'),
 ];
@@ -49,6 +50,8 @@ async function runTask(t: ReturnType<typeof setup>) {
   await t.at(pdt('10:00', '2026-10-12'));
   await t.say('no, next time always use the work calendar');
 }
+
+const weekly = '---\nname: weekly-review\ndescription: old\n---\nold steps';
 
 describe('skill workshop', () => {
   it('reviews a long and corrected task, shows the full draft on the card, and writes the skill only after approval', async () => {
@@ -70,7 +73,7 @@ describe('skill workshop', () => {
     expect(review.tools.map((tool) => tool.name)).toEqual(['skill_read', 'skill_write']);
     const input = JSON.stringify(review.messages);
     expect(input).toContain('Skill review of 2026-10-12: 1 long or corrected task.');
-    expect(input).toContain('long: 6 tool calls; the next owner message corrects it; the owner corrects the run before');
+    expect(input).toContain('long: 8 tool calls; the next owner message corrects it; the owner corrects the run before');
     expect(input).toContain('owner: no, next time always use the work calendar');
 
     // the draft waits for the owner. nothing is in the skills folder yet.
@@ -119,8 +122,8 @@ describe('skill workshop', () => {
       ...task,
       toolStep(
         { id: 'w1', name: 'skill_write', input: draft },
-        { id: 'w2', name: 'skill_write', input: { ...draft, name: 'weekly-review', replaces: true, body: 'new steps' } },
-        { id: 'w3', name: 'skill_write', input: { ...draft, name: 'deleted-skill', replaces: true } },
+        { id: 'w2', name: 'skill_write', input: { ...draft, name: 'weekly-review', replaces: true, base: skillVersion(weekly), body: 'new steps' } },
+        { id: 'w3', name: 'skill_write', input: { ...draft, name: 'deleted-skill', replaces: true, base: skillVersion(weekly) } },
       ),
       textStep('NO_REPLY'),
     ]);
@@ -130,8 +133,8 @@ describe('skill workshop', () => {
     mkdirSync(join(t.skillsDir, 'calendar-booking'), { recursive: true });
     writeFileSync(t.skillFile, '---\nname: calendar-booking\ndescription: mine\n---\nmy steps');
     mkdirSync(join(t.skillsDir, 'weekly'), { recursive: true });
-    writeFileSync(join(t.skillsDir, 'weekly', 'SKILL.md'), '---\nname: weekly-review\ndescription: old\n---\nold steps');
-    expect(await t.app.resolveApproval(1, 'approve', 'button')).toContain('the skill calendar-booking exists now, so the new skill was not written');
+    writeFileSync(join(t.skillsDir, 'weekly', 'SKILL.md'), weekly);
+    expect(await t.app.resolveApproval(1, 'approve', 'button')).toContain('a skill or a folder with the name calendar-booking exists now, so the new skill was not written');
     expect(readFileSync(t.skillFile, 'utf8')).toContain('my steps');
     expect(await t.app.resolveApproval(2, 'approve', 'button')).toContain('changed the skill weekly-review. The old text was:\n---\nname: weekly-review');
     expect(readFileSync(join(t.skillsDir, 'weekly', 'SKILL.md'), 'utf8')).toContain('new steps');
