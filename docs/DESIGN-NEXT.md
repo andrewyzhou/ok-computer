@@ -512,6 +512,14 @@ We take fx's reviewer, lazy MCP schemas, output handles, and sub-agent limits. W
 
 Each milestone is one implementer agent, named `phase<N>_milestone<M>_<word>` in `/resume`. Each must meet its acceptance criteria with tests that never call real services; real-service checks are manual smoke scripts.
 
+**Plan change (2026-10-13, owner decision).** Three milestones leave the build plan for now:
+
+- **Phase 3 M4 history is on hold.** The owner never asked for it in this form, and it is not designed well enough. A later design should also cover ChatGPT logs, not only Claude.
+- **Phase 4 M1 sandbox is on hold.** There is no use case for it yet. Without it, the `code` sub-agent profile is not built.
+- **Phase 4 M2 sweep is not a development milestone.** The owner tests it by asking the agent to do it with the Gmail integration. If that test shows a gap, the gap becomes a normal fix.
+
+After M2, the other six milestones (google, telegram, slack, web, review, workshop) are built at the same time on separate branches, then merged one at a time. Review merges last, so that it can check its rules against the real tools.
+
 ### Phase 2: foundation and the owner's core accounts
 
 | Milestone | Scope | Done when |
@@ -528,14 +536,14 @@ Each milestone is one implementer agent, named `phase<N>_milestone<M>_<word>` in
 | **M1 slack** | Slack through the official MCP server (OAuth with a pre-registered client per workspace); DM polling into signals; send through approval | With a fake MCP server shaped like Slack: DMs become signals, and sends need approval |
 | **M2 web** | `web_search` through Chrome (Google, DuckDuckGo fallback), `web_fetch`, the browser worker with Playwright, allowlists, step screenshots, trace zips, and the Browser page | Against a local test site: every step has a screenshot and snapshot, off-list navigation is blocked and recorded, and a form submit needs approval |
 | **M3 review** | Reviewer model, taint propagation, exfiltration guard, `delegate` with profiles, sub-agent traces | A tainted run cannot send without approval; the reviewer holds an injected action in a fixture; child runs show in the parent timeline |
-| **M4 history** | Claude Code transcript watcher and index, claude.ai export import, `history_search` and `history_get` | Fixture transcripts and an export ZIP are indexed with secrets redacted, and results are wrapped as untrusted |
+| **M4 history** (on hold) | Claude Code transcript watcher and index, claude.ai export import, `history_search` and `history_get` | Fixture transcripts and an export ZIP are indexed with secrets redacted, and results are wrapped as untrusted |
 
 ### Phase 4: power tools
 
 | Milestone | Scope | Done when |
 |---|---|---|
-| **M1 sandbox** | Docker sandbox container, `sandbox_*` tools, network proxy with allowlist, optional Claude code execution per slot | With Docker available: commands run as non-root with no network, network needs review, and output goes through handles |
-| **M2 sweep** | Subscription sweep: the `inbox` sub-agent triages mail across accounts on the `batch` slot, proposes an unsubscribe list, and runs it after one approval of the whole list | With a mocked Gmail: the list is grouped by sender, one approval runs all unsubscribes, and each run is traced |
+| **M1 sandbox** (on hold) | Docker sandbox container, `sandbox_*` tools, network proxy with allowlist, optional Claude code execution per slot | With Docker available: commands run as non-root with no network, network needs review, and output goes through handles |
+| **M2 sweep** (owner test, not built) | Subscription sweep: the `inbox` sub-agent triages mail across accounts on the `batch` slot, proposes an unsubscribe list, and runs it after one approval of the whole list | With a mocked Gmail: the list is grouped by sender, one approval runs all unsubscribes, and each run is traced |
 | **M3 workshop** | Skill Workshop: after long or corrected tasks, a review proposes a new or changed skill, and the owner approves it in Telegram | A fixture task produces a skill draft, and only approval writes it to `skills/` |
 
 ## 11. What the owner sets up
@@ -545,5 +553,4 @@ These steps need the owner's own accounts. The implementer writes a guide in `do
 1. **Google** (Phase 2 M3): create a Google Cloud project, turn on the Gmail and Calendar APIs, create a "Desktop app" OAuth client, and set the consent screen to "In production". Then connect each Gmail account from the dashboard. Takes about 10 minutes.
 2. **Slack** (Phase 3 M1): one internal app per workspace with the user scopes in section 4.2. The owner may need admin approval in a workspace they do not own.
 3. **Browser logins** (Phase 3 M2): run `okc browser login` once and sign in to the sites the agent may use, in the agent's own Chrome profile.
-4. **Docker Desktop running** (Phase 4 M1).
-5. **Tailscale** on the PC, phone, and laptop (any time).
+4. **Tailscale** on the PC, phone, and laptop (any time).

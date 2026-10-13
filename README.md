@@ -40,8 +40,10 @@ A small supervisor restarts the agent if it stops. The logon task means it runs 
 
 1. **Core coach (done):** Telegram adapter, agent loop, workspace files, scheduler (automations + heartbeat), 3-goals routine, daily notes + nightly consolidation into weekly trends, run logging, first version of the observability dashboard.
 2. **Foundation and core accounts:** full tracing v2, MCP client and integration registry, Gmail (all accounts) + Calendar, Telegram v2. See [docs/DESIGN-NEXT.md](docs/DESIGN-NEXT.md).
-3. **More reach:** Slack, web search + browser worker, reviewer model + taint + sub-agents, Claude history.
-4. **Power tools:** Docker sandbox, subscription sweep, Skill Workshop.
+3. **More reach:** Slack, web search + browser worker, reviewer model + taint + sub-agents.
+4. **Power tools:** Skill Workshop.
+
+On hold: Claude history (a later design should cover ChatGPT logs too) and the Docker sandbox. The subscription sweep is an owner test of the agent with Gmail, not a separate feature.
 
 ## TODO (later)
 
@@ -51,7 +53,8 @@ A small supervisor restarts the agent if it stops. The logon task means it runs 
 - [ ] Mid-reply steering (new texts adjust a reply in progress)
 - [ ] Event triggers (script detects a condition → wake the agent)
 - [ ] Inbound webhooks
-- [ ] Docker sandbox for shell commands
+- [ ] Docker sandbox for shell commands (on hold until there is a use case)
+- [ ] Claude and ChatGPT history import (on hold)
 - [ ] Voice replies / voice notes, PDF and image understanding
 - [ ] Spending alerts
 - [ ] Move more work to a local model as hardware allows
