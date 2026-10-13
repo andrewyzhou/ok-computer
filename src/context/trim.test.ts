@@ -20,6 +20,15 @@ describe('trimToolResults', () => {
     expect(content(events[1]!)).toBe(long);
   });
 
+  it('never cuts a surrogate pair in half', () => {
+    const emoji = 'a' + '😀'.repeat(2500);
+    const events = [turn(), result(emoji), turn(), turn(), turn()];
+    const content = (trimToolResults(events, false)[1] as StoredEvent & { type: 'tool_result' }).payload.content;
+    expect(content).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+    const [head, tail] = content.split(/\n\[\.\.\. \d+ characters cut \.\.\.\]\n/);
+    expect(content).toContain(`[... ${emoji.length - head!.length - tail!.length} characters cut ...]`);
+  });
+
   it('clears all old results when asked', () => {
     const events = [turn(), result('x'), turn(), turn(), turn()];
     expect(trimToolResults(events, true)[1]).toMatchObject({ payload: { content: CLEARED } });

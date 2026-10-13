@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
 import type { Db } from '../db/index.js';
+import { headOf } from '../text.js';
 import { localDay } from '../time.js';
 import { defineTool, type Tool } from '../tools/registry.js';
 import { appendToDailyNote, DAILY_SECTIONS } from './daily.js';
@@ -47,7 +48,7 @@ export function createMemoryTools(deps: MemoryToolDeps): Tool[] {
       const hits = searchMemory(deps.db, query, limit);
       if (!hits.length) return { content: `no memory matches "${query}"` };
       const blocks = hits.map((hit) => {
-        const text = hit.text.length > HIT_CHARS ? `${hit.text.slice(0, HIT_CHARS)}...` : hit.text;
+        const text = hit.text.length > HIT_CHARS ? `${headOf(hit.text, HIT_CHARS)}...` : hit.text;
         return `${hit.path} lines ${hit.startLine}-${hit.endLine} (${hit.heading}):\n${text}`;
       });
       return { content: blocks.join('\n\n') };

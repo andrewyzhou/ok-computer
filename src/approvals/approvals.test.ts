@@ -163,6 +163,13 @@ describe('the summary that the owner approves', () => {
     expect(describeInput('odd', { to: ['a@x.example', 'b@x.example'], n: 2 })).toBe('odd\nto: ["a@x.example","b@x.example"]\nn: 2');
   });
 
+  it('never cuts a surrogate pair in a long field', () => {
+    // the quote of the json text puts a high half at offset 199.
+    const summary = describeInput('send', { text: `${'x'.repeat(198)}${'😀'.repeat(300)}` });
+    expect(summary).toContain('characters cut');
+    expect(summary).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  });
+
   it('redacts a secret before the cut, so no part of it shows', () => {
     const secret = `key-${'s'.repeat(30)}-tail`;
     registerSecret(secret);

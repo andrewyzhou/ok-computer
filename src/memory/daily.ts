@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { StoredEvent } from '../events/log.js';
+import { headOf } from '../text.js';
 
 export const DAILY_SECTIONS = ['goals', 'done', 'slipped and why', 'notes', 'mood and energy'] as const;
 export type DailySection = (typeof DAILY_SECTIONS)[number];
@@ -23,7 +24,7 @@ export function sessionExcerpt(events: StoredEvent[], time: string): string | un
       return [];
     })
     .slice(-EXCERPT_MESSAGES)
-    .map((line) => (line.length > EXCERPT_CHARS ? `${line.slice(0, EXCERPT_CHARS)}...` : line).replace(/\s+/g, ' '));
+    .map((line) => (line.length > EXCERPT_CHARS ? `${headOf(line, EXCERPT_CHARS)}...` : line).replace(/\s+/g, ' '));
   if (!lines.length) return undefined;
   return [`Session closed with /new at ${time}. The last messages:`, ...lines].join('\n');
 }

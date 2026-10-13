@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { headOf, tailOf } from '../text.js';
 import type { ToolOutput } from './registry.js';
 import { wrapUntrusted } from './untrusted.js';
 
@@ -34,15 +35,10 @@ export function modelView(output: ToolOutput, handle: () => string = newHandle):
   const whole = wrap(raw);
   if (whole.length <= HANDLE_OVER) return { content: whole, truncated: false };
   const id = handle();
-  const head = raw.slice(0, safeEnd(raw, PREVIEW_HEAD));
-  const tail = raw.slice(safeStart(raw, raw.length - PREVIEW_TAIL));
+  const head = headOf(raw, PREVIEW_HEAD);
+  const tail = tailOf(raw, PREVIEW_TAIL);
   const cut = raw.length - head.length - tail.length;
   const preview = `${head}\n[... ${cut} characters cut ...]\n${tail}`;
   const note = `[this result has ${raw.length} characters. only its start and end are above. the full result is ${id}. use result_read with this handle to search or page through it.]`;
   return { content: `${wrap(preview)}\n${note}`, handle: id, truncated: true };
 }
-
-// a cut between the two halves of a surrogate pair breaks the character.
-const isHigh = (code: number) => code >= 0xd800 && code <= 0xdbff;
-const safeEnd = (text: string, end: number) => (isHigh(text.charCodeAt(end - 1)) ? end - 1 : end);
-const safeStart = (text: string, start: number) => (isHigh(text.charCodeAt(start - 1)) ? start + 1 : start);

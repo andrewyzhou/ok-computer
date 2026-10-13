@@ -1,3 +1,5 @@
+import { headOf } from '../text.js';
+
 // outside text must not close the wrapper early, or the tag of the message that holds it. the text after an early
 // closing tag would then look like trusted text, or like a separate system message.
 const CLOSING_TAG = /<\s*\/\s*(untrusted|system_event|note)\b[^>]*>?/gi;
@@ -10,7 +12,7 @@ export function wrapUntrusted(source: string, text: string): string {
   const body = text.replace(CLOSING_TAG, '[removed closing tag]');
   let attribute = source.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   // the cut must not leave a part of an entity.
-  if (attribute.length > SOURCE_LIMIT) attribute = `${attribute.slice(0, SOURCE_LIMIT).replace(/&[a-z]*$/, '')}...`;
+  if (attribute.length > SOURCE_LIMIT) attribute = `${headOf(attribute, SOURCE_LIMIT).replace(/&[a-z]*$/, '')}...`;
   return `<untrusted source="${attribute}">\n${body}\n</untrusted>`;
 }
 

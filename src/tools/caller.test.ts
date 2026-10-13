@@ -43,6 +43,8 @@ function setup(extra: Partial<ToolCallerDeps> = {}) {
     tool('long', 'read', () => ({ content: LONG })),
     tool('email', 'read', () => ({ content: `from: eve\n${LONG}`, untrustedSource: 'gmail:personal' })),
     tool('page', 'read', () => ({ content: 'short page text', untrustedSource: 'web' })),
+    // the source is over the limit of the wrapper, so the wrapper is as long as it can be.
+    tool('fetch', 'read', () => ({ untrustedSource: `https://example.test/${'a'.repeat(200)}` })),
     tool('archive', 'write', () => ({})),
     tool('send', 'external', () => ({})),
     createResultReadTool({ db, blobs }),
@@ -59,7 +61,7 @@ function setup(extra: Partial<ToolCallerDeps> = {}) {
     ...extra,
   });
   for (let i = 0; i < 2; i++) db.prepare("INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt) VALUES ('r1', 'x', '{}', 'x', 'pending', 'x')").run();
-  const allowed = ['echo', 'long', 'email', 'page', 'archive', 'send', 'result_read'];
+  const allowed = ['echo', 'long', 'email', 'page', 'fetch', 'archive', 'send', 'result_read'];
   // the helper appends the result event as the agent loop does, because the taint comes from the event log.
   const call = async (name: string, input: object = {}, runId = 'r1', id = `${name}-call`) => {
     const output = await caller.call({ id, name, input }, { runId, sessionKey: 'main', allowed, signal: new AbortController().signal });
@@ -145,6 +147,33 @@ describe('tool caller', () => {
     expect(found.content.length).toBeLessThanOrEqual(HANDLE_OVER);
     expect(row('read-dense')).toMatchObject({ truncated: 0, resultHandle: null });
     expect((await call('result_read', { handle, query: `${query}a` }, 'r1', 'too-long')).isError).toBe(true);
+  });
+
+  // a lone half of a pair stays in the event log for good, and a provider can refuse each later request with it.
+  it('never cuts a surrogate pair in a page or a search passage of result_read', async () => {
+    const { call, row } = setup();
+    const LONE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+    // one ascii character first puts the end of the default page (3500) on a high half.
+    const text = `x${'😀'.repeat(3000)}Xneedle${'😀'.repeat(1000)}`;
+    await call('echo', { text }, 'r1', 'emoji');
+    const handle = String(row('emoji').resultHandle);
+    let from = 0;
+    let read = '';
+    for (let i = 0; i < 10 && from < text.length; i++) {
+      const page = (await call('result_read', { handle, from }, 'r1', `emoji-page-${i}`)).content;
+      expect(page).not.toMatch(LONE);
+      const [, start, end] = /characters (\d+)-(\d+) of/.exec(page)!;
+      expect(Number(start)).toBe(from);
+      read += text.slice(from, Number(end));
+      from = Number(/use from (\d+) to read on/.exec(page)?.[1] ?? text.length);
+    }
+    expect(read).toBe(text);
+    // a start in the middle of a pair moves to the next whole character.
+    expect((await call('result_read', { handle, from: 2, length: 10 }, 'r1', 'odd')).content).toMatch(/characters 3-13 of/);
+    // the match is at an odd offset, so a passage start 150 code units before it is a low half.
+    const found = await call('result_read', { handle, query: 'needle' }, 'r1', 'emoji-search');
+    expect(found.content).toContain('Xneedle');
+    expect(found.content).not.toMatch(LONE);
   });
 
   // the search runs on the event loop of the live app. it once made one span for each match of each word, which

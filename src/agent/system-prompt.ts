@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadSkills, skillsIndex } from '../skills/skills.js';
+import { headOf } from '../text.js';
 import { formatLocal } from '../time.js';
 
 export const PERSONA_FILES = ['AGENTS.md', 'SOUL.md', 'IDENTITY.md', 'USER.md'] as const;
@@ -62,7 +63,7 @@ export function buildStablePrompt(input: StablePromptInput): string {
       limit === 0
         ? `[this file was left out because the workspace files are over ${TOTAL_CAP} characters. Read ${file.path}.]`
         : text.length > limit
-          ? `${text.slice(0, limit)}\n\n[this file was cut at ${limit} characters. Read ${file.path} for the full text.]`
+          ? `${headOf(text, limit)}\n\n[this file was cut at ${limit} characters. Read ${file.path} for the full text.]`
           : text;
     sections.push(`## ${file.name}\n\n${body}`);
   }

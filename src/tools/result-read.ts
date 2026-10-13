@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Db } from '../db/index.js';
 import type { BlobStore } from '../observability/blobs.js';
+import { safeEnd, safeStart } from '../text.js';
 import { defineTool } from './registry.js';
 
 // the limit keeps a page under the handle limit, so a page never gets a handle of its own. the output also repeats
@@ -34,10 +35,11 @@ export function createResultReadTool(deps: { db: Db; blobs: BlobStore }) {
 }
 
 function page(text: string, handle: string, from: number, length: number): string {
-  const end = Math.min(text.length, from + length);
   if (from >= text.length) return `${handle} has only ${text.length} characters`;
+  const start = safeStart(text, from);
+  const end = safeEnd(text, Math.min(text.length, start + length));
   const more = end < text.length ? `\n[more text follows. use from ${end} to read on.]` : '';
-  return `${handle} characters ${from}-${end} of ${text.length}:\n${text.slice(from, end)}${more}`;
+  return `${handle} characters ${start}-${end} of ${text.length}:\n${text.slice(start, end)}${more}`;
 }
 
 // each passage shows its offset, so the model can read around it with from and length. the search is one pass in
@@ -61,7 +63,7 @@ function search(text: string, handle: string, query: string): string {
       full = true;
       return;
     }
-    passages.push(passage.slice(0, READ_LIMIT));
+    passages.push(passage.slice(0, safeEnd(passage, READ_LIMIT)));
     // the separator between two passages counts too.
     used += passage.length + 2;
     if (used >= READ_LIMIT) full = true;
@@ -73,8 +75,8 @@ function search(text: string, handle: string, query: string): string {
       stopped = true;
       break;
     }
-    const start = Math.max(0, match.index - AROUND);
-    const end = Math.min(text.length, match.index + match[0].length + AROUND);
+    const start = safeStart(text, Math.max(0, match.index - AROUND));
+    const end = safeEnd(text, Math.min(text.length, match.index + match[0].length + AROUND));
     // a span longer than the limit is cut anyway, so a dense match closes it early.
     if (span && start <= span[1] && span[1] - span[0] < READ_LIMIT) {
       span[1] = Math.max(span[1], end);

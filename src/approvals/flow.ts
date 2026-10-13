@@ -5,6 +5,7 @@ import { redactedJson } from '../observability/redact.js';
 import type { TaintSource } from '../policy/policy.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
 import type { RunQueue } from '../sessions/queue.js';
+import { headOf, tailOf } from '../text.js';
 import { localDay, localTime, type Clock } from '../time.js';
 import type { RequestApproval, ToolCaller } from '../tools/caller.js';
 import type { ToolOutput } from '../tools/registry.js';
@@ -47,8 +48,9 @@ export function describeInput(toolName: string, input: unknown): string {
     const name = /^[\w.-]+$/.test(key) ? key : oneLine(JSON.stringify(key));
     const text = oneLine(redactedJson(value) ?? String(value));
     if (text.length <= FIELD_HEAD + FIELD_TAIL) return `${name}: ${text}`;
-    const cut = text.length - FIELD_HEAD - FIELD_TAIL;
-    return `${name}: ${text.slice(0, FIELD_HEAD)} [... ${cut} characters cut, the dashboard shows the full input ...] ${text.slice(-FIELD_TAIL)}`;
+    const head = headOf(text, FIELD_HEAD);
+    const tail = tailOf(text, FIELD_TAIL);
+    return `${name}: ${head} [... ${text.length - head.length - tail.length} characters cut, the dashboard shows the full input ...] ${tail}`;
   });
   return [toolName, ...lines].join('\n');
 }
@@ -125,7 +127,7 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
           : [];
         note(`The owner approved #${id} (${approval.summary}). ${what} Result:\n${output.content}`, taint);
         const head = !started ? 'The tool did not run' : output.isError ? 'The tool failed' : 'Result';
-        return `Approved #${id}. ${head}: ${output.content.slice(0, SUMMARY_LIMIT)}`;
+        return `Approved #${id}. ${head}: ${headOf(output.content, SUMMARY_LIMIT)}`;
       });
     },
   };

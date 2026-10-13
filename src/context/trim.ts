@@ -1,4 +1,5 @@
 import type { StoredEvent } from '../events/log.js';
+import { headOf, tailOf } from '../text.js';
 import { handleIn } from '../tools/results.js';
 
 export const KEEP_TURNS = 3;
@@ -28,8 +29,9 @@ function cleared(content: string): string {
 
 function cut(content: string): string {
   if (content.length <= CUT_OVER) return content;
-  const removed = content.length - 2 * CUT_KEEP;
-  return `${content.slice(0, CUT_KEEP)}\n[... ${removed} characters cut ...]\n${content.slice(-CUT_KEEP)}`;
+  const head = headOf(content, CUT_KEEP);
+  const tail = tailOf(content, CUT_KEEP);
+  return `${head}\n[... ${content.length - head.length - tail.length} characters cut ...]\n${tail}`;
 }
 
 // a thinking block is bound to the full conversation that produced it. after a compaction that conversation is
