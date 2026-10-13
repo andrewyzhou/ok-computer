@@ -92,6 +92,24 @@ describe('heartbeat', () => {
     await t.app.stop();
   });
 
+  // the caller fails open on the trace. the heartbeat read its answer from tool_calls, so one lost row dropped the
+  // notification while the job said completed.
+  it('sends the notification when the trace row of heartbeat_respond is lost', async () => {
+    const t = createTestApp(
+      [toolStep({ id: 'h1', name: 'heartbeat_respond', input: { notify: true, text: 'Your essay ETA passed.' } }), textStep('NO_REPLY')],
+      { start: pdt('09:00'), config: { heartbeat: { every: '30m' } } },
+    );
+    setChecklist(t.db, '- goals with a passed eta', new Date());
+    await t.app.start();
+    t.db.exec(`CREATE TRIGGER lost_row BEFORE INSERT ON tool_calls WHEN NEW.name = 'heartbeat_respond'
+               BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END`);
+    await t.at(pdt('09:30'));
+    expect(t.rows('SELECT COUNT(*) AS n FROM tool_calls')).toEqual([{ n: 0 }]);
+    expect(t.printed()).toContain('okc> Your essay ETA passed.');
+    expect(heartbeatRuns(t).map((run) => run.status)).toEqual(['completed']);
+    await t.app.stop();
+  });
+
   it('turns the heartbeat off with an interval of 0', async () => {
     const t = createTestApp([], { start: pdt('09:00'), config: { heartbeat: { every: '0' } } });
     await t.app.start();

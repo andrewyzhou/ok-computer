@@ -6,6 +6,7 @@ import type { RunInput, RunResult } from '../agent/loop.js';
 import type { Config } from '../config/schema.js';
 import type { Db } from '../db/index.js';
 import { getSetting, setSetting } from '../db/settings.js';
+import { succeededCalls } from '../events/log.js';
 import { dailyCron } from '../goals/routine.js';
 import { goalStats, listGoals, type Goal, type GoalStats } from '../goals/store.js';
 import type { JobResult } from '../scheduler/scheduler.js';
@@ -209,9 +210,8 @@ export function createConsolidation(deps: ConsolidationDeps): (automation: Autom
       }),
     );
     if (result.status !== 'completed') return { status: 'failed', runId, error: result.error ?? result.status };
-    const saved = db
-      .prepare("SELECT 1 FROM tool_calls WHERE runId = ? AND name = 'consolidation_save' AND isError = 0 LIMIT 1")
-      .get(runId);
+    // the event log and not the trace tells whether the save worked. a lost trace row must not start a second run.
+    const saved = succeededCalls(db, sessionKey, runId, 'consolidation_save').length > 0;
     return saved ? { status: 'completed', runId } : { status: 'failed', runId, error: 'the model did not save the consolidation' };
   };
 }

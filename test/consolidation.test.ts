@@ -85,6 +85,23 @@ describe('nightly consolidation', () => {
     await t.app.stop();
   });
 
+  // a lost trace row turned a saved consolidation into a failure, and the retry consolidated a second time.
+  it('completes the job when the trace row of consolidation_save is lost', async () => {
+    const t = setup([save({}), textStep('NO_REPLY')]);
+    await t.app.start();
+    t.db.exec(`CREATE TRIGGER lost_row BEFORE INSERT ON tool_calls WHEN NEW.name = 'consolidation_save'
+               BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END`);
+    await t.at(pdt('03:00', '2026-10-13').toISOString());
+    expect(
+      t.rows(
+        `SELECT r.status, r.error FROM automation_runs r JOIN automations a ON a.id = r.automationId
+         WHERE json_extract(a.payload, '$.type') = 'consolidation'`,
+      ),
+    ).toEqual([{ status: 'completed', error: null }]);
+    expect(readFileSync(join(t.memoryDir, 'consolidation-log.md'), 'utf8')).toContain('one new fact');
+    await t.app.stop();
+  });
+
   it('fails the job when the model does not save, and changes nothing', async () => {
     const t = setup([textStep('I am done.')]);
     await t.app.start();

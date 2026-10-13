@@ -63,6 +63,21 @@ export function listEvents(db: Db, sessionKey: string): StoredEvent[] {
     .map(toEvent);
 }
 
+// succeededCalls gives the input of each call of the named tool in a run whose result is not an error, in order. a job
+// that acts on what the model gave reads it here and not from tool_calls: the caller fails open on the trace, but the
+// run cannot go on without these events. a provider can use the same call id again in a later reply, so each result
+// takes the input of the newest call with its id.
+export function succeededCalls(db: Db, sessionKey: string, runId: string, name: string): unknown[] {
+  const inputs = new Map<string, unknown>();
+  const found: unknown[] = [];
+  for (const event of listEvents(db, sessionKey)) {
+    if (event.runId !== runId) continue;
+    if (event.type === 'assistant_message') for (const call of event.payload.toolCalls) inputs.set(call.id, call.input);
+    if (event.type === 'tool_result' && event.payload.name === name && !event.payload.isError) found.push(inputs.get(event.payload.toolCallId));
+  }
+  return found;
+}
+
 function toEvent(row: Record<string, unknown> | undefined): StoredEvent {
   if (!row) throw new Error('event row is missing');
   return {

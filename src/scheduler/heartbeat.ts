@@ -4,7 +4,7 @@ import type { RunInput, RunResult } from '../agent/loop.js';
 import { durationMs, type Config } from '../config/schema.js';
 import type { Db } from '../db/index.js';
 import { getSetting, setSetting } from '../db/settings.js';
-import { appendEvent } from '../events/log.js';
+import { appendEvent, succeededCalls } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
 import type { TaintSource } from '../policy/policy.js';
 import { sessionTaint } from '../policy/store.js';
@@ -173,11 +173,8 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
     );
     if (result.status !== 'completed') return { status: 'failed', runId, error: result.error ?? result.status };
 
-    const answer = responses(
-      db,
-      "SELECT input FROM tool_calls WHERE runId = ? AND name = 'heartbeat_respond' AND isError = 0 ORDER BY id DESC LIMIT 1",
-      runId,
-    )[0];
+    // the answer comes from the event log, because one failed trace write must not drop the owner's notification.
+    const answer = succeededCalls(db, sessionKey, runId, 'heartbeat_respond').at(-1) as Respond | undefined;
     if (answer?.notify && answer.text) {
       await owner.send(answer.text);
       // the notification can repeat untrusted content that the heartbeat read, so it carries that taint, and its text
