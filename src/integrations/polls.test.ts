@@ -52,5 +52,12 @@ describe('syncPolls', () => {
     // slack-home loses its poll, and its automation is turned off.
     syncPolls(db, parse(entry('slack-work', true), entry('slack-home', false)), now, 'UTC');
     expect(polls().find((poll) => poll.name.includes('slack-home'))!.enabled).toBe(false);
+
+    // slack-home gets its poll back, and its automation is on again. slack-work, which the owner turned off, stays off.
+    syncPolls(db, parse(entry('slack-work', true), entry('slack-home', true)), now, 'UTC');
+    expect(listAutomations(db).find((automation) => automation.name.includes('slack-home'))).toMatchObject({ enabled: true, nextRunAt: expect.any(String) });
+    expect(polls().find((poll) => poll.name.includes('slack-work'))!.enabled).toBe(false);
+    syncPolls(db, parse(entry('slack-work', true), entry('slack-home', true)), now, 'UTC');
+    expect(polls().map((poll) => poll.enabled)).toEqual([true, false]);
   });
 });

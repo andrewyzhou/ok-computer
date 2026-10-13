@@ -61,7 +61,7 @@ Add one entry to `okc.integrations.json` for each workspace, each with its own `
 
 - `scopes` must be the same list as the User Token Scopes of the app. The app asks Slack for exactly this list.
 - `slack_send_message` must stay `external`. Then you approve each send, and the card shows the channel and the exact text. Do not add `slack_schedule_message`, `slack_send_message_draft` or the canvas tools to `allow`.
-- `poll: "slack-dms"` needs `slack_search_public_and_private` and `slack_read_user_profile` in `allow`. The app refuses the file without them.
+- `poll: "slack-dms"` needs `slack_search_public_and_private` and `slack_read_user_profile` in `allow`. The app refuses the file without them. To stop the poll, turn it off on the **Automations** page; if you remove `poll` from the entry instead, the app turns the poll off at its next start, and turns it on again at the start after you add `poll` back.
 - Slack text is untrusted. After the agent reads Slack, every `external` call asks you, also when a rule in `okc.policy.json` allows it.
 
 Run `okc restart`.
