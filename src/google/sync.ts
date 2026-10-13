@@ -320,9 +320,16 @@ export function createSync(deps: SyncDeps): Sync {
       }
       const error = err instanceof Error ? err : new Error(String(err));
       const now = clock().toISOString();
+      // a parked account keeps the reason of its park. a refused client parks every account while their polls run, and
+      // the next request of such a poll fails with "sign in again". that text must not replace the reason, because a
+      // new client file lifts only the park of the client.
       const row = db
-        .prepare('UPDATE google_accounts SET failures = failures + 1, lastError = ?, lastErrorAt = ?, updatedAt = ? WHERE alias = ? RETURNING failures')
-        .get(error.message, now, now, alias);
+        .prepare(
+          `UPDATE google_accounts SET failures = failures + 1, updatedAt = ?,
+             lastError = CASE WHEN status = 'ok' THEN ? ELSE lastError END, lastErrorAt = CASE WHEN status = 'ok' THEN ? ELSE lastErrorAt END
+           WHERE alias = ? RETURNING failures`,
+        )
+        .get(now, error.message, now, alias);
       logger.warn('google poll failed', { alias, err: error });
       return { alias, ok: false, error: error.message, failures: Number(row?.failures ?? 0), ...(events ? { events } : {}), ...(resync ? { resync } : {}) };
     }

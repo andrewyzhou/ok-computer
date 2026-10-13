@@ -307,6 +307,50 @@ describe('token health against the token endpoint', () => {
     ]);
     expect((await poll()).every((each) => each.ok)).toBe(true);
   });
+
+  // the accounts poll at the same time. school holds an access token and is still at work when the refresh of personal
+  // finds the refused client, so the next request of school meets the park.
+  it('lifts the park of an account whose poll ran while google refused the client', async () => {
+    h = await createGoogleHarness({ accounts: ['personal', 'school'] });
+    h.signedIn('personal');
+    h.signedIn('school');
+    await h.accounts.run('school', (apis) => apis.gmail.users.getProfile({ userId: 'me' }));
+    h.fake.fault({ route: 'POST /token', status: 401, body: { error: 'invalid_client', error_description: 'Unauthorized' } });
+    h.fake.fault({ route: 'GET /calendar/v3/calendars/primary/events', delayMs: 300 });
+    await poll();
+    expect(h.alerts).toHaveLength(1);
+    expect(h.rows('SELECT lastError FROM google_accounts ORDER BY alias')).toEqual([
+      { lastError: 'google refused the oauth client: Unauthorized' },
+      { lastError: 'google refused the oauth client: Unauthorized' },
+    ]);
+
+    h.fake.clearFaults();
+    expect(await h.accounts.saveClient({ installed: { client_id: CLIENT_ID, client_secret: CLIENT_SECRET } })).toEqual({ saved: true });
+    expect(h.rows('SELECT status, alertedAt, failures FROM google_accounts ORDER BY alias')).toEqual([
+      { status: 'ok', alertedAt: null, failures: 0 },
+      { status: 'ok', alertedAt: null, failures: 0 },
+    ]);
+    expect((await poll()).map((each) => [each.alias, each.ok])).toEqual([
+      ['personal', true],
+      ['school', true],
+    ]);
+  });
+
+  // google answers unauthorized_client for a refresh token of another client. a new client file cannot fix it.
+  it('parks only the account whose token another client issued, and asks for a new sign-in', async () => {
+    h = await createGoogleHarness({ accounts: ['personal', 'school'] });
+    h.signedIn('personal');
+    h.signedIn('school');
+    await h.accounts.run('school', (apis) => apis.gmail.users.getProfile({ userId: 'me' }));
+    h.fake.fault({ route: 'POST /token', status: 401, body: { error: 'unauthorized_client', error_description: 'Unauthorized' }, times: 1 });
+    await poll();
+    expect(h.rows('SELECT alias, status FROM google_accounts ORDER BY alias')).toEqual([
+      { alias: 'personal', status: 'needs_auth' },
+      { alias: 'school', status: 'ok' },
+    ]);
+    expect(h.alerts).toHaveLength(1);
+    expect(h.alerts[0]!.text).toContain('Google stopped accepting the sign-in of the personal account');
+  });
 });
 
 describe('calendar sync', () => {

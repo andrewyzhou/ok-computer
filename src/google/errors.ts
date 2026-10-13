@@ -1,7 +1,7 @@
 import { redact } from '../observability/redact.js';
 import { headOf } from '../text.js';
 
-// auth: google refused the sign-in (invalid_grant, or a 401 after a fresh token). only a new sign-in helps.
+// auth: google refused the sign-in (invalid_grant, unauthorized_client, or a 401 after a fresh token). only a new sign-in helps.
 // client: google refused the oauth client (invalid_client). every account needs the owner to fix the client.
 // scope: the token lacks a permission. only a new sign-in with the box ticked helps.
 // not_found: 404. gone: 410, or a gmail history id that is too old. rate: 429 or a rate limit 403.
@@ -63,9 +63,11 @@ export function toGoogleError(err: unknown): GoogleError {
 
   // a failed token request comes before the api request, so the api request never left.
   const tokenCall = /\/token(\?|$)/.test(String(shape.config?.url ?? ''));
-  // the token endpoint answers invalid_grant for a revoked, expired or replaced refresh token.
-  if (data.error === 'invalid_grant') return new GoogleError('auth', text('sign-in refused: '), status, false);
-  if (data.error === 'invalid_client' || data.error === 'unauthorized_client') return new GoogleError('client', text(CLIENT_REFUSED), status, false);
+  // the token endpoint answers invalid_grant for a revoked, expired or replaced refresh token, and unauthorized_client
+  // for a refresh token that another client issued. both are faults of one token, and only a new sign-in of that
+  // account helps. a new client file cannot help, so they do not park every account.
+  if (data.error === 'invalid_grant' || data.error === 'unauthorized_client') return new GoogleError('auth', text('sign-in refused: '), status, false);
+  if (data.error === 'invalid_client') return new GoogleError('client', text(CLIENT_REFUSED), status, false);
   if (tokenCall) return new GoogleError('transient', text(`the token request failed${status ? ` with ${status}` : ''}: `), status, false);
   if (status === undefined) {
     const code = String(shape.code ?? (shape.cause as { code?: unknown } | undefined)?.code ?? '');

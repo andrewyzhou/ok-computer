@@ -316,7 +316,7 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
       }
       cached.clear();
       // the accounts that the refused client stopped work again. their refresh tokens are still valid.
-      db.prepare("UPDATE google_accounts SET status = 'ok', alertedAt = NULL, lastError = NULL, updatedAt = ? WHERE status = 'needs_auth' AND lastError LIKE ?").run(now(), `${CLIENT_REFUSED}%`);
+      db.prepare("UPDATE google_accounts SET status = 'ok', alertedAt = NULL, lastError = NULL, lastErrorAt = NULL, failures = 0, updatedAt = ? WHERE status = 'needs_auth' AND lastError LIKE ?").run(now(), `${CLIENT_REFUSED}%`);
       return { saved: true };
     },
     async beginSignIn(alias) {
