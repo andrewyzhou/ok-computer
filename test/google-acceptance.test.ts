@@ -98,8 +98,8 @@ describe('google acceptance', () => {
     const link = new URL(begun.url);
     expect(await (await fetch(`${link.searchParams.get('redirect_uri')}?code=${encodeURIComponent(fake.code)}&state=${link.searchParams.get('state')}`)).text()).toContain('Signed in as school@example.com');
     // the first token requests fail, and the server quotes the request body with the refresh token and the client
-    // secret in it. the auth library retries a token post three times, so the fault outlasts the retries.
-    fake.fault({ route: 'POST /token', status: 500, times: 8, echoAuth: true });
+    // secret in it. the token client makes no retries, so one fault for each account fails the first poll.
+    fake.fault({ route: 'POST /token', status: 500, times: 2, echoAuth: true });
     await t.app.start();
 
     // the first poll fails at the token endpoint. the mail after the sign-in is news.
@@ -156,7 +156,7 @@ describe('google acceptance', () => {
     expect(t.rows('SELECT status FROM approvals WHERE id = 2')).toEqual([{ status: 'approved' }]);
     const [refused] = t.rows("SELECT output FROM tool_calls WHERE toolCallId = 'approval-2'");
     expect(String(refused!.output)).toContain('the message is from evil@y.example, not from \\"news@shop.example\\"');
-    expect(fake.requests.slice(before).map((each) => each.path)).toEqual(['/gmail/v1/users/me/messages/s1?format=metadata&metadataHeaders=From&metadataHeaders=List-Unsubscribe&metadataHeaders=List-Unsubscribe-Post&metadataHeaders=Authentication-Results']);
+    expect(fake.requests.slice(before).map((each) => each.path)).toEqual(['/gmail/v1/users/me/messages/s1?format=metadata&metadataHeaders=From&metadataHeaders=List-Unsubscribe&metadataHeaders=List-Unsubscribe-Post&metadataHeaders=Authentication-Results&metadataHeaders=DKIM-Signature']);
 
     await t.app.stop();
 
