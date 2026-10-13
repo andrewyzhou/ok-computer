@@ -239,6 +239,12 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
   // a reviewer call goes inside the tool call that it checked, not among the turns of the agent.
   const reviews = new Map([...decisions.values()].flatMap((decision) => (decision.reviewerModelCallId === null ? [] : [[decision.reviewerModelCallId, decision] as const])));
   const links = subagentLinks(db, 'subagent_runs.parentRunId = ?', id);
+  // a delegate call has no tool_calls row while its child runs, so its placeholder finds its decision by the call id.
+  // the decision then shows its reviewer call, which is not a turn of the agent.
+  const decisionOf = (toolCallId: string) => {
+    const row = db.prepare('SELECT id FROM policy_decisions WHERE runId = ? AND toolCallId = ? ORDER BY id DESC LIMIT 1').get(id, toolCallId);
+    return row ? (decisions.get(Number(row.id)) ?? null) : null;
+  };
   const placed = new Set<number>();
   const pending = new Set<SubagentLink>();
   const timeline: TimelineItem[] = [];
@@ -270,7 +276,7 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
       const link = links.find((each) => each.toolCallId === requested.id);
       const live = run.status === 'running' && (link?.status === null || link?.status === 'running');
       if (link) {
-        asked.push(pendingDelegate(id, requested, link, -1 - links.indexOf(link), live));
+        asked.push(pendingDelegate(id, requested, link, -1 - links.indexOf(link), live, decisionOf(requested.id)));
         pending.add(link);
       }
     }
@@ -287,7 +293,7 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
       const approval = db.prepare('SELECT input FROM approvals WHERE id = ?').get(Number(link.toolCallId.replace(/^approval-/, '')));
       const requested = { id: link.toolCallId, input: approval ? JSON.parse(String(approval.input)) : null };
       const live = link.status === null || link.status === 'running';
-      timeline.push({ kind: 'tool', call: pendingDelegate(id, requested, link, -1 - links.indexOf(link), live) });
+      timeline.push({ kind: 'tool', call: pendingDelegate(id, requested, link, -1 - links.indexOf(link), live, decisionOf(requested.id)) });
     }
   }
   const events = db.prepare('SELECT * FROM events WHERE runId = ? ORDER BY id').all(id).map(toEventRow);
@@ -295,7 +301,7 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
 }
 
 // the call has no tool_calls row yet, so its id is negative and unique in the run.
-function pendingDelegate(runId: string, requested: { id: string; input: unknown }, link: SubagentLink, rowId: number, live: boolean): ToolCallRow {
+function pendingDelegate(runId: string, requested: { id: string; input: unknown }, link: SubagentLink, rowId: number, live: boolean, policy: PolicyDecisionRow | null): ToolCallRow {
   return {
     id: rowId,
     runId,
@@ -314,7 +320,7 @@ function pendingDelegate(runId: string, requested: { id: string; input: unknown 
     resultHandle: null,
     rawResultBlob: null,
     outcome: live ? 'running' : 'interrupted',
-    policy: null,
+    policy,
     serverId: null,
     mcpMessages: [],
     child: link,

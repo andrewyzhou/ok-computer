@@ -412,6 +412,24 @@ describe('the run page of a parent and a reviewer', () => {
     expect(done).toMatchObject([{ name: 'delegate', outcome: 'ran', child: { childRunId, status: 'completed' } }]);
   });
 
+  it('shows the review of a delegate call while its child runs (verification round 4)', async () => {
+    const hang: FakeStep = (_call, signal) =>
+      new Promise((_resolve, reject) => {
+        if (signal?.aborted) reject(new ModelError('aborted', 'aborted'));
+        signal?.addEventListener('abort', () => reject(new ModelError('aborted', 'aborted')));
+      });
+    const t = await setup([mail('r1', 'read_inbox'), delegate('d1', `Open ${TRACK} and say where the order is.`), hang], [verdict('allow', 'a link from the mail')]);
+    void t.say('where is my order?');
+    await expect.poll(() => t.rows("SELECT status FROM runs WHERE trigger = 'subagent'")).toEqual([{ status: 'running' }]);
+    const reviewed = decision(t, 'd1');
+    expect(reviewed).toMatchObject({ rule: 'exfiltration', reviewerVerdict: 'allow' });
+    const calls = getRunDetail(t.db, reviewed.runId)!.timeline.flatMap((item) => (item.kind === 'model' ? item.tools : [item.call]));
+    expect(calls.find((call) => call.toolCallId === 'd1')).toMatchObject({
+      outcome: 'running',
+      policy: { rule: 'exfiltration', reviewerVerdict: 'allow', reviewerCall: { id: reviewed.reviewerModelCallId } },
+    });
+  });
+
   // verification round 3: the delegate review fails, so the owner gets a card, and approves it after a new message.
   it('the reviewer of an approved child reads the message of the run that wrote the task, not a later one', async () => {
     const t = await setup(
