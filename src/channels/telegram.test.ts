@@ -201,9 +201,15 @@ describe('telegram formats', () => {
       parse_mode: 'HTML',
       text: 'Approval needed (#1): a &lt;b&gt;\n<blockquote expandable>{\n  "to": "&lt;x@y.example&gt;"\n}</blockquote>',
     });
-    const html = cardHtml('Approval needed', 'z'.repeat(10_000))!;
+    // a recipient at the end of a long input stays visible.
+    const long = JSON.stringify({ body: 'z'.repeat(10_000), to: 'eve@evil.example' }, null, 2);
+    const html = cardHtml('Approval needed', long)!;
     expect(htmlToPlain(html).length).toBeLessThanOrEqual(TELEGRAM_LIMIT);
-    expect(html).toContain('[... cut, the dashboard shows the full input]</blockquote>');
+    expect(html).toContain('"to": "eve@evil.example"\n}</blockquote>');
+    const [head, tail] = htmlToPlain(html).split(/\n\[\.\.\. \d+ characters cut, the dashboard shows the full input \.\.\.\]\n/);
+    expect(head!.length / (head!.length + tail!.length)).toBeCloseTo(0.7, 1);
+    const cut = Number(/(\d+) characters cut/.exec(html)![1]);
+    expect(head!.length - 'Approval needed\n'.length + tail!.length + cut).toBe(long.length);
 
     fake.refuse((c) => (c.payload.parse_mode === 'HTML' ? 400 : false));
     await channel.send({ chatId: '777', text: 'Card', details: '{ "a": 1 }' });

@@ -291,7 +291,11 @@ describe('telegram v2 acceptance', () => {
     expect(t.rows('SELECT status FROM approvals')).toEqual([{ status: 'pending' }]);
     expect(() => readFileSync(policyPath, 'utf8')).toThrow();
 
-    press(t, 'approval:1:always-yes');
+    // the yes button carries an expiry. the owner presses the button that the card shows.
+    const confirm = of(t, 'sendMessage').find((m) => String(m.text).startsWith('Always allow notes__add_note?'))!;
+    const yes = (confirm.reply_markup as { inline_keyboard: Array<Array<{ callback_data: string }>> }).inline_keyboard[0]![0]!.callback_data;
+    expect(yes).toMatch(/^approval:1:always-yes:[0-9a-z]+\.[\w-]{16}$/);
+    t.telegram.push(rawButtonUpdate(OWNER, yes));
     await until(() => of(t, 'sendMessage').some((m) => String(m.text).startsWith('notes__add_note is now always allowed.')));
     await t.app.idle();
     expect(JSON.parse(readFileSync(policyPath, 'utf8'))).toEqual({

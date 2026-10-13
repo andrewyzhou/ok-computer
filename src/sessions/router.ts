@@ -46,7 +46,7 @@ export interface RouterDeps {
   // a typed /approve gives the stored card with its buttons. only a button or the dashboard approves.
   approvalCard?: (id: number) => Card;
   // "always allow" asks the owner to confirm, then adds a rule and approves.
-  always?: { confirm(id: number): Card; apply(id: number): Promise<string> };
+  always?: { confirm(id: number): Card; apply(id: number, expires: Date): Promise<string> };
   // commands such as /status answer in code. undefined means that the text is not such a command.
   commands?: (text: string, state: RunState) => Card[] | undefined;
   // the router calls this on /new before the reset event goes into the log.
@@ -113,8 +113,9 @@ export function createRouter(deps: RouterDeps): Router {
         if (pressed && deps.approvals) await resolve(deps.approvals, pressed.id, pressed.decision, 'button');
         else if (always && deps.always) {
           const { confirm, apply } = deps.always;
-          if (!always.confirmed) await send(confirm(always.id));
-          else await resolve(async (id) => apply(id), always.id, 'approve', 'button');
+          const { expires } = always;
+          if (!expires) await send(confirm(always.id));
+          else await resolve(async (id) => apply(id, expires), always.id, 'approve', 'button');
         } else logger.warn('unknown button', { data: message.button });
         return;
       }

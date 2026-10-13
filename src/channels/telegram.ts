@@ -37,7 +37,8 @@ const DRAFT_WAIT_MS = 2000;
 const DRAFT_FAILURES = 3;
 // the updates that the bot reads. telegram keeps the list of the last call, so the bot always names it.
 export const ALLOWED_UPDATES = ['message', 'callback_query', 'stopped_message_generation'] as const;
-const CUT_NOTE = '\n[... cut, the dashboard shows the full input]';
+// the room for the note that says how many characters of the details were cut.
+const CUT_NOTE_ROOM = 80;
 
 // a long reply breaks at a paragraph, else at a line, else at a word, so each part stays readable.
 export function splitMessage(text: string, limit = TELEGRAM_LIMIT): string[] {
@@ -56,11 +57,18 @@ export function splitMessage(text: string, limit = TELEGRAM_LIMIT): string[] {
 }
 
 // the card shows its text, and the details in a quote that the owner opens. the limit counts the text without the
-// tags. a card with a long text goes out as plain parts.
+// tags. a card with a long text goes out as plain parts. long details keep their start and their end, because a
+// field at the end, for example a recipient, matters as much as a field at the start.
 export function cardHtml(text: string, details: string): string | undefined {
   const room = TELEGRAM_LIMIT - text.length - 1;
   if (room < 300) return undefined;
-  const shown = details.length <= room ? details : headOf(details, room - CUT_NOTE.length) + CUT_NOTE;
+  let shown = details;
+  if (details.length > room) {
+    const keep = room - CUT_NOTE_ROOM;
+    const head = headOf(details, Math.floor(keep * 0.7));
+    const tail = tailOf(details, keep - head.length);
+    shown = `${head}\n[... ${details.length - head.length - tail.length} characters cut, the dashboard shows the full input ...]\n${tail}`;
+  }
   return `${escapeHtml(text)}\n<blockquote expandable>${escapeHtml(shown)}</blockquote>`;
 }
 

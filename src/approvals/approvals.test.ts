@@ -11,7 +11,7 @@ import { createToolRegistry, defineTool } from '../tools/registry.js';
 import { createApprovalFlow, describeInput } from './flow.js';
 import { expireApprovals, getApproval, parseApprovalButton } from './store.js';
 
-function setup(options: { timeoutMs?: number; gate?: Promise<void> } = {}) {
+function setup(options: { timeoutMs?: number; gate?: Promise<void>; alwaysAllow?: boolean } = {}) {
   const db = openDb(':memory:');
   db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r1', 'main', 'message', 'main', 'completed', 'x')").run();
   let now = new Date('2026-10-13T03:00:00Z');
@@ -48,6 +48,7 @@ function setup(options: { timeoutMs?: number; gate?: Promise<void> } = {}) {
     signal: new AbortController().signal,
     timeoutMs: options.timeoutMs ?? 60_000,
     timeZone: 'America/Los_Angeles',
+    ...(options.alwaysAllow ? { alwaysAllow: true } : {}),
   });
   const { caller } = createTestCaller(db, createToolRegistry([sendEmail]), clock, { requestApproval: flow.request });
   const ctx = { runId: 'r1', sessionKey: 'main', allowed: ['send_email'], signal: new AbortController().signal };
@@ -56,6 +57,23 @@ function setup(options: { timeoutMs?: number; gate?: Promise<void> } = {}) {
 }
 
 describe('approvals', () => {
+  // an allow rule for a write tool would also hold in a session that read outside content.
+  it('offers "always allow" only for an external tool without needsApproval', async () => {
+    const { flow, sent } = setup({ alwaysAllow: true });
+    const ctx = { runId: 'r1', sessionKey: 'main', timeZone: 'UTC', clock: () => new Date(), signal: new AbortController().signal };
+    const why = { decisionId: 0, reason: 'r', taint: [] };
+    const tool = (risk: 'write' | 'external', needsApproval = false) =>
+      defineTool({ name: `${risk}_tool`, description: 'd', input: z.object({}), risk, needsApproval, run: async () => ({ content: 'ok' }) });
+    await flow.request(tool('external'), {}, ctx, why);
+    await flow.request(tool('write'), {}, ctx, why);
+    await flow.request(tool('external', true), {}, ctx, why);
+    expect(sent.map((each) => each.buttons!.flat().map((button) => button.text))).toEqual([
+      ['Approve', 'Deny', 'Always allow…'],
+      ['Approve', 'Deny'],
+      ['Approve', 'Deny'],
+    ]);
+  });
+
   it('pauses an external tool and asks the owner with approve and deny buttons', async () => {
     const { db, sent, delivered, request } = setup();
     const output = await request();

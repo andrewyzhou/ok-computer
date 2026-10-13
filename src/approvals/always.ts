@@ -8,11 +8,17 @@ import { localDay, type Clock } from '../time.js';
 import { approvalButtonData, getApproval } from './store.js';
 import type { ApprovalFlow } from './flow.js';
 
-export const alwaysButtonData = (id: number, confirmed: boolean) => `approval:${id}:${confirmed ? 'always-yes' : 'always'}`;
+// a confirmation is valid for this time. an old "yes" in the chat history must not add a rule days later.
+const CONFIRM_MS = 10 * 60_000;
 
-export function parseAlwaysButton(data: string): { id: number; confirmed: boolean } | undefined {
-  const match = /^approval:(\d+):always(-yes)?$/.exec(data);
-  return match ? { id: Number(match[1]), confirmed: match[2] !== undefined } : undefined;
+// the "yes" button carries its expiry in seconds, in base 36, so the data stays short.
+export const alwaysButtonData = (id: number, expires?: Date) =>
+  expires ? `approval:${id}:always-yes:${Math.floor(expires.getTime() / 1000).toString(36)}` : `approval:${id}:always`;
+
+export function parseAlwaysButton(data: string): { id: number; expires?: Date } | undefined {
+  const match = /^approval:(\d+):always(?:-yes:([0-9a-z]{1,10}))?$/.exec(data);
+  if (!match) return undefined;
+  return { id: Number(match[1]), ...(match[2] ? { expires: new Date(parseInt(match[2], 36) * 1000) } : {}) };
 }
 
 export interface AlwaysAllowDeps {
@@ -32,7 +38,7 @@ export function createAlwaysAllow(deps: AlwaysAllowDeps) {
   const pending = (id: number) => {
     const approval = getApproval(deps.db, id);
     if (!approval) return { error: `No approval has the id ${id}.` };
-    if (approval.status !== 'pending') return { error: `Approval #${id} is ${approval.status}.` };
+    if (approval.status !== 'pending') return { error: `Approval #${id} is already ${approval.status}.` };
     return { approval };
   };
 
@@ -40,13 +46,16 @@ export function createAlwaysAllow(deps: AlwaysAllowDeps) {
     confirm(id: number): Card {
       const { approval, error } = pending(id);
       if (!approval) return { text: error };
+      const tool = approval.toolName;
       return {
-        text:
-          `Always allow ${approval.toolName}? Each later call of ${approval.toolName}, with any input, then runs without asking you. ` +
-          'It still asks after the session read untrusted content, and a deny rule in okc.policy.json still wins. ' +
-          'The rule goes into okc.policy.json, where you can remove it.',
+        text: [
+          `Always allow ${tool}? Each later call of ${tool}, with any input and in every session, then runs without asking you.`,
+          'A session that read outside content still asks. Each result of an integration counts as outside content, so in the main chat the rule helps mostly after /new and in automations.',
+          'A deny rule in okc.policy.json still wins. The rule goes into okc.policy.json, where you can remove it.',
+          'This question is valid for 10 minutes.',
+        ].join('\n'),
         buttons: [
-          [{ text: `Yes, always allow ${approval.toolName}`, data: alwaysButtonData(id, true) }],
+          [{ text: `Yes, always allow ${tool}`, data: alwaysButtonData(id, new Date(deps.clock().getTime() + CONFIRM_MS)) }],
           [
             { text: 'Approve once', data: approvalButtonData(id, 'approve') },
             { text: 'Deny', data: approvalButtonData(id, 'deny') },
@@ -55,7 +64,10 @@ export function createAlwaysAllow(deps: AlwaysAllowDeps) {
       };
     },
 
-    async apply(id: number): Promise<string> {
+    // the rule goes in first, and then the approval resolves. if the resolve fails, the approval stays pending and
+    // the owner can press approve again. the rule is then already there, so nothing is added twice.
+    async apply(id: number, expires: Date): Promise<string> {
+      if (deps.clock() > expires) return 'That confirmation expired, so nothing changed. Press "Always allow…" on the card again.';
       const { approval, error } = pending(id);
       if (!approval) return error;
       const rule = { tool: approval.toolName, effect: 'allow' as const, note: `the owner allowed it from approval #${id} on ${localDay(deps.clock(), deps.timeZone)}` };
@@ -71,24 +83,31 @@ export function createAlwaysAllow(deps: AlwaysAllowDeps) {
   };
 }
 
-// the file is written to a temporary name and renamed, so a crash never leaves half a file. the result goes through
-// the same loader as the start. if the loader refuses it, the old file comes back.
+// the file is written to a temporary name and checked by the same loader as the start, then renamed. so a crash
+// never leaves half a file, and a refused file never replaces the old one. a rule that the file already has is not
+// added again.
 export function addRule(path: string, rule: Omit<Rule, 'id'>): Result<Rule[]> {
-  const before = existsSync(path) ? readFileSync(path, 'utf8') : undefined;
-  let file: { rules?: unknown[] };
-  try {
-    file = before === undefined ? {} : (JSON.parse(before) as { rules?: unknown[] });
-  } catch (err) {
-    return { ok: false, error: `${path} is not valid json: ${(err as Error).message}` };
+  let file: { rules?: unknown[] } = {};
+  if (existsSync(path)) {
+    try {
+      file = JSON.parse(readFileSync(path, 'utf8')) as { rules?: unknown[] };
+    } catch (err) {
+      return { ok: false, error: `${path} is not valid json: ${(err as Error).message}` };
+    }
   }
-  const next = { ...file, rules: [...(Array.isArray(file.rules) ? file.rules : []), rule] };
+  const rules = Array.isArray(file.rules) ? file.rules : [];
+  const same = rules.some((each) => {
+    const old = each as Partial<Rule>;
+    return old.tool?.toLowerCase() === rule.tool.toLowerCase() && old.effect === rule.effect && old.session === undefined && old.args === undefined;
+  });
+  if (same) return loadPolicy(path);
   const temporary = `${path}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(next, null, 2)}\n`);
-  renameSync(temporary, path);
-  const loaded = loadPolicy(path);
-  if (!loaded.ok) {
-    if (before === undefined) rmSync(path);
-    else writeFileSync(path, before);
+  writeFileSync(temporary, `${JSON.stringify({ ...file, rules: [...rules, rule] }, null, 2)}\n`);
+  const checked = loadPolicy(temporary);
+  if (!checked.ok) {
+    rmSync(temporary, { force: true });
+    return { ok: false, error: checked.error.replaceAll(temporary, path) };
   }
-  return loaded;
+  renameSync(temporary, path);
+  return loadPolicy(path);
 }

@@ -27,8 +27,9 @@ export interface ApprovalFlowDeps {
   // an approved call stops after this time, as a background run does. so a stuck tool cannot hold its session.
   timeoutMs: number;
   timeZone: string;
-  // with this flag the first card has an "always allow" button. a tool with needsApproval never gets it, because a
-  // rule cannot change it.
+  // with this flag the first card of an external tool has an "always allow" button. a tool with needsApproval never
+  // gets it, because a rule cannot change it. a write tool never gets it, because its allow rule would also hold in a
+  // session that read outside content.
   alwaysAllow?: boolean;
 }
 
@@ -124,7 +125,7 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
       // the owner sees the reason with the request. the taint can come from an older run, so the message names it.
       const reached = await deps.owner.send(
         cardText(approval, why.reason, why.taint, ctx.timeZone),
-        buttonsFor(approval.id, deps.alwaysAllow === true && !tool.needsApproval),
+        buttonsFor(approval.id, deps.alwaysAllow === true && tool.risk === 'external' && !tool.needsApproval),
         { details: exactInput(input) },
       );
       // the model must not tell the owner to press a button that the owner never got.
@@ -235,7 +236,7 @@ const buttonsFor = (id: number, always: boolean): Button[][] => [
     { text: 'Approve', data: approvalButtonData(id, 'approve') },
     { text: 'Deny', data: approvalButtonData(id, 'deny') },
   ],
-  ...(always ? [[{ text: 'Always allow…', data: alwaysButtonData(id, false) }]] : []),
+  ...(always ? [[{ text: 'Always allow…', data: alwaysButtonData(id) }]] : []),
 ];
 
 // the block that the owner opens shows the exact input, redacted as the dashboard shows it. the summary above it
