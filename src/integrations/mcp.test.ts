@@ -1,7 +1,7 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { InMemoryTransport, type Transport } from '@modelcontextprotocol/client';
+import { InMemoryTransport, SdkError, SdkErrorCode, type Transport } from '@modelcontextprotocol/client';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestServer } from '../../test/mcp-server.js';
@@ -228,6 +228,45 @@ describe('mcp connection failure modes', () => {
     expect(outcome).toMatchObject({ kind: 'not_sent', reason: expect.stringContaining('ENOSPC') });
     // the server never saw the call: there is no answer for it.
     expect(messages().filter((row) => row.method === 'tools/call')).toHaveLength(0);
+  });
+
+  it('adds an unsent row when the transport refuses a request after its out row, so the trace agrees with not_sent', async () => {
+    const make = memoryTransport();
+    let refuse = false;
+    const { connection, messages } = setup(async () => {
+      const transport = await make();
+      const send = transport.send.bind(transport);
+      transport.send = async (message, options) => {
+        if (refuse && 'method' in message && message.method === 'tools/call') throw new SdkError(SdkErrorCode.NotConnected, 'Not connected');
+        return send(message, options);
+      };
+      return transport;
+    });
+    await connection.start();
+    refuse = true;
+    expect(await connection.callTool('echo', { text: 'x' }, trace)).toMatchObject({ kind: 'not_sent' });
+    const rows = messages().filter((row) => row.method === 'tools/call');
+    expect(rows).toEqual([
+      expect.objectContaining({ direction: 'out', runId: 'r1', toolCallId: 'call-1' }),
+      expect.objectContaining({ direction: 'unsent', rpcId: rows[0]!.rpcId, runId: 'r1', toolCallId: 'call-1', payload: '{"error":"Not connected"}' }),
+    ]);
+  });
+
+  it('keeps only the out row when a send fails in a way that can follow the action', async () => {
+    const make = memoryTransport();
+    const { connection, messages } = setup(async () => {
+      const transport = await make();
+      const send = transport.send.bind(transport);
+      transport.send = async (message, options) => {
+        // an http send reads the answer too, so a broken answer throws from send after the server acted.
+        if ('method' in message && message.method === 'tools/call') throw new Error('Unexpected end of JSON input');
+        return send(message, options);
+      };
+      return transport;
+    });
+    await connection.start();
+    expect(await connection.callTool('echo', { text: 'x' }, trace)).toMatchObject({ kind: 'unknown' });
+    expect(messages().filter((row) => row.method === 'tools/call').map((row) => row.direction)).toEqual(['out']);
   });
 
   it('says that the effect is unknown when the connection closes during a call', async () => {

@@ -38,8 +38,9 @@ interface Pending {
 // the trace of the tool call that sent a request. the response row gets the same trace through the rpc id.
 const activeCall = new AsyncLocalStorage<CallTrace>();
 
+// unsent marks a message whose out row exists, but the transport refused to send it. its row holds the error.
 export interface MessageRecorder {
-  (direction: 'out' | 'in', message: JSONRPCMessage): void;
+  (direction: 'out' | 'in' | 'unsent', message: JSONRPCMessage, error?: string): void;
 }
 
 // each connection attempt gets its own recorder. a new client numbers its requests from 0 again, so a shared map of
@@ -50,8 +51,8 @@ export function createMessageRecorder(deps: { db: Db; blobs: BlobStore; clock: C
     `INSERT INTO mcp_messages (serverId, runId, toolCallId, direction, method, rpcId, payload, payloadBlob, latencyMs, createdAt)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  return (direction, message) => {
-    const text = redactedJson(message);
+  return (direction, message, error) => {
+    const text = redactedJson(direction === 'unsent' ? { error } : message);
     const rpcId = 'id' in message && message.id !== undefined ? String(message.id) : null;
     let method = 'method' in message ? message.method : null;
     let trace: CallTrace | undefined;
@@ -61,7 +62,11 @@ export function createMessageRecorder(deps: { db: Db; blobs: BlobStore; clock: C
     // only a tools/call and its cancel belong to a tool call. other requests can run in the async context of a call,
     // for example the tools/list that a list_changed during the call starts, but the call did not send them.
     const ownTrace = () => (direction === 'out' && (method === 'tools/call' || method === 'notifications/cancelled') ? activeCall.getStore() : undefined);
-    if (method && rpcId !== null) {
+    if (direction === 'unsent') {
+      // no answer comes for a request that did not leave, so its pending entry ends here.
+      trace = pending.get(key('out'))?.trace;
+      pending.delete(key('out'));
+    } else if (method && rpcId !== null) {
       trace = ownTrace();
       pending.set(key(direction), { method, sentAt: performance.now(), trace });
     } else if (!method && rpcId !== null) {
@@ -114,7 +119,20 @@ export function recordingTransport(
         onRecordError(err);
         throw new SdkError(SdkErrorCode.SendFailed, `the message was not sent, because its trace write failed: ${errorText(err)}`);
       }
-      return inner.send(message, options);
+      try {
+        return await inner.send(message, options);
+      } catch (err) {
+        // the out row exists. when the error shows that the message did not leave, a second row says so. an http send
+        // also reads the answer, so other errors can come after the server acted, and they keep only the out row.
+        if (classify(err).kind === 'not_sent') {
+          try {
+            record('unsent', message, errorText(err));
+          } catch (recordErr) {
+            onRecordError(recordErr);
+          }
+        }
+        throw err;
+      }
     },
     get sessionId() {
       return inner.sessionId;
