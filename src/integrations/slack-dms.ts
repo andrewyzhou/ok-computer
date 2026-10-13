@@ -48,9 +48,10 @@ export interface SlackMessage {
   text: string;
 }
 
-// onlyFirst is true when the text of a message holds a line in the form of a result heading. then only the first
-// message is certainly the server's, and messages holds only that one.
-export type SlackPage = { ok: true; messages: SlackMessage[]; onlyFirst?: true } | { ok: false; reason: string };
+// onlyFirst is true when the text of a dm can have made or cut a block. then only the first message is certainly the
+// server's, and messages holds only that one. the blocks before block suspect are whole, but one of them can still be
+// false, so a page with a smaller limit must read them again.
+export type SlackPage = { ok: true; messages: SlackMessage[]; onlyFirst?: { suspect: number } } | { ok: false; reason: string };
 
 export interface SlackDmPollDeps {
   db: Db;
@@ -153,15 +154,17 @@ export function createSlackDmPoll(deps: SlackDmPollDeps): (integrationId: string
     let after = state.position === null ? nowS - FIRST_LOOKBACK_S : Math.floor(Number(state.position)) - (state.complete ? OVERLAP_S : 0);
     let added = 0;
     let read = 0;
+    let limit = PAGE_SIZE;
     for (let page = 1; page <= PAGES_PER_POLL; page++) {
-      const step = await call(id, connection, SEARCH_TOOL, searchArgs(after));
+      const step = await call(id, connection, SEARCH_TOOL, searchArgs(after, limit));
       if (!step.ok) return step.job;
-      const answer = readSearchPage(step.result);
+      const answer = readSearchPage(step.result, limit);
       if (!answer.ok) return unreadable(id, step, answer.reason);
       const { messages } = answer;
-      // a page with a false result heading gives only its first message, so the rest of the page is not read yet.
-      const onlyFirst = answer.onlyFirst === true;
-      const full = onlyFirst || messages.length >= PAGE_SIZE;
+      // a page that can hold a false block gives only its first message, so the rest of the page is not read yet. a
+      // page of one result has nothing more.
+      const cut = limit > 1 ? answer.onlyFirst : undefined;
+      const full = cut !== undefined || messages.length >= limit;
       // a full page that is not sorted from old to new can skip the older messages between two pages.
       if (full && !ascending(messages)) return unreadable(id, step, 'a full page is not sorted from old to new, so the next page could skip older messages');
       state = { ...state, position: newest(state.position, messages), complete: !full };
@@ -172,18 +175,27 @@ export function createSlackDmPoll(deps: SlackDmPollDeps): (integrationId: string
       }
       read += messages.length;
       if (!full) break;
-      if (onlyFirst) {
-        // the next page starts in the second after the first message, because a page from its own second gives the
-        // same first message again. a later dm in that same second is skipped, and the log says so.
-        logger.warn('slack poll read only the first result of a page with a false result heading', { integration: id, after });
+      if (cut && cut.suspect > 2) {
+        // the next page reads from the same start, and ends before the first block that the text of a dm can have
+        // made. the dm with the false lines is then the last result, and the count or the limit stops its false blocks.
+        // false blocks that are whole put suspect far back, so the limit is also at most half of the last one.
+        limit = Math.min(cut.suspect - 1, Math.floor(limit / 2));
+        continue;
+      }
+      if (cut) {
+        // only the first message is whole. a page from its second gives the same page again, so the next page starts
+        // in the second after it. a later dm in that second is skipped, and the log says so.
+        logger.warn('slack poll moved past a second after a page with a false block', { integration: id, second: Math.floor(Number(messages[0]!.ts)) });
         after = Math.max(after, Math.floor(Number(messages[0]!.ts))) + 1;
+        limit = PAGE_SIZE;
         continue;
       }
       // keyset paging: the next page starts in the second of the newest message of this page. more than a full page in
       // one second moves on to the next second, and the log says so.
       const next = Math.floor(Number(newest(null, messages) ?? after));
-      if (next <= after) logger.warn('slack poll moved past a second with a full page', { integration: id, after });
+      if (next <= after) logger.warn('slack poll moved past a second with a full page', { integration: id, after, limit });
       after = next <= after ? after + 1 : next;
+      limit = PAGE_SIZE;
     }
     logger.info('slack poll', { integration: id, read, added, complete: state.complete });
     return { status: 'completed' };
@@ -193,7 +205,7 @@ export function createSlackDmPoll(deps: SlackDmPollDeps): (integrationId: string
 // the search needs a word or a filter. slack reads the day of after: in the time zone of the user and gives only the
 // later days. west of utc the local day can be one day before the utc day, so one day of margin can leave out the
 // evening of the user. two days of margin cover every time zone, and the after field gives the exact second.
-export function searchArgs(after: number): Record<string, unknown> {
+export function searchArgs(after: number, limit = PAGE_SIZE): Record<string, unknown> {
   return {
     filters: `after:${new Date((after - 2 * 24 * 60 * 60) * 1000).toISOString().slice(0, 10)}`,
     channel_types: 'im,mpim',
@@ -202,7 +214,7 @@ export function searchArgs(after: number): Record<string, unknown> {
     after: String(after),
     sort: 'timestamp',
     sort_dir: 'asc',
-    limit: PAGE_SIZE,
+    limit,
     include_context: false,
   };
 }
@@ -234,7 +246,7 @@ const NOTHING = /\bno (?:results|messages|matches)\b|\b0 (?:results|messages|mat
 
 // readSearchPage takes structured content or json first, because those keep their shape when the server changes its
 // words. markdown text is the last way.
-export function readSearchPage(result: CallToolResult): SlackPage {
+export function readSearchPage(result: CallToolResult, limit = PAGE_SIZE): SlackPage {
   const structured = result.structuredContent;
   if (structured && typeof structured === 'object') {
     const fromJson = messagesInJson(structured);
@@ -248,12 +260,12 @@ export function readSearchPage(result: CallToolResult): SlackPage {
       parsed = JSON.parse(trimmed);
     } catch {
       // the text only looks like json. the markdown reader tries it.
-      return messagesInMarkdown(text);
+      return messagesInMarkdown(text, limit);
     }
     // json without a list that the reader knows is unreadable. the markdown reader would see all of it as one message.
     return messagesInJson(parsed) ?? { ok: false, reason: 'it is json without a list of messages that the reader knows' };
   }
-  return messagesInMarkdown(text);
+  return messagesInMarkdown(text, limit);
 }
 
 // a json answer has a list of objects with a ts. the list can be under any of a few keys, or under messages.matches as
@@ -281,11 +293,15 @@ function messagesInJson(value: unknown): SlackPage | undefined {
 // dm is in the answer too, and it can hold headings, rules and lines that look like a result. so the first heading
 // before any ts gives the form of the server, and only a line of that form with the next number starts a block. each
 // other line is text of the block before it. thus a rule or another heading in a dm cannot cut a block.
-// a dm can hold a line of that form too, and then the reader cannot tell its false blocks from the real ones. only the
-// first block is certainly the server's, because its heading comes before the text of any dm. so a page with more lines
-// of that form than blocks, or with a later block that is not whole, gives only its first message. the poll then reads
-// on from the second after that message, so a false block can neither stop the poll nor move its position.
-function messagesInMarkdown(text: string): SlackPage {
+// a dm can hold a line of that form too, and with the next number it starts a false block. the reader cannot tell a
+// false block from a real one, but it can see that one exists: the real heading with that number comes later, and its
+// number is then not after the blocks so far. a dm in the last result cannot add a block, because the count, or else
+// the limit of the page, stops the blocks. a line of the form with a later number is only text. so a page whose lines
+// of that form are all real headings or text with a later number is whole. a page with a real heading that a false
+// block pushed into text, or with a later block that is not whole, gives only its first message, which is certainly the
+// server's, because its heading comes before the text of any dm. suspect is the first block that can be false or cut.
+// thus a false block can neither stop the poll nor move its position.
+function messagesInMarkdown(text: string, limit: number): SlackPage {
   if (!HAS_TS.test(text)) return NOTHING.test(text) ? { ok: true, messages: [] } : { ok: false, reason: 'it has no message that the reader knows' };
   const lines = text.split(/\r?\n/);
   const first = lines.findIndex((line) => HEADING.test(line));
@@ -295,26 +311,29 @@ function messagesInMarkdown(text: string): SlackPage {
   // text of a dm, and a wrong count means that the reader does not know this form. without a count, a page has at most
   // the blocks that the poll asks for.
   const count = /\b(\d+) (?:results|messages|matches)\b/i.exec(lines.slice(0, first).join('\n'));
-  const total = count ? Number(count[1]) : PAGE_SIZE;
+  const total = count ? Number(count[1]) : limit;
   const blocks: string[][] = [];
-  let headings = 0;
+  let suspect: number | undefined;
   for (const line of lines.slice(first)) {
     const number = numberOf(line);
-    if (number !== undefined) headings++;
     if (blocks.length < total && number === blocks.length + 1) blocks.push([]);
-    else blocks.at(-1)!.push(line);
+    else {
+      if (number !== undefined && number <= blocks.length) suspect ??= blocks.length;
+      blocks.at(-1)!.push(line);
+    }
   }
   if (count && blocks.length !== total) return { ok: false, reason: 'its number of results is not the number of blocks' };
   // the first block is the server's, so a fault in it means that the reader does not know this form.
   const head = messageInBlock(blocks[0]!);
   if (typeof head === 'string') return { ok: false, reason: head };
   const messages = [head];
-  for (const block of blocks.slice(1)) {
+  for (const [i, block] of blocks.entries()) {
+    if (i === 0 || (suspect !== undefined && i + 1 >= suspect)) continue;
     const message = messageInBlock(block);
-    if (typeof message === 'string') return { ok: true, messages: [head], onlyFirst: true };
-    messages.push(message);
+    if (typeof message === 'string') suspect = i + 1;
+    else messages.push(message);
   }
-  return headings > blocks.length ? { ok: true, messages: [head], onlyFirst: true } : { ok: true, messages };
+  return suspect === undefined ? { ok: true, messages } : { ok: true, messages: [head], onlyFirst: { suspect } };
 }
 
 // messageInBlock reads one block, or gives the reason why it cannot. the fields of the server come before the text of

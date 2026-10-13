@@ -69,7 +69,7 @@ Run `okc restart`.
 ## 3. Store the app and sign in
 
 1. Run `okc open`, go to **Integrations**, and open your Slack integration.
-2. In the **OAuth app** panel, enter the Client ID and the Client Secret and press **Store**. The app writes them to the Windows Credential Manager as `slack-work-app.ok-computer`, and no page shows them again. To change them, store new values.
+2. In the **OAuth app** panel, enter the Client ID and the Client Secret and press **Store**. The app writes them to the Windows Credential Manager as `slack-work-app.ok-computer`, and no page shows them again. To change them, store new values. A Client ID with an empty secret keeps the stored secret of the same Client ID.
 
    Do not use `cmdkey` for this value: a terminal removes the quotes of the JSON on the way to `cmdkey`, and the app then says that the secret "is not valid json".
 3. Press **Connect**. Slack's consent page opens in a new tab. Allow the access.

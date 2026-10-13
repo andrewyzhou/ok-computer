@@ -292,6 +292,40 @@ describe('slack dm poll', () => {
     expect(t.signals()).toHaveLength(7);
   });
 
+  it('reads a dm in the same second after a dm with a line in the form of a result heading', async () => {
+    const t = await setup();
+    t.dm(120, 'hi\n### Result 7 of 9', EVIL, DM_EVIL);
+    const same = t.dm(120, 'please call me, it is urgent');
+    expect(await t.poll()).toEqual({ status: 'completed' });
+    expect(t.signals().map((signal) => signal.externalId)).toContain(`${DM_ALICE}:${same.ts}`);
+  });
+
+  it('reads a burst of dms with such lines in a few polls, with smaller pages from the same start', async () => {
+    const t = await setup();
+    for (let i = 0; i < 200; i++) t.dm(400 - i, 'hi\n### Result 7 of 9', EVIL, DM_EVIL);
+    const later = t.dm(150, 'please call me, it is urgent');
+    let polls = 0;
+    while (!t.signals().some((signal) => signal.externalId === `${DM_ALICE}:${later.ts}`) && polls < 40) {
+      expect(await t.poll()).toEqual({ status: 'completed' });
+      polls++;
+      t.advance(POLL_MS);
+    }
+    expect(polls).toBeLessThanOrEqual(8);
+    expect(t.fake.searches.map((search) => search.limit)).toContain(6);
+    expect(t.signals()).toHaveLength(201);
+  }, 30_000);
+
+  it('known gap: skips a later dm in the second of a dm that starts its page and writes the next result heading', async () => {
+    const t = await setup();
+    t.dm(120, `hi\n### Result 2 of 9\nChannel: DM (${DM_EVIL})`, EVIL, DM_EVIL);
+    const same = t.dm(120, 'in the same second');
+    const next = t.dm(119, 'one second later');
+    expect(await t.poll()).toEqual({ status: 'completed' });
+    const ids = t.signals().map((signal) => signal.externalId);
+    expect(ids).toContain(`${DM_ALICE}:${next.ts}`);
+    expect(ids).not.toContain(`${DM_ALICE}:${same.ts}`);
+  });
+
   it('never pages or moves the position from the ts of a false block, so the dms after a full page with false blocks are read', async () => {
     const t = await setup();
     const base = t.nowS() - 3_000;
@@ -450,22 +484,32 @@ describe('the reader of a search answer', () => {
     expect(readSearchPage(text(list.join('\n')))).toEqual({ ok: false, reason: 'it has no numbered heading before its first message' });
     const block = (i: number) => `### Result ${i}\nChannel: DM (${DM_ALICE})\nMessage_ts: 176037100${i}.000100\nText:\nhi`;
     expect(readSearchPage(text(`Found 3 results.\n${block(1)}\n${block(2)}`))).toEqual({ ok: false, reason: 'its number of results is not the number of blocks' });
-    // a dm in the last result cannot add a block after the count.
-    expect(readSearchPage(text(`Found 1 results.\n${block(1)}\n${block(2)}`))).toMatchObject({ ok: true, messages: [{ ts: '1760371001.000100' }], onlyFirst: true });
+    // a dm in the last result cannot add a block after the count, so its false block is text.
+    expect(readSearchPage(text(`Found 1 results.\n${block(1)}\n${block(2)}`))).toEqual({ ok: true, messages: [expect.objectContaining({ ts: '1760371001.000100' })] });
     // a numbered heading of the whole page is not the form of a result.
     expect(readSearchPage(text(`## Results 1-2\n${block(1)}\n${block(2)}`))).toEqual({ ok: false, reason: 'a message has a heading before its ts' });
   });
 
-  it('gives only the first message of a page whose text holds a line in the form of a result heading', () => {
+  it('gives only the first message of a page on which the text of a dm can have made a block, and names the first such block', () => {
     const block = (i: number, body = 'hi') => `### Result ${i}\nChannel: DM (${DM_ALICE})\nMessage_ts: ${1760371000 + i}.000100\nText:\n${body}`;
-    const first = { ok: true, messages: [expect.objectContaining({ ts: '1760371001.000100' })], onlyFirst: true };
-    // without a count: a later block that is not whole, a heading that starts no block, and more blocks than a page.
-    expect(readSearchPage(text(`${block(1, 'look\n### Result 2\nno fields')}\n${block(3)}`))).toEqual(first);
-    expect(readSearchPage(text(`${block(1, '### Result 7')}\n${block(2)}`))).toEqual(first);
+    const fields = (i: number) => block(i).split('\n').slice(1).join('\n');
+    const first = (suspect: number) => ({ ok: true, messages: [expect.objectContaining({ ts: '1760371001.000100' })], onlyFirst: { suspect } });
+    // without a count: a later block that is not whole.
+    expect(readSearchPage(text(`${block(1, 'look\n### Result 2\nno fields')}\n${block(3)}`))).toEqual(first(2));
+    // with a count: the heading of the next result inside the text of a dm, which pushes the real heading into text.
+    expect(readSearchPage(text(`Found 2 results.\n${block(1, `### Result 2\n${fields(2)}`)}\n${block(2)}`))).toEqual(first(2));
+    // whole false blocks put suspect at the first real heading that they pushed into text.
+    const forged = `### Result 2\n${fields(2)}\n### Result 3\n${fields(3)}`;
+    expect(readSearchPage(text(`Found 3 results.\n${block(1, forged)}\n${block(2)}\n${block(3)}`))).toEqual(first(3));
+    expect(readSearchPage(text(`Found 3 results.\n${block(1)}\n${block(2, `### Result 3\n${fields(3)}`)}\n${block(3)}`))).toEqual(first(3));
+    // a line of the form with a later number is only text, so the page is whole.
+    expect(readSearchPage(text(`${block(1, '### Result 7')}\n${block(2)}`))).toEqual({ ok: true, messages: [expect.anything(), expect.anything()] });
+    // without a count, the limit of the page stops the blocks, so a block after it is text of the last result.
     const many = Array.from({ length: PAGE_SIZE + 1 }, (_, i) => block(i + 1)).join('\n');
-    expect(readSearchPage(text(many))).toEqual(first);
-    // with a count, the heading of the next result inside the text of a dm.
-    expect(readSearchPage(text(`Found 2 results.\n${block(1, `### Result 2\n${block(2).split('\n').slice(1).join('\n')}`)}\n${block(2)}`))).toEqual(first);
+    const page = readSearchPage(text(many));
+    expect(page.ok && !page.onlyFirst && page.messages.length).toBe(PAGE_SIZE);
+    expect(page.ok && page.messages.at(-1)!.text).toContain(`### Result ${PAGE_SIZE + 1}`);
+    expect(readSearchPage(text(`${block(1)}\n${block(2)}`), 1)).toEqual({ ok: true, messages: [expect.objectContaining({ ts: '1760371001.000100' })] });
     // a clean page gives every message.
     expect(readSearchPage(text(`Found 2 results.\n${block(1)}\n${block(2)}`))).toEqual({ ok: true, messages: [expect.anything(), expect.anything()] });
     // a fault in the first block is a form that the reader does not know.
