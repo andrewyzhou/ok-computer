@@ -255,6 +255,10 @@ describe('the tool caller after the tool acts', () => {
   it('keeps an output untrusted when its source is not text, and gives a result and a row', async () => {
     for (const [odd, source] of [
       [true, 'odd'],
+      // an empty source passed as no source, so the text reached the model without a wrapper and without taint.
+      ['', 'odd'],
+      ['  ', 'odd'],
+      [0, '0'],
       [42, '42'],
       [{ host: 'evil.example' }, '{"host":"evil.example"}'],
     ] as const) {
