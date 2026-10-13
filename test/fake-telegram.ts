@@ -1,5 +1,6 @@
 import { Bot, type Transformer } from 'grammy';
 import type { Update } from 'grammy/types';
+import { buttonSigner } from '../src/channels/telegram-buttons.js';
 
 export interface ApiCall {
   method: string;
@@ -13,7 +14,17 @@ export function textUpdate(from: number, text: string, chat = from): Omit<Update
   return { message: { message_id: 1, date: 0, chat: privateChat(chat), from: person(from), text } } as Omit<Update, 'update_id'>;
 }
 
+export const FAKE_BOT_TOKEN = '123456:TEST-TOKEN';
+// the data of a button that the bot sent, with its mark.
+export const signed = (data: string) => buttonSigner(FAKE_BOT_TOKEN).sign(data);
+
+// a press of a button that the bot sent. the data gets the mark that the adapter added when it sent the button.
 export function buttonUpdate(from: number, data: string, chat = from): Omit<Update, 'update_id'> {
+  return rawButtonUpdate(from, signed(data), chat);
+}
+
+// a press with exactly this data, for example of a button that the model wrote into rich markdown.
+export function rawButtonUpdate(from: number, data: string, chat = from): Omit<Update, 'update_id'> {
   return {
     callback_query: {
       id: `cb-${data}`,
@@ -69,7 +80,7 @@ export function createFakeTelegram() {
     }
   };
 
-  const bot = new Bot('123456:TEST-TOKEN', {
+  const bot = new Bot(FAKE_BOT_TOKEN, {
     botInfo: {
       id: 1,
       is_bot: true,

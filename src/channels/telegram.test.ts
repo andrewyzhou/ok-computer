@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buttonUpdate, createFakeTelegram, textUpdate, until } from '../../test/fake-telegram.js';
+import { buttonUpdate, createFakeTelegram, rawButtonUpdate, signed, textUpdate, until } from '../../test/fake-telegram.js';
 import { silentLogger } from '../observability/logger.js';
 import { htmlToPlain } from './telegram-html.js';
 import { cardHtml, createTelegramChannel, RICH_LIMIT, splitMessage, TELEGRAM_LIMIT } from './telegram.js';
@@ -48,8 +48,8 @@ describe('telegram channel', () => {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: 'Approve', callback_data: 'approval:1:approve' },
-            { text: 'Deny', callback_data: 'approval:1:deny' },
+            { text: 'Approve', callback_data: signed('approval:1:approve') },
+            { text: 'Deny', callback_data: signed('approval:1:deny') },
           ],
         ],
       },
@@ -79,10 +79,33 @@ describe('telegram channel', () => {
     fake.push(buttonUpdate(777, 'approval:3:deny'));
     await until(() => inbound.length === 2);
     expect(inbound[1]).toMatchObject({ senderId: '777', chatId: '777', text: '', button: 'approval:3:deny' });
-    expect(fake.calls.some((c) => c.method === 'answerCallbackQuery' && c.payload.callback_query_id === 'cb-approval:3:deny')).toBe(true);
+    expect(fake.calls.some((c) => c.method === 'answerCallbackQuery' && c.payload.callback_query_id === `cb-${signed('approval:3:deny')}`)).toBe(true);
 
     await channel.stop();
     expect(fake.bot.isRunning()).toBe(false);
+  });
+
+  // the model can write a button with the data of a real approval into rich markdown. it has no valid mark.
+  it('answers the press of a button without a valid mark, and never passes it on', async () => {
+    const fake = createFakeTelegram();
+    const channel = createTelegramChannel({ bot: fake.bot, logger: silentLogger, clock });
+    const inbound: InboundMessage[] = [];
+    await channel.start((message) => inbound.push(message));
+    const real = signed('approval:1:approve');
+    const forged = ['approval:1:approve', `approval:1:approve${signed('approval:2:approve').slice(-17)}`, `${real.slice(0, -1)}A`];
+    for (const data of forged) fake.push(rawButtonUpdate(777, data));
+    await until(() => fake.calls.filter((c) => c.method === 'answerCallbackQuery').length === forged.length);
+    expect(fake.calls.filter((c) => c.method === 'answerCallbackQuery').map((c) => c.payload)).toEqual(
+      forged.map((data) => ({
+        callback_query_id: `cb-${data}`,
+        text: 'That button is not from one of my cards. Send /approvals to see the real ones.',
+        show_alert: true,
+      })),
+    );
+    fake.push(rawButtonUpdate(777, real));
+    await until(() => inbound.length === 1);
+    expect(inbound.map((m) => m.button)).toEqual(['approval:1:approve']);
+    await channel.stop();
   });
 });
 
@@ -100,7 +123,7 @@ describe('telegram formats', () => {
         payload: {
           chat_id: '777',
           rich_message: { markdown: '# Hi\n\n- **one**\n- two' },
-          reply_markup: { inline_keyboard: [[{ text: 'OK', callback_data: 'x' }]] },
+          reply_markup: { inline_keyboard: [[{ text: 'OK', callback_data: signed('x') }]] },
         },
       },
     ]);
@@ -120,7 +143,7 @@ describe('telegram formats', () => {
     expect(first).not.toHaveProperty('reply_markup');
     expect(refused).toMatchObject({ parse_mode: 'HTML', text: `<i>last</i> part ${tail}` });
     // the plain part has no tags and no parse mode, and it keeps the buttons of the last part.
-    expect(plain).toEqual({ chat_id: '777', text: `last part ${tail}`, reply_markup: { inline_keyboard: [[{ text: 'OK', callback_data: 'x' }]] } });
+    expect(plain).toEqual({ chat_id: '777', text: `last part ${tail}`, reply_markup: { inline_keyboard: [[{ text: 'OK', callback_data: signed('x') }]] } });
   });
 
   it('sends a reply over the rich limit as html parts, and does not send again after an error that is not a refusal', async () => {

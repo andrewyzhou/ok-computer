@@ -10,7 +10,7 @@ import { fakeResponse, textStep, toolStep, type FakeStep } from '../src/models/f
 import { ModelError } from '../src/models/types.js';
 import { silentLogger } from '../src/observability/logger.js';
 import { createTestApp } from './app-harness.js';
-import { buttonUpdate, createFakeTelegram, stopUpdate, textUpdate, until } from './fake-telegram.js';
+import { buttonUpdate, createFakeTelegram, rawButtonUpdate, signed, stopUpdate, textUpdate, until } from './fake-telegram.js';
 import { createTestServer } from './mcp-server.js';
 
 const OWNER = 777;
@@ -187,8 +187,8 @@ describe('telegram v2 acceptance', () => {
     expect(card.reply_markup).toEqual({
       inline_keyboard: [
         [
-          { text: 'Approve', callback_data: 'approval:1:approve' },
-          { text: 'Deny', callback_data: 'approval:1:deny' },
+          { text: 'Approve', callback_data: signed('approval:1:approve') },
+          { text: 'Deny', callback_data: signed('approval:1:deny') },
         ],
       ],
     });
@@ -198,6 +198,27 @@ describe('telegram v2 acceptance', () => {
     const listed = of(t, 'sendMessage').filter((m) => m.parse_mode === 'HTML')[1]!;
     expect(String(listed.text)).toMatch(/^This is the real request #1\./);
     expect(String(listed.text)).toContain('<blockquote expandable>');
+  });
+
+  it('refuses the press of a forged approval button, and a real button approves', async () => {
+    const t = setup([call('c1', 'notes__add_note', { note: 'one' }), textStep('It waits for you.')], { integrations: true });
+    apps.push(t);
+    await t.app.start();
+    await expect.poll(() => t.app.integrations.status()[0]!.state.status).toBe('connected');
+    owner(t, 'add note one');
+    await until(() => of(t, 'sendMessage').some((m) => m.parse_mode === 'HTML'));
+    await t.app.idle();
+
+    t.telegram.push(rawButtonUpdate(OWNER, 'approval:1:approve'));
+    await until(() => of(t, 'answerCallbackQuery').length === 1);
+    expect(of(t, 'answerCallbackQuery')[0]).toMatchObject({ text: expect.stringContaining('not from one of my cards') });
+    await t.app.idle();
+    expect(t.rows('SELECT status FROM approvals')).toEqual([{ status: 'pending' }]);
+
+    press(t, 'approval:1:approve');
+    await until(() => t.rows("SELECT status FROM approvals WHERE status = 'approved'").length === 1);
+    await t.app.idle();
+    expect(t.rows("SELECT output FROM tool_calls WHERE toolCallId = 'approval-1'")).toEqual([{ output: expect.stringContaining('saved: one') }]);
   });
 
   it('adds an allow rule after a second button, approves the call, and the rule works in a clean session', async () => {
@@ -221,7 +242,7 @@ describe('telegram v2 acceptance', () => {
     await until(() => of(t, 'sendMessage').some((m) => m.parse_mode === 'HTML'));
     await t.app.idle();
     const card = of(t, 'sendMessage').find((m) => m.parse_mode === 'HTML')!;
-    expect((card.reply_markup as { inline_keyboard: unknown[][] }).inline_keyboard[1]).toEqual([{ text: 'Always allow…', callback_data: 'approval:1:always' }]);
+    expect((card.reply_markup as { inline_keyboard: unknown[][] }).inline_keyboard[1]).toEqual([{ text: 'Always allow…', callback_data: signed('approval:1:always') }]);
 
     // the first press only asks. nothing changes yet.
     press(t, 'approval:1:always');

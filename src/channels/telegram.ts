@@ -3,6 +3,7 @@ import type { InlineKeyboardMarkup } from 'grammy/types';
 import type { Logger } from '../observability/logger.js';
 import { headOf, tailOf } from '../text.js';
 import { systemClock, type Clock } from '../time.js';
+import { buttonSigner } from './telegram-buttons.js';
 import { escapeHtml, htmlToPlain, markdownToHtmlParts } from './telegram-html.js';
 import type { Button, ChannelAdapter, InboundMessage } from './types.js';
 
@@ -69,6 +70,7 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
   const { bot } = options;
   const clock = options.clock ?? systemClock;
   const logger = options.logger.child({ channel: TELEGRAM });
+  const buttons = buttonSigner(bot.token);
   // the stop button of a draft sends an update with the draft id. the map finds the run of that draft.
   const stops = new Map<number, { chatId: number; stop: () => void }>();
   let nextDraftId = 1;
@@ -121,14 +123,20 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
         });
       });
       bot.on('callback_query:data', async (ctx) => {
+        const data = buttons.check(ctx.callbackQuery.data);
         // telegram shows a spinner on the button until the bot answers the press.
+        if (data === undefined) {
+          logger.warn('a button without a valid mark was pressed, so it was ignored', { data: ctx.callbackQuery.data });
+          await ctx.answerCallbackQuery({ text: 'That button is not from one of my cards. Send /approvals to see the real ones.', show_alert: true });
+          return;
+        }
         await ctx.answerCallbackQuery();
         if (!isPrivate(ctx.chat)) return logger.info('button outside a private chat ignored', { chatId: String(ctx.chat?.id) });
         received({
           senderId: String(ctx.from.id),
           chatId: String(ctx.chat?.id ?? ctx.from.id),
           text: '',
-          button: ctx.callbackQuery.data,
+          button: data,
         });
       });
       // a draft goes only to the owner's chat, so a stop from the chat of the draft comes from the owner.
@@ -154,7 +162,7 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
     },
     async send(out) {
       const keyboard = out.buttons?.length
-        ? { inline_keyboard: out.buttons.map((row) => row.map((button: Button) => ({ text: button.text, callback_data: button.data }))) }
+        ? { inline_keyboard: out.buttons.map((row) => row.map((button: Button) => ({ text: button.text, callback_data: buttons.sign(button.data) }))) }
         : undefined;
       if (out.details !== undefined) {
         const html = cardHtml(out.text, out.details);
