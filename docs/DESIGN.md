@@ -457,15 +457,28 @@ Everything below is queryable from SQLite:
   - **Logs**: live tail with level filter.
 - Phase 1 write actions are limited to: toggle automation, run automation now, edit heartbeat checklist, approve or deny.
 
+Decisions from M4:
+
+- **Where it runs.** `src/main.ts` starts the dashboard after the app, on `dashboard.port` (default 4317), except in `npm run chat`. A dashboard that cannot start (for example, the port is in use) logs an error, and the agent keeps running. `web/dist` is served from the same server; routes are in the URL hash, so only `index.html` and the assets are needed. `npm run dev:web` runs the Vite dev server with a proxy to the API.
+- **Access.** The server listens on `127.0.0.1` only. It refuses requests whose host name is not a loopback name (this stops DNS rebinding), and it takes writes only with a JSON content type (a form post from another web page then needs a CORS preflight, which the server never allows). When `DASHBOARD_TOKEN` is set, every `/api/*` request must give it as a bearer header or as `?token=`, because `EventSource` cannot send headers.
+- **Stream.** `/api/stream` polls the database and today's log file each second for each client: new events by id, new runs by rowid, a status change of each run it saw running, and complete new log lines. It needs no hooks in the writers, so it also sees rows that another process writes. The page closes its stream on `pagehide`, because the browser allows only six connections to one host.
+- **Run timeline.** A fixed clock gives rows the same time, so the timeline is not sorted by time. Each tool call goes after the model call whose response asked for it (matched by tool call id). A tool call that ran after an approval goes last. The full request and response of a model call load on demand from `/api/model-calls/:id`.
+- **What the model saw.** `App.contextView(sessionKey)` runs the session's real strategy over the full log, with the session's stable prompt and tool allowlist and without compaction hooks, so it never calls a model or appends an event. It shows the input of the next model call. It can differ from an earlier call in two cases: the stable prompt files changed since then, or that run used the trimmed fallback after a failed compaction. The exact input of each past call is in the run detail.
+- **Run now** runs the automation through the normal job runner and writes an `automation_runs` row, but it does not change `nextRunAt` or the failure count. The API answers at once with 202; the run shows in the stream.
+- **Approvals.** The dashboard shows the redacted summary of an approval, never the stored input, because the input is not redacted.
+- **Plain words.** A daily cron (`M H * * *`) is described as "every day at HH:MM" before the cron text, also in the tool output.
+- **Charts** are single-series SVG bars (daily hit rate, the streak of days with goals, cost by day) with a native tooltip on each day. Tables carry the same numbers.
+- **Tests.** `test/seed.ts` fills a database through the real app and a fake model: runs with tool calls, a failed tool, a failed model call, a heartbeat, a compaction, approvals, goals over several days, memory files and log lines. The API tests and the jsdom page tests (`web/src/pages.test.tsx`) run against it.
+
 ## 17. Configuration
 
 - Secrets in `.env`: `CLAUDE_API_KEY` (also accept `ANTHROPIC_API_KEY`), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_ID`, optional `OPENAI_COMPAT_BASE_URL`, `OPENAI_COMPAT_API_KEY`, `DASHBOARD_TOKEN`.
-- Non-secret settings in `okc.config.json`, validated with zod, with defaults for every field: time zone, slot chains, pricing, missed-run grace (`scheduler.missedGraceMs`), heartbeat interval and active hours, routine times (`routine.askAt`, `routine.reminders`, `routine.resultsAt`), the consolidation time (`memory.consolidateAt`), the context budget (`context.windowTokens`), dashboard port, paths.
+- Non-secret settings in `okc.config.json`, validated with zod, with defaults for every field: time zone, slot chains, pricing, missed-run grace (`scheduler.missedGraceMs`), heartbeat interval and active hours, routine times (`routine.askAt`, `routine.reminders`, `routine.resultsAt`), the consolidation time (`memory.consolidateAt`), the context budget (`context.windowTokens`), the dashboard port (`dashboard.port`), paths.
 - Invalid config stops the process at start with a clear message.
 
 ## 18. Process and operations
 
-- `npm run dev`: start everything with reload. `npm start`: run the build. `npm run chat`: cli channel only. `npm test`, `npm run typecheck`, `npm run build` (server and web).
+- `npm run dev`: start everything with reload. `npm start`: run the build. `npm run chat`: cli channel only. `npm run dev:web`: the dashboard UI with hot reload. `npm test`, `npm run typecheck`, `npm run build` (server and web).
 - Graceful shutdown on SIGINT and SIGTERM: stop channels, finish or abort active runs with a recorded status, close the database.
 - Database migrations are numbered SQL files applied at start inside a transaction, tracked in a `migrations` table.
 - Running as a service in WSL (systemd user unit) is a later task. Keep the process friendly to it: log to stdout and files, exit non-zero on fatal errors.
