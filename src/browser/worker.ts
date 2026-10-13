@@ -255,8 +255,8 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
         channel: 'chrome',
         headless: true,
         serviceWorkers: 'block',
-        acceptDownloads: true,
-        downloadsPath: downloads,
+        // no tool works with a file, and a download is a file that a page puts on this pc without a step.
+        acceptDownloads: false,
         viewport: { width: 1280, height: 800 },
         args: deps.args ?? [],
         ...(userAgent ? { userAgent } : {}),

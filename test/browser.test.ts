@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createServer, get } from 'node:http';
 import { join } from 'node:path';
@@ -120,6 +120,15 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
       expect(blocked, button).toContainEqual({ url: site.url('shop.test', '/api/save'), reason: expect.stringContaining('send data (POST)') });
     }
     expect(site.hitsOn('shop.test').filter((hit) => hit.method !== 'GET')).toEqual([]);
+  });
+
+  it('saves no download', async () => {
+    const h = harness();
+    const page = await h.run('browser_open', { url: site.url('shop.test', '/files') });
+    await h.run('browser_click', { ref: refOf(page.content, /link "Invoice"/), element: 'Invoice link' });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const downloads = join(h.dir, 'downloads');
+    expect(existsSync(downloads) ? readdirSync(downloads) : []).toEqual([]);
   });
 
   it('lets a click send a get form, such as a search box', async () => {

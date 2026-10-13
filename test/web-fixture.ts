@@ -109,6 +109,10 @@ export async function startFixture(): Promise<Fixture> {
         const query = new URL(path, 'http://x').searchParams;
         return send(302, '', 'text/plain', { location: `http://${query.get('host')}:${query.get('port')}/#/approvals` });
       }
+      case 'shop.test/files':
+        return send(200, html('<a href="/invoice.txt">Invoice</a>', 'Files'));
+      case 'shop.test/invoice.txt':
+        return send(200, 'invoice 42', 'text/plain', { 'content-disposition': 'attachment; filename="invoice.txt"' });
       case 'shop.test/search':
         return send(200, html('<form action="/find" method="get"><input name="q" aria-label="Query" value="shirts"><button type="submit">Search</button></form>', 'Search'));
       case 'shop.test/find':
