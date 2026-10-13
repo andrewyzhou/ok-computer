@@ -11,7 +11,7 @@ import { parseIntegrations, type IntegrationEntry } from '../src/integrations/co
 import { textStep, toolStep } from '../src/models/fake.js';
 import { sessionTaint } from '../src/policy/store.js';
 import { createTestApp } from './app-harness.js';
-import { createTestServer } from './mcp-server.js';
+import { createPagedServer, createTestServer } from './mcp-server.js';
 
 const FIXTURE = join(import.meta.dirname, 'fixtures/stdio-server.ts');
 const start = '2026-10-13T09:00:00-07:00';
@@ -314,6 +314,27 @@ describe('mcp acceptance', () => {
       output: expect.stringContaining('unknown tool: notes__add_note'),
     });
     expect(db.prepare("SELECT count(*) AS n FROM mcp_messages WHERE method = 'tools/call' AND toolCallId LIKE 'approval-%'").get()).toEqual({ n: 0 });
+  });
+
+  it('reads every page of a tool list, so a tool on the second page can be found and called', async () => {
+    const paged = async (): Promise<Transport> => {
+      const [client, server] = InMemoryTransport.createLinkedPair();
+      await createPagedServer().connect(server);
+      return client;
+    };
+    const entry = notesEntry({ tools: { allow: ['page_one', 'page_two'] }, risk: { page_one: 'read', page_two: 'read' } });
+    const t = createTestApp([search('s1', 'page two'), call('c1', 'notes__page_two'), textStep('ok')], {
+      start,
+      deps: { integrations: [entry], mcpTransport: paged },
+    });
+    apps.push(t);
+    await t.app.start();
+    await expect.poll(() => t.app.integrations.status()[0]!.state.status).toBe('connected');
+    expect(t.app.integrations.status()[0]!.tools.map((tool) => tool.name)).toEqual(['notes__page_one', 'notes__page_two']);
+    await t.say('use the second tool');
+    expect(t.rows("SELECT output FROM tool_calls WHERE toolCallId = 'c1'")).toEqual([{ output: expect.stringContaining('ran page_two') }]);
+    // each page is its own request in the trace.
+    expect(t.rows("SELECT count(*) AS n FROM mcp_messages WHERE method = 'tools/list' AND direction = 'out'")).toEqual([{ n: 2 }]);
   });
 
   it('works with a real stdio server', async () => {

@@ -1,4 +1,4 @@
-import { McpServer } from '@modelcontextprotocol/server';
+import { McpServer, Server } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 const text = (value: string) => ({ content: [{ type: 'text' as const, text: value }] });
@@ -47,5 +47,16 @@ export function createTestServer(options: { needsBook?: boolean } = {}): McpServ
     setTimeout(() => process.exit(1), 10);
     return text('stopping');
   });
+  return server;
+}
+
+// the paged server gives its tool list in two pages, as a server with many tools does.
+export function createPagedServer(): Server {
+  const server = new Server({ name: 'okc-paged-server', version: '1.0.0' }, { capabilities: { tools: {} } });
+  const tool = (name: string) => ({ name, description: `The ${name.replace('_', ' ')} tool.`, inputSchema: { type: 'object' as const, properties: {} } });
+  server.setRequestHandler('tools/list', async (request) =>
+    request.params?.cursor === 'page-2' ? { tools: [tool('page_two')] } : { tools: [tool('page_one')], nextCursor: 'page-2' },
+  );
+  server.setRequestHandler('tools/call', async (request) => text(`ran ${request.params.name}`));
   return server;
 }
