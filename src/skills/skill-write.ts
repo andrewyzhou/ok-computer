@@ -72,7 +72,10 @@ export const skillWriteInput = z
       .string()
       .min(1)
       .max(64)
-      .refine((name) => !hiddenIn(name), 'the name has a hidden or control character'),
+      .refine((name) => !hiddenIn(name), 'the name has a hidden or control character')
+      // a change keeps a name that the owner gave by hand, so the folder name rule does not apply to it. the card
+      // still shows the name, and a long run of marks can cover the lines next to it.
+      .refine((name) => !marksIn(name), 'the name has more than 3 combining marks in a row'),
     description: text(DESCRIPTION_LIMIT).refine((value) => !value.includes('\n'), 'the description is one line'),
     body: text(BODY_LIMIT).refine((value) => value.split('\n').length <= BODY_LINES, `the body has at most ${BODY_LINES} lines`),
     replaces: z.boolean(),

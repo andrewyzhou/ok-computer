@@ -54,6 +54,10 @@ describe('skill_write input', () => {
       expect(refused({ [field]: `x${stack(4)} book` }), field).toBe(true);
       expect(refused({ [field]: `x${stack(3)} book` }), field).toBe(false);
     }
+    // a change has no folder name rule, so the name of a change needs this check too. the card shows the name.
+    const change = { replaces: true, base: skillVersion('x') };
+    expect(refused({ ...change, name: `w${stack(4)}eekly-review` })).toBe(true);
+    expect(refused({ ...change, name: `w${stack(3)}eekly-review` })).toBe(false);
     expect(refused({ body: ['1. Book the event.', `x${stack(30).repeat(13)}`, '2. Confirm.'].join(char(0x0a)) })).toBe(true);
     // a vietnamese letter has two marks, and a keycap has a selector and an enclosing mark.
     expect(refused({ body: `vi${char(0x0323)}${char(0x0302)}t, press 1${char(0xfe0f)}${char(0x20e3)}` })).toBe(false);
