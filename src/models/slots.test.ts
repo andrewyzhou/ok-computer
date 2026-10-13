@@ -40,11 +40,13 @@ describe('slot runner', () => {
   });
 
   it('records each call with its cost', async () => {
-    const { runner, clients, rows } = setup(['anthropic/claude-haiku-5-5'], {
+    const { runner, clients, rows, db } = setup(['anthropic/claude-haiku-5-5'], {
       anthropic: [{ text: 'hello', usage: { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 } }],
     });
     const result = await runner.call('main', request, { runId: null });
     expect(result.ok && result.response.text).toBe('hello');
+    // the id links a reviewer verdict to the row of its call.
+    expect(result.ok && result.modelCallId).toBe((db.prepare('SELECT id FROM model_calls').get() as { id: number }).id);
     expect(clients.anthropic?.calls[0]).toMatchObject({ model: 'claude-haiku-5-5', maxTokens: 16000, effort: 'low' });
     expect(rows()).toEqual([
       { provider: 'anthropic', model: 'claude-haiku-5-5', costUsd: 0.00015, stopReason: 'end_turn', error: null },

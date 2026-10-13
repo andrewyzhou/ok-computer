@@ -12,7 +12,7 @@ import type { ToolRegistry } from '../tools/registry.js';
 import { repairSession } from './recovery.js';
 import { buildVolatilePrompt } from './system-prompt.js';
 
-export type Trigger = 'message' | 'automation' | 'heartbeat' | 'consolidation' | 'system';
+export type Trigger = 'message' | 'automation' | 'heartbeat' | 'consolidation' | 'system' | 'subagent';
 export type RunStatus = 'running' | 'completed' | 'failed' | 'aborted';
 
 export interface AgentDeps {
@@ -45,6 +45,8 @@ export interface RunInput {
   signal?: AbortSignal;
   // the memory flush before a compaction runs with this flag, so it cannot start a second compaction.
   noCompaction?: boolean;
+  // a sub-agent profile sets its own limit of model calls.
+  maxIterations?: number;
 }
 
 export interface RunResult {
@@ -60,6 +62,7 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
   const { db, slots, tools, strategy, config, clock } = deps;
   const runId = input.runId ?? (deps.newId ?? randomUUID)();
   const logger = deps.logger.child({ runId, sessionKey: input.sessionKey });
+  const maxIterations = input.maxIterations ?? config.agent.maxIterations;
   const timeoutMs = input.trigger === 'message' ? config.agent.chatTimeoutMs : config.agent.backgroundTimeoutMs;
 
   db.prepare('INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES (?, ?, ?, ?, ?, ?)').run(
@@ -131,8 +134,8 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
         };
 
     for (let iteration = 1; ; iteration++) {
-      if (iteration > config.agent.maxIterations) {
-        const error = `the task stopped after ${config.agent.maxIterations} model calls without a final answer`;
+      if (iteration > maxIterations) {
+        const error = `the task stopped after ${maxIterations} model calls without a final answer`;
         append({ type: 'note', payload: { text: error } });
         return { ...finish('failed', '', error), stoppedAtLimit: true };
       }
