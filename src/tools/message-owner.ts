@@ -8,8 +8,8 @@ export function createMessageOwnerTool(owner: Pick<OwnerMessenger, 'send'>) {
     description: "Send a message to the owner now, in the owner's last chat. Use it in background runs.",
     input: z.object({ text: z.string().min(1) }),
     risk: 'write',
-    async run({ text }) {
-      return (await owner.send(text))
+    async run({ text }, ctx) {
+      return (await owner.send(text, undefined, { markdown: true, runId: ctx.runId }))
         ? { content: 'sent' }
         : { content: 'the message was not sent because no chat of the owner is available', isError: true };
     },

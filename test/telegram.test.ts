@@ -93,12 +93,12 @@ describe('telegram through the app', () => {
     await t.app.stop();
   });
 
-  it('sends proactive messages to the owner telegram chat, not the cli, and splits long replies', async () => {
+  it('sends proactive messages to the owner telegram chat, not the cli, and a long reply as one rich message', async () => {
     const long = `${'a'.repeat(3000)}\n\n${'b'.repeat(3000)}`;
     const t = setup([textStep(long)]);
     await t.app.start();
     await t.at('2026-10-12T19:00:00-07:00');
-    expect(t.texts()).toEqual([`${OWNER}: ${'a'.repeat(3000)}`, `${OWNER}: ${'b'.repeat(3000)}`]);
+    expect(t.texts()).toEqual([`${OWNER}: ${long}`]);
     expect(t.cliPrinted()).toBe('');
     await t.app.stop();
   });

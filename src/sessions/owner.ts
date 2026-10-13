@@ -16,7 +16,7 @@ export interface OwnerMessenger {
   remember(chat: OwnerChat): void;
   chat(): OwnerChat | undefined;
   // send gives false when no chat of the owner is known or the channel fails.
-  send(text: string, buttons?: Button[][], extra?: Pick<OutboundMessage, 'markdown' | 'details'>): Promise<boolean>;
+  send(text: string, buttons?: Button[][], extra?: Pick<OutboundMessage, 'markdown' | 'details' | 'runId'>): Promise<boolean>;
 }
 
 // proactive messages go to the chat that the owner used last. the preferred chat, for example the owner's private

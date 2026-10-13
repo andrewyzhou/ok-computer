@@ -73,7 +73,7 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
         events: start(text, automation.taint),
         signal: deps.signal,
       });
-      if (hasText(result)) await owner.send(result.text);
+      if (hasText(result)) await owner.send(result.text, undefined, { markdown: true, runId: result.runId });
       return toJob(result);
     });
 
@@ -93,7 +93,7 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
       }),
     );
     if (hasText(result)) {
-      await owner.send(result.text);
+      await owner.send(result.text, undefined, { markdown: true, runId });
       // the main session gets a copy, so the agent knows what the owner answers to. the text can repeat untrusted
       // content that the run read, so the copy carries the taint of the run's session, and its text is wrapped. the
       // name of a tainted automation is untrusted text too, so the id stands for it.
