@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { parseConfig } from '../config/load.js';
 import { openDb } from '../db/index.js';
@@ -20,7 +21,7 @@ function setup(chain: string[], steps: Record<string, FakeStep[]>) {
     db.prepare('SELECT provider, model, costUsd, stopReason, error FROM model_calls ORDER BY id').all() as Array<
       Record<string, unknown>
     >;
-  return { runner, clients, sleep, rows };
+  return { runner, clients, sleep, rows, db };
 }
 
 const transient = () => new ModelError('transient', 'overloaded', 529);
@@ -36,6 +37,21 @@ describe('slot runner', () => {
     expect(rows()).toEqual([
       { provider: 'anthropic', model: 'claude-haiku-5-5', costUsd: 0.00015, stopReason: 'end_turn', error: null },
     ]);
+  });
+
+  it('records the tool list of each call one time and links each call to it by hash', async () => {
+    const { runner, db } = setup(['anthropic/a'], { anthropic: [textStep('1'), textStep('2'), textStep('3')] });
+    const tools = [{ name: 'now', description: 'Time.', inputSchema: { type: 'object' } }];
+    await runner.call('main', { ...request, tools }, { runId: null });
+    await runner.call('main', { ...request, tools }, { runId: null });
+    await runner.call('main', request, { runId: null });
+    const snapshots = db.prepare('SELECT hash, tools FROM tool_catalog_snapshots').all();
+    expect(snapshots.map((row) => JSON.parse(String(row.tools)))).toEqual(expect.arrayContaining([tools, []]));
+    expect(snapshots).toHaveLength(2);
+    const hashes = db.prepare('SELECT toolCatalogHash AS hash FROM model_calls ORDER BY id').all().map((row) => row.hash);
+    const withTools = snapshots.find((row) => String(row.tools) === JSON.stringify(tools))!.hash;
+    expect(hashes).toEqual([withTools, withTools, expect.not.stringMatching(String(withTools))]);
+    expect(hashes[0]).toBe(createHash('sha256').update(JSON.stringify(tools)).digest('hex'));
   });
 
   it('retries the same model one time after a transient error', async () => {

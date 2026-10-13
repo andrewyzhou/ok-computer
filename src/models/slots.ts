@@ -1,9 +1,17 @@
+import { createHash } from 'node:crypto';
 import type { Config, Slot } from '../config/schema.js';
 import type { Db } from '../db/index.js';
 import type { Logger } from '../observability/logger.js';
 import { redactedJson } from '../observability/redact.js';
 import { costUsd } from './cost.js';
-import { ModelError, type ModelCall, type ModelClient, type ModelRequest, type ModelResponse } from './types.js';
+import {
+  ModelError,
+  type ModelCall,
+  type ModelClient,
+  type ModelRequest,
+  type ModelResponse,
+  type ToolSpec,
+} from './types.js';
 
 export type SlotResult =
   | { ok: true; response: ModelResponse; provider: string; model: string }
@@ -94,12 +102,24 @@ interface CallRecord {
   latencyMs: number;
 }
 
+// the snapshot keeps each distinct tool list one time. the hash on each call shows which tools the model had.
+export function recordToolCatalog(db: Db, tools: ToolSpec[], now: Date): string {
+  const json = JSON.stringify(tools);
+  const hash = createHash('sha256').update(json).digest('hex');
+  db.prepare('INSERT OR IGNORE INTO tool_catalog_snapshots (hash, tools, createdAt) VALUES (?, ?, ?)').run(
+    hash,
+    json,
+    now.toISOString(),
+  );
+  return hash;
+}
+
 function record(db: Db, row: CallRecord, now: Date): void {
   const usage = row.response?.usage;
   db.prepare(
     `INSERT INTO model_calls (runId, slot, provider, model, inputTokens, outputTokens, cacheReadTokens,
-       cacheWriteTokens, costUsd, latencyMs, stopReason, error, request, response, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       cacheWriteTokens, costUsd, latencyMs, stopReason, error, request, response, createdAt, toolCatalogHash)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     row.runId,
     row.slot,
@@ -116,5 +136,6 @@ function record(db: Db, row: CallRecord, now: Date): void {
     redactedJson(row.call),
     row.response ? redactedJson(row.response) : null,
     now.toISOString(),
+    recordToolCatalog(db, row.call.tools, now),
   );
 }
