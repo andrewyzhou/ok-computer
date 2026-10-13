@@ -33,33 +33,44 @@ describe('neutralizeMarkdown', () => {
     expect(neutralizeMarkdown('![x](u) tg://a').neutralized).toEqual(['![', 'tg:']);
   });
 
+  // markdown decodes a backslash escape and a character reference in a link destination, so these are tg: and attach:.
+  it('breaks a scheme with an escaped colon or a letter as a character reference', () => {
+    expect(safe(String.raw`[o](tg\://resolve)`)).toBe(String.raw`[o](tg` + Z + String.raw`\://resolve)`);
+    expect(safe(String.raw`[o](attach\://file)`)).toBe(String.raw`[o](attach` + Z + String.raw`\://file)`);
+    expect(safe('[o](&#116;g://resolve)')).toBe(`[o](&#116;g${Z}://resolve)`);
+    expect(safe('[o](t&#x67;://resolve)')).toBe(`[o](t&#x67;${Z}://resolve)`);
+    expect(safe('[o](t&#103;://x) [p](att&#x61;ch://y) [q](&#84;G&#58;//z)')).toBe(`[o](t&#103;${Z}://x) [p](att&#x61;ch${Z}://y) [q](&#84;G${Z}&#58;//z)`);
+    expect(neutralizeMarkdown('&#116;g: att&#x61;ch:').neutralized).toEqual(['tg:', 'attach:']);
+    // a longer word that ends in tg is not the scheme.
+    expect(safe('xtg://a')).toBe('xtg://a');
+  });
+
   it('leaves text, allowed tags and autolinks as they are', () => {
     const text = '**bold** <u>under</u> <details><summary>more</summary>x</details> <tg-spoiler>s</tg-spoiler> <https://x.test> 2 < 3 > 1';
     expect(neutralizeMarkdown(text)).toEqual({ text, neutralized: [] });
   });
 
-  it('leaves a closed code fence as it is', () => {
-    const text = 'Here is code:\n```ts\nconst a: Array<T> = [];\nconst h = "<img src=x> <u> <details> <tg-spoiler> ![i](u) tg://x";\n```\nAfter <img>.';
-    expect(safe(text)).toBe(text.replace('After <img>', `After <${Z}img>`));
-    expect(safe('~~~\n<img>\n~~~')).toBe('~~~\n<img>\n~~~');
-  });
-
-  it('does not exempt an unclosed fence, an inline code span, or a fence that markdown would not see as code', () => {
-    expect(safe('```\n<img src=x>')).toBe(`\`\`\`\n<${Z}img src=x>`);
-    expect(safe('`<tg-button>`')).toBe(`\`<${Z}tg-button>\``);
-    // a fence inside a list item ends with the item, so the tag after it is html at the top level.
-    expect(safe('- item\n  ```\n<img src=x>\n  ```')).toBe(`- item\n  \`\`\`\n<${Z}img src=x>\n  \`\`\``);
-    // the lines of an html block stay raw until a blank line, and a <pre> block stays raw until </pre>.
-    expect(safe('<details>\n```\n<img src=x>\n```')).toBe(`<details>\n\`\`\`\n<${Z}img src=x>\n\`\`\``);
-    expect(safe('<pre>\n\n```\n<img src=x>\n```\n</pre>')).toBe(`<pre>\n\n\`\`\`\n<${Z}img src=x>\n\`\`\`\n</pre>`);
-    // backticks after a backtick fence make the line inline code.
-    expect(safe('```a`b\n<img src=x>\n```')).toBe(`\`\`\`a\`b\n<${Z}img src=x>\n\`\`\``);
-    // a closing fence must be at least as long as the opening one.
-    expect(safe('````\n<img>\n```')).toBe(`\`\`\`\`\n<${Z}img>\n\`\`\``);
-  });
-
-  it('exempts a fence after an html block that a blank line closed', () => {
-    expect(safe('<details>x</details>\n\n```\n<img>\n```')).toBe('<details>x</details>\n\n```\n<img>\n```');
+  // the scanner once kept the lines of a fence as they were. each input below made the scanner and a markdown
+  // parser disagree on where the fence ended, so a live tag passed as code.
+  it('changes the text in a code fence too, because only a full parser knows where a fence ends', () => {
+    const IMG = '<img src="https://x.test/p.png?d=1">';
+    const F = '```';
+    const inputs = [
+      [F, '<img>', F],
+      [` ${F}`, F, IMG, F],
+      ['  ~~~', '~~~', '<tg-button data="approval:1:approve">OK</tg-button>', '~~~'],
+      [F, 'x', `${F}\u00a0`, F, IMG, F],
+      [F, 'x', `${F}\u2003`, F, IMG, F],
+      [F, `${F}\r`, IMG, F],
+      ['<details>', '\u00a0', F, IMG, F],
+      ['- item', `  ${F}`, 'x', `  ${F}`, F, IMG, F],
+      [F, '![x](https://x.test/p.png)', F],
+    ].map((lines) => lines.join('\n'));
+    for (const input of inputs) {
+      const result = neutralizeMarkdown(input);
+      expect(result.neutralized.length, JSON.stringify(input)).toBeGreaterThan(0);
+      expect(result.text, JSON.stringify(input)).not.toMatch(/<(?:img|tg-button)|!\[/);
+    }
   });
 
   it('takes linear time on hostile text', () => {
@@ -101,5 +112,18 @@ describe('splitMarkdown', () => {
     const parts = splitMarkdown(line, 100);
     expect(parts.join('')).toBe(line);
     for (const part of parts) expect(part).not.toMatch(/[\uD800-\uDBFF]$|^[\uDC00-\uDFFF]/);
+  });
+
+  // a cut at an earlier blank line keeps the lines after it, and the next line could then make the part too long.
+  it('keeps each part within the limit after a cut at an earlier blank line', () => {
+    const parts = splitMarkdown(`aaaaa\n\n${'b'.repeat(60)}\n${'c'.repeat(60)}\nd`, 100);
+    expect(parts.map((part) => part.length)).toEqual([5, 60, 62]);
+    let seed = 7;
+    const next = (n: number) => (seed = (seed * 48_271) % 2_147_483_647) % n;
+    const pieces = ['', '```', '```ts', '~~~', '- item'];
+    for (let round = 0; round < 3000; round++) {
+      const lines = Array.from({ length: 1 + next(12) }, () => (next(3) === 0 ? pieces[next(pieces.length)]! : 'x'.repeat(next(130))));
+      for (const part of splitMarkdown(lines.join('\n'), 100)) expect(part.length).toBeLessThanOrEqual(100);
+    }
   });
 });

@@ -2,7 +2,9 @@
 // makes the telegram servers fetch a url without a click, and a tg:// link can show media. the model writes this
 // text, and a tainted model can be told what to write. so a zero-width space goes into each such construct. the
 // owner sees the same text, and telegram does not parse it. the check reads the raw text without a parser, so a
-// difference between two parsers cannot hide a tag.
+// difference between two parsers cannot hide a tag. for this reason the pass also changes the text in code blocks:
+// a list, a quote or an html block changes where a fence ends, and only a full parser knows that. the cost is a
+// zero-width space in copied code that holds a tag, an image or a tg: scheme.
 
 const ZWSP = '​';
 
@@ -12,11 +14,20 @@ const ALLOWED_TAGS = new Set(
 );
 
 // the spaces before and after the slash are separate groups, so a long run of spaces has only one way to match.
-// "<!" and "<?" start a comment or a declaration, which can hold a fence that the line scanner would take as code.
+// "<!" and "<?" start a comment or a declaration, which can hide text.
 const TAG = /<(\s*(?:\/\s*)?)([A-Za-z][A-Za-z0-9-]*)(?=[\s/>]|$)|<(?=[!?])/g;
 const IMAGE = /!\[/g;
-// a link destination can spell the colon as an html entity.
-const SCHEME = /\b(tg|attach)(?=:|&colon;|&#0*58;?|&#x0*3a;?)/gi;
+// markdown decodes character references and backslash escapes in a link destination. so each letter of the scheme
+// can be a numeric reference, and the colon can be a reference or an escaped colon.
+const letter = (char: string) => {
+  const codes = [char.charCodeAt(0), char.toUpperCase().charCodeAt(0)];
+  return `(?:${char}|&#0*(?:${codes.join('|')});?|&#x0*(?:${codes.map((code) => code.toString(16)).join('|')});?)`;
+};
+const spelled = (word: string) => [...word].map(letter).join('');
+const SCHEME = new RegExp(
+  String.raw`(?<![A-Za-z0-9])(?:(${spelled('tg')})|(${spelled('attach')}))(?=:|\\:|&colon;|&#0*58;?|&#x0*3a;?)`,
+  'gi',
+);
 
 export interface Neutralized {
   text: string;
@@ -26,30 +37,25 @@ export interface Neutralized {
 
 export function neutralizeMarkdown(text: string): Neutralized {
   const neutralized: string[] = [];
-  const lines = text.split('\n');
-  const code = codeLines(lines);
-  const safe = lines.map((line, i) => {
-    if (code[i]) return line;
-    return line
-      .replace(TAG, (match, slash: string | undefined, name: string | undefined, at: number) => {
-        if (name === undefined) {
-          neutralized.push(`<${line.charAt(at + 1)}`);
-          return `<${ZWSP}`;
-        }
-        if (ALLOWED_TAGS.has(name.toLowerCase())) return match;
-        neutralized.push(`<${name.toLowerCase()}>`);
-        return `<${ZWSP}${slash}${name}`;
-      })
-      .replace(IMAGE, () => {
-        neutralized.push('![');
-        return `!${ZWSP}[`;
-      })
-      .replace(SCHEME, (scheme: string) => {
-        neutralized.push(`${scheme.toLowerCase()}:`);
-        return `${scheme}${ZWSP}`;
-      });
-  });
-  return { text: safe.join('\n'), neutralized };
+  const safe = text
+    .replace(TAG, (match, slash: string | undefined, name: string | undefined, at: number) => {
+      if (name === undefined) {
+        neutralized.push(`<${text.charAt(at + 1)}`);
+        return `<${ZWSP}`;
+      }
+      if (ALLOWED_TAGS.has(name.toLowerCase())) return match;
+      neutralized.push(`<${name.toLowerCase()}>`);
+      return `<${ZWSP}${slash}${name}`;
+    })
+    .replace(IMAGE, () => {
+      neutralized.push('![');
+      return `!${ZWSP}[`;
+    })
+    .replace(SCHEME, (scheme: string, tg: string | undefined) => {
+      neutralized.push(tg ? 'tg:' : 'attach:');
+      return `${scheme}${ZWSP}`;
+    });
+  return { text: safe, neutralized };
 }
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
@@ -63,39 +69,11 @@ function opener(line: string, indent: number): string | undefined {
   return marker[0] === '`' && info.includes('`') ? undefined : marker;
 }
 
+// markdown allows only spaces and tabs after a closing fence. trim() also removes other white space.
 const closes = (line: string, marker: string) => {
   const found = FENCE.exec(line);
-  return found !== null && found[1]![0] === marker[0] && found[1]!.length >= marker.length && found[2]!.trim() === '';
+  return found !== null && found[1]![0] === marker[0] && found[1]!.length >= marker.length && /^[ \t]*$/.test(found[2]!);
 };
-
-// codeLines marks the lines of each fenced code block that the pass leaves as they are. the rule is stricter than
-// markdown, so a block that the scanner takes as code is code for telegram too:
-// - the fence starts in column 0, so it is not inside a list item;
-// - no html block is open. such a block starts with a tag at the start of a line and ends at a blank line, and a
-//   <pre> block ends only at </pre>. markdown keeps the lines of the block raw, so a fence there is not code;
-// - a closing fence follows. a fence without one is not exempt.
-function codeLines(lines: string[]): boolean[] {
-  const code = lines.map(() => false);
-  let html = false;
-  let pre = false;
-  let open: { marker: string; at: number } | undefined;
-  for (const [i, line] of lines.entries()) {
-    if (open) {
-      if (closes(line, open.marker)) {
-        code.fill(true, open.at, i + 1);
-        open = undefined;
-      }
-      continue;
-    }
-    if (line.trim() === '') html = false;
-    const marker = html || pre ? undefined : opener(line, 0);
-    if (marker) open = { marker, at: i };
-    else if (/^ {0,3}<\s*(?:\/\s*)?[A-Za-z]/.test(line)) html = true;
-    if (/^ {0,3}<pre(?=[\s>]|$)/i.test(line)) pre = true;
-    if (/<\/pre>/i.test(line)) pre = false;
-  }
-  return code;
-}
 
 // the split reads lines, not a markdown parse. a parser takes quadratic time on some text and can overflow the stack
 // on deep quotes, and the model writes the text. a part ends at a blank line outside a code fence. a part with no such
@@ -110,25 +88,32 @@ export function splitMarkdown(text: string, limit: number): string[] {
   let size = 0;
   let fence: { marker: string; line: string } | undefined;
   let lastBreak = -1;
+  // the count of lines at the start of the part that open a fence again: 0 or 1.
+  let carried = 0;
   const take = (count: number) => {
     const part = lines.slice(0, count);
     const open = fenceAfter(part);
     const body = part.join('\n').trim();
     if (body) parts.push(open ? `${body}\n${open.marker}` : body);
     lines = open ? [open.line, ...lines.slice(count)] : lines.slice(count);
+    carried = open ? 1 : 0;
     size = lines.reduce((sum, line) => sum + line.length + 1, 0);
     lastBreak = -1;
   };
   for (let line of text.split('\n')) {
-    while (line.length > room) {
-      const cut = /[\uD800-\uDBFF]/.test(line[room - 1]!) ? room - 1 : room;
-      if (lines.length) take(lines.length);
+    if (size + line.length + 1 > room) take(lastBreak > 0 ? lastBreak : lines.length);
+    // the lines after the blank line stay in the part, so with this line the part can still be too long. a part
+    // that holds only the line that opens a fence again cannot get shorter.
+    if (size + line.length + 1 > room && lines.length > carried) take(lines.length);
+    // a line that still does not fit is cut. the line that opens a fence again takes room in each part, and the cut
+    // keeps at least half the room, so a very long fence line makes a part too long but never stops the split.
+    while (size + line.length + 1 > room) {
+      const space = Math.max(room - size - 1, Math.floor(room / 2));
+      const cut = /[\uD800-\uDBFF]/.test(line[space - 1]!) ? space - 1 : space;
       lines.push(line.slice(0, cut));
-      size += cut + 1;
       line = line.slice(cut);
       take(lines.length);
     }
-    if (size + line.length + 1 > room) take(lastBreak > 0 ? lastBreak : lines.length);
     if (fence && closes(line, fence.marker)) fence = undefined;
     else if (!fence) {
       const marker = opener(line, 3);
