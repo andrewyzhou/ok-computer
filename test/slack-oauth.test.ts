@@ -151,6 +151,24 @@ describe('slack sign-in with a pre-registered client', () => {
     expect(redact(`said ${t.slack.clientSecret}`)).toBe('said [redacted]');
   });
 
+  // a token that never expires kept its old scopes after the owner added a scope to the config, so the guide's fix for
+  // missing_scope connected again with the same token and slack was never asked for the new scope.
+  it('signs in again when the stored token does not hold each configured scope', async () => {
+    const t = await setup();
+    await t.integrations.start();
+    await signIn(t);
+    const tokens = JSON.parse((await t.secrets.get('slack-work:oauth-tokens'))!) as Record<string, unknown>;
+    // slack can name the scopes with commas. a token that holds each configured scope connects with no new sign-in.
+    await t.secrets.set('slack-work:oauth-tokens', JSON.stringify({ ...tokens, scope: SCOPES.join(',') }));
+    expect(await t.integrations.connect('slack-work')).toEqual({ connected: true });
+    await t.secrets.set('slack-work:oauth-tokens', JSON.stringify({ ...tokens, scope: SCOPES.slice(1).join(',') }));
+    const started = await t.integrations.connect('slack-work');
+    if (!('url' in started)) throw new Error(`expected a link, got ${JSON.stringify(started)}`);
+    expect(await t.integrations.finishSignIn(await consent(t.slack, started.url))).toMatchObject({ ok: true });
+    await expect.poll(() => t.state().status).toBe('connected');
+    expect(t.slack.scopes).toEqual([SCOPES.join(' '), SCOPES.join(' ')]);
+  });
+
   it('uses a client that the owner stores again after the first sign-in', async () => {
     const t = await setup();
     await t.integrations.start();

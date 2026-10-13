@@ -95,7 +95,7 @@ The first poll runs 15 minutes after the start, and it reads the direct messages
 | "The server said: invalid_client: the server said bad_client_secret" (or `invalid_client_id`) | Copy both values again from **Basic Information** and store them. |
 | "The server said: invalid_grant: the server said invalid_code" | The address was pasted too late or twice. Press Connect again. |
 | Slack's consent page says `bad_redirect_uri` | The redirect URL of the app must be exactly the one that the **OAuth app** panel shows. |
-| A tool answers with `missing_scope` | Add the scope that Slack names to the User Token Scopes of the app and to `scopes`, run `okc restart`, and press Connect again. |
+| A tool answers with `missing_scope` | Add the scope that Slack names to the User Token Scopes of the app and to `scopes`, and run `okc restart`. The stored token does not hold the new scope, so the integration then needs a new sign-in: press Connect and paste the address as in section 3. |
 | Telegram: "The slack-work integration needs you to sign in again" | The token was revoked, for example because the app was removed. Press Connect. |
 | A poll is skipped: "slack-work is not connected" | Nothing. The Integrations page says why it is not connected, and the next poll goes on. |
 | A poll failed: "could not be read" | Slack answered in a form that the reader does not know. See step 4: save the answer as a fixture, and change the reader. The Slack tools of the agent still work. |

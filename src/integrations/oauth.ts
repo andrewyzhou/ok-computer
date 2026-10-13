@@ -179,6 +179,15 @@ export function createOAuth(deps: OAuthDeps): OAuth {
         // each token is a secret on its own. the redaction of the whole json text would miss a token in a header.
         registerSecret(tokens?.access_token, `${tokensRef(id)}#access`);
         registerSecret(tokens?.refresh_token, `${tokensRef(id)}#refresh`);
+        // the owner can add a scope to the config after a sign-in. a token that never expires would then hold the old
+        // scopes for ever, so a token that does not name each configured scope makes the sdk start a new sign-in. a
+        // token without a scope, as after some refreshes, is kept, because the app cannot know what it holds.
+        const granted = tokens?.scope ? new Set(tokens.scope.split(/[\s,]+/)) : undefined;
+        const missing = auth?.scopes?.filter((scope) => !granted?.has(scope)) ?? [];
+        if (granted && missing.length) {
+          logger.warn('oauth token lacks a configured scope, so a new sign-in starts', { integration: id, missing });
+          return undefined;
+        }
         return tokens;
       },
       async saveTokens(tokens) {
