@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { openDb } from '../db/index.js';
+import { createAutomationTools } from '../scheduler/tools.js';
+import { createToolRegistry } from '../tools/registry.js';
 import { normalizeSchema } from './schema.js';
 
 const schema = {
@@ -25,7 +29,7 @@ describe('schema normalization', () => {
     expect(normalizeSchema(schema, 'anthropic')).toEqual(rest);
   });
 
-  it('gives local models a plain schema without references or unions', () => {
+  it('puts references in place and keeps only the unions that a type list or an enum cannot say', () => {
     const out = normalizeSchema(schema, 'openai-compat') as { properties: Record<string, unknown> } & Record<string, unknown>;
     expect(out.$defs).toBeUndefined();
     expect(out.$schema).toBeUndefined();
@@ -38,10 +42,26 @@ describe('schema normalization', () => {
     expect(out.properties.label).toEqual({ type: 'string' });
     expect(out.properties.id).toEqual({ type: ['string', 'integer'] });
     expect(out.properties.mode).toEqual({ enum: ['fast', 'slow'] });
-    expect(out.properties.target).toEqual({ type: 'object', properties: { email: { type: 'string' } } });
+    // both shapes stay. the first shape alone would refuse a list of addresses.
+    expect(out.properties.target).toEqual({
+      anyOf: [{ type: 'object', properties: { email: { type: 'string' } } }, { type: 'array', items: { type: 'string' } }],
+    });
     expect(out.properties.tree).toEqual({ type: 'object', properties: { child: { description: 'any value' } } });
     expect(out.properties.both).toEqual({ type: 'object', properties: { a: { type: 'string' }, b: { type: 'number' } }, required: ['a', 'b'] });
-    expect(JSON.stringify(out)).not.toMatch(/\$ref|anyOf|oneOf|allOf/);
+    expect(JSON.stringify(out)).not.toMatch(/\$ref|oneOf|allOf/);
+  });
+
+  it('keeps every schedule kind of automations_create valid', () => {
+    const registry = createToolRegistry(createAutomationTools({ db: openDb(':memory:'), replan: () => {} }));
+    const plain = z.fromJSONSchema(normalizeSchema(registry.specs(['automations_create'])[0]!.inputSchema, 'openai-compat'));
+    const payload = { type: 'agent', prompt: 'Ask for my goals.' };
+    for (const schedule of [
+      { kind: 'cron', expr: '0 19 * * *' },
+      { kind: 'every', everyMs: 3_600_000 },
+      { kind: 'at', at: '2026-10-14T19:00:00-07:00' },
+    ]) {
+      expect(plain.safeParse({ name: 'goals', schedule, payload }).success).toBe(true);
+    }
   });
 });
 

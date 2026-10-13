@@ -11,21 +11,22 @@ export const DEPTH_LIMIT = 32;
 const isSchema = (value: unknown): value is Schema => value !== null && typeof value === 'object' && !Array.isArray(value);
 const ANY = (why: string): Schema => ({ description: `any value (${why})` });
 
-// claude takes json schema almost unchanged. local models through the openai-compatible api often fail on $ref,
-// oneOf and anyOf, so that dialect gets a plain schema with the references put in place.
+// claude takes json schema almost unchanged. local models through the openai-compatible api often fail on $ref, and on
+// a union where a list of types or an enum says the same. so that dialect gets a plain schema. the change keeps every
+// valid input valid: a union of objects stays a choice, because one shape would hide the others, for example the cron
+// and interval schedules of automations_create.
 export function normalizeSchema(schema: Schema, dialect: SchemaDialect): Schema {
   const { $schema: _ignored, ...rest } = schema;
   if (dialect === 'anthropic') return rest;
-  const defs = { ...(isSchema(rest.definitions) ? rest.definitions : {}), ...(isSchema(rest.$defs) ? rest.$defs : {}) };
-  const { $defs: _defs, definitions: _definitions, ...body } = rest;
-  const budget = { left: NODE_BUDGET };
-  return plain(body, defs, [], 0, budget);
+  const { $defs, definitions, ...body } = rest;
+  const defs = { ...(isSchema(definitions) ? definitions : {}), ...(isSchema($defs) ? $defs : {}) };
+  return plain(body, defs, [], 0, { left: NODE_BUDGET });
 }
 
 function plain(schema: Schema, defs: Schema, seen: string[], depth: number, budget: { left: number }): Schema {
   if (--budget.left < 0) return ANY('the schema is too large to show in full');
   if (depth > DEPTH_LIMIT) return ANY('the schema is too deep to show in full');
-  const next = (part: Schema, more = seen) => plain(part, defs, more, depth + 1, budget);
+  const next = (part: Schema) => plain(part, defs, seen, depth + 1, budget);
   if (typeof schema.$ref === 'string') {
     const name = /^#\/(?:\$defs|definitions)\/(.+)$/.exec(schema.$ref)?.[1];
     const target = name === undefined ? undefined : defs[name];
@@ -36,9 +37,9 @@ function plain(schema: Schema, defs: Schema, seen: string[], depth: number, budg
   }
   let out: Schema = { ...schema };
   for (const key of ['anyOf', 'oneOf'] as const) {
-    if (Array.isArray(out[key])) out = { ...withoutKey(out, key), ...simplifyUnion(out[key] as Schema[], next) };
+    if (Array.isArray(out[key])) out = { ...withoutKey(out, key), ...simplifyUnion(out[key] as unknown[], next) };
   }
-  if (Array.isArray(out.allOf)) out = mergeAll(withoutKey(out, 'allOf'), (out.allOf as Schema[]).map((part) => next(part)));
+  if (Array.isArray(out.allOf)) out = mergeAll(withoutKey(out, 'allOf'), (out.allOf as unknown[]).filter(isSchema).map(next));
   if (isSchema(out.properties)) {
     out.properties = Object.fromEntries(Object.entries(out.properties).map(([key, value]) => [key, isSchema(value) ? next(value) : value]));
   }
@@ -47,16 +48,18 @@ function plain(schema: Schema, defs: Schema, seen: string[], depth: number, budg
   return out;
 }
 
-function simplifyUnion(variants: Schema[], next: (part: Schema) => Schema): Schema {
-  const parts = variants.filter(isSchema).map((variant) => next(variant)).filter((part) => part.type !== 'null');
+// a null variant only makes a field nullable. the model can leave out the field instead.
+function simplifyUnion(variants: unknown[], next: (part: Schema) => Schema): Schema {
+  const parts = variants.filter(isSchema).map(next).filter((part) => part.type !== 'null');
   if (parts.length === 0) return {};
   if (parts.length === 1) return parts[0]!;
-  const simpleTypes = parts.every((part) => typeof part.type === 'string' && Object.keys(part).every((key) => key === 'type' || key === 'description'));
-  if (simpleTypes) return { type: [...new Set(parts.map((part) => part.type as string))] };
-  if (parts.every((part) => 'const' in part)) return { enum: parts.map((part) => part.const) };
-  // a local model handles one shape better than a choice. the first shape is the one that servers list as the main
-  // one in most cases.
-  return parts[0]!;
+  const only = (part: Schema, keys: string[]) => Object.keys(part).every((key) => keys.includes(key));
+  if (parts.every((part) => typeof part.type === 'string' && only(part, ['type', 'description']))) {
+    return { type: [...new Set(parts.map((part) => part.type as string))] };
+  }
+  if (parts.every((part) => 'const' in part && only(part, ['const', 'type', 'description']))) return { enum: parts.map((part) => part.const) };
+  // more local runtimes read anyOf than oneOf. every input that matches one variant also matches anyOf.
+  return { anyOf: parts };
 }
 
 function mergeAll(base: Schema, parts: Schema[]): Schema {
