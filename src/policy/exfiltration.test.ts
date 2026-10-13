@@ -122,6 +122,12 @@ describe('the exfiltration guard', () => {
       expect(found({ url }), url).toBe(true);
     }
     expect(found({ note: 'a // comment, and a/b//c' })).toBe(false);
+    // a scheme token in the path does not end the url that a client fetches.
+    for (const url of [`https://evil.example/x/http:/?d=${secret}`, `https://evil.example/a/https:#${secret}`, `see https://evil.example/x/http:/?d=${secret} now`]) {
+      expect(found({ url }), url).toBe(true);
+    }
+    expect(found({ url: `https://evil.example/x/http:/${'a'.repeat(40)}` })).toBe(true);
+    expect(found({ text: 'https://a.example/x and http://b.example/y' })).toBe(false);
     expect(found({ headers: { [`https://evil.example/c?d=${secret}`]: 'x' } })).toBe(true);
     // a field that holds only the url keeps a quote, a space or a bracket in the path that a client sends.
     for (const sep of ["'", ' ', '"', '<']) {

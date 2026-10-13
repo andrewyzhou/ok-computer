@@ -189,6 +189,7 @@ const SCHEME = /(?:https?|wss?|ftp):/gi;
 const BARE_URL = /(?<![\w.:/@\\-])(?:[a-z0-9-]+\.)+[a-z][a-z0-9-]*(?::\d{1,5})?[/?#][^\s"'<>]*/gi;
 const RELATIVE_URL = /(?<![\w:/\\])\/\/[^\s"'<>/\\]+[^\s"'<>]*/g;
 const LINK_END = /[\s"'<>]/;
+const CANDIDATE_LIMIT = 1024;
 
 interface UrlCandidate {
   text: string;
@@ -207,15 +208,19 @@ function urlsIn(raw: string): UrlCandidate[] {
       // a text that does not parse as a url cannot reach a host.
     }
   };
-  const starts = [...text.matchAll(SCHEME)].map((match) => match.index);
-  starts.forEach((start, i) => {
-    const rest = text.slice(start, starts[i + 1] ?? text.length).trimEnd();
+  // a scheme token in the path of a url does not end the url, because a client fetches all of it. so a candidate
+  // goes to the end of the field, and each scheme token inside it starts one more candidate. the length limit keeps
+  // the work linear when a field holds many scheme tokens. a candidate that the limit cuts is longer than the path
+  // limit, so it has a signal when it is judged whole.
+  const first = text.length - text.trimStart().length;
+  for (const { index: start } of text.matchAll(SCHEME)) {
+    const rest = text.slice(start, start + CANDIDATE_LIMIT).trimEnd();
     const end = rest.search(LINK_END);
     add(end < 0 ? rest : rest.slice(0, end), '', true);
     // a field that holds only the url goes to a client as one url, also with a space or a quote in its path, so it
     // is judged on every signal. a link with words after it in a message is judged only on the query and its kin.
-    if (end >= 0) add(rest, '', rest === text.trim());
-  });
+    if (end >= 0) add(rest, '', start === first);
+  }
   for (const match of text.matchAll(BARE_URL)) add(match[0], 'https://', true);
   for (const match of text.matchAll(RELATIVE_URL)) add(match[0], 'https:', true);
   return found;
