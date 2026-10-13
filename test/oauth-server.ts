@@ -15,7 +15,10 @@ export interface OAuthTestServer {
   // expire makes every access token invalid, so the next request gets a 401 and the client refreshes.
   expire(): void;
   revoke(): void;
-  stats: { authorizations: number; codeGrants: number; refreshGrants: number; reuse: number; mcpRequests: number };
+  // refuseCodes makes the token endpoint refuse each authorization code, as for a consent that took too long.
+  refuseCodes(): void;
+  // requests counts every http request, so a test can show that a parked integration makes none.
+  stats: { requests: number; authorizations: number; codeGrants: number; refreshGrants: number; reuse: number; mcpRequests: number };
   // the client must give this client id. without it the test uses dynamic registration.
   clientId: string;
 }
@@ -26,7 +29,8 @@ export async function startOAuthServer(): Promise<OAuthTestServer> {
   const codes = new Map<string, { challenge: string; redirect: string }>();
   const access = new Set<string>();
   const refresh = new Map<string, { used: boolean }>();
-  const stats = { authorizations: 0, codeGrants: 0, refreshGrants: 0, reuse: 0, mcpRequests: 0 };
+  let refusing = false;
+  const stats = { requests: 0, authorizations: 0, codeGrants: 0, refreshGrants: 0, reuse: 0, mcpRequests: 0 };
   const clientId = 'okc-test-client';
   let base = '';
 
@@ -69,6 +73,7 @@ export async function startOAuthServer(): Promise<OAuthTestServer> {
   };
 
   const server: Server = createServer(async (req, res) => {
+    stats.requests++;
     const url = new URL(req.url!, base);
     const body = await readBody(req);
     if (url.pathname === '/mcp') return mcp(req, res, body);
@@ -106,6 +111,7 @@ export async function startOAuthServer(): Promise<OAuthTestServer> {
         const code = codes.get(params.get('code') ?? '');
         codes.delete(params.get('code') ?? '');
         const verifier = params.get('code_verifier') ?? '';
+        if (refusing) return json(res, 400, { error: 'invalid_grant', error_description: 'the code expired' });
         if (!code || b64url(createHash('sha256').update(verifier).digest()) !== code.challenge) return json(res, 400, { error: 'invalid_grant' });
         stats.codeGrants++;
         return json(res, 200, issue());
@@ -141,6 +147,9 @@ export async function startOAuthServer(): Promise<OAuthTestServer> {
     revoke: () => {
       access.clear();
       refresh.clear();
+    },
+    refuseCodes: () => {
+      refusing = true;
     },
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };

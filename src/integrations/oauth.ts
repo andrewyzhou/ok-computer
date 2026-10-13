@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import type { OAuthClientMetadata, OAuthClientProvider, OAuthDiscoveryState, StoredOAuthClientInformation, StoredOAuthTokens, Transport } from '@modelcontextprotocol/client';
 import type { Db } from '../db/index.js';
 import type { Logger } from '../observability/logger.js';
-import { registerSecret } from '../observability/redact.js';
+import { redact, registerSecret } from '../observability/redact.js';
 import type { Clock } from '../time.js';
 import { errorText } from '../tools/registry.js';
 import type { HttpEntry } from './config.js';
@@ -44,8 +44,12 @@ export interface OAuthDeps {
 
 export interface OAuth {
   provider(entry: HttpEntry): OAuthClientProvider;
-  // fetch for the http transport. two refreshes with the same refresh token become one request.
-  fetch: typeof fetch;
+  // fetchFor gives the fetch of the http transport of one integration. it logs each sign-in step, and two refreshes
+  // with the same refresh token become one request.
+  fetchFor(entry: HttpEntry): typeof fetch;
+  // the text of the last failed sign-in step of an integration, as the server wrote it. a success clears it.
+  serverError(integrationId: string): string | undefined;
+  hasTokens(integrationId: string): Promise<boolean>;
   // the authorization link of the last flow of an integration that has not ended, for the dashboard.
   pendingUrl(integrationId: string): string | undefined;
   // callback finishes a flow. it is the handler of the loopback server, and tests call it without the server.
@@ -65,7 +69,9 @@ export function createOAuth(deps: OAuthDeps): OAuth {
   const drafts = new Map<string, Draft>();
   // the flow that finishAuth works on. the callback sets it just before the call.
   const active = new Map<string, Flow>();
+  const serverErrors = new Map<string, string>();
   let server: Server | undefined;
+  let closeTimer: NodeJS.Timeout | undefined;
 
   const readJson = async <T>(ref: string): Promise<T | undefined> => {
     const text = await secrets.get(ref);
@@ -118,7 +124,11 @@ export function createOAuth(deps: OAuthDeps): OAuth {
       async saveTokens(tokens) {
         registerSecret(tokens.access_token);
         registerSecret(tokens.refresh_token);
+        const before = await readJson<StoredOAuthTokens>(tokensRef(id));
         await secrets.set(tokensRef(id), JSON.stringify(tokens));
+        // the sdk also saves the stored tokens again to add the issuer. only new tokens from the server are a sign-in,
+        // and only they have a new expiry.
+        if (before?.access_token === tokens.access_token) return;
         const now = clock();
         const expires = typeof tokens.expires_in === 'number' ? new Date(now.getTime() + tokens.expires_in * 1000).toISOString() : null;
         db.prepare(
@@ -173,20 +183,75 @@ export function createOAuth(deps: OAuthDeps): OAuth {
   // the sdk refreshes on each 401, inside each request. two calls that both get a 401 would both use the same refresh
   // token, and a server with rotation refuses the second, or revokes the whole family.
   const shared = new Map<string, { response: Promise<Response>; at: number }>();
-  const singleFlight: typeof fetch = async (input, init) => {
-    const body = init?.body;
-    const params = body instanceof URLSearchParams ? body : typeof body === 'string' ? new URLSearchParams(body) : undefined;
-    const token = params?.get('grant_type') === 'refresh_token' ? params.get('refresh_token') : null;
-    if (init?.method !== 'POST' || !token) return fetch(input, init);
-    const now = clock().getTime();
-    for (const [key, each] of shared) if (now - each.at > REFRESH_SHARE_MS) shared.delete(key);
-    let entry = shared.get(token);
-    if (!entry) {
-      entry = { response: fetch(input, init), at: now };
-      shared.set(token, entry);
-    }
-    // each caller reads its own copy. the first response is never read, so it can give more copies.
-    return (await entry.response).clone();
+  const singleFlight =
+    (base: typeof fetch): typeof fetch =>
+    async (input, init) => {
+      const body = init?.body;
+      const params = body instanceof URLSearchParams ? body : typeof body === 'string' ? new URLSearchParams(body) : undefined;
+      const token = params?.get('grant_type') === 'refresh_token' ? params.get('refresh_token') : null;
+      if (init?.method !== 'POST' || !token) return base(input, init);
+      const now = clock().getTime();
+      for (const [key, each] of shared) if (now - each.at > REFRESH_SHARE_MS) shared.delete(key);
+      let entry = shared.get(token);
+      if (!entry) {
+        entry = { response: base(input, init), at: now };
+        shared.set(token, entry);
+      }
+      // each caller reads its own copy. the first response is never read, so it can give more copies.
+      return (await entry.response).clone();
+    };
+
+  // the sign-in steps (discovery, registration, token) are not json-rpc, so mcp_messages does not show them. the log
+  // gets each step with the integration id, and a failed step keeps the server's text for the owner. the log has no
+  // query and no body, because they hold the code, the verifier and the tokens. requests to the mcp endpoint are in
+  // mcp_messages already.
+  const observed =
+    (entry: HttpEntry): typeof fetch =>
+    async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const endpoint = new URL(entry.url);
+      if (url.origin === endpoint.origin && url.pathname === endpoint.pathname) return fetch(input, init);
+      const fields = { integration: entry.id, method: init?.method ?? 'GET', url: `${url.origin}${url.pathname}` };
+      const started = performance.now();
+      let response: Response;
+      try {
+        response = await fetch(input, init);
+      } catch (err) {
+        logger.warn('oauth step failed', { ...fields, err });
+        throw err;
+      }
+      const ms = Math.round(performance.now() - started);
+      // discovery tries several well-known urls, and a 404 there is normal. a failed post (registration or token) is a
+      // failed step.
+      if (response.ok || fields.method !== 'POST') {
+        logger.info('oauth step', { ...fields, status: response.status, ms });
+        if (response.ok && fields.method === 'POST') serverErrors.delete(entry.id);
+        return response;
+      }
+      const detail = redact(await errorDetail(response.clone()));
+      serverErrors.set(entry.id, detail);
+      logger.warn('oauth step failed', { ...fields, status: response.status, ms, detail });
+      // a failed callback does not change the state of the connection, so the page reads the text from here.
+      try {
+        const now = clock().toISOString();
+        db.prepare(
+          `INSERT INTO integration_state (integrationId, lastError, lastErrorAt, updatedAt) VALUES (?, ?, ?, ?)
+           ON CONFLICT (integrationId) DO UPDATE SET lastError = excluded.lastError, lastErrorAt = excluded.lastErrorAt, updatedAt = excluded.updatedAt`,
+        ).run(entry.id, `the sign-in step ${url.pathname} failed. The server said: ${detail}`, now, now);
+      } catch (err) {
+        logger.error('integration state write failed', { integration: entry.id, err });
+      }
+      return response;
+    };
+
+  // the callback listens only while a flow waits for the owner.
+  const closeWhenIdle = async () => {
+    prune();
+    if (flows.size || !server) return;
+    clearTimeout(closeTimer);
+    const current = server;
+    server = undefined;
+    await new Promise<void>((resolve) => current.close(() => resolve()));
   };
 
   const callback: OAuth['callback'] = async (url, finish) => {
@@ -220,7 +285,9 @@ export function createOAuth(deps: OAuthDeps): OAuth {
 
   return {
     provider: providerFor,
-    fetch: singleFlight,
+    fetchFor: (entry) => singleFlight(observed(entry)),
+    serverError: (id) => serverErrors.get(id),
+    hasTokens: async (id) => (await secrets.get(tokensRef(id))) !== undefined,
     pendingUrl(id) {
       prune();
       return [...flows.values()].find((flow) => flow.integrationId === id)?.url;
@@ -238,6 +305,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
         void callback(new URL(req.url ?? '/', `http://127.0.0.1:${port}`), finish).then(({ status, integrationId, text }) => {
           res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }).end(text);
           if (status === 200 && integrationId) onDone(integrationId);
+          void closeWhenIdle();
         });
       });
       await new Promise<void>((resolve, reject) => {
@@ -245,11 +313,27 @@ export function createOAuth(deps: OAuthDeps): OAuth {
         next.listen(port, '127.0.0.1', () => resolve());
       });
       server = next;
+      // a flow that the owner never finishes ends after its time limit, and the port closes then too.
+      closeTimer = setTimeout(() => void closeWhenIdle(), FLOW_TTL_MS + 1_000);
+      closeTimer.unref();
     },
     async close() {
+      clearTimeout(closeTimer);
       const current = server;
       server = undefined;
       if (current) await new Promise<void>((resolve) => current.close(() => resolve()));
     },
   };
+}
+
+// an oauth error answer has error and error_description. other answers give the start of their text.
+async function errorDetail(response: Response): Promise<string> {
+  const text = (await response.text().catch(() => '')).slice(0, 500);
+  try {
+    const body = JSON.parse(text) as { error?: unknown; error_description?: unknown };
+    if (typeof body.error === 'string') return body.error_description ? `${body.error}: ${String(body.error_description)}` : body.error;
+  } catch {
+    // the body is not json. the status and the start of the text say enough.
+  }
+  return `http ${response.status}${text ? `: ${text}` : ''}`;
 }

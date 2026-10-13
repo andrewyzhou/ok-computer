@@ -126,9 +126,12 @@ export function createApp(deps: AppDeps): App {
     entries,
     secrets,
     ...(oauth ? { oauth } : {}),
-    onNeedsAuth: (id) =>
+    onNeedsAuth: (id, said) =>
       void owner
-        .send(`The ${id} integration needs you to sign in again. Open the dashboard on the PC, go to Integrations, and press Connect.`)
+        .send(
+          `The ${id} integration needs you to sign in again, and its tools do not work until then.${said ? ` The server said: ${said}` : ''} ` +
+            `Connect it on the PC: http://127.0.0.1:${config.dashboard.port}/#/integrations/${id}`,
+        )
         .catch((err: unknown) => logger.error('needs-auth message failed', { integration: id, err })),
     ...(deps.mcpTransport ? { transport: deps.mcpTransport } : {}),
     ...(deps.setTimer ? { setTimer: deps.setTimer } : {}),

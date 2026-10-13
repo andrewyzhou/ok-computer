@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,7 +8,7 @@ import { parseConfig } from '../config/load.js';
 import { startDashboard, type DashboardDeps } from '../dashboard/server.js';
 import { openDb } from '../db/index.js';
 import { createBlobStore } from '../observability/blobs.js';
-import { silentLogger } from '../observability/logger.js';
+import { createLogger, silentLogger } from '../observability/logger.js';
 import { redact } from '../observability/redact.js';
 import { parseIntegrations, type IntegrationEntry } from './config.js';
 import { createIntegrations, type Integrations } from './integrations.js';
@@ -30,6 +30,10 @@ afterEach(async () => {
 
 async function setup() {
   const as = await startOAuthServer();
+  // the real logger writes json lines, so a test can show that no token reaches the log.
+  const logDir = mkdtempSync(join(tmpdir(), 'okc-oauth-log-'));
+  const logger = createLogger({ dir: logDir, consoleLevel: 'off' });
+  const logLines = () => readdirSync(logDir).flatMap((file) => readFileSync(join(logDir, file), 'utf8').split('\n').filter(Boolean));
   cleanup.push(() => as.close());
   const db = openDb(':memory:');
   db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r1', 'main', 'message', 'main', 'running', 'x')").run();
@@ -37,25 +41,25 @@ async function setup() {
   const clock = () => new Date(now);
   const secrets = createMemorySecretStore({ 'remote-app': JSON.stringify({ client_id: as.clientId }) });
   const port = await freePort();
-  const oauth = createOAuth({ db, clock, logger: silentLogger, secrets, port });
+  const oauth = createOAuth({ db, clock, logger, secrets, port });
   cleanup.push(() => oauth.close());
   const parsed = parseIntegrations({
     integrations: [{ id: 'remote', kind: 'mcp-http', url: `${as.base}/mcp`, auth: { type: 'oauth', clientRef: 'remote-app' }, tools: { allow: ['echo'] }, risk: { echo: 'read' } }],
   });
   if (!parsed.ok) throw new Error(parsed.error);
-  const needsAuth: string[] = [];
+  const needsAuth: Array<[string, string | undefined]> = [];
   const integrations = createIntegrations({
     db,
     blobs: createBlobStore(db, mkdtempSync(join(tmpdir(), 'okc-oauth-')), clock),
-    logger: silentLogger,
+    logger,
     clock,
     entries: parsed.value as IntegrationEntry[],
     secrets,
     oauth,
-    onNeedsAuth: (id) => needsAuth.push(id),
+    onNeedsAuth: (id, said) => needsAuth.push([id, said]),
   });
   cleanup.push(() => integrations.stop());
-  return { as, db, secrets, oauth, integrations, needsAuth, advance: (ms: number) => (now += ms) };
+  return { as, db, secrets, oauth, integrations, needsAuth, port, logLines, advance: (ms: number) => (now += ms) };
 }
 
 // the owner's browser: it opens the link, and the server sends it to the loopback callback.
@@ -78,13 +82,13 @@ async function connect(integrations: Integrations) {
 const echo = (integrations: Integrations, id = 'c1') => integrations.connection('remote')!.callTool('echo', { text: 'hi' }, { runId: 'r1', toolCallId: id });
 
 describe('oauth', () => {
-  it('waits for the owner, signs in through the loopback callback, and keeps every token out of the logs', async () => {
-    const { as, db, secrets, integrations, needsAuth } = await setup();
+  it('waits for the owner without a request, signs in through the loopback callback, and keeps every token out of the trace and the log', async () => {
+    const { as, db, secrets, integrations, needsAuth, logLines } = await setup();
     await integrations.start();
-    // without tokens the server needs the owner. no browser opens, and the app does not retry by itself.
-    expect(integrations.connection('remote')!.state().status).toBe('needs_auth');
-    expect(needsAuth).toEqual(['remote']);
-    expect(as.stats.authorizations).toBe(0);
+    // without tokens the integration is parked: no discovery, no registration, no flow, and no message to the owner.
+    expect(integrations.status()[0]!.state).toMatchObject({ status: 'needs_auth', error: expect.stringContaining('not signed in yet') });
+    expect(as.stats.requests).toBe(0);
+    expect(needsAuth).toEqual([]);
 
     await connect(integrations);
     expect(await echo(integrations)).toMatchObject({ kind: 'result' });
@@ -94,8 +98,54 @@ describe('oauth', () => {
     expect(db.prepare("SELECT tokenExpiresAt FROM integration_state WHERE integrationId = 'remote'").get()).toEqual({
       tokenExpiresAt: '2026-10-13T11:00:00.000Z',
     });
-    const traced = db.prepare('SELECT payload FROM mcp_messages').all().map((row) => String(row.payload)).join('\n');
-    expect(traced).not.toContain(tokens.access_token);
+    const stored = [
+      ...db.prepare('SELECT payload FROM mcp_messages').all().map((row) => String(row.payload)),
+      JSON.stringify(db.prepare('SELECT * FROM integration_state').all()),
+      ...logLines(),
+    ].join('\n');
+    expect(stored).not.toContain(tokens.access_token);
+    expect(stored).not.toContain(tokens.refresh_token);
+    // the token request carries the code and the pkce verifier. the log never has a request body.
+    expect(logLines().join('\n')).not.toMatch(/code_verifier|grant_type/);
+    // the log shows each sign-in step with the integration id, so a failed step is visible.
+    expect(logLines().some((line) => line.includes('"msg":"oauth step"') && line.includes('/token') && line.includes('"integration":"remote"'))).toBe(true);
+  });
+
+  it('closes the callback port when no sign-in waits', async () => {
+    const { integrations, port } = await setup();
+    await integrations.start();
+    await connect(integrations);
+    // another process can now take the port, because this one listens only while a flow waits.
+    const other = createOAuth({ db: openDb(':memory:'), clock: () => new Date(), logger: silentLogger, secrets: createMemorySecretStore(), port });
+    await expect.poll(async () => other.listen(() => undefined, () => {}).then(() => true, () => false)).toBe(true);
+    await other.close();
+  });
+
+  it('sends no message for stored tokens that never worked in this app', async () => {
+    const { db, secrets, integrations, needsAuth } = await setup();
+    // for example, the database is new but the credential manager still has old tokens.
+    await secrets.set('remote:oauth-tokens', JSON.stringify({ access_token: 'at_old', refresh_token: 'rt_old', token_type: 'Bearer' }));
+    await integrations.start();
+    expect(integrations.connection('remote')!.state().status).toBe('needs_auth');
+    expect(needsAuth).toEqual([]);
+    // the sdk saved the old tokens again to add the issuer. that is not a sign-in.
+    expect(db.prepare('SELECT authorizedAt, tokenExpiresAt FROM integration_state WHERE integrationId = ?').get('remote')).toEqual({ authorizedAt: null, tokenExpiresAt: null });
+  });
+
+  it('sends no message when a first sign-in fails, and keeps the text of the server', async () => {
+    const { as, db, integrations, needsAuth } = await setup();
+    await integrations.start();
+    as.refuseCodes();
+    const started = await integrations.authorize('remote');
+    if (!('url' in started)) throw new Error('expected a link');
+    const { response } = await consent(started.url);
+    expect(response.status).toBe(400);
+    expect(needsAuth).toEqual([]);
+    expect(integrations.connection('remote')!.state().status).not.toBe('connected');
+    expect(db.prepare('SELECT authorizedAt, lastError FROM integration_state WHERE integrationId = ?').get('remote')).toEqual({
+      authorizedAt: null,
+      lastError: 'the sign-in step /token failed. The server said: invalid_grant: the code expired',
+    });
   });
 
   it('refuses an unknown state, a second use of the same link, and an expired flow', async () => {
@@ -143,10 +193,15 @@ describe('oauth', () => {
     expect(await echo(integrations)).toMatchObject({ kind: 'not_sent', reason: expect.stringContaining('sign-in') });
     expect(integrations.connection('remote')!.state().status).toBe('needs_auth');
     expect(await echo(integrations, 'again')).toMatchObject({ kind: 'not_sent' });
-    expect(needsAuth).toEqual(['remote']);
+    // one message, with the text of the token endpoint. the page shows the same text.
+    expect(needsAuth).toEqual([['remote', 'invalid_grant: unknown refresh token']]);
+    expect(integrations.status()[0]!.lastError).toContain('The server said: invalid_grant: unknown refresh token');
     const requests = as.stats.mcpRequests;
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(as.stats.mcpRequests).toBe(requests);
+    // the owner presses connect. the new flow waits for the owner, and the owner gets no second message.
+    expect(await integrations.authorize('remote')).toMatchObject({ url: expect.any(String) });
+    expect(needsAuth).toHaveLength(1);
   });
 
   it('reads a revoked refresh token correctly while the dashboard runs in the same process', async () => {
@@ -164,7 +219,13 @@ describe('oauth', () => {
     expect(integrations.connection('remote')!.state().status).toBe('needs_auth');
     // the sdk removes dead tokens only when it can read the invalid_grant answer.
     expect(await secrets.get('remote:oauth-tokens')).toBeUndefined();
-    expect(needsAuth).toEqual(['remote']);
+    expect(needsAuth).toHaveLength(1);
+
+    // after a restart the integration has no tokens, so it waits for the owner and sends no second message.
+    await integrations.stop();
+    await integrations.start();
+    expect(integrations.status()[0]!.state.status).toBe('needs_auth');
+    expect(needsAuth).toHaveLength(1);
   });
 
   it('says so when another process holds the callback port', async () => {

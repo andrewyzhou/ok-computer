@@ -25,8 +25,9 @@ export interface IntegrationsDeps {
   // tests give an in-memory transport. the app uses stdio and http.
   transport?: (entry: IntegrationEntry) => Promise<Transport>;
   oauth?: OAuth;
-  // the owner gets a message when a server needs a new sign-in, for example after a failed refresh.
-  onNeedsAuth?: (integrationId: string) => void;
+  // the owner gets a message when a sign-in that worked stops working, for example after a revoked refresh token. it
+  // gets the text of the server, when the failed sign-in step had one.
+  onNeedsAuth?: (integrationId: string, serverText: string | undefined) => void;
   setTimer?: SetTimer;
 }
 
@@ -78,6 +79,12 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
   const catalogs = createCatalogStore({ db: deps.db, clock: deps.clock, logger, entries });
   const connections = new Map<string, McpConnection>();
   const states = new Map<string, ConnectionState>();
+  // an oauth integration without tokens waits for the owner and makes no request. an attempt would register a client
+  // and make a sign-in link that nobody opens, at each start.
+  const parked = new Map<string, ConnectionState>();
+  // a sign-in that the owner starts from the dashboard can end in needs_auth too. the owner needs no message then.
+  const authorizing = new Set<string>();
+  const stateOf = (id: string): ConnectionState => parked.get(id) ?? states.get(id) ?? { status: 'stopped' };
   // a tool object depends on the catalog version, so a new version gives new objects with new validators.
   const built = new Map<string, { hash: string; tool: Tool }>();
 
@@ -90,19 +97,34 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
   const saveState = (id: string, state: ConnectionState) => {
     const before = states.get(id)?.status;
     states.set(id, state);
-    // the owner hears once when a server needs a new sign-in, not at each failed attempt.
-    if (state.status === 'needs_auth' && before !== 'needs_auth') deps.onNeedsAuth?.(id);
     if (state.status !== 'error' && state.status !== 'needs_auth') return;
+    const said = state.status === 'needs_auth' ? deps.oauth?.serverError(id) : undefined;
+    let authorizedAt: unknown;
     try {
+      const now = deps.clock().toISOString();
       deps.db
         .prepare(
           `INSERT INTO integration_state (integrationId, lastError, lastErrorAt, updatedAt) VALUES (?, ?, ?, ?)
            ON CONFLICT (integrationId) DO UPDATE SET lastError = excluded.lastError, lastErrorAt = excluded.lastErrorAt, updatedAt = excluded.updatedAt`,
         )
-        .run(id, state.error ?? state.status, deps.clock().toISOString(), deps.clock().toISOString());
+        .run(id, `${state.error ?? state.status}${said ? ` The server said: ${said}` : ''}`, now, now);
+      authorizedAt = deps.db.prepare('SELECT authorizedAt FROM integration_state WHERE integrationId = ?').get(id)?.authorizedAt;
     } catch (err) {
       logger.error('integration state write failed', { integration: id, err });
     }
+    // the owner hears once when a sign-in that worked stops working. a first sign-in and a crash loop send nothing:
+    // the owner just added the first, and the app retries the second by itself.
+    if (state.status === 'needs_auth' && before !== 'needs_auth' && authorizedAt && !authorizing.has(id)) deps.onNeedsAuth?.(id, said);
+  };
+
+  // begin connects an integration, or parks an oauth integration that has no tokens.
+  const begin = async (entry: IntegrationEntry, connection: McpConnection) => {
+    if (entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' && deps.oauth && !(await deps.oauth.hasTokens(entry.id))) {
+      parked.set(entry.id, { status: 'needs_auth', error: 'it is not signed in yet. connect it from the dashboard.' });
+      return;
+    }
+    parked.delete(entry.id);
+    await connection.start();
   };
 
   for (const entry of entries) {
@@ -153,7 +175,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       async run(input, ctx) {
         // a call does not wait for a server that is not connected. a wait would hold the session queue, and the tool
         // did not run, so the model can safely try again.
-        const state = connection.state();
+        const state = stateOf(entry.id);
         if (state.status !== 'connected') return { content: `${item.name} did not run: ${unavailable(entry.id, state)}`, isError: true };
         const outcome = await connection.callTool(item.mcpName, input as Record<string, unknown>, { runId: ctx.runId, toolCallId: ctx.toolCallId ?? '' });
         return outcomeOutput(item.name, entry.id, outcome);
@@ -175,7 +197,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
     return tool;
   };
 
-  const status = (entry: IntegrationEntry): string => states.get(entry.id)?.status ?? 'stopped';
+  const status = (entry: IntegrationEntry): string => stateOf(entry.id).status;
 
   const discovery = {
     visible(sessionKey: string): Discoverable[] {
@@ -208,7 +230,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       );
       // the servers start side by side. one slow server must not hold the others.
       await Promise.all(
-        [...connections].filter(([id]) => !paused.has(id)).map(([, connection]) => connection.start()),
+        [...connections].filter(([id]) => !paused.has(id)).map(([id, connection]) => begin(byId.get(id)!, connection)),
       );
     },
     async stop() {
@@ -222,7 +244,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
         return {
           id: entry.id,
           kind: entry.kind,
-          state: states.get(entry.id) ?? { status: 'stopped' },
+          state: stateOf(entry.id),
           ...(catalog ? { catalogHash: catalog.hash, catalogStored: catalog.stored } : {}),
           tools: (catalog?.snapshot.tools ?? []).map((tool) => ({ name: tool.name, mcpName: tool.mcpName, risk: riskOf(entry, tool) })),
           rejected: catalog?.snapshot.rejected ?? [],
@@ -244,8 +266,12 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
            ON CONFLICT (integrationId) DO UPDATE SET paused = excluded.paused, updatedAt = excluded.updatedAt`,
         )
         .run(id, paused ? 1 : 0, now);
-      if (paused) await connection.stop();
-      else await connection.start();
+      if (paused) {
+        parked.delete(id);
+        await connection.stop();
+      } else {
+        await begin(byId.get(id)!, connection);
+      }
       return true;
     },
     connection: (id) => connections.get(id),
@@ -269,8 +295,14 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
         return { error: `the sign-in callback cannot listen: ${(err as Error).message}` };
       }
       // a new attempt makes the sdk create a new flow, or connect with the stored tokens.
-      await connection.stop();
-      await connection.start();
+      parked.delete(id);
+      authorizing.add(id);
+      try {
+        await connection.stop();
+        await connection.start();
+      } finally {
+        authorizing.delete(id);
+      }
       if (connection.state().status === 'connected') return { connected: true };
       const url = oauth.pendingUrl(id);
       return url ? { url } : { error: connection.state().error ?? 'no sign-in link was made' };
