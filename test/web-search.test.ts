@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { getSetting } from '../src/db/settings.js';
 import type { BrowserWorker } from '../src/browser/worker.js';
 import { openDb } from '../src/db/index.js';
-import { createWebSearchTool, type Engine } from '../src/web/search.js';
+import { createWebSearchTool, resumeEngines, type Engine } from '../src/web/search.js';
 import { createBrowserHarness, hasChrome } from './browser-harness.js';
 import { startFixture, type Fixture } from './web-fixture.js';
 
@@ -140,5 +140,68 @@ describe('web_search timing', () => {
     expect((await tool.run({ query: 'two' }, ctx)).content).toContain('Results from Google');
     expect(waits).toHaveLength(1);
     expect(waits[0]).toBeLessThanOrEqual(2_000);
+  });
+});
+
+// a fake worker: google answers with a captcha or with results, and a block can come with the answer.
+function fakeSearch(start: string) {
+  const db = openDb(':memory:');
+  let now = new Date(start);
+  const page = { google: 'captcha' as 'captcha' | 'results', blocked: [] as Array<{ url: string; reason: string; top?: boolean }> };
+  const worker = {
+    async inTab(_step: unknown, hosts: string[]) {
+      const google = hosts[0] === 'google.com';
+      const value = google && page.google === 'captcha' ? { kind: 'captcha' } : { kind: 'results', results: [{ title: google ? 'G' : 'D', url: 'https://x.example/', snippet: '' }] };
+      return { value, result: { ok: true, note: '', url: '', title: '', blocked: google ? page.blocked : [], blockedMore: 0, sent: [], taskId: 't', acted: true } };
+    },
+  } as unknown as BrowserWorker;
+  const tool = createWebSearchTool({ db, worker, clock: () => now, timeZone: 'UTC', sleep: async () => undefined });
+  const ctx = { runId: 'r', sessionKey: 'main', timeZone: 'UTC', clock: () => now, signal: new AbortController().signal, toolCallId: 'c' };
+  return { db, page, search: () => tool.run({ query: 'q' }, ctx), set: (at: string) => (now = new Date(at)) };
+}
+
+describe('web_search pauses', () => {
+  it('reads a consent wall only from a block of the search page itself', async () => {
+    const s = fakeSearch('2026-10-13T17:00:00Z');
+    s.page.google = 'results';
+    // the proxy puts the refusals of another task into the search tab too.
+    s.page.blocked = [{ url: 'http://consent.tracker.example/s', reason: 'refused' }];
+    expect((await s.search()).untrustedSource).toBe('web_search:google');
+    s.page.blocked = [{ url: 'https://evil.example/?consent.google.de', reason: 'refused', top: true }];
+    expect((await s.search()).untrustedSource).toBe('web_search:google');
+    s.page.blocked = [{ url: 'https://consent.google.de/ml', reason: 'not on the allowlist', top: true }];
+    const walled = await s.search();
+    expect(walled.content).toContain('Google showed a consent page');
+    expect(walled.untrustedSource).toBe('web_search:duckduckgo');
+  });
+
+  it('ends the pause when okc browser login closes, and keeps the strikes', async () => {
+    const s = fakeSearch('2026-10-13T17:00:00Z');
+    expect((await s.search()).content).toContain('Google showed a CAPTCHA, so it pauses until 17:15');
+    s.page.google = 'results';
+    s.set('2026-10-13T17:02:00Z');
+    expect((await s.search()).content).toContain('Google is paused until 17:15 (a CAPTCHA)');
+    resumeEngines(s.db, new Date());
+    expect((await s.search()).untrustedSource).toBe('web_search:google');
+    // a success clears the strikes. without it, the next captcha waits an hour.
+    resumeEngines(s.db, new Date());
+    s.page.google = 'captcha';
+    expect((await s.search()).content).toContain('pauses until 17:17');
+  });
+
+  it('ends a pause that began while the wall clock was ahead, and names the date of a pause that ends on another day', async () => {
+    const s = fakeSearch('2026-11-12T17:00:00Z');
+    await s.search();
+    s.set('2026-10-13T18:00:00Z');
+    s.page.google = 'results';
+    expect((await s.search()).untrustedSource).toBe('web_search:google');
+    // four captchas: the fourth pause is a day.
+    s.page.google = 'captcha';
+    for (const at of ['2026-10-13T19:00:00Z', '2026-10-13T19:20:00Z', '2026-10-13T20:30:00Z']) {
+      s.set(at);
+      await s.search();
+    }
+    s.set('2026-10-14T03:00:00Z');
+    expect((await s.search()).content).toContain('pauses until 2026-10-15 03:00');
   });
 });

@@ -4,7 +4,7 @@ import { untraced, type BrowserWorker } from '../browser/worker.js';
 import type { Db } from '../db/index.js';
 import { getSetting, setSetting } from '../db/settings.js';
 import { defineTool, type Tool } from '../tools/registry.js';
-import { localTime, type Clock } from '../time.js';
+import { localDay, localTime, type Clock } from '../time.js';
 
 export interface Engine {
   id: 'google' | 'duckduckgo';
@@ -42,8 +42,24 @@ export interface EngineState {
   reason?: string;
 }
 
+const LONGEST_MS = Math.max(...BACKOFF_MS, CONSENT_PAUSE_MS);
+
+// a pause that ends later than the longest wait from now began while the wall clock was ahead, so it is over.
+export const pausedNow = (state: EngineState | undefined, now: Date) => {
+  const left = state?.until ? new Date(state.until).getTime() - now.getTime() : 0;
+  return left > 0 && left <= LONGEST_MS;
+};
+
 // the dashboard reads the pauses too.
 export const engineStates = (db: Db) => getSetting<Record<string, EngineState>>(db, STATE_KEY) ?? {};
+
+// okc browser login calls this when its window closes: the owner may have answered a captcha or a consent page, so
+// each engine tries again at the next search. the strikes stay, so a new captcha pauses the engine for longer.
+export function resumeEngines(db: Db, now: Date): void {
+  const states = engineStates(db);
+  if (!Object.keys(states).length) return;
+  setSetting(db, STATE_KEY, Object.fromEntries(Object.entries(states).map(([id, state]) => [id, { strikes: state.strikes }])), now);
+}
 
 // the code runs in the page. the server code has no dom types, so the page objects are typed loosely here.
 type Loose = any;
@@ -120,6 +136,9 @@ export function createWebSearchTool(deps: SearchDeps): Tool {
   let queue: Promise<unknown> = Promise.resolve();
 
   const states = () => engineStates(deps.db);
+  // a pause of a day ends on another date, so the date comes first then.
+  const when = (until: Date, now: Date) =>
+    localDay(until, deps.timeZone) === localDay(now, deps.timeZone) ? localTime(until, deps.timeZone) : `${localDay(until, deps.timeZone)} ${localTime(until, deps.timeZone)}`;
   const save = (id: string, state: EngineState) => setSetting(deps.db, STATE_KEY, { ...states(), [id]: state }, deps.clock());
 
   return defineTool({
@@ -140,8 +159,8 @@ export function createWebSearchTool(deps: SearchDeps): Tool {
         for (const engine of order) {
           const now = deps.clock();
           const state = states()[engine.id] ?? { strikes: 0 };
-          if (state.until && new Date(state.until) > now) {
-            notes.push(`${engine.label} is paused until ${localTime(new Date(state.until), deps.timeZone)} (${state.reason}).`);
+          if (pausedNow(state, now)) {
+            notes.push(`${engine.label} is paused until ${when(new Date(state.until!), now)} (${state.reason}).`);
             continue;
           }
           const hour = (recent.get(engine.id) ?? []).filter((at) => performance.now() - at < 60 * 60_000);
@@ -164,8 +183,9 @@ export function createWebSearchTool(deps: SearchDeps): Tool {
           );
           if ('refused' in got) return { content: got.refused, isError: true, effect: 'none' as const };
           const seen = got.value;
-          // a consent page on another google domain is blocked by the allowlist, and the block names it.
-          const walled = got.result.blocked.some((each) => /consent\./.test(each.url));
+          // a consent page on another google domain is blocked by the allowlist, and the block names it. only a block of
+          // the search page itself counts: the proxy puts its refusals into every tab, also those of another task.
+          const walled = got.result.blocked.some((each) => each.top && /^consent\./.test(URL.parse(each.url)?.hostname ?? ''));
           if (!seen || walled) {
             notes.push(walled ? `${engine.label} showed a consent page. The owner can answer it once with okc browser login.` : `${engine.label} did not load: ${got.error ?? 'no answer'}.`);
             if (walled) save(engine.id, { ...state, until: new Date(now.getTime() + CONSENT_PAUSE_MS).toISOString(), reason: 'a consent page' });
@@ -175,7 +195,7 @@ export function createWebSearchTool(deps: SearchDeps): Tool {
             const strikes = state.strikes + 1;
             const until = new Date(now.getTime() + BACKOFF_MS[Math.min(strikes, BACKOFF_MS.length) - 1]!);
             save(engine.id, { strikes, until: until.toISOString(), reason: 'a CAPTCHA' });
-            notes.push(`${engine.label} showed a CAPTCHA, so it pauses until ${localTime(until, deps.timeZone)}. The owner can answer the CAPTCHA with okc browser login.`);
+            notes.push(`${engine.label} showed a CAPTCHA, so it pauses until ${when(until, now)}. The owner can answer the CAPTCHA with okc browser login.`);
             continue;
           }
           if (seen.kind === 'consent') {

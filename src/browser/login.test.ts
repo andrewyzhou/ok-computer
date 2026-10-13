@@ -24,3 +24,12 @@ describe('okc browser login', () => {
     expect(prefs).toMatchObject({ intl: { accept_languages: 'en-US' }, profile: { name: 'Agent', password_manager_enabled: false } });
   });
 });
+
+describe('okc browser login and the search pauses', () => {
+  it('ends the pauses when the window closes, not before', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'okc-login-'));
+    const order: string[] = [];
+    await browserLogin({ dataDir, chrome: 'chrome.exe', launch: async () => (order.push('window'), 0), onClosed: () => order.push('resume') });
+    expect(order).toEqual(['window', 'resume']);
+  });
+});

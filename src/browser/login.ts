@@ -3,6 +3,8 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/load.js';
+import { openDb } from '../db/index.js';
+import { resumeEngines } from '../web/search.js';
 import { hardenProfile, profileBusy } from './worker.js';
 
 const CHROME_PATHS = [
@@ -16,6 +18,8 @@ export interface LoginDeps {
   url?: string;
   chrome?: string;
   launch?: (chrome: string, args: string[]) => Promise<number | null>;
+  // runs when the window closes. the command ends the pauses of the search engines.
+  onClosed?: () => void;
 }
 
 const launchChrome = (chrome: string, args: string[]) =>
@@ -37,7 +41,8 @@ export async function browserLogin(deps: LoginDeps): Promise<string> {
   hardenProfile(profile, resolve(deps.dataDir, 'browser', 'downloads'));
   const args = [`--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', ...(deps.url ? [deps.url] : [])];
   await (deps.launch ?? launchChrome)(chrome, args);
-  return 'The agent browser closed. The sign-ins are saved in its profile.';
+  deps.onClosed?.();
+  return 'The agent browser closed. The sign-ins are saved in its profile. A paused search engine tries again at the next search.';
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
@@ -47,7 +52,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     process.exit(1);
   }
   process.stdout.write('Sign in to the sites that the agent may use, then close the Chrome window.\n');
-  browserLogin({ dataDir: loaded.value.paths.data, ...(process.argv[2] ? { url: process.argv[2] } : {}) }).then(
+  const dataDir = loaded.value.paths.data;
+  // the owner may have answered a captcha or a consent page of a search engine in the window.
+  const onClosed = () => resumeEngines(openDb(join(dataDir, 'okc.sqlite')), new Date());
+  browserLogin({ dataDir, onClosed, ...(process.argv[2] ? { url: process.argv[2] } : {}) }).then(
     (text) => process.stdout.write(`${text}\n`),
     (err: unknown) => {
       console.error(err);

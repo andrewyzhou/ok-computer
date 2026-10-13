@@ -5,7 +5,7 @@ import { profileBusy } from '../browser/worker.js';
 import type { Db } from '../db/index.js';
 import { createByteStore } from '../observability/byte-blobs.js';
 import type { Clock } from '../time.js';
-import { ENGINES, engineStates } from '../web/search.js';
+import { ENGINES, engineStates, pausedNow } from '../web/search.js';
 import type { BrowserOverview, BrowserStep, BrowserTaskDetail, BrowserTaskSummary, SearchEngineState } from './browser-types.js';
 
 const json = <T>(text: unknown, fallback: T): T => {
@@ -51,7 +51,7 @@ export function searchEngines(db: Db, now: Date): SearchEngineState[] {
   return ENGINES.map((engine) => {
     const state = states[engine.id];
     const until = state?.until ?? null;
-    return { id: engine.id, label: engine.label, paused: !!until && new Date(until) > now, until, reason: state?.reason ?? null, strikes: state?.strikes ?? 0 };
+    return { id: engine.id, label: engine.label, paused: pausedNow(state, now), until, reason: state?.reason ?? null, strikes: state?.strikes ?? 0 };
   });
 }
 
