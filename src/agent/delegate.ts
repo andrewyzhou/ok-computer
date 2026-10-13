@@ -6,6 +6,7 @@ import { listEvents } from '../events/log.js';
 import { SUBAGENT_PREFIX } from '../policy/policy.js';
 import { sessionTaint } from '../policy/store.js';
 import type { RunQueue } from '../sessions/queue.js';
+import { NO_REPLY } from '../sessions/router.js';
 import type { Clock } from '../time.js';
 import { defineTool, type Tool } from '../tools/registry.js';
 import type { RunInput, RunResult } from './loop.js';
@@ -118,10 +119,19 @@ export function createDelegateTool(deps: DelegateDeps): Tool {
           }),
         );
         // the result is text that the child wrote after it read its sources, so it carries their taint to the parent.
-        // the source names the child run, where the full provenance is.
+        // the source names the child run, where the full provenance is, and only the sources that the child read
+        // itself. the parent already has the inherited sources. if the source repeated them, each delegate call in a
+        // tainted session would double the length of the newest source.
         const taint = sessionTaint(db, sessionKey);
-        const untrusted = taint.length ? { untrustedSource: `${sessionKey} (${[...new Set(taint.map((each) => each.source))].join(', ')})` } : {};
-        if (result.status === 'completed') return { content: result.text.trim() || `The ${profile} sub-agent gave no answer.`, ...untrusted };
+        const parentSources = new Set(inherited.map((each) => each.source));
+        const own = taint.map((each) => each.source).filter((source) => !parentSources.has(source));
+        const untrusted = taint.length ? { untrustedSource: own.length ? `${sessionKey} (${own.join(', ')})` : sessionKey } : {};
+        if (result.status === 'completed') {
+          // the base instructions tell each session to answer NO_REPLY when it has nothing to say. the parent must not
+          // repeat that word, because the owner then gets no reply.
+          const text = result.text.trim();
+          return { content: text && text !== NO_REPLY ? text : `The ${profile} sub-agent gave no answer.`, ...untrusted };
+        }
         return { content: stoppedReport(db, profile, sessionKey, result), isError: true, ...untrusted };
       } finally {
         const left = (running.get(ctx.runId) ?? 1) - 1;

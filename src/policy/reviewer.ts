@@ -5,7 +5,7 @@ import type { ModelRequest, ToolSpec } from '../models/types.js';
 import { redactedJson } from '../observability/redact.js';
 import { headOf } from '../text.js';
 import { wrapUntrusted } from '../tools/untrusted.js';
-import type { ReviewRequest, Reviewer, ReviewResult } from './policy.js';
+import { sourceNames, type ReviewRequest, type Reviewer, type ReviewResult } from './policy.js';
 
 export const REVIEW_TOOL = 'review_verdict';
 // a review has its own time limit inside the run, so a slow reviewer cannot use up the run.
@@ -83,7 +83,7 @@ export function reviewRequest(db: Db, request: ReviewRequest): ModelRequest {
   const text = [
     ownerRequest(db, request.sessionKey, request.runId),
     // only the names of the sources. the untrusted text itself never reaches the reviewer, so it cannot instruct it.
-    `<untrusted_sources>${request.taint.length ? escapeText(request.taint.join(', ')) : 'none'}</untrusted_sources>`,
+    `<untrusted_sources>${request.taint.length ? escapeText(sourceNames(request.taint)) : 'none'}</untrusted_sources>`,
     `<policy_reason>${escapeText(request.reason)}</policy_reason>`,
     `<tool_call name="${escapeText(request.tool)}" risk="${request.risk}">\n${input}\n</tool_call>`,
   ].join('\n\n');

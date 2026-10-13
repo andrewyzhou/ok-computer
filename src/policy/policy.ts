@@ -104,7 +104,7 @@ function decideAny(input: PolicyInput, rules: readonly Rule[]): Verdict {
     return {
       decision: 'approve',
       rule: 'taint',
-      reason: `the session read untrusted content (${input.taint.join(', ')}), so an external action needs the owner's approval`,
+      reason: `the session read untrusted content (${sourceNames(input.taint)}), so an external action needs the owner's approval`,
     };
   }
   // in a tainted session an injected instruction can make the model put private data in a link or a search. the
@@ -114,7 +114,7 @@ function decideAny(input: PolicyInput, rules: readonly Rule[]): Verdict {
     return {
       decision: 'review',
       rule: 'exfiltration',
-      reason: `the session read untrusted content (${input.taint.join(', ')}), and ${input.tool} ${leak}, so a reviewer checks it first`,
+      reason: `the session read untrusted content (${sourceNames(input.taint)}), and ${input.tool} ${leak}, so a reviewer checks it first`,
     };
   }
   if (rule) return { decision: 'allow', rule: rule.id, reason: rule.note ?? `the policy rule ${rule.id} allows ${input.tool}` };
@@ -130,6 +130,17 @@ function decideAny(input: PolicyInput, rules: readonly Rule[]): Verdict {
         reason: `${input.tool} sends data off the pc or changes an account, so the owner must approve it`,
       };
   }
+}
+
+// a session can read many sources, and a source name can be long. a reason, an approval card and a review name only
+// the first sources, so their size has a limit. the taint of each decision keeps the full list for the dashboard.
+export const SOURCE_LIMIT = 5;
+export const SOURCE_NAME_LIMIT = 200;
+
+export function sourceNames(sources: readonly string[]): string {
+  const shown = sources.slice(0, SOURCE_LIMIT).map((each) => headOf(each, SOURCE_NAME_LIMIT));
+  const more = sources.length - shown.length;
+  return more > 0 ? `${shown.join(', ')} and ${more} more` : shown.join(', ');
 }
 
 function matches(rule: Rule, input: PolicyInput): boolean {

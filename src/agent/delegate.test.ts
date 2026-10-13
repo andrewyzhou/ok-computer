@@ -51,8 +51,8 @@ describe('delegate', () => {
     appendEvent(db, { sessionKey: 'main', runId: 'p', type: 'system_event', payload: { text: 'mail', taint } }, clock());
     expect(await tool.run({ profile: 'research', task: 'Find it.' }, ctx())).toEqual({
       content: 'The answer.',
-      // the child starts tainted, so its result is untrusted too.
-      untrustedSource: 'sub:research:c1 (gmail:personal)',
+      // the child starts tainted, so its result is untrusted too. the parent already has the inherited source.
+      untrustedSource: 'sub:research:c1',
     });
     expect(started[0]).toMatchObject({
       runId: 'c1',
@@ -71,6 +71,32 @@ describe('delegate', () => {
   it('gives a trusted result for a child that read nothing untrusted', async () => {
     const { tool, ctx } = setup(async (input) => done(input.runId!, 'Nothing new.'));
     expect(await tool.run({ profile: 'research', task: 't' }, ctx())).toEqual({ content: 'Nothing new.' });
+  });
+
+  it('names only the sources that the child read itself, so the source does not grow with each call (verification round 4)', async () => {
+    const { db, tool, ctx } = setup(async (input) => {
+      for (const event of input.events) appendEvent(db, { ...event, sessionKey: input.sessionKey, runId: input.runId! }, clock());
+      // the second child reads a page of its own.
+      if (input.runId === 'c2') {
+        appendEvent(db, { sessionKey: input.sessionKey, runId: input.runId, type: 'tool_result', payload: { toolCallId: 'w', name: 'web_fetch', content: 'page', isError: false, untrustedSource: 'web:a.example' } }, clock());
+      }
+      return done(input.runId!, `answer ${input.runId}`);
+    });
+    appendEvent(db, { sessionKey: 'main', runId: 'p', type: 'tool_result', payload: { toolCallId: 'm1', name: 'gmail_read', content: 'mail', isError: false, untrustedSource: 'gmail:personal' } }, clock());
+    const sources: string[] = [];
+    for (let i = 1; i <= 12; i++) {
+      const output = await tool.run({ profile: 'research', task: 't' }, ctx('main', `d${i}`));
+      sources.push(String(output.untrustedSource));
+      // the caller writes the result event, so the next child inherits it.
+      appendEvent(db, { sessionKey: 'main', runId: 'p', type: 'tool_result', payload: { toolCallId: `d${i}`, name: 'delegate', content: output.content, isError: false, untrustedSource: output.untrustedSource } }, clock());
+    }
+    expect(sources.slice(0, 3)).toEqual(['sub:research:c1', 'sub:research:c2 (web:a.example)', 'sub:research:c3']);
+    expect(Math.max(...sources.map((each) => each.length))).toBeLessThan(40);
+  });
+
+  it('gives no answer for a child that replies NO_REPLY, so the parent does not repeat it (verification round 4)', async () => {
+    const { tool, ctx } = setup(async (input) => done(input.runId!, ' NO_REPLY\n'));
+    expect(await tool.run({ profile: 'research', task: 't' }, ctx())).toEqual({ content: 'The research sub-agent gave no answer.' });
   });
 
   it('refuses a fourth child of the same run while three work, and runs it after one ends', async () => {

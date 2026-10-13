@@ -96,6 +96,14 @@ describe('the reviewer', () => {
     expect(text).toContain('<untrusted_sources>gmail:personal</untrusted_sources>');
   });
 
+  it('names at most five sources, so a long taint list does not fill the request (verification round 4)', async () => {
+    const { model, reviewer } = setup([toolStep(verdict({ verdict: 'allow', reason: 'x' }))]);
+    await reviewer(request({ taint: Array.from({ length: 1_000 }, (_, i) => `sub:research:${'c'.repeat(300)}${i}`) }));
+    const sources = /<untrusted_sources>(.*)<\/untrusted_sources>/.exec(sentText(model.calls[0]))![1]!;
+    expect(sources).toMatch(/ and 995 more$/);
+    expect(sources.length).toBeLessThan(1_100);
+  });
+
   it('reads the owner request of the session, of the parent of a child, or the wrapped task of a run', () => {
     const { db } = setup([]);
     const say = (sessionKey: string, type: 'user_message' | 'system_event' | 'session_reset', text = '') =>

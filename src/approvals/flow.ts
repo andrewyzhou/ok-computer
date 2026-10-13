@@ -3,7 +3,7 @@ import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
 import { redactedJson } from '../observability/redact.js';
-import type { TaintSource } from '../policy/policy.js';
+import { SOURCE_LIMIT, SOURCE_NAME_LIMIT, type TaintSource } from '../policy/policy.js';
 import { decisionForApproval } from '../policy/store.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
 import type { RunQueue } from '../sessions/queue.js';
@@ -214,7 +214,10 @@ export function approvalNote(db: Db, approval: Approval, text: (summary: string)
 
 function cardText(approval: Approval, reason: string, taint: TaintSource[], timeZone: string): string {
   const lines = [`Approval needed (#${approval.id}): ${approval.summary}`, `Why: ${reason}.`];
-  if (taint.length) lines.push(`Untrusted content in this session: ${taint.map((each) => taintText(each, timeZone)).join('; ')}.`);
+  if (taint.length) {
+    const more = taint.length > SOURCE_LIMIT ? `; and ${taint.length - SOURCE_LIMIT} more` : '';
+    lines.push(`Untrusted content in this session: ${taint.slice(0, SOURCE_LIMIT).map((each) => taintText(each, timeZone)).join('; ')}${more}.`);
+  }
   return lines.join('\n');
 }
 
@@ -229,5 +232,5 @@ const buttonsFor = (id: number): Button[][] => [
 function taintText(taint: TaintSource, timeZone: string): string {
   const at = new Date(taint.at);
   const run = taint.runId ? ` in run ${taint.runId.slice(0, 8)}` : '';
-  return `${taint.source} (read by ${taint.toolName} on ${localDay(at, timeZone)} at ${localTime(at, timeZone)}${run})`;
+  return `${headOf(taint.source, SOURCE_NAME_LIMIT)} (read by ${taint.toolName} on ${localDay(at, timeZone)} at ${localTime(at, timeZone)}${run})`;
 }

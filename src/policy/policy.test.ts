@@ -168,6 +168,14 @@ describe('policy decisions', () => {
     expect(decide(call({ risk: 'read', taint: ['web'] }), [])).toMatchObject({ decision: 'allow' });
   });
 
+  it('names at most five sources, each cut to 200 characters, in a reason (verification round 4)', () => {
+    const taint = [`mcp:${'x'.repeat(10_000)}`, ...Array.from({ length: 49 }, (_, i) => `web:${i}`)];
+    const { reason } = decide(call({ tool: 'gmail_send', risk: 'external', taint }), []);
+    expect(reason).toContain(`(mcp:${'x'.repeat(196)}, web:0, web:1, web:2, web:3 and 45 more)`);
+    expect(reason.length).toBeLessThan(400);
+    expect(decide(call({ tool: 'gmail_send', risk: 'external', taint: ['a', 'b'] }), []).reason).toContain('(a, b)');
+  });
+
   it('asks the owner for a tool that always needs approval, unless a rule denies it', () => {
     const allow = [rule('x', { tool: '*', effect: 'allow' })];
     expect(decide(call({ risk: 'read', alwaysApprove: true }), allow)).toMatchObject({ decision: 'approve', rule: 'tool' });
