@@ -39,11 +39,12 @@ describe('skill_write input', () => {
     expect(refused({ name: 'console' })).toBe(false);
   });
 
-  it('refuses a description of two lines and hidden characters in the body', () => {
+  it('refuses a description of two lines and hidden characters in the body and in why', () => {
     expect(refused({ description: 'one\ntwo' })).toBe(true);
     expect(refused({ description: 'x'.repeat(201) })).toBe(true);
     for (const point of [0x202e, 0x200b, 0x0d, 0x2028, 0xad, 0xfeff, 0x07]) expect(refused({ body: `step${char(point)}one` }), point.toString(16)).toBe(true);
     expect(refused({ description: `book${char(0x202e)}` })).toBe(true);
+    expect(refused({ why: char(0x200b).repeat(300) })).toBe(true);
   });
 
   it('refuses tag characters, variation selectors, fillers and joiners that are not part of an emoji', () => {

@@ -72,7 +72,7 @@ function fullField(name: string, value: string): string {
   const breaks = text.replace(/[\r\v\f]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);
   const { text: shown, found } = showInvisible(oneLine(breaks));
   const block = shown.split('\n').map((line) => `│ ${line}`).join('\n');
-  return `${name} (in full, ${value.length} characters):${warnings(text !== value, found, shown)}\n${block}`;
+  return `${name} (in full, ${value.length} characters):${warnings(text !== value, found, shown, true)}\n${block}`;
 }
 
 // the card hides a stored secret, but the tool gets the real value. the owner must know that the call sends it.
@@ -80,15 +80,16 @@ function fullField(name: string, value: string): string {
 // not match. the check is on each run of text between spaces and json marks, not on each word, because a word of
 // look-alikes alone ("аррӏе" in "https://аррӏе.example") is in one script. a run without latin letters, for example
 // a sentence in russian, gets no mark. the mark names the code points, so the owner can see the difference.
-function warnings(redacted: boolean, invisible: boolean, text: string): string {
+// a field in full shows each run on its own lines, so it gets one mark with the count and the code points. a quote of
+// each run would repeat the text and make the card too long for one telegram message.
+function warnings(redacted: boolean, invisible: boolean, text: string, full = false): string {
   const marks: string[] = [];
   if (redacted) marks.push('this field holds a secret that the card hides, and the tool gets the real value');
   if (invisible) marks.push('this field holds invisible or direction characters, shown as \\u codes');
-  const mixed = [...new Set(text.split(/[\s",[\]{}]+/u).filter((run) => LATIN.test(run) && OTHER_SCRIPT.test(run)))].slice(0, 3);
-  for (const run of mixed) {
-    const points = [...new Set([...run].filter((char) => OTHER_SCRIPT.test(char)))].slice(0, 5).map(codePoint);
-    marks.push(`"${headOf(run, 60)}" mixes scripts (${points.join(', ')})`);
-  }
+  const mixed = [...new Set(text.split(/[\s",[\]{}]+/u).filter((run) => LATIN.test(run) && OTHER_SCRIPT.test(run)))];
+  const pointsOf = (runs: string[]) => [...new Set(runs.flatMap((run) => [...run].filter((char) => OTHER_SCRIPT.test(char))))].slice(0, 5).map(codePoint);
+  if (full && mixed.length) marks.push(`${mixed.length} ${mixed.length === 1 ? 'run mixes' : 'runs mix'} scripts (${pointsOf(mixed).join(', ')})`);
+  if (!full) for (const run of mixed.slice(0, 3)) marks.push(`"${headOf(run, 60)}" mixes scripts (${pointsOf([run]).join(', ')})`);
   return marks.length ? ` [check: ${marks.join('; ')}]` : '';
 }
 

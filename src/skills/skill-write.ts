@@ -66,7 +66,9 @@ export const skillWriteInput = z
     body: text(BODY_LIMIT).refine((value) => value.split('\n').length <= BODY_LINES, `the body has at most ${BODY_LINES} lines`),
     replaces: z.boolean(),
     base: z.string().regex(/^[0-9a-f]{12}$/).optional(),
-    why: z.string().min(1).max(300),
+    // the card shows a hidden character of why as a \u code of six characters, so a why of them would make the card
+    // too long for one telegram message.
+    why: text(300),
   })
   .refine((input) => !input.replaces || input.base !== undefined, { message: 'a change needs base: the version of the skill from the review input', path: ['base'] })
   // the loader trims a field and removes quotes around it, and it leaves out a skill without a description. so a

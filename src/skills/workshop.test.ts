@@ -316,6 +316,21 @@ describe('the worst skill card', () => {
     const card = `Approval needed (#9999): ${describeInput('skill_write', input, createSkillWriteTool({ skillsDir: 'x' }).fullFields)}\nWhy: skill_write always needs the owner's approval.`;
     expect(card.length).toBeLessThanOrEqual(4096);
   });
+
+  it('fits one telegram message when each field mixes scripts', () => {
+    // a run of latin and gothic letters is visible, so the draft passes, and the card adds a mark for it. gothic
+    // letters use two code units and the longest code point names.
+    const gothic = [0x10330, 0x10331, 0x10332, 0x10333, 0x10334].map((point) => String.fromCodePoint(point)).join('');
+    const runs = (count: number) => Array.from({ length: count }, (_, n) => `${String.fromCharCode(98 + n)}${'a'.repeat(49)}${gothic}`).join(' ');
+    const fill = (start: string, length: number) => `${start} ${'"'.repeat(length - start.length - 1)}`;
+    const lines = Array.from({ length: BODY_LINES - 1 }, () => 'x');
+    const body = [...lines, fill(runs(20), BODY_LIMIT - (BODY_LINES - 1) * 2)].join('\n');
+    expect(body.length).toBe(BODY_LIMIT);
+    const input = skillWriteInput.parse({ name: 'a'.repeat(64), description: fill(runs(3), 200), body, replaces: true, base: skillVersion('x'), why: fill(runs(3), 300) });
+    const card = `Approval needed (#9999): ${describeInput('skill_write', input, createSkillWriteTool({ skillsDir: 'x' }).fullFields)}\nWhy: skill_write always needs the owner's approval.`;
+    expect(card).toContain('20 runs mix scripts (U+10330, U+10331, U+10332, U+10333, U+10334)');
+    expect(card.length).toBeLessThanOrEqual(4096);
+  });
 });
 
 describe('a full field on the approval card', () => {
