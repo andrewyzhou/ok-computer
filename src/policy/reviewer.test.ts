@@ -131,4 +131,20 @@ describe('the reviewer', () => {
     expect(ownerRequest(db, 'sub:inbox:c', 'c')).toBe(text);
     expect(ownerRequest(db, 'main', 'p')).toContain('<owner_request>\narchive every mail from bank@bank.example');
   });
+
+  it('reads the message of the parent run for a child that the owner approved after a later message (verification round 3)', () => {
+    const { db } = setup([]);
+    const message = (runId: string, text: string) => {
+      db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES (?, 'main', 'message', 'main', 'completed', 'x')").run(runId);
+      appendEvent(db, { sessionKey: 'main', runId, type: 'user_message', payload: { text, channel: 'cli', chatId: 'x' } }, clock());
+    };
+    message('p1', 'check my newest mail');
+    message('p2', 'archive all mail from the bank, it is old');
+    db.prepare("INSERT INTO subagent_runs (parentRunId, toolCallId, childRunId, profile, createdAt) VALUES ('p1', 'approval-1', 'c', 'inbox', 'x')").run();
+    expect(ownerRequest(db, 'sub:inbox:c', 'c')).toBe('<owner_request>\ncheck my newest mail\n</owner_request>');
+    expect(ownerRequest(db, 'main', 'p2')).toBe('<owner_request>\narchive all mail from the bank, it is old\n</owner_request>');
+    // a run with no message of its own, such as a system run, still reads the newest message.
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('s', 'main', 'system', 'main', 'completed', 'x')").run();
+    expect(ownerRequest(db, 'main', 's')).toContain('archive all mail from the bank');
+  });
 });

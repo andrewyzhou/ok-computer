@@ -104,12 +104,18 @@ export function ownerRequest(db: Db, sessionKey: string, runId?: string): string
   const ownRun = trigger !== undefined && trigger !== 'message' && trigger !== 'system';
   const reset = '(SELECT COALESCE(MAX(seq), 0) FROM events WHERE sessionKey = ? AND type = ?)';
   if (!ownRun) {
-    const owner = db
-      .prepare(
-        `SELECT json_extract(payload, '$.text') AS text FROM events
-         WHERE sessionKey = ? AND type = 'user_message' AND seq > ${reset} ORDER BY seq DESC LIMIT 1`,
-      )
-      .get(key, key, 'session_reset');
+    // the owner can approve a delegate call after a later message. the child then does the task of the old run, so
+    // the message of that run decides, not the newest one.
+    const owner =
+      (scope.runId === undefined
+        ? undefined
+        : db.prepare(`SELECT json_extract(payload, '$.text') AS text FROM events WHERE runId = ? AND type = 'user_message' ORDER BY seq DESC LIMIT 1`).get(scope.runId)) ??
+      db
+        .prepare(
+          `SELECT json_extract(payload, '$.text') AS text FROM events
+           WHERE sessionKey = ? AND type = 'user_message' AND seq > ${reset} ORDER BY seq DESC LIMIT 1`,
+        )
+        .get(key, key, 'session_reset');
     if (owner) return `<owner_request>\n${escapeText(headOf(String(owner.text), REQUEST_LIMIT))}\n</owner_request>`;
   }
   const start = ownRun
