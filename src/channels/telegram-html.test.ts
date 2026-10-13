@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { Lexer } from 'marked';
+import { describe, expect, it, vi } from 'vitest';
 import { htmlToPlain, markdownToHtmlParts } from './telegram-html.js';
 
 const TAGS = ['b', 'i', 's', 'code', 'pre', 'a', 'blockquote'];
@@ -68,9 +69,36 @@ describe('markdownToHtmlParts', () => {
   it('counts the text that telegram shows, not the escapes', () => {
     const parts = markdownToHtmlParts('<'.repeat(3000), 4096);
     expect(parts).toHaveLength(1);
-    expect(parts[0]!.length).toBe(12_000);
+    // the lexer reads parts of 2,000 characters, so a very long line becomes two paragraphs.
+    expect(parts[0]!.replace('\n\n', '')).toBe('&lt;'.repeat(3000));
     // a long link has a short visible text, so its block fits and keeps its format.
-    const url = `https://a.example/${'y'.repeat(5000)}`;
-    expect(markdownToHtmlParts(`See [the page](${url}).`, 4096)).toEqual([`See <a href="${url}">the page</a>.`]);
+    const url = `https://a.example/${'y'.repeat(1500)}`;
+    expect(markdownToHtmlParts(`See [the page](${url}).`, 1000)).toEqual([`See <a href="${url}">the page</a>.`]);
+  });
+});
+
+describe('markdownToHtmlParts on hostile text', () => {
+  // the lexer took seconds on this text, or overflowed the stack, when it read the whole reply at once.
+  it('converts text that is slow for the lexer within a bound, and never throws', () => {
+    for (const text of [`${'*'.repeat(32_000)}a`, '> '.repeat(16_000), `${'['.repeat(16_000)}a`, '- '.repeat(16_000)]) {
+      const started = performance.now();
+      const parts = markdownToHtmlParts(text);
+      expect(performance.now() - started).toBeLessThan(1500);
+      expect(parts.length).toBeGreaterThan(0);
+      for (const part of parts) expect(htmlToPlain(part).length).toBeLessThanOrEqual(4096);
+    }
+  });
+
+  it('sends a part that the lexer cannot read as escaped text', () => {
+    const lex = vi.spyOn(Lexer, 'lex').mockImplementationOnce(() => {
+      throw new RangeError('Maximum call stack size exceeded');
+    });
+    expect(markdownToHtmlParts('**a** <b>')).toEqual(['**a** &lt;b&gt;']);
+    lex.mockRestore();
+  });
+
+  it('turns an image into a link and keeps only http, https and mailto links', () => {
+    const [html] = markdownToHtmlParts('![cat](https://x.test/c.png) [p](tg://photo?id=1) [m](mailto:a@x.test) ![x](javascript:alert(1))');
+    expect(html).toBe('<a href="https://x.test/c.png">cat</a> p <a href="mailto:a@x.test">m</a> x');
   });
 });

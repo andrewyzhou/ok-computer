@@ -1,21 +1,36 @@
 import { Lexer, type Token, type Tokens } from 'marked';
+import { splitMarkdown } from './telegram-safe.js';
 import { splitMessage, TELEGRAM_LIMIT } from './telegram.js';
 
 // telegram html knows only a few tags. every other text is escaped, so the model text cannot add a tag or an
 // attribute.
 export const escapeHtml = (text: string) => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 const escapeAttribute = (text: string) => escapeHtml(text).replaceAll('"', '&quot;');
+const SAFE_HREF = /^(https?:|mailto:)/i;
 
 // the text that telegram shows, without tags. its limit counts this text, not the html.
 export const htmlToPlain = (html: string) =>
   html.replace(/<[^>]*>/g, '').replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"').replaceAll('&amp;', '&');
 
+// the lexer gets parts of this size. it takes quadratic time on some text and can overflow the stack on deep quotes,
+// and the model writes the text. a part of this size takes some milliseconds in the worst case.
+const LEX_LIMIT = 2000;
+
 // the fallback converts each top-level block on its own, so each block is complete html. a part then holds whole
 // blocks, and a cut never falls inside a tag. a block that is longer than one part loses its inline format and is cut
-// as plain text.
+// as plain text. a part that the lexer cannot read becomes escaped text.
 export function markdownToHtmlParts(markdown: string, limit = TELEGRAM_LIMIT): string[] {
-  const blocks = Lexer.lex(markdown)
-    .map((token) => ({ token, html: block(token, false) }))
+  const blocks = splitMarkdown(markdown, LEX_LIMIT)
+    .flatMap((part) => {
+      try {
+        return Lexer.lex(part).map((token) => {
+          const code = token.type === 'code';
+          return { html: block(token, false), code, plain: code ? (token as Tokens.Code).text : plainText(token) };
+        });
+      } catch {
+        return [{ html: escapeHtml(part), code: false, plain: part }];
+      }
+    })
     .filter((each) => each.html !== '');
   const parts: string[] = [];
   let current = '';
@@ -31,13 +46,12 @@ export function markdownToHtmlParts(markdown: string, limit = TELEGRAM_LIMIT): s
       shown = length;
     }
   };
-  for (const { token, html } of blocks) {
+  for (const { html, code, plain } of blocks) {
     if (htmlToPlain(html).length <= limit) {
       push(html);
       continue;
     }
-    const code = token.type === 'code';
-    for (const piece of splitMessage(code ? (token as Tokens.Code).text : plainText(token), limit)) {
+    for (const piece of splitMessage(plain, limit)) {
       push(code ? `<pre>${escapeHtml(piece)}</pre>` : escapeHtml(piece));
     }
   }
@@ -110,11 +124,15 @@ function inline(token: Token): string {
       return '\n';
     case 'link': {
       const link = token as Tokens.Link;
-      // a link to another scheme, for example javascript:, keeps only its text.
-      return /^(https?:|mailto:|tg:)/i.test(link.href) ? `<a href="${escapeAttribute(link.href)}">${inner()}</a>` : inner();
+      // a link to another scheme, for example javascript: or tg:, keeps only its text.
+      return SAFE_HREF.test(link.href) ? `<a href="${escapeAttribute(link.href)}">${inner()}</a>` : inner();
     }
-    case 'image':
-      return escapeHtml((token as Tokens.Image).text);
+    // an image becomes a link, so the telegram servers do not fetch it before the owner clicks.
+    case 'image': {
+      const image = token as Tokens.Image;
+      const text = escapeHtml(image.text || image.href);
+      return SAFE_HREF.test(image.href) ? `<a href="${escapeAttribute(image.href)}">${text}</a>` : text;
+    }
     // raw html from the model is text, never a tag.
     case 'html':
       return escapeHtml(token.raw);
