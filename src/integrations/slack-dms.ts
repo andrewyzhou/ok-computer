@@ -27,6 +27,9 @@ export const FIRST_LOOKBACK_S = 24 * 60 * 60;
 export const PAGE_SIZE = 20;
 // one poll reads at most this many pages. the next poll goes on from the position.
 export const PAGES_PER_POLL = 10;
+// the calls of a poll only read, and the next poll reads again. so a poll does not wait the long answer limit of a tool
+// call. a server that never answers would hold the poll, and the scheduler would start the next poll beside it.
+export const POLL_ANSWER_WAIT_MS = 60_000;
 const SUMMARY_LIMIT = 300;
 
 interface PollState {
@@ -55,6 +58,8 @@ export interface SlackDmPollDeps {
   logger: Logger;
   clock: Clock;
   connection(integrationId: string): McpConnection | undefined;
+  // a test gives a shorter wait. the default is POLL_ANSWER_WAIT_MS.
+  answerWaitMs?: number;
 }
 
 type Step = { ok: true; result: CallToolResult; where: string } | { ok: false; job: JobResult };
@@ -69,7 +74,7 @@ export function createSlackDmPoll(deps: SlackDmPollDeps): (integrationId: string
   const call = async (id: string, connection: McpConnection, tool: string, args: Record<string, unknown>): Promise<Step> => {
     const toolCallId = `poll:${id}:${randomUUID()}`;
     const where = `${tool} (call ${toolCallId})`;
-    const outcome = await connection.callTool(tool, args, { runId: null, toolCallId });
+    const outcome = await connection.callTool(tool, args, { runId: null, toolCallId }, { answerWaitMs: deps.answerWaitMs ?? POLL_ANSWER_WAIT_MS });
     switch (outcome.kind) {
       case 'result':
         if (!outcome.result.isError) return { ok: true, result: outcome.result, where };

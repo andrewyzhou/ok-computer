@@ -295,7 +295,13 @@ export interface McpConnection {
   stop(): Promise<void>;
   // the transport of the last attempt. the oauth flow calls finishAuth on it.
   transport(): Transport | undefined;
-  callTool(name: string, args: Record<string, unknown>, trace: CallTrace): Promise<CallOutcome>;
+  callTool(name: string, args: Record<string, unknown>, trace: CallTrace, options?: CallOptions): Promise<CallOutcome>;
+}
+
+export interface CallOptions {
+  // a read that the app can do again, for example a poll, waits less than ANSWER_WAIT_MS. a long wait holds the job,
+  // and the next run of the job can start beside it.
+  answerWaitMs?: number;
 }
 
 // a failed server gets a new attempt after each delay. the last delay repeats.
@@ -500,7 +506,7 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
       await inner?.close().catch(() => {});
       setState({ status: 'stopped' });
     },
-    async callTool(name, args, trace) {
+    async callTool(name, args, trace, options) {
       const connected = client;
       if (!connected) return { kind: 'not_sent', reason: `${id} is not connected (${state.status}${state.error ? `: ${state.error}` : ''})` };
       const call: ActiveCall = { trace };
@@ -512,7 +518,7 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
         // a plain request and not callTool: callTool checks the result against the outputSchema of the server. that
         // check runs the server's patterns on the event loop, and it throws for a tool that ran.
         const result = await activeCall.run(call, () =>
-          connected.request({ method: 'tools/call', params: { name, arguments: args } }, { timeout: deps.answerWaitMs ?? ANSWER_WAIT_MS }),
+          connected.request({ method: 'tools/call', params: { name, arguments: args } }, { timeout: options?.answerWaitMs ?? deps.answerWaitMs ?? ANSWER_WAIT_MS }),
         );
         return { kind: 'result', result: result as CallToolResult };
       } catch (err) {

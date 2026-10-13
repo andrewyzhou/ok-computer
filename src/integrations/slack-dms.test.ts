@@ -13,7 +13,7 @@ import { parseIntegrations } from './config.js';
 import { createIntegrations } from './integrations.js';
 import type { McpConnection } from './mcp.js';
 import { createMemorySecretStore } from './secrets.js';
-import { createSlackDmPoll, FIRST_LOOKBACK_S, OVERLAP_S, PAGE_SIZE, PAGES_PER_POLL, pollStateKey, readSearchPage, readSelfId, type SlackDmPollDeps } from './slack-dms.js';
+import { createSlackDmPoll, FIRST_LOOKBACK_S, OVERLAP_S, PAGE_SIZE, PAGES_PER_POLL, POLL_ANSWER_WAIT_MS, pollStateKey, readSearchPage, readSelfId, type SlackDmPollDeps } from './slack-dms.js';
 
 const EVIL = 'U0EVIL00001';
 const DM_EVIL = 'D0EVIL00001';
@@ -376,6 +376,24 @@ describe('slack dm poll', () => {
     const notSent = { state: () => ({ status: 'connected' }), callTool: async () => ({ kind: 'not_sent', reason: 'closed' }) } as unknown as McpConnection;
     const poll = createSlackDmPoll({ ...t.deps, connection: () => notSent });
     expect(await poll('slack-work')).toEqual({ status: 'skipped', error: expect.stringContaining('was not sent, because slack-work is not connected now') });
+  });
+
+  it('gives up on a server that does not answer after a short wait, so the next poll does not start beside it', async () => {
+    const t = await setup({ answerWaitMs: 200 });
+    await t.poll();
+    let release = () => {};
+    t.fake.faults.hold = new Promise<void>((resolve) => (release = resolve));
+    const started = Date.now();
+    expect(await t.poll()).toEqual({ status: 'failed', error: expect.stringContaining('got no answer that the app could read') });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    release();
+    // without a test value, each call waits POLL_ANSWER_WAIT_MS. the profile and all pages of a poll fit in the 15
+    // minutes between two polls.
+    const waits: unknown[] = [];
+    const stub = { state: () => ({ status: 'connected' }), callTool: async (...args: unknown[]) => (waits.push(args[3]), { kind: 'not_sent', reason: 'x' }) };
+    await createSlackDmPoll({ ...t.deps, answerWaitMs: undefined, connection: () => stub as unknown as McpConnection })('slack-work');
+    expect(waits).toEqual([{ answerWaitMs: POLL_ANSWER_WAIT_MS }]);
+    expect((PAGES_PER_POLL + 1) * POLL_ANSWER_WAIT_MS).toBeLessThan(POLL_MS);
   });
 
   it('redacts a known secret in the summary and the blob', async () => {
