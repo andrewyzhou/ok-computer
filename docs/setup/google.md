@@ -34,7 +34,7 @@ Add this block to `okc.config.json`. If the file does not exist, create it next 
 - `clientId`: the client ID of the Desktop app client (it ends in `.apps.googleusercontent.com`). It is not a secret.
 - `alias`: at most 16 lower-case letters, digits and dashes. The agent names an account by its alias.
 - `email` (optional, recommended): a sign-in with another Google account is refused, so an alias can never read the wrong mailbox.
-- `send` (default `false`): when `true`, the sign-in also asks for permission to send mail, and the agent gets `gmail_send`. You approve each send. If you change it later, connect each account again.
+- `send` (default `false`): when `true`, the sign-in also asks for permission to send mail, and the agent gets `gmail_send`. You approve each send. If you change it later, connect each account again. With `false` the agent has no send tool, but Google lets the "modify" permission send mail too, so the limit is in the app, not in the token.
 - `sessions`: `main`, and also `auto` if your automations may use Gmail and Calendar.
 - `pollMinutes` (default 15, at least 5).
 
@@ -72,7 +72,7 @@ Open the dashboard on this PC (`okc open`), then go to **Google**.
   ```
 
   An allow rule on a write tool also holds after the agent read mail. It never lets an event invite people.
-- **Unsubscribe** uses only the sender's own `List-Unsubscribe` header: a one-click link (only when Gmail saw a valid DKIM signature, and never to an address inside your network) or a mail (only with `send: true`). Otherwise the agent gives you the link.
+- **Unsubscribe** uses only the sender's own `List-Unsubscribe` header: a one-click link (only when Gmail saw a valid DKIM signature of the sender's domain that covers the unsubscribe headers, and never to an address inside your network) or a mail (only with `send: true`). Otherwise the agent gives you the link.
 
 ## 5. When something goes wrong
 
