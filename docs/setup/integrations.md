@@ -36,7 +36,7 @@ Put the file next to `okc.config.json`. Example with one local server and one re
 - `tools.allow`: the only tools the agent can see. Every other tool of the server is hidden.
 - `risk`: `read` runs without approval. A tool without an entry is `write` when the server says it is read only, and `external` otherwise. A `write` call goes to the reviewer model on the `utility` slot, which allows or holds it; when the reviewer fails, you decide. An `external` call asks you each time. The Integrations page shows where each risk comes from.
 - `untrustedOutput` (default `true`): the results taint the session, so an `external` call after them always asks you.
-- `sessions` (default `["main"]`): `main`, `auto` (automations), or `sub:<profile>` (`sub:browser`, `sub:research`, `sub:inbox`). A sub-agent reaches an integration only through a `sub:<profile>` entry. A sub-agent never asks you: a call that needs your approval is denied in the sub-agent, and the main agent can make it.
+- `sessions` (default `["main"]`): `main`, `auto` (automations), or `sub:<profile>` (`sub:browser`, `sub:research`, `sub:inbox`; another name stops the app at start). A sub-agent reaches an integration only through a `sub:<profile>` entry. A sub-agent never asks you: a call that needs your approval is denied in the sub-agent, and the main agent can make it.
 
 An invalid file stops the app at start with a message that names the field.
 

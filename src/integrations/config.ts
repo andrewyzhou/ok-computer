@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
+import { PROFILES } from '../agent/delegate.js';
 import type { Result } from '../config/load.js';
 
 // the id is the first part of each tool name, and a tool name has at most 64 characters.
@@ -13,8 +14,10 @@ const secretRef = z
 
 const risk = z.enum(['read', 'write', 'external']);
 
-// sessions names the session profiles that see the tools: main, auto (automation runs), or sub:<profile>.
-const profile = z.string().regex(/^(main|auto|sub:[a-z][a-z0-9-]*)$/, 'use "main", "auto", or "sub:<profile>"');
+// sessions names the session profiles that see the tools: main, auto (automation runs), or sub:<profile>. a
+// misspelled sub-agent profile would hide the tools from the child with no message, so only a real profile passes.
+const SESSION_NAMES = ['main', 'auto', ...Object.keys(PROFILES).map((name) => `sub:${name}`)];
+const profile = z.string().refine((name) => SESSION_NAMES.includes(name), `use one of ${SESSION_NAMES.map((name) => `"${name}"`).join(', ')}`);
 
 const common = {
   id: integrationId,
