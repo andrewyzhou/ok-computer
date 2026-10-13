@@ -57,10 +57,10 @@ export function bodyText(part: gmail_v1.Schema$MessagePart | undefined): string 
   if (plain?.body?.data) return Buffer.from(plain.body.data, 'base64url').toString('utf8');
   const html = findPart(part, 'text/html');
   if (html?.body?.data) {
-    return Buffer.from(html.body.data, 'base64url')
-      .toString('utf8')
-      .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '')
-      .replace(/<[^>]+>/g, ' ')
+    // the sender writes the html, so each step must take linear time. a tag pattern that can cross a '<' took 8 s on
+    // 120 kb of '<' and blocked the whole process.
+    return withoutBlocks(Buffer.from(html.body.data, 'base64url').toString('utf8'))
+      .replace(/<[^<>]*>/g, ' ')
       .replace(/&nbsp;/g, ' ')
       .replace(/&amp;/g, '&')
       .replace(/&lt;/g, '<')
@@ -68,6 +68,26 @@ export function bodyText(part: gmail_v1.Schema$MessagePart | undefined): string 
       .replace(/[ \t]+/g, ' ');
   }
   return '(no text part)';
+}
+
+// the html without its script and style blocks. a forward scan replaces a lazy pattern with a back reference, which
+// took quadratic time on many open tags without a close. a block without its close tag ends the text. the scan does
+// not use a lower-case copy, because lower case can change the length of the text and move the positions.
+function withoutBlocks(html: string): string {
+  const open = /<(script|style)\b/gi;
+  let out = '';
+  let at = 0;
+  for (let match = open.exec(html); match; match = open.exec(html)) {
+    out += html.slice(at, match.index);
+    const close = new RegExp(`</${match[1]}`, 'gi');
+    close.lastIndex = open.lastIndex;
+    const found = close.exec(html);
+    const end = found ? html.indexOf('>', close.lastIndex) : -1;
+    if (end < 0) return out;
+    at = end + 1;
+    open.lastIndex = at;
+  }
+  return out + html.slice(at);
 }
 
 function findPart(part: gmail_v1.Schema$MessagePart | undefined, mimeType: string): gmail_v1.Schema$MessagePart | undefined {
