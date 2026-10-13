@@ -131,6 +131,11 @@ export interface HeartbeatDeps {
   agent: (input: RunInput) => Promise<RunResult>;
   signal: AbortSignal;
   newId?: () => string;
+  // the signals of the integrations: a bounded digest of the unhandled ones, and the mark after a completed run.
+  signals?: {
+    digest(now: Date): { ids: number[]; text: string; taint: TaintSource[] } | undefined;
+    handled(ids: number[], by: string, now: Date): void;
+  };
 }
 
 export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) => Promise<JobResult> {
@@ -143,7 +148,9 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
       return { status: 'skipped', error: 'outside active hours' };
     }
     const checklist = getChecklist(db);
-    if (!checklist) return { status: 'skipped', error: 'the checklist is empty' };
+    // new signals are a reason to run without a checklist.
+    const digest = deps.signals?.digest(clock());
+    if (!checklist && !digest) return { status: 'skipped', error: 'the checklist is empty' };
     if (queue.busy(MAIN_SESSION)) return { status: 'skipped', error: 'the main session has a run in progress' };
 
     const recent = recentNotifications(db);
@@ -151,12 +158,20 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
       'Heartbeat check.',
       '',
       'Checklist:',
-      checklist,
+      checklist || '- none',
+      ...(digest
+        ? [
+            '',
+            "New signals from the owner's accounts, newest first. Tell the owner about a signal only when it needs attention soon, for example a deadline that is not on the calendar. Each signal is shown one time.",
+            digest.text,
+          ]
+        : []),
       '',
       'Recent notifications to the owner:',
       ...(recent.length ? recent.map((line) => `- ${line}`) : ['- none']),
     ].join('\n');
-    const inherited = checklistTaint(db);
+    // the digest quotes outside text, so the run starts with its taint. the heartbeat has no external tools.
+    const inherited = [...checklistTaint(db), ...(digest?.taint ?? [])];
     const runId = newId();
     const sessionKey = `${HEARTBEAT_PREFIX}${runId}`;
     const result = await queue.enqueue(sessionKey, () =>
@@ -171,12 +186,18 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
         signal: deps.signal,
       }),
     );
+    // a failed run leaves the signals unhandled, so the next heartbeat shows them again.
     if (result.status !== 'completed') return { status: 'failed', runId, error: result.error ?? result.status };
 
     // the answer comes from the event log, because one failed trace write must not drop the owner's notification.
     const answer = succeededCalls(db, sessionKey, runId, 'heartbeat_respond').at(-1) as Respond | undefined;
     if (answer?.notify && answer.text) {
       await owner.send(answer.text);
+    }
+    // the mark comes after the send. a crash between the two shows the signals again, and the recent notifications
+    // tell the next heartbeat not to repeat itself. a lost deadline is worse than a repeated one.
+    if (digest) deps.signals!.handled(digest.ids, `heartbeat:${runId}`, clock());
+    if (answer?.notify && answer.text) {
       // the notification can repeat untrusted content that the heartbeat read, so it carries that taint, and its text
       // is wrapped.
       const taint = sessionTaint(db, sessionKey);

@@ -48,6 +48,8 @@ export interface Fault {
   // reset closes the socket without an answer. late runs the route, then closes the socket without the answer.
   reset?: boolean;
   late?: boolean;
+  // echoAuth puts the authorization header and the body of the request in the error message.
+  echoAuth?: boolean;
   times?: number;
 }
 
@@ -184,6 +186,27 @@ export async function startFakeGoogle(): Promise<FakeGoogle> {
       const draft = box.drafts.get(match[1]!);
       return draft ? json(res, 200, { id: match[1], message: { id: draft.message.id } }) : apiError(res, 404, 'Requested entity was not found.', 'notFound');
     }
+    if (path === '/gmail/v1/users/me/labels') return json(res, 200, { labels: [{ id: 'INBOX', name: 'INBOX' }, { id: 'Label_1', name: 'school' }] });
+    if (path === '/gmail/v1/users/me/messages/batchModify') {
+      const change = JSON.parse(body) as { ids: string[]; addLabelIds?: string[]; removeLabelIds?: string[] };
+      for (const id of change.ids) {
+        const message = box.messages.get(id);
+        if (message) message.labelIds = [...(message.labelIds ?? ['INBOX']).filter((label) => !change.removeLabelIds?.includes(label)), ...(change.addLabelIds ?? [])];
+      }
+      res.writeHead(204).end();
+      return;
+    }
+    if ((match = /^\/calendar\/v3\/calendars\/primary\/events\/([^/]+)$/.exec(path))) {
+      const event = box.events.get(decodeURIComponent(match[1]!));
+      if (!event || event.status === 'cancelled') return apiError(res, req.method === 'DELETE' ? 410 : 404, 'Resource has been deleted', 'deleted');
+      if (req.method === 'DELETE') {
+        fake.upsertEvent(alias, { ...event, status: 'cancelled' });
+        res.writeHead(204).end();
+        return;
+      }
+      fake.upsertEvent(alias, { ...event, ...(JSON.parse(body) as Partial<FakeEvent>) });
+      return json(res, 200, box.events.get(event.id));
+    }
     if (path === '/calendar/v3/calendars/primary/events' && req.method === 'GET') {
       const syncToken = url.searchParams.get('syncToken');
       const since = syncToken ? Number(syncToken.replace('st-', '')) : 0;
@@ -225,7 +248,9 @@ export async function startFakeGoogle(): Promise<FakeGoogle> {
           return void route(req, sink, url, body);
         }
         res.writeHead(fault.status ?? 500, { 'content-type': 'application/json' });
-        return void res.end(JSON.stringify(fault.body ?? { error: { code: fault.status ?? 500, message: 'injected fault' } }));
+        // a careless server quotes the request in its error, with the token in it.
+        const echo = fault.echoAuth ? ` for ${req.headers.authorization ?? ''} ${body}` : '';
+        return void res.end(JSON.stringify(fault.body ?? { error: { code: fault.status ?? 500, message: `injected fault${echo}` } }));
       }
       void route(req, res, url, body).catch((err: unknown) => apiError(res, 500, String(err)));
     });

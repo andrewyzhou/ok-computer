@@ -33,6 +33,10 @@ export function registerSecret(value: string | undefined, source?: string): void
     if (escaped === form) break;
     form = escaped;
   }
+  // a form body or a query string holds the percent-encoded value. a server that quotes its request in an error
+  // (an oauth token endpoint, for example) puts that form in the message.
+  const encoded = encodeURIComponent(value);
+  if (encoded !== value) forms.push(encoded);
   if (source === undefined) forms.forEach((each) => fixed.add(each));
   else bySource.set(source, forms);
   secrets = [...new Set([...fixed, ...[...bySource.values()].flat()])].sort((a, b) => b.length - a.length);

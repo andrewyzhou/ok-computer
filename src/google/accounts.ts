@@ -177,7 +177,8 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
           res.writeHead(404).end();
           return;
         }
-        const reply = (text: string) => res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }).end(text);
+        // the listener closes after the reply. a close before it would wait for this open connection for ever.
+        const reply = (text: string) => res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', connection: 'close' }).end(text, () => void closeIfIdle());
         const error = url.searchParams.get('error');
         const state = url.searchParams.get('state') ?? '';
         if (error) {
@@ -203,7 +204,11 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
     const closing = server;
     server = undefined;
     serverUrl = undefined;
-    await new Promise<void>((resolve) => closing.close(() => resolve()));
+    await new Promise<void>((resolve) => {
+      closing.close(() => resolve());
+      // a browser keeps a connection open after the reply. it must not hold the close.
+      closing.closeIdleConnections();
+    });
   };
 
   async function finishSignIn(state: string, code: string): Promise<{ email: string } | { error: string }> {
@@ -240,14 +245,18 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
         `UPDATE google_accounts SET email = ?, scopes = ?, status = 'ok', authorizedAt = ?, alertedAt = NULL, lastError = NULL, updatedAt = ? WHERE alias = ?`,
       ).run(email, [...granted].join(' '), now(), now(), flow.alias);
       if (before && before !== email) deps.onNewMailbox?.(flow.alias);
+      // the gmail baseline is the moment of the sign-in, not the first poll that works. mail that comes between the
+      // two is news. a cursor that exists stays, so a sign-in after needs_auth still finds the mail of the outage.
+      db.prepare(
+        `INSERT INTO google_sync (alias, api, cursor) VALUES (?, 'gmail', ?)
+         ON CONFLICT (alias, api) DO UPDATE SET cursor = COALESCE(google_sync.cursor, excluded.cursor)`,
+      ).run(flow.alias, String(profile.data.historyId));
       logger.info('google account signed in', { alias: flow.alias });
       return { email };
     } catch (err) {
       const error = toGoogleError(err);
       logger.warn('google sign-in failed', { alias: flow?.alias, err: error });
       return { error: error.message };
-    } finally {
-      await closeIfIdle();
     }
   }
 

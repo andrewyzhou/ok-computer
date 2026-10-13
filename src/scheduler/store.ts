@@ -18,6 +18,8 @@ export const payloadSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('goal_checkin'), goalId: z.number().int() }),
   z.object({ type: z.literal('goals_results') }),
   z.object({ type: z.literal('consolidation') }),
+  // a poll of an integration in code, for example google. it makes no model call for the poll itself.
+  z.object({ type: z.literal('poll'), source: z.string().min(1) }),
 ]);
 export type Payload = z.infer<typeof payloadSchema>;
 

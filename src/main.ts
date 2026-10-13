@@ -85,7 +85,7 @@ async function main(): Promise<void> {
     clock: systemClock,
     rules: rules.value,
     integrations: integrations.value,
-    ...(integrations.value.length ? { secrets: createKeyringStore() } : {}),
+    ...(integrations.value.length || config.google ? { secrets: createKeyringStore() } : {}),
     connectIntegrations: !chatMode,
   });
   process.on('SIGINT', () => void stop('SIGINT'));

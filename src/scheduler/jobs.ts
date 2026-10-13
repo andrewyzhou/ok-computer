@@ -44,6 +44,8 @@ export interface JobDeps {
   agent: (input: RunInput) => Promise<RunResult>;
   heartbeat: (automation: Automation) => Promise<JobResult>;
   consolidation: (automation: Automation) => Promise<JobResult>;
+  // the poll of each integration that polls in code, by its source name.
+  polls?: Record<string, () => Promise<JobResult>>;
   signal: AbortSignal;
   newId?: () => string;
 }
@@ -144,6 +146,11 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
         return deps.heartbeat(automation);
       case 'consolidation':
         return deps.consolidation(automation);
+      case 'poll': {
+        // the config can remove an integration while its automation stays.
+        const poll = deps.polls?.[payload.source];
+        return poll ? poll() : { status: 'skipped', error: `no integration polls ${payload.source}` };
+      }
     }
   };
 }

@@ -83,4 +83,10 @@ describe('redact', () => {
     registerSecret('other-secret-value-2026', 'one');
     expect(redact('shared-secret-value-2026 other-secret-value-2026')).toBe('[redacted] [redacted]');
   });
+
+  // a token endpoint that quotes its form body in an error showed a google refresh token as 1%2F%2F... in the log.
+  it('hides the percent-encoded form of a secret', () => {
+    registerSecret('1//refresh/token+value=2026', 'google.test');
+    expect(redact('refresh_token=1%2F%2Frefresh%2Ftoken%2Bvalue%3D2026&grant_type=refresh_token')).toBe('refresh_token=[redacted]&grant_type=refresh_token');
+  });
 });
