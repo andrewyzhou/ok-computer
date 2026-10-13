@@ -6,8 +6,8 @@ import type { ToolCall } from '../models/types.js';
 import type { BlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
 import { redact, redactedJson } from '../observability/redact.js';
-import { decide, type ReviewResult, type Reviewer, type Risk, type Rule, type TaintSource } from '../policy/policy.js';
-import { decisionOfApproval, recordDecision, sessionTaint, updateDecision } from '../policy/store.js';
+import { decide, SUBAGENT_PREFIX, type ReviewResult, type Reviewer, type Risk, type Rule, type TaintSource } from '../policy/policy.js';
+import { decisionOfApproval, recordDecision, sessionTaint, updateDecision, urlSeen } from '../policy/store.js';
 import type { RunQueue } from '../sessions/queue.js';
 import type { Clock } from '../time.js';
 import { errorText, type Attribution, type Tool, type ToolContext, type ToolOutput, type ToolRegistry } from './registry.js';
@@ -278,7 +278,15 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
     const taint = sessionTaint(db, ctx.sessionKey);
     const sources = taint.map((each) => each.source);
     const verdict = decide(
-      { tool: tool.name, risk: tool.risk, alwaysApprove: tool.needsApproval === true, input, sessionKey: ctx.sessionKey, taint: sources },
+      {
+        tool: tool.name,
+        risk: tool.risk,
+        alwaysApprove: tool.needsApproval === true,
+        input,
+        sessionKey: ctx.sessionKey,
+        taint: sources,
+        seen: (url) => urlSeen(db, ctx.sessionKey, url),
+      },
       deps.rules,
     );
     let reason =
@@ -291,6 +299,13 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
     const gate = { decisionId, taint };
 
     const askOwner = async (): Promise<ToolOutput> => {
+      // a sub-agent never asks the owner (see policy.ts). a review without a usable reviewer would ask, so it becomes a
+      // hold, and the decision row says why.
+      if (ctx.sessionKey.startsWith(SUBAGENT_PREFIX)) {
+        const held = { verdict: 'hold' as const, reason: `${reason}. a sub-agent cannot ask the owner, so the call did not run` };
+        updateDecision(db, decisionId, { review: held });
+        return { content: `${tool.name} did not run: ${held.reason}. Return to the parent agent and say which call needs the owner.`, isError: true };
+      }
       try {
         const asked = await untilStopped(deps.requestApproval(tool, input, toolCtx, { decisionId, reason, taint }), ctx.signal, (err) =>
           logger.error('approval request failed after its run stopped', { runId: ctx.runId, toolCallId: call.id, tool: tool.name, err }),

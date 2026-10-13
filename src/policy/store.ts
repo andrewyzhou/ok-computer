@@ -108,3 +108,20 @@ function toolNameOf(db: Db, name: string, runId: string | null, toolCallId: stri
   const row = db.prepare('SELECT name FROM tool_calls WHERE runId = ? AND toolCallId = ? ORDER BY id LIMIT 1').get(runId, toolCallId);
   return row ? String(row.name) : name;
 }
+
+// a url that the session already read carries no new data. the newest 2,000 events bound the work of one check. the
+// payload is redacted json text, so a url with a secret or an escaped character does not match, and goes to review.
+export function urlSeen(db: Db, sessionKey: string, url: string): boolean {
+  return (
+    db
+      .prepare(
+        `SELECT 1 FROM (
+           SELECT type, payload FROM events
+           WHERE sessionKey = ? AND type IN ('tool_result', 'system_event')
+             AND seq > (SELECT COALESCE(MAX(seq), 0) FROM events WHERE sessionKey = ? AND type = 'session_reset')
+           ORDER BY seq DESC LIMIT 2000)
+         WHERE (type = 'tool_result' OR json_extract(payload, '$.taint') IS NOT NULL) AND instr(payload, ?) > 0 LIMIT 1`,
+      )
+      .get(sessionKey, sessionKey, url) !== undefined
+  );
+}

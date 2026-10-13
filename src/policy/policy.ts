@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
 import type { Result } from '../config/load.js';
+import { headOf } from '../text.js';
 
 export type Risk = 'read' | 'write' | 'external';
 export type Decision = 'allow' | 'review' | 'approve' | 'deny';
@@ -38,12 +39,10 @@ const LOCAL_WRITE_TOOLS = [
   'message_owner',
 ];
 
-export const BUILTIN_RULES: Rule[] = LOCAL_WRITE_TOOLS.map((tool) => ({
-  id: `builtin:${tool}`,
-  tool,
-  effect: 'allow',
-  note: 'the tool changes only local data',
-}));
+export const BUILTIN_RULES: Rule[] = [
+  ...LOCAL_WRITE_TOOLS.map((tool): Rule => ({ id: `builtin:${tool}`, tool, effect: 'allow', note: 'the tool changes only local data' })),
+  { id: 'builtin:delegate', tool: 'delegate', effect: 'allow', note: 'delegate starts a sub-agent; each call of the sub-agent gets its own policy decision' },
+];
 
 // a taint source names the first tool call that brought one untrusted source into a session. the owner can open
 // that call to see why a later action needs approval.
@@ -64,19 +63,37 @@ export interface PolicyInput {
   sessionKey: string;
   // the sources of untrusted content that the session read. an empty list means that the session is not tainted.
   taint: string[];
+  // seen tells whether a url is in the text that the session already read. the policy asks only in a tainted session,
+  // and only for a url that can carry data.
+  seen?: (url: string) => boolean;
 }
+
+// a sub-agent runs in a session sub:<profile>:<childRunId>. no run reads the result of an approval in that session,
+// and the owner did not start the child, so a child never asks the owner. the parent can ask for the same call.
+export const SUBAGENT_PREFIX = 'sub:';
 
 export interface Verdict {
   decision: Decision;
-  // rule names what decided: a rule id, "taint", "tool", or "risk:<level>".
+  // rule names what decided: a rule id, "taint", "exfiltration", "subagent", "tool", or "risk:<level>".
   rule: string;
   reason: string;
 }
 
 // a deny rule always wins, in any position in the file. so a broad allow rule that comes later cannot cancel a deny
 // rule. taint makes every external call go to the owner, also when a rule allows the tool. without a matching rule,
-// the risk level decides.
+// the risk level decides. in a sub-agent session a call that needs the owner is denied.
 export function decide(input: PolicyInput, rules: readonly Rule[]): Verdict {
+  const verdict = decideAny(input, rules);
+  if (verdict.decision !== 'approve' || !input.sessionKey.startsWith(SUBAGENT_PREFIX)) return verdict;
+  const [, profile, childRunId] = input.sessionKey.split(':');
+  return {
+    decision: 'deny',
+    rule: 'subagent',
+    reason: `${verdict.reason}, but the ${profile} sub-agent (run ${childRunId}) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it`,
+  };
+}
+
+function decideAny(input: PolicyInput, rules: readonly Rule[]): Verdict {
   const deny = rules.find((each) => each.effect === 'deny' && matches(each, input));
   if (deny) return { decision: 'deny', rule: deny.id, reason: deny.note ?? `the policy rule ${deny.id} denies ${input.tool}` };
   const rule = rules.findLast((each) => each.effect === 'allow' && matches(each, input));
@@ -88,6 +105,16 @@ export function decide(input: PolicyInput, rules: readonly Rule[]): Verdict {
       decision: 'approve',
       rule: 'taint',
       reason: `the session read untrusted content (${input.taint.join(', ')}), so an external action needs the owner's approval`,
+    };
+  }
+  // in a tainted session an injected instruction can make the model put private data in a link or a search. the
+  // reviewer checks such a call, also when a rule allows the tool, because a rule cannot see the data in the call.
+  const leak = input.taint.length ? dataLeak(input) : undefined;
+  if (leak) {
+    return {
+      decision: 'review',
+      rule: 'exfiltration',
+      reason: `the session read untrusted content (${input.taint.join(', ')}), and ${input.tool} ${leak}, so a reviewer checks it first`,
     };
   }
   if (rule) return { decision: 'allow', rule: rule.id, reason: rule.note ?? `the policy rule ${rule.id} allows ${input.tool}` };
@@ -152,6 +179,53 @@ function denyForms(value: unknown): string[] {
 
 const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
 const URL_IN_TEXT = /https?:\/\/[^\s"'<>]+/gi;
+
+// a url can carry data in its query, its fragment, a long path, or a long label of its host (dns lookups leave the pc
+// too). a short url such as https://example.com/about carries no more than its choice of page. any query counts,
+// because a length limit let a short secret through (24 bytes in base64 fit in 31 characters), and a false match
+// costs only one call of the reviewer. the limits on the path and the labels are a filter, not a proof.
+const PATH_LIMIT = 100;
+const LABEL_LIMIT = 32;
+// a url that the session already read carries no new data, for example a link from a mail or a search result. the
+// check of each url reads the event log, so a call with many urls goes to the reviewer without the check.
+const SEEN_CHECKS = 20;
+
+export function dataUrls(value: unknown): Array<{ url: string; signal: string }> {
+  const found: Array<{ url: string; signal: string }> = [];
+  eachString(value, (text) => {
+    for (const each of text.normalize('NFKC').match(URL_IN_TEXT) ?? []) {
+      const signal = urlSignal(each);
+      if (signal) found.push({ url: each, signal });
+    }
+  });
+  return found;
+}
+
+function urlSignal(text: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    // a text that does not parse as a url cannot reach a host.
+    return undefined;
+  }
+  if (url.search.length > 1 || url.hash.length > 1) return 'it has a query or a fragment';
+  if (url.hostname.length + url.pathname.length > PATH_LIMIT) return `its host and path have over ${PATH_LIMIT} characters`;
+  if (url.hostname.split('.').some((label) => label.length > LABEL_LIMIT)) return `a label of its host has over ${LABEL_LIMIT} characters`;
+  return undefined;
+}
+
+// web_search has no url, but it sends its query to a search engine, so its query counts as the query of a url.
+function dataLeak(input: PolicyInput): string | undefined {
+  const fields = input.input !== null && typeof input.input === 'object' ? (input.input as Record<string, unknown>) : {};
+  if (input.tool === 'web_search' && typeof fields.query === 'string' && fields.query.trim()) {
+    return `sends a search query (${headOf(fields.query, 200)})`;
+  }
+  const urls = dataUrls(input.input);
+  const seen = input.seen;
+  const unseen = urls.length > SEEN_CHECKS || !seen ? urls[0] : urls.find((each) => !seen(each.url));
+  return unseen ? `sends a url that can carry data (${headOf(unseen.url, 200)}): ${unseen.signal}` : undefined;
+}
 
 // the walk gives each string and number of a list or an object, at any depth. it does not give the keys, but the
 // json text of the whole value still holds them.
@@ -241,5 +315,6 @@ export interface ReviewResult {
   modelCallId?: number;
 }
 
-// the reviewer model comes in a later milestone. until then a review goes to the owner as an approval.
+// reviewer.ts makes the reviewer. without one, a review goes to the owner as an approval, and a reviewer that throws
+// also sends the call to the owner.
 export type Reviewer = (request: ReviewRequest) => Promise<ReviewResult>;
