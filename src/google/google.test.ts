@@ -4,7 +4,7 @@ import { createFakeClient } from '../models/fake.js';
 import { createSlotRunner } from '../models/slots.js';
 import { openDb } from '../db/index.js';
 import { scheduleContext } from '../scheduler/context.js';
-import { createAutomation } from '../scheduler/store.js';
+import { createAutomation, listAutomations, updateAutomation } from '../scheduler/store.js';
 import { signalDigest } from '../signals/digest.js';
 import { googleConfigSchema } from './config.js';
 import { createGoogle, syncGooglePoll } from './google.js';
@@ -76,6 +76,24 @@ describe('google poll job', () => {
     const context = scheduleContext(db, now, 'UTC');
     expect(context).toContain('water the plants');
     expect(context).not.toContain('google poll');
+  });
+
+  // the poll turned on again only when the interval changed. a google block that was removed and then added back with
+  // the same interval left the poll off for good.
+  it('turns the poll on again when the google block comes back, and keeps a pause of the owner', () => {
+    const db = openDb(':memory:');
+    const now = new Date('2026-10-13T16:00:00Z');
+    const google = googleConfigSchema.parse({ clientId: CLIENT_ID, accounts: [{ alias: 'personal' }] });
+    const enabled = () => listAutomations(db).filter((each) => each.payload.type === 'poll').map((each) => each.enabled);
+    syncGooglePoll(db, { timeZone: 'UTC', google }, now);
+    expect(enabled()).toEqual([true]);
+    syncGooglePoll(db, { timeZone: 'UTC' }, now);
+    expect(enabled()).toEqual([false]);
+    syncGooglePoll(db, { timeZone: 'UTC', google }, now);
+    expect(enabled()).toEqual([true]);
+    updateAutomation(db, listAutomations(db).find((each) => each.payload.type === 'poll')!.id, { enabled: false }, now, 'UTC');
+    syncGooglePoll(db, { timeZone: 'UTC', google }, now);
+    expect(enabled()).toEqual([false]);
   });
 
   it('skips in the chat process', async () => {

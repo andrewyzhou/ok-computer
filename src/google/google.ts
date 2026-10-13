@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Config } from '../config/schema.js';
 import type { Db } from '../db/index.js';
+import { getSetting, setSetting } from '../db/settings.js';
 import type { SecretStore } from '../integrations/secrets.js';
 import type { SlotRunner } from '../models/slots.js';
 import type { BlobStore } from '../observability/blobs.js';
@@ -51,19 +52,24 @@ export interface GoogleDeps {
   oneClick?: (target: string) => Promise<OneClickResult>;
 }
 
+const POLL_SYNCED_EVERY = 'google_poll_synced_every_ms';
+
 // the poll automation follows the config at each start, as the heartbeat does. a pause by the owner stays until the
 // interval in the config changes. without a google block the automation is turned off, not deleted, so its history
-// stays.
+// stays. the stored interval is 0 then, so a block that comes back with the same interval turns the poll on again.
 export function syncGooglePoll(db: Db, config: Pick<Config, 'google' | 'timeZone'>, now: Date): void {
   const existing = listAutomations(db).find((each) => each.payload.type === 'poll' && each.payload.source === 'google');
-  if (!config.google) {
+  const everyMs = config.google ? config.google.pollMinutes * 60_000 : 0;
+  const synced = getSetting<number>(db, POLL_SYNCED_EVERY) ?? (existing?.schedule.kind === 'every' ? existing.schedule.everyMs : undefined);
+  setSetting(db, POLL_SYNCED_EVERY, everyMs, now);
+  if (!everyMs) {
     if (existing?.enabled) updateAutomation(db, existing.id, { enabled: false }, now, config.timeZone);
     return;
   }
-  const schedule = { kind: 'every' as const, everyMs: config.google.pollMinutes * 60_000 };
+  const schedule = { kind: 'every' as const, everyMs };
   if (!existing) {
     createAutomation(db, { name: 'google poll', schedule, payload: { type: 'poll', source: 'google' }, slot: 'utility', createdBy: 'system' }, now, config.timeZone);
-  } else if (existing.schedule.kind !== 'every' || existing.schedule.everyMs !== schedule.everyMs) {
+  } else if (synced !== everyMs) {
     updateAutomation(db, existing.id, { schedule, enabled: true }, now, config.timeZone);
   }
 }
