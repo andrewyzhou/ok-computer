@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SLOTS } from '../config/schema.js';
 import type { Db } from '../db/index.js';
+import type { TaintSource } from '../policy/policy.js';
 import { sessionTaint } from '../policy/store.js';
 import { formatLocal } from '../time.js';
 import { defineTool, type Tool } from '../tools/registry.js';
@@ -44,6 +45,12 @@ export function formatAutomation(automation: Automation, timeZone: string): stri
 const finished = (automation: Automation) =>
   automation.schedule.kind === 'at' && !automation.enabled && automation.lastRunAt !== null;
 
+// one entry for each source, as in the taint of a session.
+function unionTaint(a: TaintSource[], b: TaintSource[]): TaintSource[] {
+  const sources = new Set(a.map((each) => each.source));
+  return [...a, ...b.filter((each) => !sources.has(each.source))];
+}
+
 export function createAutomationTools(deps: { db: Db; replan: () => void }): Tool[] {
   const { db } = deps;
 
@@ -55,7 +62,11 @@ export function createAutomationTools(deps: { db: Db; replan: () => void }): Too
     async run(_input, ctx) {
       const automations = listAutomations(db).filter((automation) => !finished(automation));
       if (!automations.length) return { content: 'there are no automations' };
-      return { content: automations.map((automation) => formatAutomation(automation, ctx.timeZone)).join('\n') };
+      const content = automations.map((automation) => formatAutomation(automation, ctx.timeZone)).join('\n');
+      // the name and the prompt of a tainted automation repeat untrusted text, so the list is untrusted too. else a
+      // session after /new reads that text and stays clean.
+      const sources = [...new Set(automations.flatMap((automation) => automation.taint.map((each) => each.source)))];
+      return { content, ...(sources.length ? { untrustedSource: sources.join(', ') } : {}) };
     },
   });
 
@@ -105,11 +116,20 @@ export function createAutomationTools(deps: { db: Db; replan: () => void }): Too
         patch.payload?.type === 'agent' && current.payload.type === 'agent' && current.payload.condition
           ? { ...patch.payload, condition: current.payload.condition }
           : patch.payload;
-      // a new payload replaces the old text, so it also replaces the taint.
+      // the name and the payload are text that each run reads. the old taint stays while any old text stays, and a
+      // session that writes text adds its own taint. so a rename or a save of the same text cannot remove a taint. a
+      // change of the schedule or the state writes no text, so a pause from a tainted session does not taint it.
+      const replaced =
+        patch.name !== undefined &&
+        patch.name !== current.name &&
+        payload !== undefined &&
+        JSON.stringify(payload) !== JSON.stringify(current.payload);
+      const writes = patch.name !== undefined || payload !== undefined;
+      const taint = unionTaint(replaced ? [] : current.taint, writes ? sessionTaint(db, ctx.sessionKey) : []);
       const updated = updateAutomation(
         db,
         id,
-        { ...patch, ...(payload && { payload, taint: sessionTaint(db, ctx.sessionKey) }) },
+        { ...patch, ...(payload && { payload }), taint },
         ctx.clock(),
         ctx.timeZone,
       );
