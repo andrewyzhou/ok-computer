@@ -87,6 +87,14 @@ export function createToolRegistry(tools: Tool[], logger: Logger = silentLogger)
         const content = output?.content;
         output = { ...output, content: content === undefined || content === null ? '' : typeof content === 'object' ? JSON.stringify(content) : String(content) };
       }
+      // the same is true for a source that is not text, for example true from a boolean flag. the output stays
+      // untrusted, because a dropped source would hide outside text.
+      const source: unknown = output.untrustedSource;
+      if (source && typeof source !== 'string') {
+        logger.warn('tool gave an untrusted source that is not text', { tool: tool.name, runId: ctx.runId, toolCallId: ctx.toolCallId });
+        const named = source === true ? (tool.untrustedOutput ?? tool.name) : typeof source === 'object' ? JSON.stringify(source) : String(source);
+        output = { ...output, untrustedSource: named };
+      }
       return tool.untrustedOutput && !output.untrustedSource ? { ...output, untrustedSource: tool.untrustedOutput } : output;
     },
   };

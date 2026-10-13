@@ -38,8 +38,10 @@ export function redact(text: string): string {
 // the redaction works on each string before the json text exists, so a replacement can never cut an escape and make
 // the json text invalid. an invalid payload in the append-only event log blocks its session for good. the escaped
 // forms still catch a secret in a string that is json text itself.
+// json has no text for undefined, and a database column cannot take undefined. a model can send a tool call without
+// its arguments, so undefined becomes the text null.
 export function redactedJson(value: unknown): string {
-  return JSON.stringify(value, redactLeaf);
+  return JSON.stringify(value, redactLeaf) ?? 'null';
 }
 
 // redactValue gives a copy with each string redacted, for a caller that needs the value and not its text.

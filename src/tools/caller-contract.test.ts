@@ -81,6 +81,7 @@ describe('the tool caller before the tool acts', () => {
       caller: () => caller,
       signal: new AbortController().signal,
       timeoutMs: 60_000,
+      timeZone: 'America/Los_Angeles',
     });
     const { caller } = createTestCaller(db, createToolRegistry([tool]), clock, { requestApproval: flow.request, queue });
     db.exec("CREATE TRIGGER no_approvals BEFORE INSERT ON approvals BEGIN SELECT RAISE(ABORT, 'disk is full'); END");
@@ -222,6 +223,31 @@ describe('the tool caller after the tool acts', () => {
       expect(typeof output.content).toBe('string');
       expect(row('odd-call')).toMatchObject({ outcome: null });
     }
+  });
+
+  // an adapter can pass a boolean flag as the source. the wrapper then threw after the tool acted, and no row stayed.
+  it('keeps an output untrusted when its source is not text, and gives a result and a row', async () => {
+    for (const [odd, source] of [
+      [true, 'odd'],
+      [42, '42'],
+      [{ host: 'evil.example' }, '{"host":"evil.example"}'],
+    ] as const) {
+      const { tool, ran } = counted('odd', 'read', async () => ({ content: 'outside text', untrustedSource: odd }) as unknown as { content: string });
+      const { call, row } = setup([tool]);
+      const output = await call('odd');
+      expect(ran).toEqual(['odd']);
+      expect(output.untrustedSource).toBe(source);
+      expect(output.content).toContain(`<untrusted source="${source.replace(/"/g, '&quot;')}">`);
+      expect(row('odd-call')).toMatchObject({ untrustedSource: source });
+    }
+  });
+
+  // an openai compatible server can leave out the arguments, so the input is undefined, which sqlite cannot bind.
+  it('keeps the row of a call without input', async () => {
+    const { tool } = counted('bare', 'read', async () => ({ content: 'ok' }));
+    const { caller, row } = setup([tool]);
+    await caller.call({ id: 'bare-call', name: 'bare', input: undefined }, { runId: 'r1', sessionKey: 'main', allowed: ['bare'], signal: new AbortController().signal });
+    expect(row('bare-call')).toMatchObject({ input: 'null' });
   });
 
   it('logs the stack of a tool that throws with the ids of the run and the call', async () => {

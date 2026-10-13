@@ -1,9 +1,9 @@
 import { join } from 'node:path';
 import { runAgent, type AgentDeps } from './agent/loop.js';
-import { closeStaleWork, interruptedText } from './agent/recovery.js';
+import { closeStaleWork, interruptedText, repairSession } from './agent/recovery.js';
 import { buildStablePrompt } from './agent/system-prompt.js';
-import { createApprovalFlow, type ApprovalFlow } from './approvals/flow.js';
-import { expireApprovals } from './approvals/store.js';
+import { approvalNote, createApprovalFlow, type ApprovalFlow } from './approvals/flow.js';
+import { expireApprovals, type Approval } from './approvals/store.js';
 import type { ChannelAdapter } from './channels/types.js';
 import type { Config } from './config/schema.js';
 import { sinceLastReset } from './context/full-history.js';
@@ -112,6 +112,7 @@ export function createApp(deps: AppDeps): App {
     caller: () => caller,
     signal: shutdown.signal,
     timeoutMs: config.agent.backgroundTimeoutMs,
+    timeZone: config.timeZone,
   });
   // the scheduler is created below. the tools call replan only after the start.
   const replan = () => scheduler.replan();
@@ -215,6 +216,7 @@ export function createApp(deps: AppDeps): App {
     isOwner: (message) => message.channel === 'cli' || ownerIds[message.channel] === message.senderId,
     rememberOwnerChat: owner.remember,
     approvals: approvals.resolve,
+    approvalCard: approvals.card,
     onReset: () => {
       const now = clock();
       const excerpt = sessionExcerpt(sinceLastReset(listEvents(db, MAIN_SESSION)), localTime(now, config.timeZone));
@@ -226,28 +228,40 @@ export function createApp(deps: AppDeps): App {
   // the sweep closes the work of a stopped process and tells the sessions and the owner. it runs at the start and on
   // each scheduler tick. events go through the session queue, so they never land inside an active run.
   const staleMs = Math.max(config.agent.chatTimeoutMs, config.agent.backgroundTimeoutMs) + STALE_MARGIN_MS;
-  const note = (sessionKey: string, text: string) =>
+  // the note to the session carries the taint of the decision, because the summary is text that the model wrote. the
+  // owner gets the same words with the plain summary.
+  const tell = (approval: Approval, words: (summary: string) => string, toOwner: boolean) => {
+    const { sessionKey } = approval;
+    const { text, taint } = approvalNote(db, approval, words);
     void queue
-      .enqueue(sessionKey, async () => void appendEvent(db, { sessionKey, runId: null, type: 'system_event', payload: { text } }, clock()))
+      .enqueue(sessionKey, async () =>
+        void appendEvent(db, { sessionKey, runId: null, type: 'system_event', payload: { text, ...(taint.length ? { taint } : {}) } }, clock()),
+      )
       .catch((err: unknown) => logger.error('sweep note failed', { sessionKey, err }));
+    if (toOwner) void owner.send(words(approval.summary));
+  };
   function sweep(now: Date) {
     try {
       for (const approval of expireApprovals(db, now)) {
-        note(approval.sessionKey, `Approval #${approval.id} (${approval.summary}) expired after 24 hours without an answer. The tool did not run.`);
+        tell(approval, (summary) => `Approval #${approval.id} (${summary}) expired after 24 hours without an answer. The tool did not run.`, false);
       }
-      // the next run of each session repairs its calls. a repair here could answer the calls of a live turn in
-      // another process.
       const stale = closeStaleWork(db, now, staleMs, { runs: activeRuns, approvals: approvals.active });
       if (stale.runs.length) logger.warn('closed the runs of a stopped process', { runs: stale.runs.map((run) => run.id) });
+      // the next run of a session repairs its calls. an isolated automation and the heartbeat have a session for
+      // each run, so no next run comes, and the sweep repairs it. that session belongs to the stale run alone, so no
+      // live turn of another process can be in it. a shared session can have such a turn, so the sweep leaves it.
+      for (const run of stale.runs.filter((each) => each.sessionKey.endsWith(`:${each.id}`))) {
+        void queue
+          .enqueue(run.sessionKey, async () => void repairSession(db, run.sessionKey, clock, logger))
+          .catch((err: unknown) => logger.error('repair of a stale session failed', { sessionKey: run.sessionKey, err }));
+      }
       for (const approval of stale.expired) {
-        const text = `Approval #${approval.id} (${approval.summary}) was approved, but the app stopped before it ran, so it expired and did not run. Ask again if you still want it.`;
-        note(approval.sessionKey, text);
-        void owner.send(text);
+        const words = (summary: string) =>
+          `Approval #${approval.id} (${summary}) was approved, but the app stopped before it ran, so it expired and did not run. Ask again if you still want it.`;
+        tell(approval, words, true);
       }
       for (const approval of stale.interrupted) {
-        const text = `Approval #${approval.id} (${approval.summary}) started, but the app stopped while it ran. ${interruptedText(approval.toolName)}`;
-        note(approval.sessionKey, text);
-        void owner.send(text);
+        tell(approval, (summary) => `Approval #${approval.id} (${summary}) started, but the app stopped while it ran. ${interruptedText(approval.toolName)}`, true);
       }
     } catch (err) {
       logger.error('sweep failed', { err });
@@ -259,7 +273,12 @@ export function createApp(deps: AppDeps): App {
     async start() {
       sweep(clock());
       for (const channel of channels.values()) {
-        await channel.start((message) => void router.handle(message));
+        // node stops the process on an unhandled rejection. a failed write in the reply to one message must not stop
+        // the service.
+        await channel.start(
+          (message) =>
+            void router.handle(message).catch((err: unknown) => logger.error('message handling failed', { channel: message.channel, err })),
+        );
         logger.info('channel started', { channel: channel.id });
       }
       if (installRoutine(db, config, clock())) logger.info('goals routine installed');

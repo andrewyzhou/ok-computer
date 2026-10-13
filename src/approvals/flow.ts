@@ -1,15 +1,18 @@
+import type { Button } from '../channels/types.js';
 import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
 import { redactedJson } from '../observability/redact.js';
 import type { TaintSource } from '../policy/policy.js';
+import { decisionForApproval } from '../policy/store.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
 import type { RunQueue } from '../sessions/queue.js';
 import { headOf, tailOf } from '../text.js';
 import { localDay, localTime, type Clock } from '../time.js';
 import type { RequestApproval, ToolCaller } from '../tools/caller.js';
 import type { ToolOutput } from '../tools/registry.js';
-import { approvalButtonData, createApproval, resolveApproval, type Decision, type ResolvedVia } from './store.js';
+import { wrapIfTainted } from '../tools/untrusted.js';
+import { approvalButtonData, createApproval, getApproval, resolveApproval, type Approval, type Decision, type ResolvedVia } from './store.js';
 
 export interface ApprovalFlowDeps {
   db: Db;
@@ -22,6 +25,7 @@ export interface ApprovalFlowDeps {
   signal: AbortSignal;
   // an approved call stops after this time, as a background run does. so a stuck tool cannot hold its session.
   timeoutMs: number;
+  timeZone: string;
 }
 
 export interface ApprovalFlow {
@@ -30,6 +34,9 @@ export interface ApprovalFlow {
   resolve(id: number, decision: Decision, via: ResolvedVia): Promise<string>;
   // the approved calls that this process holds, in the session queue or running. the sweep must not close them.
   active: ReadonlySet<number>;
+  // card gives the stored request of an approval with its buttons. the assistant can send a false card with the same
+  // words and the id of a real approval, so a typed /approve shows this card, and only a button runs the call.
+  card(id: number): { text: string; buttons?: Button[][] };
 }
 
 const SUMMARY_LIMIT = 500;
@@ -46,7 +53,7 @@ export function describeInput(toolName: string, input: unknown): string {
     input !== null && typeof input === 'object' && !Array.isArray(input) ? Object.entries(input) : [['input', input]];
   const lines = fields.map(([key, value]) => {
     const name = /^[\w.-]+$/.test(key) ? key : oneLine(JSON.stringify(key));
-    const text = oneLine(redactedJson(value) ?? String(value));
+    const text = oneLine(redactedJson(value));
     if (text.length <= FIELD_HEAD + FIELD_TAIL) return `${name}: ${text}`;
     const head = headOf(text, FIELD_HEAD);
     const tail = tailOf(text, FIELD_TAIL);
@@ -72,14 +79,7 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
       const approval = createApproval(db, { runId: ctx.runId, toolName: tool.name, input, summary, decisionId: why.decisionId }, clock());
       logger.info('approval requested', { approvalId: approval.id, tool: tool.name, runId: ctx.runId });
       // the owner sees the reason with the request. the taint can come from an older run, so the message names it.
-      const lines = [`Approval needed (#${approval.id}): ${summary}`, `Why: ${why.reason}.`];
-      if (why.taint.length) lines.push(`Untrusted content in this session: ${why.taint.map((each) => taintText(each, ctx.timeZone)).join('; ')}.`);
-      const reached = await deps.owner.send(lines.join('\n'), [
-        [
-          { text: 'Approve', data: approvalButtonData(approval.id, 'approve') },
-          { text: 'Deny', data: approvalButtonData(approval.id, 'deny') },
-        ],
-      ]);
+      const reached = await deps.owner.send(cardText(approval, why.reason, why.taint, ctx.timeZone), buttonsFor(approval.id));
       // the model must not tell the owner to press a button that the owner never got.
       if (!reached) {
         logger.warn('the request for an approval did not reach the owner', { approvalId: approval.id, runId: ctx.runId });
@@ -92,6 +92,15 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
       };
     },
 
+    card(id) {
+      const approval = getApproval(db, id);
+      if (!approval) return { text: `No approval has the id ${id}.` };
+      if (approval.status !== 'pending') return { text: `Approval #${id} is ${approval.status}, so it cannot be approved now.` };
+      const decision = decisionForApproval(db, id);
+      const card = cardText(approval, decision?.reason ?? 'the policy asks the owner', decision?.taint ?? [], deps.timeZone);
+      return { text: `This is the real request #${id}. Check each field, then press Approve.\n\n${card}`, buttons: buttonsFor(id) };
+    },
+
     async resolve(id, decision, via) {
       const resolved = resolveApproval(db, id, decision, via, clock());
       if (!resolved.ok) return resolved.error;
@@ -101,14 +110,14 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
       if (approved) active.add(id);
       // the session queue keeps the result event out of the middle of an active run.
       return queue.enqueue(approval.sessionKey, async () => {
-        const note = (text: string, taint: TaintSource[] = []) =>
+        const note = ({ text, taint }: { text: string; taint: TaintSource[] }) =>
           appendEvent(
             db,
             { sessionKey: approval.sessionKey, runId: null, type: 'system_event', payload: { text, ...(taint.length ? { taint } : {}) } },
             clock(),
           );
         if (!approved) {
-          note(`The owner denied #${id} (${approval.summary}). The tool did not run.`);
+          note(approvalNote(db, approval, (summary) => `The owner denied #${id} (${summary}). The tool did not run.`));
           return `Denied #${id}.`;
         }
         let result: { started: boolean; output: ToolOutput };
@@ -125,13 +134,34 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
         const taint: TaintSource[] = output.untrustedSource
           ? [{ source: output.untrustedSource, toolName: approval.toolName, runId: approval.runId, toolCallId: `approval-${id}`, at: clock().toISOString() }]
           : [];
-        note(`The owner approved #${id} (${approval.summary}). ${what} Result:\n${output.content}`, taint);
+        const approvedNote = approvalNote(db, approval, (summary) => `The owner approved #${id} (${summary}). ${what} Result:\n${output.content}`);
+        note({ text: approvedNote.text, taint: [...approvedNote.taint, ...taint] });
         const head = !started ? 'The tool did not run' : output.isError ? 'The tool failed' : 'Result';
         return `Approved #${id}. ${head}: ${headOf(output.content, SUMMARY_LIMIT)}`;
       });
     },
   };
 }
+
+// the summary is the input that the model wrote, so a note with it carries the taint of the decision. after /new the
+// session is clean, and the text of a tainted model must not come back into it as trusted text.
+export function approvalNote(db: Db, approval: Approval, text: (summary: string) => string): { text: string; taint: TaintSource[] } {
+  const taint = decisionForApproval(db, approval.id)?.taint ?? [];
+  return { text: text(wrapIfTainted(taint, approval.summary)), taint };
+}
+
+function cardText(approval: Approval, reason: string, taint: TaintSource[], timeZone: string): string {
+  const lines = [`Approval needed (#${approval.id}): ${approval.summary}`, `Why: ${reason}.`];
+  if (taint.length) lines.push(`Untrusted content in this session: ${taint.map((each) => taintText(each, timeZone)).join('; ')}.`);
+  return lines.join('\n');
+}
+
+const buttonsFor = (id: number): Button[][] => [
+  [
+    { text: 'Approve', data: approvalButtonData(id, 'approve') },
+    { text: 'Deny', data: approvalButtonData(id, 'deny') },
+  ],
+];
 
 // the run id is long, so the owner gets its first 8 characters, as the dashboard shows it.
 function taintText(taint: TaintSource, timeZone: string): string {

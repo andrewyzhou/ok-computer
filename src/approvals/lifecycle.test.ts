@@ -48,6 +48,7 @@ function world(run: () => Promise<{ content: string }>, options: { timeoutMs?: n
     caller: () => caller,
     signal: shutdown.signal,
     timeoutMs: options.timeoutMs ?? 60_000,
+    timeZone: 'America/Los_Angeles',
   });
   caller = createTestCaller(db, createToolRegistry([send]), () => T0, { requestApproval: flow.request, queue }).caller;
   const ask = () => caller.call({ id: 'c1', name: 'send', input: {} }, { runId: 'r1', sessionKey: 'main', allowed: ['send'], signal: new AbortController().signal });

@@ -52,6 +52,12 @@ export function updateDecision(db: Db, id: number, change: { reason?: string; re
   );
 }
 
+// the decision keeps the reason and the taint that the approval card showed to the owner.
+export function decisionForApproval(db: Db, approvalId: number): { reason: string; taint: TaintSource[] } | undefined {
+  const row = db.prepare('SELECT reason, taint FROM policy_decisions WHERE approvalId = ? ORDER BY id LIMIT 1').get(approvalId);
+  return row ? { reason: String(row.reason), taint: row.taint ? (JSON.parse(String(row.taint)) as TaintSource[]) : [] } : undefined;
+}
+
 export function decisionOfApproval(db: Db, approvalId: number): number | null {
   const row = db.prepare('SELECT id FROM policy_decisions WHERE approvalId = ? ORDER BY id LIMIT 1').get(approvalId);
   return row ? Number(row.id) : null;

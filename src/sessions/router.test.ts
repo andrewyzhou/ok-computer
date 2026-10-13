@@ -31,7 +31,7 @@ function setup(
     channels: new Map([['cli', channel]]),
     agent,
     isOwner,
-    ...(approvals ? { approvals } : {}),
+    ...(approvals ? { approvals, approvalCard: (id: number) => ({ text: `the stored card of #${id}`, buttons: [] }) } : {}),
   });
   return { db, router, sent };
 }
@@ -74,7 +74,9 @@ describe('router', () => {
     });
   });
 
-  it('resolves approvals only from a button or a command, never from free text', async () => {
+  // the assistant can send a false card with the id of a real approval. a typed /approve once ran the stored input
+  // at once, so the owner approved a call that the owner never saw.
+  it('resolves approvals only from a button or /deny, never from free text, and /approve shows the stored card', async () => {
     const agent = vi.fn(async (): Promise<RunResult> => ({ runId: 'r', status: 'completed', text: 'ok' }));
     const approvals = vi.fn(async (id: number, decision: string) => `${decision} ${id}`);
     const { router, sent } = setup(agent, () => true, approvals);
@@ -88,12 +90,21 @@ describe('router', () => {
     await router.handle({ ...message('1'), button: 'approval:3:approve' });
     await router.handle({ ...message('2'), button: 'something else' });
     expect(approvals.mock.calls).toEqual([
-      [1, 'approve', 'command'],
       [2, 'deny', 'command'],
       [3, 'approve', 'button'],
     ]);
     expect(agent).toHaveBeenCalledTimes(2);
-    expect(sent).toEqual(['ok', 'ok', 'approve 1', 'deny 2', 'approve 3']);
+    expect(sent).toEqual(['ok', 'ok', 'the stored card of #1', 'deny 2', 'approve 3']);
+  });
+
+  // the approved call can run before a later write fails. the owner once got no reply, and the process stopped.
+  it('replies when an approval fails, and does not reject', async () => {
+    const approvals = vi.fn(async () => {
+      throw new Error('database or disk is full');
+    });
+    const { router, sent } = setup(vi.fn(), () => true, approvals);
+    await router.handle({ ...message('1'), button: 'approval:4:approve' });
+    expect(sent).toEqual(['Something failed while I handled approval #4. The dashboard shows what happened.']);
   });
 
   it('refuses an approval command from an unknown sender', async () => {

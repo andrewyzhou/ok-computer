@@ -93,7 +93,7 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
   try {
     // a crash or a failed write can leave a tool call without a result. the provider refuses such a request, so the
     // run first gives each such call a result.
-    const repaired = repairSession(db, input.sessionKey, clock);
+    const repaired = repairSession(db, input.sessionKey, clock, logger);
     if (repaired) logger.warn('gave results to tool calls that had none', { calls: repaired });
     for (const event of input.events) append(event);
     append({

@@ -3,6 +3,7 @@ import { sinceLastReset } from '../context/full-history.js';
 import type { Db } from '../db/index.js';
 import { appendEvent, listEvents } from '../events/log.js';
 import type { ToolCall } from '../models/types.js';
+import { silentLogger, type Logger } from '../observability/logger.js';
 import { redactedJson } from '../observability/redact.js';
 import type { Clock } from '../time.js';
 
@@ -33,47 +34,68 @@ function danglingCalls(db: Db, sessionKey: string): Array<{ runId: string | null
 // - the decision let the tool start: a note that the outcome is unknown, and a row with outcome 'interrupted'.
 // - otherwise: a note that the tool did not run (or waits for the owner).
 // the caller of this function holds the session queue, so no other run of the session can add a result.
-export function repairSession(db: Db, sessionKey: string, clock: Clock): number {
+export function repairSession(db: Db, sessionKey: string, clock: Clock, logger: Logger = silentLogger): number {
   const dangling = danglingCalls(db, sessionKey);
   for (const { runId, call } of dangling) {
-    const row = db
-      .prepare('SELECT output, isError, untrustedSource FROM tool_calls WHERE runId IS ? AND toolCallId = ? ORDER BY id DESC LIMIT 1')
-      .get(runId, call.id);
-    let payload: { toolCallId: string; name: string; content: string; isError: boolean; untrustedSource?: string };
-    if (row) {
-      const output = JSON.parse(String(row.output)) as { content: string };
-      payload = { toolCallId: call.id, name: call.name, content: output.content, isError: Number(row.isError) === 1 };
-      if (row.untrustedSource !== null) payload.untrustedSource = String(row.untrustedSource);
-    } else {
-      const decision = db
-        .prepare('SELECT id, decision, reviewerVerdict, approvalId FROM policy_decisions WHERE runId IS ? AND toolCallId = ? ORDER BY id DESC LIMIT 1')
-        .get(runId, call.id);
-      // the caller writes the decision just before the tool runs. an allowed decision without a row means that the
-      // tool started, and the process stopped before the row.
-      const started = decision?.decision === 'allow' || (decision?.decision === 'review' && decision.reviewerVerdict === 'allow');
-      const waits = !started && decision?.approvalId != null;
-      const content = started ? interruptedText(call.name) : waits ? waitsText(call.name, Number(decision!.approvalId)) : notRunText(call.name);
-      payload = { toolCallId: call.id, name: call.name, content, isError: !waits };
-      if (runId !== null) {
-        db.prepare(
-          `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, policyDecisionId, outcome)
-           VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-        ).run(
-          runId,
-          call.id,
-          call.name,
-          redactedJson(call.input),
-          redactedJson({ content, ...(payload.isError ? { isError: true } : {}) }),
-          payload.isError ? 1 : 0,
-          clock().toISOString(),
-          decision ? Number(decision.id) : null,
-          started ? 'interrupted' : null,
-        );
-      }
+    let payload: ResultPayload;
+    try {
+      payload = resultFromTrace(db, runId, call, clock);
+    } catch (err) {
+      // a failure for one call must not stop each later run of the session. the trace did not tell whether the
+      // tool started, so the text says that its outcome is unknown.
+      logger.error('repair of a tool call failed', { sessionKey, runId, toolCallId: call.id, err });
+      payload = { toolCallId: call.id, name: call.name, content: interruptedText(call.name), isError: true };
     }
     appendEvent(db, { sessionKey, runId, type: 'tool_result', payload }, clock());
   }
   return dangling.length;
+}
+
+interface ResultPayload {
+  toolCallId: string;
+  name: string;
+  content: string;
+  isError: boolean;
+  untrustedSource?: string;
+}
+
+function resultFromTrace(db: Db, runId: string | null, call: ToolCall, clock: Clock): ResultPayload {
+  const row = db
+    .prepare('SELECT output, isError, untrustedSource FROM tool_calls WHERE runId IS ? AND toolCallId = ? ORDER BY id DESC LIMIT 1')
+    .get(runId, call.id);
+  let payload: ResultPayload;
+  if (row) {
+    const output = JSON.parse(String(row.output)) as { content: string };
+    payload = { toolCallId: call.id, name: call.name, content: output.content, isError: Number(row.isError) === 1 };
+    if (row.untrustedSource !== null) payload.untrustedSource = String(row.untrustedSource);
+  } else {
+    const decision = db
+      .prepare('SELECT id, decision, reviewerVerdict, approvalId FROM policy_decisions WHERE runId IS ? AND toolCallId = ? ORDER BY id DESC LIMIT 1')
+      .get(runId, call.id);
+    // the caller writes the decision just before the tool runs. an allowed decision without a row means that the
+    // tool started, and the process stopped before the row.
+    const started = decision?.decision === 'allow' || (decision?.decision === 'review' && decision.reviewerVerdict === 'allow');
+    const waits = !started && decision?.approvalId != null;
+    const content = started ? interruptedText(call.name) : waits ? waitsText(call.name, Number(decision!.approvalId)) : notRunText(call.name);
+    payload = { toolCallId: call.id, name: call.name, content, isError: !waits };
+    if (runId !== null) {
+      db.prepare(
+        `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, policyDecisionId, outcome)
+         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+      ).run(
+        runId,
+        call.id,
+        call.name,
+        redactedJson(call.input),
+        redactedJson({ content, ...(payload.isError ? { isError: true } : {}) }),
+        payload.isError ? 1 : 0,
+        clock().toISOString(),
+        decision ? Number(decision.id) : null,
+        started ? 'interrupted' : null,
+      );
+    }
+  }
+  return payload;
 }
 
 export interface StaleWork {

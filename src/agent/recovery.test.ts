@@ -68,6 +68,38 @@ describe('repairSession', () => {
     expect(repairSession(db, 'main', clock)).toBe(0);
   });
 
+  // a call without input could not be bound, and the repair threw at each run start, so the session was blocked.
+  it('repairs each call on its own, so one odd call does not block the session', () => {
+    const { db, decide, results } = setup();
+    appendEvent(db, {
+      sessionKey: 'main',
+      runId: 'r1',
+      type: 'assistant_message',
+      payload: {
+        provider: 'fake',
+        model: 'm',
+        content: [],
+        text: '',
+        toolCalls: [
+          { id: 'bare', name: 'tool_bare', input: undefined },
+          { id: 'damaged', name: 'tool_damaged', input: {} },
+          { id: 'ok', name: 'tool_ok', input: {} },
+        ],
+        stopReason: 'tool_use',
+      },
+    });
+    decide('bare', 'allow');
+    db.prepare("INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt) VALUES ('r1', 'damaged', 'tool_damaged', '{}', 'not json', 0, 1, 'x')").run();
+    expect(repairSession(db, 'main', clock)).toBe(3);
+    expect(results().map((each) => [each.toolCallId, each.content])).toEqual([
+      ['bare', interruptedText('tool_bare')],
+      ['damaged', interruptedText('tool_damaged')],
+      ['ok', 'tool_ok did not run, because the app stopped first.'],
+    ]);
+    expect(db.prepare("SELECT input, outcome FROM tool_calls WHERE toolCallId = 'bare'").get()).toEqual({ input: 'null', outcome: 'interrupted' });
+    expect(repairSession(db, 'main', clock)).toBe(0);
+  });
+
   it('ignores calls before the last reset', () => {
     const { db, turn } = setup();
     turn('old');
