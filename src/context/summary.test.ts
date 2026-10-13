@@ -26,6 +26,13 @@ describe('summary identifiers', () => {
     ]);
   });
 
+  it('finds result handles, so a summary keeps them', () => {
+    const events = [
+      event('tool_result', { toolCallId: 't', name: 'memory_get', content: 'the full result is res_0123456789ab.', isError: false }),
+    ];
+    expect(findIdentifiers(events)).toEqual(['res_0123456789ab']);
+  });
+
   it('names missing headings and missing identifiers, and accepts dropped identifiers', () => {
     const full = `${SUMMARY_HEADINGS.join('\n- x\n')}\n- flight 2026-11-02`;
     expect(validateSummary(full, ['2026-11-02'])).toEqual([]);

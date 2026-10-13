@@ -23,6 +23,7 @@ export const MAIN_TOOLS: readonly string[] = [
   'memory_search',
   'memory_write',
   'now',
+  'result_read',
   'skill_read',
 ];
 export const NO_REPLY = 'NO_REPLY';

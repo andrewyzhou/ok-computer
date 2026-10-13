@@ -26,6 +26,14 @@ describe('trimToolResults', () => {
     expect(trimToolResults(short, true)).toEqual(short);
   });
 
+  it('keeps the handle of a cleared result, so the model can read it again', () => {
+    const preview = 'start\n[...]\nend\n[this result has 9000 characters. the full result is res_0123456789ab. use result_read.]';
+    const events = [turn(), result(preview), turn(), turn(), turn()];
+    expect(trimToolResults(events, true)[1]).toMatchObject({
+      payload: { content: `${CLEARED} the full result is res_0123456789ab.` },
+    });
+  });
+
   it('removes thinking blocks from assistant turns only', () => {
     const withThinking = turn([
       { type: 'thinking', thinking: '', signature: 'sig' },

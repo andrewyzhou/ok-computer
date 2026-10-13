@@ -23,7 +23,9 @@ import { appendToDailyNote, sessionExcerpt } from './memory/daily.js';
 import { createMemoryTools } from './memory/tools.js';
 import { createSlotRunner } from './models/slots.js';
 import type { ModelClient, ModelRequest } from './models/types.js';
+import { createBlobStore } from './observability/blobs.js';
 import type { Logger } from './observability/logger.js';
+import { BUILTIN_RULES, type Rule } from './policy/policy.js';
 import { scheduleContext } from './scheduler/context.js';
 import {
   createHeartbeat,
@@ -41,9 +43,11 @@ import { createRunQueue } from './sessions/queue.js';
 import { createRouter, MAIN_SESSION, MAIN_TOOLS } from './sessions/router.js';
 import { localDay, localTime, type Clock } from './time.js';
 import { createSkillTools } from './skills/skills.js';
+import { createToolCaller } from './tools/caller.js';
 import { createMessageOwnerTool } from './tools/message-owner.js';
 import { nowTool } from './tools/now.js';
 import { createToolRegistry } from './tools/registry.js';
+import { createResultReadTool } from './tools/result-read.js';
 
 export interface AppDeps {
   config: Config;
@@ -54,6 +58,8 @@ export interface AppDeps {
   // the sender id of the owner on each channel other than the cli, for example the telegram user id.
   ownerIds?: Record<string, string>;
   clock: Clock;
+  // the policy rules: the built-in rules, then the rules of okc.policy.json.
+  rules?: readonly Rule[];
   setTimer?: SetTimer;
   newId?: () => string;
 }
@@ -90,6 +96,7 @@ export function createApp(deps: AppDeps): App {
   const [preferred] = Object.entries(ownerIds).map(([channel, chatId]) => ({ channel, chatId }));
   const owner = createOwnerMessenger({ db, channels, logger, clock, ...(preferred ? { preferred } : {}) });
   const ids = deps.newId ? { newId: deps.newId } : {};
+  const blobs = createBlobStore(db, join(config.paths.data, 'blobs'), clock);
 
   const approvals = createApprovalFlow({
     db,
@@ -97,8 +104,7 @@ export function createApp(deps: AppDeps): App {
     logger,
     queue,
     owner,
-    timeZone: config.timeZone,
-    tools: () => tools,
+    caller: () => caller,
     signal: shutdown.signal,
   });
   // the scheduler is created below. the tools call replan only after the start.
@@ -113,9 +119,18 @@ export function createApp(deps: AppDeps): App {
       ...createConsolidationTools({ db, memoryDir }),
       createMessageOwnerTool(owner),
       ...createSkillTools({ skillsDir: config.paths.skills }),
+      createResultReadTool({ db, blobs }),
     ],
-    { gate: approvals.gate },
   );
+  const caller = createToolCaller({
+    db,
+    blobs,
+    tools,
+    rules: deps.rules ?? BUILTIN_RULES,
+    requestApproval: approvals.request,
+    clock,
+    timeZone: config.timeZone,
+  });
 
   const slots = createSlotRunner({ db, config, clients: deps.clients, logger, clock });
   const strategy = createTrimAndCompact({ db, slots, logger, clock, windowTokens: config.context.windowTokens });
@@ -123,6 +138,7 @@ export function createApp(deps: AppDeps): App {
     db,
     slots,
     tools,
+    caller,
     strategy,
     logger,
     config,

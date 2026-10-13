@@ -4,10 +4,9 @@ import type { CompactionHooks, ContextStrategy } from '../context/strategy.js';
 import type { Db } from '../db/index.js';
 import { appendEvent, listEvents, type EventInput } from '../events/log.js';
 import type { SlotRunner } from '../models/slots.js';
-import type { ToolCall } from '../models/types.js';
 import type { Logger } from '../observability/logger.js';
-import { redactedJson } from '../observability/redact.js';
 import type { Clock } from '../time.js';
+import type { ToolCaller } from '../tools/caller.js';
 import type { ToolOutput, ToolRegistry } from '../tools/registry.js';
 import { buildVolatilePrompt } from './system-prompt.js';
 
@@ -18,6 +17,7 @@ export interface AgentDeps {
   db: Db;
   slots: SlotRunner;
   tools: ToolRegistry;
+  caller: ToolCaller;
   strategy: ContextStrategy;
   logger: Logger;
   config: Pick<Config, 'timeZone' | 'agent'>;
@@ -157,8 +157,8 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
       const outputs = await Promise.all(
         response.toolCalls.map((call) =>
           response.stopReason === 'tool_use'
-            ? runTool(deps, call, input, runId, abort.signal)
-            : Promise.resolve({ content: 'this tool call was not run because the reply was cut off', isError: true }),
+            ? deps.caller.call(call, { runId, sessionKey: input.sessionKey, allowed: input.allowedTools, signal: abort.signal })
+            : Promise.resolve<ToolOutput>({ content: 'this tool call was not run because the reply was cut off', isError: true }),
         ),
       );
       response.toolCalls.forEach((call, i) => {
@@ -177,36 +177,6 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
     clearTimeout(timer);
     input.signal?.removeEventListener('abort', onOuterAbort);
   }
-}
-
-async function runTool(
-  deps: AgentDeps,
-  call: ToolCall,
-  input: RunInput,
-  runId: string,
-  signal: AbortSignal,
-): Promise<ToolOutput> {
-  const started = performance.now();
-  const ctx = { runId, sessionKey: input.sessionKey, timeZone: deps.config.timeZone, clock: deps.clock, signal };
-  const output = await deps.tools.run(call, input.allowedTools, ctx);
-  recordToolCall(deps.db, runId, call, output, Math.round(performance.now() - started), deps.clock());
-  return output;
-}
-
-export function recordToolCall(db: Db, runId: string, call: ToolCall, output: ToolOutput, durationMs: number, now: Date): void {
-  db.prepare(
-    `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    runId,
-    call.id,
-    call.name,
-    redactedJson(call.input),
-    redactedJson(output),
-    output.isError ? 1 : 0,
-    durationMs,
-    now.toISOString(),
-  );
 }
 
 function abortReason(signal: AbortSignal): string | undefined {

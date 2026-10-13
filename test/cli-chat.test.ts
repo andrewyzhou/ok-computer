@@ -70,6 +70,7 @@ describe('cli chat through the full loop', () => {
       'memory_search',
       'memory_write',
       'now',
+      'result_read',
       'skill_read',
     ]);
 

@@ -58,7 +58,7 @@ describe('tool registry', () => {
     expect(result).toEqual({ content: 'unknown tool: echo', isError: true });
   });
 
-  it('sends a tool that needs approval to the gate and runs it only through runApproved', async () => {
+  it('refuses to run a tool that needs approval, because only the tool caller asks the owner', async () => {
     let ran = 0;
     const send = defineTool({
       name: 'send',
@@ -70,21 +70,11 @@ describe('tool registry', () => {
         return { content: `sent to ${to}` };
       },
     });
-    const gated: unknown[] = [];
-    const withGate = createToolRegistry([send], {
-      gate: async (tool, input) => {
-        gated.push([tool.name, input]);
-        return { content: 'pending' };
-      },
-    });
-    expect(await withGate.run({ id: '1', name: 'send', input: { to: 'bob' } }, ['send'], ctx)).toEqual({ content: 'pending' });
-    expect(gated).toEqual([['send', { to: 'bob' }]]);
+    const withSend = createToolRegistry([send]);
+    expect((await withSend.run({ id: '1', name: 'send', input: { to: 'bob' } }, ['send'], ctx)).isError).toBe(true);
     expect(ran).toBe(0);
-    expect(await withGate.runApproved('send', { to: 'bob' }, ctx)).toEqual({ content: 'sent to bob' });
-
-    const noGate = createToolRegistry([send]);
-    expect((await noGate.run({ id: '1', name: 'send', input: { to: 'bob' } }, ['send'], ctx)).isError).toBe(true);
-    expect(ran).toBe(1);
+    const resolved = withSend.resolve({ id: '1', name: 'send', input: { to: 'bob' } }, ['send']);
+    expect(resolved.ok && (await withSend.execute(resolved.tool, resolved.input, ctx))).toEqual({ content: 'sent to bob' });
   });
 
   it('gives the time in the owner time zone', async () => {

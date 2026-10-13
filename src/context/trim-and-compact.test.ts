@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { createTestCaller } from '../../test/harness.js';
 import { runAgent, type AgentDeps } from '../agent/loop.js';
 import { parseConfig } from '../config/load.js';
 import { openDb } from '../db/index.js';
@@ -33,10 +34,12 @@ function setup(steps: FakeStep[], options: { tools?: string[] } = {}) {
   const clock = () => new Date('2026-10-13T03:15:00Z');
   const slots = createSlotRunner({ db, config: parsed.value, clients: { fake: model }, logger: silentLogger, sleep: async () => {}, clock });
   let ids = 0;
+  const tools = createToolRegistry([nowTool, ...createMemoryTools({ db, memoryDir })]);
   const deps: AgentDeps = {
     db,
     slots,
-    tools: createToolRegistry([nowTool, ...createMemoryTools({ db, memoryDir })]),
+    tools,
+    caller: createTestCaller(db, tools, clock).caller,
     strategy: createTrimAndCompact({ db, slots, logger: silentLogger, clock, windowTokens: WINDOW }),
     logger: silentLogger,
     config: parsed.value,

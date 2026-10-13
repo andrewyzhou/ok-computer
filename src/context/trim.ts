@@ -1,4 +1,5 @@
 import type { StoredEvent } from '../events/log.js';
+import { handleIn } from '../tools/results.js';
 
 export const KEEP_TURNS = 3;
 export const CUT_OVER = 4000;
@@ -14,9 +15,15 @@ export function trimToolResults(events: StoredEvent[], clear: boolean): StoredEv
   const untouchedFrom = turns.length >= KEEP_TURNS ? turns[turns.length - KEEP_TURNS]! : 0;
   return events.map((event, i) => {
     if (i >= untouchedFrom || event.type !== 'tool_result') return event;
-    const content = clear ? CLEARED : cut(event.payload.content);
+    const content = clear ? cleared(event.payload.content) : cut(event.payload.content);
     return content === event.payload.content ? event : { ...event, payload: { ...event.payload, content } };
   });
+}
+
+// a cleared result keeps its handle, so the model can read the full result again with result_read.
+function cleared(content: string): string {
+  const handle = handleIn(content);
+  return handle ? `${CLEARED} the full result is ${handle}.` : CLEARED;
 }
 
 function cut(content: string): string {

@@ -51,6 +51,7 @@ export function transcript(events: StoredEvent[]): string {
 
 // the order matters. each match is removed from the text, so a later pattern does not find a part of it again.
 const IDENTIFIER_PATTERNS: RegExp[] = [
+  /\bres_[0-9a-f]{12}\b/g,
   /https?:\/\/[^\s<>"'`)\]}]+[^\s<>"'`)\]}.,;:!?]/g,
   /(?:[\w.-]+[/\\])+[\w-]+\.[a-z0-9]{1,5}\b/gi,
   /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,

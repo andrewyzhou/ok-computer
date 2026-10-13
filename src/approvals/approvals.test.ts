@@ -5,6 +5,7 @@ import { openDb } from '../db/index.js';
 import { listEvents } from '../events/log.js';
 import { silentLogger } from '../observability/logger.js';
 import { createRunQueue } from '../sessions/queue.js';
+import { createTestCaller } from '../../test/harness.js';
 import { createToolRegistry, defineTool } from '../tools/registry.js';
 import { createApprovalFlow } from './flow.js';
 import { expireApprovals, getApproval, parseApprovalButton } from './store.js';
@@ -39,13 +40,12 @@ function setup() {
         return true;
       },
     },
-    timeZone: 'America/Los_Angeles',
-    tools: () => registry,
+    caller: () => caller,
     signal: new AbortController().signal,
   });
-  const registry = createToolRegistry([sendEmail], { gate: flow.gate });
-  const ctx = { runId: 'r1', sessionKey: 'main', timeZone: 'UTC', clock, signal: new AbortController().signal };
-  const request = () => registry.run({ id: 't1', name: 'send_email', input: { to: 'bob@example.com' } }, ['send_email'], ctx);
+  const { caller } = createTestCaller(db, createToolRegistry([sendEmail]), clock, { requestApproval: flow.request });
+  const ctx = { runId: 'r1', sessionKey: 'main', allowed: ['send_email'], signal: new AbortController().signal };
+  const request = () => caller.call({ id: 't1', name: 'send_email', input: { to: 'bob@example.com' } }, ctx);
   return { db, flow, sent, delivered, request, advance: (ms: number) => (now = new Date(now.getTime() + ms)) };
 }
 
@@ -73,7 +73,14 @@ describe('approvals', () => {
     expect(listEvents(db, 'main').map((e) => e.type === 'system_event' && e.payload.text)).toEqual([
       expect.stringContaining('The owner approved #1'),
     ]);
-    expect(db.prepare('SELECT name, isError FROM tool_calls').all()).toEqual([{ name: 'send_email', isError: 0 }]);
+    // the pending call and the approved call both link to the decision that asked the owner.
+    expect(db.prepare('SELECT toolCallId, isError, riskLevel, policyDecisionId FROM tool_calls ORDER BY id').all()).toEqual([
+      { toolCallId: 't1', isError: 0, riskLevel: 'external', policyDecisionId: 1 },
+      { toolCallId: 'approval-1', isError: 0, riskLevel: 'external', policyDecisionId: 1 },
+    ]);
+    expect(db.prepare('SELECT decision, rule, approvalId FROM policy_decisions').all()).toEqual([
+      { decision: 'approve', rule: 'risk:external', approvalId: 1 },
+    ]);
     expect(await flow.resolve(1, 'approve', 'command')).toBe('Approval #1 is already approved.');
     expect(delivered).toHaveLength(1);
   });

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ToolCall, ToolSpec } from '../models/types.js';
+import type { Risk } from '../policy/policy.js';
 import type { Clock } from '../time.js';
 
 export interface ToolContext {
@@ -13,6 +14,9 @@ export interface ToolContext {
 export interface ToolOutput {
   content: string;
   isError?: boolean;
+  // a tool that returns text from outside the owner names its source here. the tool caller wraps the text as
+  // untrusted and marks the session as tainted.
+  untrustedSource?: string;
 }
 
 export interface Tool<I = unknown> {
@@ -20,74 +24,66 @@ export interface Tool<I = unknown> {
   description: string;
   input: z.ZodType<I>;
   // external means that the tool sends data off the machine or changes an account.
-  risk: 'read' | 'write' | 'external';
+  risk: Risk;
   // an external tool always needs approval. this flag also asks for approval on other tools.
   needsApproval?: boolean;
   run(input: I, ctx: ToolContext): Promise<ToolOutput>;
 }
 
-// the gate gets each call of a tool that needs approval. the tool does not run until the owner approves it.
-export type ApprovalGate = (tool: Tool, input: unknown, ctx: ToolContext) => Promise<ToolOutput>;
+export type Resolved = { ok: true; tool: Tool; input: unknown } | { ok: false; output: ToolOutput };
 
 export interface ToolRegistry {
   specs(allowed: readonly string[]): ToolSpec[];
+  // resolve finds the tool and checks its input. the error output goes back to the model.
+  resolve(call: ToolCall, allowed: readonly string[]): Resolved;
+  // execute runs a resolved tool. a tool that throws gives an error output.
+  execute(tool: Tool, input: unknown, ctx: ToolContext): Promise<ToolOutput>;
+  // run skips the policy, so it refuses a tool that needs approval. tests use it to drive one tool. the agent uses
+  // the tool caller.
   run(call: ToolCall, allowed: readonly string[], ctx: ToolContext): Promise<ToolOutput>;
-  // runApproved runs a tool after the owner approved the call.
-  runApproved(name: string, input: unknown, ctx: ToolContext): Promise<ToolOutput>;
 }
 
 export function defineTool<I>(tool: Tool<I>): Tool<unknown> {
   return tool as Tool<unknown>;
 }
 
-export function needsApproval(tool: Tool): boolean {
-  return tool.risk === 'external' || tool.needsApproval === true;
-}
-
-export function createToolRegistry(tools: Tool[], options: { gate?: ApprovalGate } = {}): ToolRegistry {
+export function createToolRegistry(tools: Tool[]): ToolRegistry {
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   // the tool list is part of the cached prefix, so the order must not change between requests.
   const sorted = [...tools].sort((a, b) => a.name.localeCompare(b.name));
   const specs = new Map(sorted.map((tool) => [tool.name, toSpec(tool)]));
 
-  const execute = async (tool: Tool, input: unknown, ctx: ToolContext): Promise<ToolOutput> => {
-    try {
-      return await tool.run(input, ctx);
-    } catch (err) {
-      return { content: `${tool.name} failed: ${(err as Error).message}`, isError: true };
-    }
-  };
-
-  const parse = (tool: Tool, input: unknown) => {
-    const parsed = tool.input.safeParse(input);
-    return parsed.success
-      ? ({ ok: true, value: parsed.data } as const)
-      : ({ ok: false, output: { content: `invalid input for ${tool.name}:\n${z.prettifyError(parsed.error)}`, isError: true } } as const);
-  };
-
-  return {
+  const registry: ToolRegistry = {
     specs(allowed) {
       return sorted.filter((tool) => allowed.includes(tool.name)).map((tool) => specs.get(tool.name)!);
     },
-    async run(call, allowed, ctx) {
+    resolve(call, allowed) {
       const tool = byName.get(call.name);
       // a tool outside the allowlist is the same as a tool that does not exist.
-      if (!tool || !allowed.includes(call.name)) return { content: `unknown tool: ${call.name}`, isError: true };
-      const parsed = parse(tool, call.input);
-      if (!parsed.ok) return parsed.output;
-      if (needsApproval(tool)) {
-        if (!options.gate) return { content: `${tool.name} needs approval, but approvals are not available`, isError: true };
-        return options.gate(tool, parsed.value, ctx);
+      if (!tool || !allowed.includes(call.name)) return { ok: false, output: { content: `unknown tool: ${call.name}`, isError: true } };
+      const parsed = tool.input.safeParse(call.input);
+      if (!parsed.success) {
+        return { ok: false, output: { content: `invalid input for ${tool.name}:\n${z.prettifyError(parsed.error)}`, isError: true } };
       }
-      return execute(tool, parsed.value, ctx);
+      return { ok: true, tool, input: parsed.data };
     },
-    async runApproved(name, input, ctx) {
-      const tool = byName.get(name);
-      if (!tool) return { content: `unknown tool: ${name}`, isError: true };
-      const parsed = parse(tool, input);
-      return parsed.ok ? execute(tool, parsed.value, ctx) : parsed.output;
+    async execute(tool, input, ctx) {
+      try {
+        return await tool.run(input, ctx);
+      } catch (err) {
+        return { content: `${tool.name} failed: ${(err as Error).message}`, isError: true };
+      }
+    },
+    async run(call, allowed, ctx) {
+      const resolved = registry.resolve(call, allowed);
+      if (!resolved.ok) return resolved.output;
+      if (resolved.tool.risk === 'external' || resolved.tool.needsApproval) {
+        return { content: `${call.name} needs approval, so it runs only through the tool caller`, isError: true };
+      }
+      return registry.execute(resolved.tool, resolved.input, ctx);
     },
   };
+  return registry;
 }
 
 function toSpec(tool: Tool): ToolSpec {

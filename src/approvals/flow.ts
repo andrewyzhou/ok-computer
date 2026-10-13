@@ -1,11 +1,11 @@
-import { recordToolCall } from '../agent/loop.js';
 import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
 import type { RunQueue } from '../sessions/queue.js';
 import type { Clock } from '../time.js';
-import type { ApprovalGate, ToolOutput, ToolRegistry } from '../tools/registry.js';
+import type { RequestApproval, ToolCaller } from '../tools/caller.js';
+import type { ToolOutput } from '../tools/registry.js';
 import { approvalButtonData, createApproval, resolveApproval, type Decision, type ResolvedVia } from './store.js';
 
 export interface ApprovalFlowDeps {
@@ -14,14 +14,13 @@ export interface ApprovalFlowDeps {
   logger: Logger;
   queue: RunQueue;
   owner: OwnerMessenger;
-  timeZone: string;
-  // the registry uses the gate of this flow, so the flow gets the registry later.
-  tools: () => ToolRegistry;
+  // the caller uses the request of this flow, so the flow gets the caller later.
+  caller: () => ToolCaller;
   signal: AbortSignal;
 }
 
 export interface ApprovalFlow {
-  gate: ApprovalGate;
+  request: RequestApproval;
   // resolve gives the text of the reply to the owner.
   resolve(id: number, decision: Decision, via: ResolvedVia): Promise<string>;
 }
@@ -34,7 +33,7 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
   const { db, clock, logger, queue } = deps;
 
   return {
-    async gate(tool, input, ctx) {
+    async request(tool, input, ctx) {
       const summary = `${tool.name} ${JSON.stringify(input)}`.slice(0, SUMMARY_LIMIT);
       const approval = createApproval(db, { runId: ctx.runId, toolName: tool.name, input, summary }, clock());
       logger.info('approval requested', { approvalId: approval.id, tool: tool.name, runId: ctx.runId });
@@ -45,7 +44,10 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
         ],
       ]);
       return {
-        content: `${tool.name} needs the owner's approval. Approval #${approval.id} is pending, and the tool did not run yet. The owner can approve it with the button or with /approve ${approval.id}. The decision comes back as a system event.`,
+        approvalId: approval.id,
+        output: {
+          content: `${tool.name} needs the owner's approval. Approval #${approval.id} is pending, and the tool did not run yet. The owner can approve it with the button or with /approve ${approval.id}. The decision comes back as a system event.`,
+        },
       };
     },
 
@@ -57,20 +59,7 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
       // the session queue keeps the result event out of the middle of an active run.
       return queue.enqueue(approval.sessionKey, async () => {
         let output: ToolOutput | undefined;
-        if (approval.status === 'approved') {
-          const started = performance.now();
-          output = await deps
-            .tools()
-            .runApproved(approval.toolName, approval.input, {
-              runId: approval.runId,
-              sessionKey: approval.sessionKey,
-              timeZone: deps.timeZone,
-              clock,
-              signal: deps.signal,
-            });
-          const call = { id: `approval-${id}`, name: approval.toolName, input: approval.input };
-          recordToolCall(db, approval.runId, call, output, Math.round(performance.now() - started), clock());
-        }
+        if (approval.status === 'approved') output = await deps.caller().callApproved(approval, deps.signal);
         const text = output
           ? `The owner approved #${id} (${approval.summary}). The tool ran.${output.isError ? ' It failed.' : ''} Result:\n${output.content}`
           : `The owner denied #${id} (${approval.summary}). The tool did not run.`;

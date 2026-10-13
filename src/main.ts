@@ -10,6 +10,7 @@ import { startDashboard, type RunningDashboard } from './dashboard/server.js';
 import { createClients } from './models/clients.js';
 import { createLogger } from './observability/logger.js';
 import { registerSecret } from './observability/redact.js';
+import { loadPolicy } from './policy/policy.js';
 import { systemClock } from './time.js';
 
 async function main(): Promise<void> {
@@ -23,6 +24,11 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   const config = loaded.value;
+  const rules = loadPolicy();
+  if (!rules.ok) {
+    console.error(rules.error);
+    process.exit(1);
+  }
   const { telegramOwnerId, ...secrets } = loadSecrets();
   Object.values(secrets).forEach(registerSecret);
 
@@ -62,7 +68,7 @@ async function main(): Promise<void> {
     const onClose = () => (telegram ? logger.info('cli input ended') : void app.idle().then(() => stop('cli input ended')));
     channels.push(createCliChannel({ onClose }));
   }
-  const app = createApp({ config, db, logger, clients: clients.value, channels, ownerIds, clock: systemClock });
+  const app = createApp({ config, db, logger, clients: clients.value, channels, ownerIds, clock: systemClock, rules: rules.value });
   process.on('SIGINT', () => void stop('SIGINT'));
   process.on('SIGTERM', () => void stop('SIGTERM'));
 
