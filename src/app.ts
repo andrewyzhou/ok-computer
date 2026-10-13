@@ -141,7 +141,14 @@ export function createApp(deps: AppDeps): App {
     contextLines: (now) => scheduleContext(db, now, config.timeZone),
     ...ids,
   };
-  const agent = (input: Parameters<typeof runAgent>[1]) => runAgent(agentDeps, input);
+  const agent = async (input: Parameters<typeof runAgent>[1]) => {
+    const result = await runAgent(agentDeps, input);
+    // the router tells the owner about a stopped message run in its reply. a background run has no reply, so the owner gets a message here.
+    if (result.stoppedAtLimit && input.trigger !== 'message') {
+      await owner.send(`The ${input.trigger} run did not finish: ${result.error}.`);
+    }
+    return result;
+  };
 
   const heartbeat = createHeartbeat({ db, clock, logger, config, queue, owner, agent, signal: shutdown.signal, ...ids });
   const runJob = createJobRunner({

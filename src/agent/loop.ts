@@ -48,6 +48,8 @@ export interface RunResult {
   status: Exclude<RunStatus, 'running'>;
   text: string;
   error?: string;
+  // the run used all its model calls without a final answer.
+  stoppedAtLimit?: true;
 }
 
 export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunResult> {
@@ -121,7 +123,7 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
       if (iteration > config.agent.maxIterations) {
         const error = `the task stopped after ${config.agent.maxIterations} model calls without a final answer`;
         append({ type: 'note', payload: { text: error } });
-        return finish('failed', '', error);
+        return { ...finish('failed', '', error), stoppedAtLimit: true };
       }
       const request = await strategy.build({
         sessionKey: input.sessionKey,

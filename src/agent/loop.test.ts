@@ -53,6 +53,7 @@ describe('agent loop', () => {
     const result = await run('loop forever');
     expect(result.status).toBe('failed');
     expect(result.error).toContain('stopped after 3 model calls');
+    expect(result.stoppedAtLimit).toBe(true);
     expect(model.calls).toHaveLength(3);
     expect(events().at(-1)?.type).toBe('note');
   });
