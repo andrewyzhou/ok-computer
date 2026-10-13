@@ -98,7 +98,12 @@ export function createAutomationTools(deps: { db: Db; replan: () => void }): Too
       if (patch.payload && !own) {
         return { content: `the payload of a ${current.payload.type} automation cannot change`, isError: true };
       }
-      const updated = updateAutomation(db, id, patch, ctx.clock(), ctx.timeZone);
+      // the routine reminders stop through their condition. a new prompt must not remove the condition.
+      const payload: Automation['payload'] | undefined =
+        patch.payload?.type === 'agent' && current.payload.type === 'agent' && current.payload.condition
+          ? { ...patch.payload, condition: current.payload.condition }
+          : patch.payload;
+      const updated = updateAutomation(db, id, { ...patch, ...(payload && { payload }) }, ctx.clock(), ctx.timeZone);
       if (!updated.ok) return { content: updated.error, isError: true };
       deps.replan();
       return { content: `updated ${formatAutomation(updated.value, ctx.timeZone)}` };

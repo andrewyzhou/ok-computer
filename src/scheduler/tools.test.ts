@@ -70,6 +70,24 @@ describe('automation tools', () => {
     expect((await call('automations_update', { id: heartbeat.value.id, enabled: false })).isError).toBeUndefined();
   });
 
+  it('keeps the condition of a routine reminder when the agent changes its prompt', async () => {
+    const { db, now, call } = setup();
+    const reminder = createAutomation(
+      db,
+      {
+        name: 'goals: reminder 20:00',
+        schedule: { kind: 'cron', expr: '0 20 * * *' },
+        payload: { type: 'agent', prompt: 'remind', condition: 'no_goals_today' },
+        createdBy: 'system',
+      },
+      now,
+      'UTC',
+    );
+    if (!reminder.ok) throw new Error(reminder.error);
+    await call('automations_update', { id: reminder.value.id, payload: { type: 'agent', prompt: 'remind gently' } });
+    expect(getAutomation(db, reminder.value.id)?.payload).toEqual({ type: 'agent', prompt: 'remind gently', condition: 'no_goals_today' });
+  });
+
   it('refuses a one-shot time in the past', async () => {
     const { call } = setup();
     const out = await call('automations_create', {
