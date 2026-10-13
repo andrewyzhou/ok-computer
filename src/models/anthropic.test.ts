@@ -191,6 +191,28 @@ describe('createAnthropicClient streaming', () => {
     await expect(broken('invalid_request_error').complete(request, undefined, () => {})).rejects.toMatchObject({ kind: 'request' });
   });
 
+  // a stream stays open for the whole reply, so a cut in the middle is the usual network failure. the sdk then
+  // throws its base error, which went up raw: no retry and no row for the call.
+  it('takes a stream that ends early, breaks, or sends bad json as transient', async () => {
+    const answering = (body: () => string | ReadableStream) =>
+      createAnthropicClient('test-key', {
+        fetch: async () => new Response(body(), { status: 200, headers: { 'content-type': 'text/event-stream' } }),
+      });
+    const reset = () => {
+      let sent = false;
+      return new ReadableStream({
+        pull(controller) {
+          if (sent) return controller.error(new TypeError('terminated'));
+          sent = true;
+          controller.enqueue(new TextEncoder().encode(sse.slice(0, sse.indexOf('event: content_block_stop'))));
+        },
+      });
+    };
+    for (const body of [() => sse.slice(0, sse.indexOf('event: message_delta')), reset, () => 'event: message_start\ndata: {not json\n\n']) {
+      await expect(answering(body).complete(request, undefined, () => {})).rejects.toMatchObject({ name: 'ModelError', kind: 'transient' });
+    }
+  });
+
   it('maps a refused stream and an abort to the same errors as a plain request', async () => {
     const limited = createAnthropicClient('test-key', {
       fetch: async () => new Response(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'slow down' } }), { status: 429 }),
