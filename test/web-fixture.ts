@@ -139,6 +139,8 @@ export async function startFixture(): Promise<Fixture> {
         return send(302, '', 'text/plain', { location: at('evil.test', '/redirected?leak=1') });
       case 'shop.test/meta-evil':
         return send(200, html(`<meta http-equiv="refresh" content="0;url=${at('evil.test', '/meta?leak=1')}"><p>moving</p>`));
+      case 'shop.test/late-evil':
+        return send(200, html(`<meta http-equiv="refresh" content="1;url=${at('evil.test', '/late?leak=1')}"><p>moving soon</p>`, 'Late'));
       case 'shop.test/redir-private':
         return send(302, '', 'text/plain', { location: `http://127.0.0.2:${port}/admin` });
       case 'shop.test/hang':

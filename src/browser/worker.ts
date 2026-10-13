@@ -107,6 +107,8 @@ interface Tab {
   sent: Sent[];
   // a navigation of the page itself was blocked in this step.
   topBlocked: boolean;
+  // the address after the last step that did not end on the error page of chrome.
+  lastPage?: string;
   console: string[];
   lastUsed: number;
   queue: Promise<unknown>;
@@ -364,7 +366,8 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   async function endTab(tab: Tab, status: 'closed' | 'crashed', reason: string): Promise<void> {
     tabs.delete(tab.page);
     if (tasks.get(tab.sessionKey) === tab) tasks.delete(tab.sessionKey);
-    // the tab closes first. a hung page held the trace stop for ever, and a closed page does not.
+    // the tab closes first. a hung page keeps its renderer busy, and with dom snapshots it also held the trace stop for
+    // ever.
     await within(tab.page.close({ runBeforeUnload: false }), t.capture);
     let trace: { path?: string; bytes?: number; error?: string } = {};
     if (tracing === tab.id && context) {
@@ -389,7 +392,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     let snapshot: string | undefined;
     let jpeg: Buffer | undefined;
     try {
-      if (tab.page.url().startsWith('chrome-error:')) throw new Error('the tab is on the error page of chrome, which is not the site');
+
       // a script can change a value while the snapshot runs, so the values before and after it are both masked.
       const text = await untraced(tab.page, async () => {
         const before = await passwordsOf(tab.page, t.capture);
@@ -491,6 +494,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       if (stayed) note = note ? `${note}. ${stayed}` : stayed;
       const shot = await capture(tab);
       const urlAfter = tab.page.url();
+      if (!urlAfter.startsWith('chrome-error:')) tab.lastPage = urlAfter;
       const stepId = record(tab, input, { urlBefore, urlAfter, snapshot: shot.snapshot, jpeg: shot.jpeg, started, ...(error || shot.errors.length ? { error: [error, ...shot.errors].filter(Boolean).join('; ') } : {}) });
       const base = { url: urlAfter, blocked: [...tab.blocked], sent: [...tab.sent], taskId: tab.id, acted, ...(shot.snapshot !== undefined ? { snapshot: shot.snapshot } : {}), ...(stepId ? { stepId } : {}) };
       // a page that answers neither capture is hung, for example by a loop in its script. closing the tab is the only
@@ -505,15 +509,18 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   }
 
   // a blocked navigation leaves chrome on its own error page. the model would read that page as the site, and its
-  // host would become a taint source, so the tab goes back to the page of the step start. the error page commits a
-  // moment after the block, so the wait has a short limit.
+  // host would become a taint source, so the tab goes back. the error page commits a moment after the block, so the
+  // wait has a short limit. a block can also come between two steps, for example from a timed refresh, and then the
+  // step starts on the error page.
   async function leaveErrorPage(tab: Tab, urlBefore: string): Promise<string | undefined> {
     const onError = () => tab.page.url().startsWith('chrome-error:');
     if (tab.topBlocked && !onError()) await tab.page.waitForURL((url) => url.protocol === 'chrome-error:', { timeout: 2_000 }).catch(() => undefined);
-    if (!onError() || urlBefore.startsWith('chrome-error:')) return undefined;
+    if (!onError()) return undefined;
+    // a refresh replaces its own entry in the history, so the way back can skip the page. the address is the target.
+    const target = urlBefore.startsWith('chrome-error:') ? tab.lastPage : urlBefore;
     await tab.page.goBack({ waitUntil: 'domcontentloaded', timeout: t.capture }).catch(() => undefined);
-    if (tab.page.url() !== urlBefore) await tab.page.goto(urlBefore, { waitUntil: 'domcontentloaded', timeout: t.capture }).catch(() => undefined);
-    return `The navigation was blocked, so the page stayed at ${urlBefore}.`;
+    if (target && tab.page.url() !== target) await tab.page.goto(target, { waitUntil: 'domcontentloaded', timeout: t.capture }).catch(() => undefined);
+    return `A navigation was blocked, so the tab went back to ${tab.page.url()}.`;
   }
 
   function sweep(): number {

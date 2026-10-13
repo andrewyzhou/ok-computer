@@ -79,13 +79,25 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     const first = await h.run('browser_open', { url: site.url('shop.test') });
     const out = await h.run('browser_click', { ref: refOf(first.content, /link "Evil link"/), element: 'Evil link' });
     expect(out.content).toContain(`Address: ${site.url('shop.test')}`);
-    expect(out.content).toContain('the page stayed at');
+    expect(out.content).toContain(`the tab went back to ${site.url('shop.test')}`);
     expect(out.content).toContain('button "Buy now"');
     expect(out.untrustedSource).toBe(`browser:shop.test:${site.port}`);
     const last = h.steps().at(-1)!;
     expect(last.urlAfter).toBe(site.url('shop.test'));
     expect(h.blobs.read(String(last.snapshotBlob))).toContain('Buy now');
     expect(JSON.stringify(h.steps())).not.toContain('chromewebdata');
+  });
+
+  it('goes back from the error page of chrome after a block between two steps', async () => {
+    const h = harness();
+    await h.run('browser_open', { url: site.url('shop.test', '/late-evil') });
+    // the refresh comes 1 s after the load, when no step runs.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const out = await h.run('browser_snapshot', {});
+    expect(out.content).toContain('the tab went back to');
+    expect(out.content).not.toContain('chrome-error');
+    expect(out.untrustedSource).toBe(`browser:shop.test:${site.port}`);
+    expect(site.hitsOn('evil.test')).toEqual([]);
   });
 
   it('sends the user agent of normal chrome', async () => {
