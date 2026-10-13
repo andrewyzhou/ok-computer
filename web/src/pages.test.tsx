@@ -85,6 +85,27 @@ describe('every dashboard page loads against the seeded database', () => {
     expect(await screen.findByText(/Catalog [0-9a-f]{12}, first offered/)).toBeTruthy();
   });
 
+  it('shows the outcome of each tool call, so a call that waits for the owner never looks like it ran', async () => {
+    const { db } = seeded.t;
+    // the call to result_read waits for the owner, and the session was tainted by an email.
+    const taint = [{ source: 'gmail:work', toolName: 'mail_read', runId: 'run-1', toolCallId: 'm1', at: '2026-10-12T21:00:00.000Z' }];
+    db.prepare(
+      "UPDATE policy_decisions SET decision = 'approve', approvalId = ?, taint = ? WHERE id = (SELECT policyDecisionId FROM tool_calls WHERE toolCallId = 'call-read')",
+    ).run(seeded.pendingApprovalId, JSON.stringify(taint));
+    db.prepare("UPDATE tool_calls SET outcome = 'interrupted' WHERE toolCallId = 'call-week'").run();
+    open('#/runs/run-5');
+    expect(await screen.findByText('Timeline')).toBeTruthy();
+    const [week, read] = [...document.querySelectorAll('.timeline.nested > li')] as HTMLElement[];
+    expect(week!.querySelector('.step-head')?.textContent).toMatch(/memory_get\s*interrupted/);
+    expect(read!.querySelector('.step-head')?.textContent).toMatch(/result_read\s*waiting/);
+    expect(read!.querySelector('.step-head')?.textContent).not.toMatch(/\bran\b/);
+    fireEvent.click(within(week!).getByText(/result and what the model saw/));
+    expect(await within(week!).findByText(/The app stopped while the tool ran/)).toBeTruthy();
+    fireEvent.click(within(read!).getByText(/policy decision/));
+    expect(within(read!).getByText(/gmail:work, read by mail_read/)).toBeTruthy();
+    expect(within(read!).getByText('run run-1')).toBeTruthy();
+  });
+
   it('lists sessions', async () => {
     open('#/sessions');
     expect(await screen.findByText('heartbeat:run-4')).toBeTruthy();

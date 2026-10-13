@@ -54,6 +54,8 @@ export interface PolicyDecisionRow {
   reviewerReason: string | null;
   approvalId: number | null;
   approvalStatus: string | null;
+  // the untrusted sources that the session had read when the policy decided.
+  taint: Array<{ source: string; toolName: string; runId: string | null; toolCallId: string; at: string }>;
   createdAt: string;
 }
 
@@ -76,6 +78,9 @@ export interface ToolCallRow {
   resultHandle: string | null;
   // the raw result is rawResultBlob ?? output.content. the blob exists only when the model saw other text.
   rawResultBlob: string | null;
+  // one word from outcomeOf in outcome.ts: ran, failed, invalid, denied, held, waiting, approved, declined, expired,
+  // abandoned, late or interrupted.
+  outcome: string;
   policy: PolicyDecisionRow | null;
 }
 

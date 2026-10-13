@@ -2,6 +2,7 @@ import type { Config } from '../config/schema.js';
 import type { Db } from '../db/index.js';
 import { goalStats, listGoals, type Goal } from '../goals/store.js';
 import { redact } from '../observability/redact.js';
+import { outcomeOf } from './outcome.js';
 import { getChecklist, inActiveHours } from '../scheduler/heartbeat.js';
 import { describeSchedule } from '../scheduler/schedule.js';
 import { listAutomations, type Automation } from '../scheduler/store.js';
@@ -125,11 +126,13 @@ function toDecision(row: Row): PolicyDecisionRow {
     reviewerReason: str(row.reviewerReason),
     approvalId: num(row.approvalId),
     approvalStatus: str(row.approvalStatus),
+    taint: row.taint ? JSON.parse(String(row.taint)) : [],
     createdAt: String(row.createdAt),
   };
 }
 
 function toToolCall(row: Row, decisions: Map<number, PolicyDecisionRow>): ToolCallRow {
+  const policy = row.policyDecisionId === null ? null : (decisions.get(Number(row.policyDecisionId)) ?? null);
   return {
     id: Number(row.id),
     runId: String(row.runId),
@@ -147,7 +150,14 @@ function toToolCall(row: Row, decisions: Map<number, PolicyDecisionRow>): ToolCa
     truncated: row.truncated === 1,
     resultHandle: str(row.resultHandle),
     rawResultBlob: str(row.rawResultBlob),
-    policy: row.policyDecisionId === null ? null : (decisions.get(Number(row.policyDecisionId)) ?? null),
+    outcome: outcomeOf({
+      toolCallId: String(row.toolCallId),
+      isError: row.isError === 1,
+      stored: str(row.outcome),
+      riskLevel: str(row.riskLevel),
+      decision: policy,
+    }),
+    policy,
   };
 }
 

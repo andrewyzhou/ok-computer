@@ -99,6 +99,13 @@ function BlobText({ hash }: { hash: string }) {
   );
 }
 
+// these outcomes need a sentence, because the model saw a note and not the result of the tool.
+const OUTCOME_NOTES: Record<string, string> = {
+  abandoned: 'The run stopped while the tool ran. The model was told that the effect is unknown.',
+  late: 'The run stopped while the tool ran, and the tool finished later. The raw result is the late result. The model saw the note, and the late result came to the session as a system event.',
+  interrupted: 'The app stopped while the tool ran. The model got a note that the effect is unknown.',
+};
+
 // the raw result is what the tool gave. the model view is the exact text that the model got, after the wrapper of
 // untrusted text and the cut to a preview.
 function ResultView({ call }: { call: ToolCallRow }) {
@@ -113,6 +120,7 @@ function ResultView({ call }: { call: ToolCallRow }) {
       {call.untrustedSource ? (
         <p className="muted">The result came from {call.untrustedSource}, so the model got it inside an untrusted wrapper.</p>
       ) : null}
+      {OUTCOME_NOTES[call.outcome] ? <p className="muted">{OUTCOME_NOTES[call.outcome]}</p> : null}
       {call.rawResultBlob ? null : <p className="muted">The model saw the raw result unchanged.</p>}
       <div className="split">
         <div>
@@ -138,6 +146,24 @@ function PolicyView({ policy }: { policy: PolicyDecisionRow }) {
       </dd>
       <dt>Reason</dt>
       <dd>{policy.reason}</dd>
+      {policy.taint.length ? (
+        <>
+          <dt>Taint</dt>
+          <dd>
+            {policy.taint.map((each) => (
+              <div key={each.source}>
+                {each.source}, read by {each.toolName} at {time(each.at)}
+                {each.runId ? (
+                  <>
+                    {' '}
+                    in <a href={`#/runs/${encodeURIComponent(each.runId)}`}>run {each.runId.slice(0, 8)}</a>
+                  </>
+                ) : null}
+              </div>
+            ))}
+          </dd>
+        </>
+      ) : null}
       {policy.reviewerVerdict ? (
         <>
           <dt>Reviewer</dt>
@@ -162,7 +188,7 @@ function ToolCallItem({ call }: { call: ToolCallRow }) {
   return (
     <li className={`step step-tool${call.isError ? ' is-error' : ''}`}>
       <div className="step-head">
-        <strong>tool call</strong> {call.name} {call.isError ? <Status value="error" /> : null}
+        <strong>tool call</strong> {call.name} <Status value={call.outcome} />
         {call.policy ? (
           <span className="muted">
             <Status value={call.policy.decision} /> by {call.policy.rule}

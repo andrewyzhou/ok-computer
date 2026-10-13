@@ -24,6 +24,14 @@ const STATUS_TONE: Record<string, string> = {
   deny: 'critical',
   hold: 'serious',
   tainted: 'serious',
+  ran: 'good',
+  invalid: 'critical',
+  held: 'serious',
+  waiting: 'warning',
+  declined: 'serious',
+  abandoned: 'serious',
+  late: 'warning',
+  interrupted: 'serious',
 };
 
 // a status always shows its word, so the color is never the only signal.
