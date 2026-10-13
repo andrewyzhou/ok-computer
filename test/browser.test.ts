@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { browserLogin } from '../src/browser/login.js';
 import { profileBusy } from '../src/browser/worker.js';
-import { createBrowserHarness, hasChrome, killChrome } from './browser-harness.js';
-import { FIXTURE_PASSWORD, startFixture, type Fixture } from './web-fixture.js';
+import { createBrowserHarness, hasChrome, killChrome, traceEntries } from './browser-harness.js';
+import { FIXTURE_COOKIE, FIXTURE_PASSWORD, startFixture, type Fixture } from './web-fixture.js';
 
 let site: Fixture;
 beforeAll(async () => {
@@ -41,9 +41,9 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     const [step] = h.steps();
     expect(step).toMatchObject({ action: 'open', urlAfter: site.url('shop.test') });
     expect(h.blobs.read(String(step!.snapshotBlob))).toContain('Buy now');
-    const png = h.bytes.read(String(step!.screenshotBlob))!;
-    expect(png.mime).toBe('image/png');
-    expect(png.bytes.subarray(1, 4).toString()).toBe('PNG');
+    const jpeg = h.bytes.read(String(step!.screenshotBlob))!;
+    expect(jpeg.mime).toBe('image/jpeg');
+    expect(jpeg.bytes.subarray(0, 2)).toEqual(Buffer.from([0xff, 0xd8]));
     expect(h.tasks()).toMatchObject([{ kind: 'task', status: 'open', allowlist: '["shop.test"]' }]);
     // the image of another host loads, and the frame of an off-list site does not.
     expect(site.hitsOn('cdn.test').length).toBeGreaterThan(0);
@@ -170,6 +170,10 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(outputs).not.toContain(FIXTURE_PASSWORD);
     for (const step of h.steps()) expect(h.blobs.read(String(step.snapshotBlob))).not.toContain(FIXTURE_PASSWORD);
     expect(site.hitsOn('shop.test').filter((hit) => hit.path === '/session')).toEqual([]);
+    await h.run('browser_close', {});
+    const trace = [...traceEntries(join(h.dir, 'traces', 'task-1.zip')).values()].map((bytes) => bytes.toString('latin1')).join('\n');
+    expect(trace.length).toBeGreaterThan(1000);
+    expect(trace).not.toContain(FIXTURE_PASSWORD);
   });
 
   it('refuses a ref of an older snapshot, and the page gets no click', async () => {
@@ -231,6 +235,27 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(task).toMatchObject({ status: 'closed', tracePath: 'traces/task-1.zip' });
     expect(Number(task!.traceBytes)).toBeGreaterThan(1000);
     expect(existsSync(join(h.dir, 'traces', 'task-1.zip'))).toBe(true);
+  });
+
+  it('keeps no cookie, header, network log or dom in the trace, and keeps the screenshots and the actions', async () => {
+    const h = harness();
+    const first = await h.run('browser_open', { url: site.url('shop.test') });
+    await h.run('browser_type', { ref: refOf(first.content, /textbox "Name"/), element: 'name', text: 'Ada' });
+    await h.run('browser_open', { url: site.url('shop.test', '/about') });
+    await h.run('browser_close', {});
+    const entries = traceEntries(join(h.dir, 'traces', 'task-1.zip'));
+    const names = [...entries.keys()];
+    const text = [...entries.values()].map((bytes) => bytes.toString('latin1')).join('\n');
+    expect(text).not.toMatch(/set-cookie|"cookie"/i);
+    expect(text).not.toContain(FIXTURE_COOKIE.split('=')[1]);
+    expect(names.filter((name) => name.endsWith('.network'))).toEqual(names.filter((name) => name.endsWith('.network') && entries.get(name)!.length === 0));
+    expect(text).not.toContain('"frame-snapshot"');
+    // the screenshots are jpeg resources, and the action list names the steps.
+    expect(names.filter((name) => name.startsWith('resources/')).every((name) => entries.get(name)!.subarray(0, 2).equals(Buffer.from([0xff, 0xd8])))).toBe(true);
+    expect(text).toContain('screencast-frame');
+    expect(text).toMatch(/"method":"goto"/);
+    // the fill keeps what the agent typed. the tool_calls row of browser_type already stores the same text, redacted.
+    expect(text).toMatch(/"method":"fill"[^\n]*"value":"Ada"/);
   });
 
   it('ends the task when chrome dies, and the next open starts chrome again', async () => {

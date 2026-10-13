@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { openDb } from '../src/db/index.js';
 import { createBrowserTools } from '../src/browser/tools.js';
 import { createBrowserWorker, type BrowserDeps } from '../src/browser/worker.js';
@@ -56,6 +56,18 @@ export function createBrowserHarness(extra: Partial<BrowserDeps> = {}) {
     steps: () => db.prepare('SELECT * FROM browser_steps ORDER BY id').all(),
     tasks: () => db.prepare('SELECT * FROM browser_tasks ORDER BY startedAt, id').all(),
   };
+}
+
+// the entries of a trace zip with their bytes. windows expands the zip, so the test needs no zip library.
+export function traceEntries(zip: string): Map<string, Buffer> {
+  const out = mkdtempSync(join(tmpdir(), 'okc-trace-'));
+  execFileSync('powershell', ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${zip}' -DestinationPath '${out}'`]);
+  const entries = new Map<string, Buffer>();
+  for (const name of readdirSync(out, { recursive: true, withFileTypes: true })) {
+    const path = join(name.parentPath, name.name);
+    if (name.isFile()) entries.set(path.slice(out.length + 1).split(sep).join('/'), readFileSync(path));
+  }
+  return entries;
 }
 
 // a crash of chrome: every chrome process of the profile ends at once.

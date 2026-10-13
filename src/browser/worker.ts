@@ -133,6 +133,14 @@ export interface BrowserWorker {
   stop(): Promise<void>;
 }
 
+// the trace keeps the result of each playwright call: the snapshot before the mask, the values of password fields, the
+// html of the page. the playwright client leaves a call in an internal zone out of the trace. the zone is a private
+// method of the client, so a test pins this: no password and no dom in the trace. the actions stay in the trace.
+export function untraced<T>(page: Page, read: () => Promise<T>): Promise<T> {
+  const client = page as unknown as { _wrapApiCall(work: () => Promise<T>, options: { internal: boolean }): Promise<T> };
+  return client._wrapApiCall(read, { internal: true });
+}
+
 // the ai snapshot shows the value of a password field as plain text. the model, the blobs and the trace must never get
 // it, so each value is masked wherever it shows in the snapshot.
 async function passwordsOf(page: Page, ms: number): Promise<string[]> {
@@ -341,7 +349,9 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       // the trace belongs to the context, so one task at a time has it. the row says why a task has no trace.
       try {
         if (tracing) throw new Error(`task ${tracing} still has the trace`);
-        await ctx.tracing.start({ screenshots: true, snapshots: true, title: tab.id });
+        // a dom snapshot also turns on the network log of the trace, with the cookie of each request. the screenshots
+        // and the action list stay, and each step keeps the masked snapshot that the model read.
+        await ctx.tracing.start({ screenshots: true, snapshots: { dom: false, aria: false, screen: true }, title: tab.id });
         tracing = tab.id;
       } catch (err) {
         logger.warn('the browser trace did not start', { taskId: tab.id, err });
@@ -374,29 +384,33 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     endRow(tab.id, status, reason, trace);
   }
 
-  async function capture(tab: Tab): Promise<{ snapshot?: string; png?: Buffer; errors: string[] }> {
+  async function capture(tab: Tab): Promise<{ snapshot?: string; jpeg?: Buffer; errors: string[] }> {
     const errors: string[] = [];
     let snapshot: string | undefined;
-    let png: Buffer | undefined;
+    let jpeg: Buffer | undefined;
     try {
       if (tab.page.url().startsWith('chrome-error:')) throw new Error('the tab is on the error page of chrome, which is not the site');
       // a script can change a value while the snapshot runs, so the values before and after it are both masked.
-      const before = await passwordsOf(tab.page, t.capture);
-      const text = await tab.page.ariaSnapshot({ mode: 'ai', timeout: t.capture });
-      snapshot = renumber(maskPasswords(text, [...before, ...(await passwordsOf(tab.page, t.capture))]), ++tab.snapshot);
+      const text = await untraced(tab.page, async () => {
+        const before = await passwordsOf(tab.page, t.capture);
+        const raw = await tab.page.ariaSnapshot({ mode: 'ai', timeout: t.capture });
+        return maskPasswords(raw, [...before, ...(await passwordsOf(tab.page, t.capture))]);
+      });
+      snapshot = renumber(text, ++tab.snapshot);
     } catch (err) {
       errors.push(`snapshot: ${errorText(err).split('\n')[0]}`);
     }
     try {
-      png = await tab.page.screenshot({ timeout: t.capture, type: 'png' });
+      // a jpeg at quality 60 is about four times smaller than a png on real pages, and it stays readable.
+      jpeg = await tab.page.screenshot({ timeout: t.capture, type: 'jpeg', quality: 60 });
     } catch (err) {
       errors.push(`screenshot: ${errorText(err).split('\n')[0]}`);
     }
-    return { snapshot, png, errors };
+    return { snapshot, jpeg, errors };
   }
 
   // the record is written after the action. it fails open: a lost row is better than a second action.
-  function record(tab: Tab, step: StepInput, data: { urlBefore: string; urlAfter: string; snapshot?: string; png?: Buffer; error?: string; started: number }): number | undefined {
+  function record(tab: Tab, step: StepInput, data: { urlBefore: string; urlAfter: string; snapshot?: string; jpeg?: Buffer; error?: string; started: number }): number | undefined {
     let snapshotBlob: string | null = null;
     let screenshotBlob: string | null = null;
     try {
@@ -405,7 +419,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       logger.error('browser snapshot blob write failed', { taskId: tab.id, err });
     }
     try {
-      if (data.png) screenshotBlob = deps.bytes.put(data.png, 'image/png');
+      if (data.jpeg) screenshotBlob = deps.bytes.put(data.jpeg, 'image/jpeg');
     } catch (err) {
       logger.error('browser screenshot blob write failed', { taskId: tab.id, err });
     }
@@ -477,7 +491,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       if (stayed) note = note ? `${note}. ${stayed}` : stayed;
       const shot = await capture(tab);
       const urlAfter = tab.page.url();
-      const stepId = record(tab, input, { urlBefore, urlAfter, snapshot: shot.snapshot, png: shot.png, started, ...(error || shot.errors.length ? { error: [error, ...shot.errors].filter(Boolean).join('; ') } : {}) });
+      const stepId = record(tab, input, { urlBefore, urlAfter, snapshot: shot.snapshot, jpeg: shot.jpeg, started, ...(error || shot.errors.length ? { error: [error, ...shot.errors].filter(Boolean).join('; ') } : {}) });
       const base = { url: urlAfter, blocked: [...tab.blocked], sent: [...tab.sent], taskId: tab.id, acted, ...(shot.snapshot !== undefined ? { snapshot: shot.snapshot } : {}), ...(stepId ? { stepId } : {}) };
       // a page that answers neither capture is hung, for example by a loop in its script. closing the tab is the only
       // way back (probe p5), and the next browser_open starts a new task.
@@ -485,7 +499,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
         await endTab(tab, 'crashed', 'the page stopped responding');
         return { ...base, ok: false, title: '', note: `${error ? `${error}. ` : ''}The page stopped responding, so its tab closed and the task ended.` };
       }
-      const title = await within(tab.page.title(), t.capture).catch(() => '');
+      const title = await within(untraced(tab.page, () => tab.page.title()), t.capture).catch(() => '');
       return { ...base, ok: !error, note: error ? [error, stayed].filter(Boolean).join('. ') : note, title: typeof title === 'string' ? title : '' };
     });
   }

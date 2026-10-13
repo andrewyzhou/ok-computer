@@ -1,6 +1,6 @@
 import type { Page } from 'playwright-core';
 import { z } from 'zod';
-import type { BrowserWorker } from '../browser/worker.js';
+import { untraced, type BrowserWorker } from '../browser/worker.js';
 import type { Db } from '../db/index.js';
 import { getSetting, setSetting } from '../db/settings.js';
 import { defineTool, type Tool } from '../tools/registry.js';
@@ -45,7 +45,7 @@ interface EngineState {
 // the code runs in the page. the server code has no dom types, so the page objects are typed loosely here.
 type Loose = any;
 async function readPage(page: Page, engine: Engine['id']): Promise<Seen> {
-  return page.evaluate((id) => {
+  return untraced(page, () => page.evaluate((id) => {
     const doc = (globalThis as unknown as { document: Loose; location: Loose }).document;
     const where = (globalThis as unknown as { location: { pathname: string; hostname: string } }).location;
     const text = String(doc.body?.innerText ?? '').slice(0, 5000);
@@ -86,7 +86,7 @@ async function readPage(page: Page, engine: Engine['id']): Promise<Seen> {
       results.push({ title: String(link.innerText ?? '').trim(), url, snippet: String(box.querySelector('.result__snippet')?.innerText ?? '').trim().slice(0, 300) });
     }
     return results.length ? { kind: 'results' as const, results } : { kind: 'nothing' as const };
-  }, engine);
+  }, engine));
 }
 
 export interface SearchDeps {

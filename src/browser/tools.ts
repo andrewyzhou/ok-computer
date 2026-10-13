@@ -2,7 +2,7 @@ import type { Locator, Page } from 'playwright-core';
 import { z } from 'zod';
 import { defineTool, type Tool, type ToolContext, type ToolOutput } from '../tools/registry.js';
 import { extractIsolated } from '../web/extract-run.js';
-import { NotDone, type ActTab, type BrowserRefusal, type BrowserWorker, type StepInput, type StepResult } from './worker.js';
+import { NotDone, untraced, type ActTab, type BrowserRefusal, type BrowserWorker, type StepInput, type StepResult } from './worker.js';
 
 // the tools that change what leaves the pc. the owner approves each call, so they stay with the main session when a
 // browser child session gets the other tools.
@@ -83,12 +83,12 @@ interface PageDocument {
 }
 
 // a get form only reads, for example a search box, so a click may send it. the gate allows only get anyway.
-async function sendsData(locator: Locator): Promise<boolean> {
-  return locator.evaluate((el, selector) => {
+async function sendsData(page: Page, locator: Locator): Promise<boolean> {
+  return untraced(page, () => locator.evaluate((el, selector) => {
     const control = (el as unknown as PageControl).closest(selector);
     if (!control?.form) return false;
     return (control.getAttribute('formmethod') ?? control.form.method).toLowerCase() !== 'get';
-  }, SUBMIT_CONTROL);
+  }, SUBMIT_CONTROL));
 }
 
 // playwright reads a ref against the last snapshot of the page, which can be newer than the one that the model read.
@@ -111,7 +111,7 @@ interface FormState {
 // the fields that the owner reads on the card: every named field that a person sees and can change. a password
 // shows as its length only.
 async function submitControls(page: Page): Promise<FormState[]> {
-  return page.evaluate((selector) => {
+  return untraced(page, () => page.evaluate((selector) => {
     const out: FormState[] = [];
     const doc = (globalThis as unknown as { document: PageDocument }).document;
     for (const control of Array.from(doc.querySelectorAll(selector))) {
@@ -129,7 +129,7 @@ async function submitControls(page: Page): Promise<FormState[]> {
       out.push({ name, action: form.action, fields, password });
     }
     return out;
-  }, SUBMIT_CONTROL);
+  }, SUBMIT_CONTROL));
 }
 
 const sameAddress = (a: string, b: string) => {
@@ -179,7 +179,7 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
         return view(
           await act(ctx, 'click', { ref: id, element: name }, async (page, tab) => {
             const target = await find(page, tab, id);
-            if (await sendsData(target)) throw new NotDone(`${id} sends a form. Nothing was clicked. Use browser_submit, which the owner approves`);
+            if (await sendsData(page, target)) throw new NotDone(`${id} sends a form. Nothing was clicked. Use browser_submit, which the owner approves`);
             await target.click();
           }),
         );
@@ -194,7 +194,7 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
         return view(
           await act(ctx, 'type', { ref: id, element: name, text }, async (page, tab) => {
             const target = await find(page, tab, id);
-            if (await target.evaluate((el) => (el as unknown as PageControl).matches('input[type=password]'))) {
+            if (await untraced(page, () => target.evaluate((el) => (el as unknown as PageControl).matches('input[type=password]')))) {
               throw new NotDone(`${id} is a password field. The agent never types a password. Nothing was typed. The owner signs in with okc browser login`);
             }
             await target.fill(text);
@@ -233,7 +233,7 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
       async run(_input, ctx) {
         let text = '';
         const result = await act(ctx, 'extract', undefined, async (page) => {
-          const page2 = await extractIsolated(await page.content(), page.url());
+          const page2 = await extractIsolated(await untraced(page, () => page.content()), page.url());
           text = `${page2.title ? `# ${page2.title}\n\n` : ''}${page2.text}`;
           return text;
         });
