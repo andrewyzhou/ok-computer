@@ -15,8 +15,8 @@ export interface Sent {
   body?: string;
 }
 
-// the form data set of an approved submit, as the browser sends it. skip names fields whose value the check cannot
-// know, such as the click position of an image button.
+// the form data set of an approved submit, as the browser sends it. skip names the click position of an image button:
+// the request must hold exactly one pair of each name with a whole number, because the check cannot know the value.
 export interface ApprovedForm {
   pairs: Array<[string, string]>;
   skip: string[];
@@ -120,25 +120,29 @@ export function formPairs(body: Body | undefined): Array<[string, string]> | und
     const split = part.indexOf('\r\n\r\n');
     const name = split < 0 ? undefined : /name="([^"]*)"/.exec(part.slice(0, split))?.[1];
     if (name === undefined) return undefined;
-    // a file field sends the name of the file, as FormData gives it to the check.
+    // a file field sends the name of the file, as FormData gives it to the check. the agent cannot attach a file, so a
+    // file with content came from a script of the page, and the body is not a form that the check read.
     const file = /filename="([^"]*)"/.exec(part.slice(0, split))?.[1];
-    pairs.push([name, file ?? part.slice(split + 4, -2)]);
+    const content = part.slice(split + 4, -2);
+    if (file !== undefined && content.length > 0) return undefined;
+    pairs.push([name, file ?? content]);
   }
   return pairs;
 }
 
 // the browser sends a new line in a value as cr lf, and FormData keeps lf.
-const flat = (pairs: Array<[string, string]>, skip: string[]) =>
-  JSON.stringify(
-    pairs
-      .filter(([name]) => !skip.includes(name))
-      .map((pair) => pair.map((text) => text.replace(/\r\n?/g, '\n')))
-      .sort(),
-  );
+const flat = (pairs: Array<[string, string]>) => JSON.stringify(pairs.map((pair) => pair.map((text) => text.replace(/\r\n?/g, '\n'))).sort());
 
 function sameForm(body: Body | undefined, form: ApprovedForm): boolean {
   const sent = formPairs(body);
-  return sent !== undefined && flat(sent, form.skip) === flat(form.pairs, form.skip);
+  if (sent === undefined) return false;
+  // a page script can add a field with the name of a click position at the click. only one pair of each name leaves.
+  for (const name of form.skip) {
+    const at = sent.findIndex(([each, value]) => each === name && /^\d+$/.test(value));
+    if (at < 0) return false;
+    sent.splice(at, 1);
+  }
+  return flat(sent) === flat(form.pairs);
 }
 
 // both layers can see the same request, so each verdict goes to the tab rules through this one place.

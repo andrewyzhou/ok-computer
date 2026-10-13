@@ -338,6 +338,41 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(out.content).toContain(`Blocked ${200 + Number(more)} requests:`);
   });
 
+  it('lets an image button send one click position, and refuses a field of that name that a script adds', async () => {
+    const h = harness();
+    const url = site.url('shop.test', '/image-form');
+    const posts = () => site.hitsOn('shop.test').filter((hit) => hit.method === 'POST');
+    await h.run('browser_open', { url });
+    site.hits.length = 0;
+    expect((await h.run('browser_submit', { url, button: 'Go', fields: { note: 'hello' } })).isError).toBe(false);
+    // an image button without a name sends x and y.
+    await h.run('browser_open', { url });
+    expect((await h.run('browser_submit', { url, button: 'Order', fields: { item: 'pen' } })).isError).toBe(false);
+    expect(posts().map((hit) => hit.body)).toEqual([expect.stringMatching(/^note=hello&go\.x=\d+&go\.y=\d+$/), expect.stringMatching(/^item=pen&x=\d+&y=\d+$/)]);
+    for (const injected of ['INJECTED', '12']) {
+      await h.run('browser_open', { url: `${url}#${injected}` });
+      site.hits.length = 0;
+      const out = await h.run('browser_submit', { url: `${url}#${injected}`, button: 'Go', fields: { note: 'hello' } });
+      expect(out.content).toContain('the page changed the form after the check');
+      expect(posts()).toEqual([]);
+    }
+  });
+
+  it('refuses a file that a script puts into an empty file field at the click', async () => {
+    const h = harness();
+    const url = site.url('shop.test', '/file-form');
+    const posts = () => site.hitsOn('shop.test').filter((hit) => hit.method === 'POST');
+    await h.run('browser_open', { url });
+    site.hits.length = 0;
+    expect((await h.run('browser_submit', { url, button: 'Send', fields: { note: 'hello', f: '' } })).isError).toBe(false);
+    expect(posts()).toHaveLength(1);
+    await h.run('browser_open', { url: `${url}#x` });
+    site.hits.length = 0;
+    const out = await h.run('browser_submit', { url: `${url}#x`, button: 'Send', fields: { note: 'hello', f: '' } });
+    expect(out.content).toContain('the page changed the form after the check');
+    expect(posts()).toEqual([]);
+  });
+
   it('sends no webrtc packet over udp, also to an address of this pc', async () => {
     const udp = createSocket('udp4');
     const packets: Buffer[] = [];

@@ -104,7 +104,8 @@ interface FormState {
   fields: Record<string, string | string[]>;
   // the whole form data set that the browser sends, also the hidden fields. the gate compares the request with it.
   pairs: Array<[string, string]>;
-  // the click position of an image button. the browser sends it, and the check cannot know it before the click.
+  // the names of the click position of an image button. the browser sends one pair of each, and the check cannot know
+  // the values before the click.
   skip: string[];
   password: boolean;
 }
@@ -118,7 +119,14 @@ async function formOf(page: Page, control: ElementHandle): Promise<FormState | n
     if (!button.matches(selector) || !button.form) return null;
     const { FormData } = globalThis as unknown as { FormData: new (form: unknown, submitter: unknown) => Iterable<[string, string | { name: string }]> };
     const pairs: Array<[string, string]> = [...new FormData(button.form, button)].map(([name, value]) => [name, typeof value === 'string' ? value : value.name]);
-    const image = button.matches('input[type=image]') && button.name ? [`${button.name}.x`, `${button.name}.y`] : [];
+    // an image button adds its click position, as name.x and name.y, or as x and y without a name. FormData gives 0
+    // for each. only that one pair of each name leaves the set, so a field of the same name stays on the card.
+    const prefix = button.name ? `${button.name}.` : '';
+    const image = button.matches('input[type=image]') ? [`${prefix}x`, `${prefix}y`] : [];
+    for (const name of image) {
+      const at = pairs.findIndex(([each, value]) => each === name && value === '0');
+      if (at >= 0) pairs.splice(at, 1);
+    }
     const left = new Map<string, number>();
     const key = (name: string, value: string) => JSON.stringify([name, value]);
     const leave = (name: string, value: string) => left.set(key(name, value), (left.get(key(name, value)) ?? 0) + 1);
@@ -127,7 +135,7 @@ async function formOf(page: Page, control: ElementHandle): Promise<FormState | n
     const fields: Record<string, string | string[]> = {};
     for (const [name, value] of pairs) {
       const count = left.get(key(name, value)) ?? 0;
-      if (count > 0 || image.includes(name)) {
+      if (count > 0) {
         left.set(key(name, value), count - 1);
         continue;
       }
@@ -135,7 +143,7 @@ async function formOf(page: Page, control: ElementHandle): Promise<FormState | n
       fields[name] = old === undefined ? value : Array.isArray(old) ? [...old, value] : [old, value];
     }
     const password = Array.from(button.form.elements).some((item) => item.type === 'password');
-    return { fields, pairs: pairs.filter(([name]) => !image.includes(name)), skip: image, password };
+    return { fields, pairs, skip: image, password };
   }, SUBMIT_CONTROL));
 }
 
