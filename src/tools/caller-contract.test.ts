@@ -10,6 +10,7 @@ import { openDb } from '../db/index.js';
 import { listEvents } from '../events/log.js';
 import type { BlobStore } from '../observability/blobs.js';
 import { createLogger, silentLogger, type Logger } from '../observability/logger.js';
+import { registerSecret } from '../observability/redact.js';
 import { BUILTIN_RULES } from '../policy/policy.js';
 import { createRunQueue } from '../sessions/queue.js';
 import { abandonedText, type ToolCallerDeps } from './caller.js';
@@ -119,6 +120,31 @@ describe('the tool caller before the tool acts', () => {
     expect(ran).toEqual([]);
     expect(asked).toEqual([expect.stringContaining('the reviewer failed (529 overloaded), so the owner decides')]);
     expect(decisions()).toMatchObject([{ decision: 'review', reviewerVerdict: null, reason: expect.stringContaining('the reviewer failed') }]);
+  });
+
+  // a provider can echo the key in a 401. the reviewer text went raw to the decision row and to the card.
+  it('redacts a secret in the error and the reason of a reviewer, on the card and in the decision', async () => {
+    const secret = `reviewer-key-${'k'.repeat(20)}`;
+    registerSecret(secret);
+    const { tool } = counted('archive', 'write');
+    const asked: string[] = [];
+    let fail = true;
+    const { call, decisions } = setup([tool], {
+      reviewer: async () => {
+        if (fail) throw new Error(`401 invalid x-api-key ${secret}`);
+        return { verdict: 'hold', reason: `the input repeats ${secret}` };
+      },
+      requestApproval: async (_tool, _input, _ctx, why) => {
+        asked.push(why.reason);
+        return { content: 'approval #1 is pending' };
+      },
+    });
+    await call('archive', 'a1');
+    fail = false;
+    expect(await call('archive', 'a2')).toMatchObject({ isError: true, content: expect.not.stringContaining(secret) });
+    expect(asked).toEqual([expect.stringContaining('401 invalid x-api-key [redacted]')]);
+    expect(JSON.stringify(decisions())).not.toContain(secret);
+    expect(decisions()[1]).toMatchObject({ reviewerVerdict: 'hold', reviewerReason: 'the input repeats [redacted]' });
   });
 });
 

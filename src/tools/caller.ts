@@ -258,7 +258,8 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       } catch (err) {
         // a reviewer that fails must not allow the call. the owner decides instead.
         logger.warn('reviewer failed, so the owner decides', { runId: ctx.runId, toolCallId: call.id, tool: tool.name, err });
-        reason = `${reason}. the reviewer failed (${errorText(err)}), so the owner decides`;
+        // the error goes on the card in the chat, so it is redacted here and not only in the store.
+        reason = `${reason}. the reviewer failed (${redact(errorText(err))}), so the owner decides`;
         updateDecision(db, decisionId, { reason });
         return { ...gate, held: await askOwner() };
       }

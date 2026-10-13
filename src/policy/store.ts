@@ -1,4 +1,5 @@
 import type { Db } from '../db/index.js';
+import { redact } from '../observability/redact.js';
 import type { ReviewResult, TaintSource, Verdict } from './policy.js';
 
 export interface DecisionRecord extends Verdict {
@@ -10,6 +11,10 @@ export interface DecisionRecord extends Verdict {
   review?: ReviewResult;
   approvalId?: number;
 }
+
+// each text of a decision can hold a provider error or a reviewer answer, and a provider can echo a key in an error.
+// so the store redacts every text here, in one place.
+const redacted = (text: string | undefined) => (text === undefined ? null : redact(text));
 
 export function recordDecision(db: Db, record: DecisionRecord, now: Date): number {
   const row = db
@@ -24,10 +29,10 @@ export function recordDecision(db: Db, record: DecisionRecord, now: Date): numbe
       record.toolName,
       record.decision,
       record.rule,
-      record.reason,
+      redact(record.reason),
       record.review?.modelCallId ?? null,
       record.review?.verdict ?? null,
-      record.review?.reason ?? null,
+      redacted(record.review?.reason),
       record.approvalId ?? null,
       record.taint.length ? JSON.stringify(record.taint) : null,
       now.toISOString(),
@@ -43,10 +48,10 @@ export function updateDecision(db: Db, id: number, change: { reason?: string; re
        approvalId = COALESCE(?, approvalId)
      WHERE id = ?`,
   ).run(
-    change.reason ?? null,
+    redacted(change.reason),
     change.review?.modelCallId ?? null,
     change.review?.verdict ?? null,
-    change.review?.reason ?? null,
+    redacted(change.review?.reason),
     change.approvalId ?? null,
     id,
   );

@@ -66,6 +66,19 @@ describe('slot runner', () => {
     expect(hashes[0]).toBe(createHash('sha256').update(JSON.stringify(tools)).digest('hex'));
   });
 
+  // the request was redacted, but the snapshot of the same tool list kept the secret, and the dashboard served it.
+  it('redacts a secret in the tool list snapshot, the same as in the request', async () => {
+    const secret = `catalog-secret-${'z'.repeat(20)}`;
+    registerSecret(secret);
+    const { runner, db } = setup(['anthropic/a'], { anthropic: [textStep('ok')] });
+    const tools = [{ name: 'search', description: `Search with https://api.example/?key=${secret}`, inputSchema: { type: 'object' } }];
+    await runner.call('main', { ...request, tools }, { runId: null });
+    const call = db.prepare('SELECT request, toolCatalogHash FROM model_calls').get()!;
+    const snapshot = db.prepare('SELECT tools FROM tool_catalog_snapshots WHERE hash = ?').get(String(call.toolCatalogHash))!;
+    expect(String(snapshot.tools)).not.toContain(secret);
+    expect(JSON.parse(String(snapshot.tools))).toEqual((JSON.parse(String(call.request)) as { tools: unknown }).tools);
+  });
+
   it('retries the same model one time after a transient error', async () => {
     const { runner, sleep, rows } = setup(['anthropic/a', 'anthropic/b'], { anthropic: [transient(), textStep('ok')] });
     const result = await runner.call('main', request, { runId: null });

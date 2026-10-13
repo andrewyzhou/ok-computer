@@ -104,9 +104,10 @@ interface CallRecord {
   latencyMs: number;
 }
 
-// the snapshot keeps each distinct tool list one time. the hash on each call shows which tools the model had.
+// the snapshot keeps each distinct tool list one time. the hash on each call shows which tools the model had. the
+// text is redacted the same as the request, because the tool list of an mcp server is text from outside.
 export function recordToolCatalog(db: Db, tools: ToolSpec[], now: Date): string {
-  const json = JSON.stringify(tools);
+  const json = redactedJson(tools);
   const hash = createHash('sha256').update(json).digest('hex');
   db.prepare('INSERT OR IGNORE INTO tool_catalog_snapshots (hash, tools, createdAt) VALUES (?, ?, ?)').run(
     hash,
