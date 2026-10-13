@@ -42,6 +42,7 @@ function setup() {
     },
     caller: () => caller,
     signal: new AbortController().signal,
+    timeoutMs: 60_000,
   });
   const { caller } = createTestCaller(db, createToolRegistry([sendEmail]), clock, { requestApproval: flow.request });
   const ctx = { runId: 'r1', sessionKey: 'main', allowed: ['send_email'], signal: new AbortController().signal };

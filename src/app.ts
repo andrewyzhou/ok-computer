@@ -101,6 +101,7 @@ export function createApp(deps: AppDeps): App {
   const owner = createOwnerMessenger({ db, channels, logger, clock, ...(preferred ? { preferred } : {}) });
   const ids = deps.newId ? { newId: deps.newId } : {};
   const blobs = createBlobStore(db, join(config.paths.data, 'blobs'), clock);
+  const activeRuns = new Set<string>();
 
   const approvals = createApprovalFlow({
     db,
@@ -110,6 +111,7 @@ export function createApp(deps: AppDeps): App {
     owner,
     caller: () => caller,
     signal: shutdown.signal,
+    timeoutMs: config.agent.backgroundTimeoutMs,
   });
   // the scheduler is created below. the tools call replan only after the start.
   const replan = () => scheduler.replan();
@@ -165,6 +167,7 @@ export function createApp(deps: AppDeps): App {
           : {}),
       }),
     contextLines: (now) => scheduleContext(db, now, config.timeZone),
+    activeRuns,
     ...ids,
   };
   const agent = async (input: Parameters<typeof runAgent>[1]) => {
@@ -234,7 +237,7 @@ export function createApp(deps: AppDeps): App {
       }
       // the next run of each session repairs its calls. a repair here could answer the calls of a live turn in
       // another process.
-      const stale = closeStaleWork(db, now, staleMs);
+      const stale = closeStaleWork(db, now, staleMs, { runs: activeRuns, approvals: approvals.active });
       if (stale.runs.length) logger.warn('closed the runs of a stopped process', { runs: stale.runs.map((run) => run.id) });
       for (const approval of stale.expired) {
         const text = `Approval #${approval.id} (${approval.summary}) was approved, but the app stopped before it ran, so it expired and did not run. Ask again if you still want it.`;

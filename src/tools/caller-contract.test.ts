@@ -80,6 +80,7 @@ describe('the tool caller before the tool acts', () => {
       owner: { remember() {}, chat: () => undefined, send: async () => true },
       caller: () => caller,
       signal: new AbortController().signal,
+      timeoutMs: 60_000,
     });
     const { caller } = createTestCaller(db, createToolRegistry([tool]), clock, { requestApproval: flow.request, queue });
     db.exec("CREATE TRIGGER no_approvals BEFORE INSERT ON approvals BEGIN SELECT RAISE(ABORT, 'disk is full'); END");
@@ -109,7 +110,7 @@ describe('the tool caller before the tool acts', () => {
       },
       requestApproval: async (_tool, _input, _ctx, why) => {
         asked.push(why.reason);
-        return { approvalId: 1, output: { content: 'approval #1 is pending' } };
+        return { content: 'approval #1 is pending' };
       },
     });
     db.prepare("INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt) VALUES ('r1', 'archive', '{}', 'archive', 'pending', 'x')").run();
@@ -272,8 +273,8 @@ describe('the tool caller after the tool acts', () => {
     const signal = new AbortController().signal;
     const outputs = await Promise.all([caller.callApproved(approval, signal), caller.callApproved(approval, signal)]);
     expect(ran).toEqual(['send']);
-    expect(outputs).toContainEqual({ content: 'sent' });
-    expect(outputs).toContainEqual({ content: 'approval #1 already ran, so it did not run again', isError: true });
+    expect(outputs).toContainEqual({ started: true, output: { content: 'sent' } });
+    expect(outputs).toContainEqual({ started: false, output: { content: 'approval #1 already ran, so it did not run again', isError: true } });
     expect(db.prepare("SELECT COUNT(*) AS n FROM tool_calls WHERE toolCallId = 'approval-1'").get()).toEqual({ n: 1 });
   });
 });

@@ -1,8 +1,10 @@
+import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 import { createHarness } from '../../test/harness.js';
 import { getRunDetail } from '../dashboard/queries.js';
 import { textStep, toolStep } from '../models/fake.js';
 import { ModelError } from '../models/types.js';
+import { defineTool } from '../tools/registry.js';
 
 describe('agent loop', () => {
   it('answers a message and records the run, the events and the model call', async () => {
@@ -80,6 +82,25 @@ describe('agent loop', () => {
     ]);
     const timeline = getRunDetail(db, 'run-1')!.timeline;
     expect(timeline.flatMap((item) => (item.kind === 'model' ? item.tools : [item.call])).map((call) => call.toolCallId)).toEqual(['t1']);
+  });
+
+  it('holds the run id in activeRuns while the run runs, so the stale sweep of this process skips it', async () => {
+    const seen: string[][] = [];
+    const probe = defineTool({
+      name: 'probe',
+      description: 'Reads the active runs.',
+      input: z.object({}),
+      risk: 'read',
+      async run() {
+        seen.push([...deps.activeRuns!]);
+        return { content: 'ok' };
+      },
+    });
+    const { deps, run } = createHarness([toolStep({ id: 'p1', name: 'probe', input: {} }), textStep('done')], {}, { tools: [probe] });
+    deps.activeRuns = new Set();
+    await run('go');
+    expect(seen).toEqual([['run-1']]);
+    expect(deps.activeRuns.size).toBe(0);
   });
 
   it('fails the run when the model chain fails', async () => {

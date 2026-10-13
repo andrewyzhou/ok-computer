@@ -19,19 +19,17 @@ export interface CallContext {
   signal: AbortSignal;
 }
 
-// why gives the owner the reason of the policy and the untrusted sources that the session read.
+// why gives the owner the reason of the policy and the untrusted sources that the session read. the flow links the
+// decision to the approval before it sends the message, so a crash during the send leaves a decision that names a
+// live approval.
 export interface ApprovalWhy {
+  decisionId: number;
   reason: string;
   taint: TaintSource[];
 }
 
 // the approval flow asks the owner. its output tells the model that the call waits for the owner.
-export type RequestApproval = (
-  tool: Tool,
-  input: unknown,
-  ctx: ToolContext,
-  why: ApprovalWhy,
-) => Promise<{ approvalId: number; output: ToolOutput }>;
+export type RequestApproval = (tool: Tool, input: unknown, ctx: ToolContext, why: ApprovalWhy) => Promise<ToolOutput>;
 
 export interface ToolCallerDeps {
   db: Db;
@@ -57,7 +55,8 @@ export interface ToolCaller {
   // model gets the text as an error, and the call gets a row like every other call.
   notRun(call: ToolCall, ctx: CallContext, text: string): ToolOutput;
   // callApproved runs the stored input of an approval one time. the call goes into the trace of the original run.
-  callApproved(approval: Approval, signal: AbortSignal): Promise<ToolOutput>;
+  // started tells whether the tool began to run, so the note to the session does not say that a skipped call ran.
+  callApproved(approval: Approval, signal: AbortSignal): Promise<{ started: boolean; output: ToolOutput }>;
 }
 
 interface Trace {
@@ -196,16 +195,13 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
     const gate = { decisionId, taint };
 
     const askOwner = async (): Promise<ToolOutput> => {
-      let requested: { approvalId: number; output: ToolOutput };
       try {
-        requested = await deps.requestApproval(tool, input, toolCtx, { reason, taint });
+        return await deps.requestApproval(tool, input, toolCtx, { decisionId, reason, taint });
       } catch (err) {
         logger.error('approval request failed, so the tool did not run', { runId: ctx.runId, toolCallId: call.id, tool: tool.name, err });
         updateDecision(db, decisionId, { reason: `${reason}. the request for the owner's approval failed, so the call did not run` });
         return { content: `${tool.name} did not run, because the request for the owner's approval failed: ${errorText(err)}`, isError: true };
       }
-      updateDecision(db, decisionId, { approvalId: requested.approvalId });
-      return requested.output;
     };
 
     if (verdict.decision === 'deny') {
@@ -276,6 +272,9 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         signal,
         toolCallId: call.id,
       };
+      const skipped = (content: string) => ({ started: false, output: { content, isError: true } });
+      // a stop before the claim leaves the approval unclaimed. the sweep then tells the owner that it did not run.
+      if (signal.aborted) return skipped(`approval #${approval.id} did not run, because the app stopped first`);
       let trace: Trace;
       try {
         // the start mark is a compare and set. a second call for the same approval never runs the tool again, and an
@@ -283,17 +282,25 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         const claimed = db
           .prepare("UPDATE approvals SET startedAt = ? WHERE id = ? AND startedAt IS NULL AND status = 'approved'")
           .run(clock().toISOString(), approval.id).changes;
-        if (!claimed) return { content: `approval #${approval.id} already ran, so it did not run again`, isError: true };
+        if (!claimed) {
+          const status = db.prepare('SELECT status FROM approvals WHERE id = ?').get(approval.id)?.status;
+          return skipped(
+            status === 'expired'
+              ? `approval #${approval.id} expired before it could run, so it did not run`
+              : `approval #${approval.id} already ran, so it did not run again`,
+          );
+        }
         trace = { decisionId: decisionOfApproval(db, approval.id), tainted: sessionTaint(db, approval.sessionKey).length > 0 };
       } catch (err) {
         logger.error('approved call failed before it ran', { runId: approval.runId, approvalId: approval.id, err });
-        return { content: `approval #${approval.id} did not run: ${errorText(err)}`, isError: true };
+        return skipped(`approval #${approval.id} did not run: ${errorText(err)}`);
       }
       const resolved = tools.resolve(call, [approval.toolName]);
-      if (!resolved.ok) return strip(record(approval.runId, call, resolved.output, started, trace));
+      if (!resolved.ok) return { started: false, output: strip(record(approval.runId, call, resolved.output, started, trace)) };
       const finish = (output: ToolOutput, outcome?: 'abandoned') =>
         record(approval.runId, call, output, started, { ...trace, risk: resolved.tool.risk, ...(outcome ? { outcome } : {}) });
-      return strip(await run(resolved.tool, resolved.input, toolCtx, call, finish));
+      // no await comes between the check of the signal and this line, so the tool starts.
+      return { started: true, output: strip(await run(resolved.tool, resolved.input, toolCtx, call, finish)) };
     },
   };
 }

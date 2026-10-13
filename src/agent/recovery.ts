@@ -85,36 +85,50 @@ export interface StaleWork {
   interrupted: Approval[];
 }
 
+// the work that this process holds in memory. it is live, whatever its age.
+export interface LiveWork {
+  runs: Iterable<string>;
+  approvals: Iterable<number>;
+}
+
 // a run ends at its timeout, and a stuck tool is abandoned then. so a run that is still running long after the
 // longest timeout belongs to a process that stopped. the age test, and not the start of this process, decides,
-// because a second process (for example npm run chat) can share the database with a live one.
-export function closeStaleWork(db: Db, now: Date, staleMs: number): StaleWork {
+// because a second process (for example npm run chat) can share the database with a live one. the age alone is not
+// sufficient for the work of this process:
+// - an approved call can wait in its session queue behind runs that are longer than the age limit together.
+// - the clock can move forward, for example after the pc wakes from sleep.
+// so the work that this process holds is never closed.
+export function closeStaleWork(db: Db, now: Date, staleMs: number, live: LiveWork = { runs: [], approvals: [] }): StaleWork {
   const cutoff = new Date(now.getTime() - staleMs).toISOString();
   const at = now.toISOString();
+  const liveRuns = JSON.stringify([...live.runs]);
+  const liveApprovals = JSON.stringify([...live.approvals]);
   const runs = db
     .prepare(
       `UPDATE runs SET status = 'aborted', endedAt = ?, error = 'the process stopped during the run'
-       WHERE status = 'running' AND startedAt < ? RETURNING id, sessionKey`,
+       WHERE status = 'running' AND startedAt < ? AND id NOT IN (SELECT value FROM json_each(?)) RETURNING id, sessionKey`,
     )
-    .all(at, cutoff)
+    .all(at, cutoff, liveRuns)
     .map((row) => ({ id: String(row.id), sessionKey: String(row.sessionKey) }));
 
   const expired = db
     .prepare(
       `UPDATE approvals SET status = 'expired' WHERE status = 'approved' AND startedAt IS NULL AND resolvedAt < ?
+         AND id NOT IN (SELECT value FROM json_each(?))
        RETURNING id`,
     )
-    .all(cutoff)
+    .all(cutoff, liveApprovals)
     .map((row) => getApproval(db, Number(row.id))!);
 
   const interrupted = db
     .prepare(
       `SELECT id FROM approvals WHERE status = 'approved' AND startedAt < ?
+         AND id NOT IN (SELECT value FROM json_each(?))
          AND NOT EXISTS (SELECT 1 FROM tool_calls WHERE tool_calls.runId = approvals.runId
                          AND tool_calls.toolCallId = 'approval-' || approvals.id)
        ORDER BY id`,
     )
-    .all(cutoff)
+    .all(cutoff, liveApprovals)
     .map((row) => getApproval(db, Number(row.id))!);
   for (const approval of interrupted) {
     const content = interruptedText(approval.toolName);

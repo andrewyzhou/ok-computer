@@ -28,19 +28,30 @@ export interface Approval {
   resolvedBy: ResolvedVia | null;
 }
 
-// the input is not redacted, because the tool runs again with this exact input after the approval.
+// the input is not redacted, because the tool runs again with this exact input after the approval. the link from the
+// policy decision is written in the same transaction. the message to the owner comes after it and can take long, so
+// a crash during the message leaves a decision that names a live approval.
 export function createApproval(
   db: Db,
-  input: { runId: string; toolName: string; input: unknown; summary: string },
+  input: { runId: string; toolName: string; input: unknown; summary: string; decisionId?: number },
   now: Date,
 ): Approval {
-  const row = db
-    .prepare(
-      `INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt) VALUES (?, ?, ?, ?, 'pending', ?)
-       RETURNING id`,
-    )
-    .get(input.runId, input.toolName, JSON.stringify(input.input), input.summary, now.toISOString());
-  return getApproval(db, Number(row!.id))!;
+  db.exec('BEGIN');
+  try {
+    const row = db
+      .prepare(
+        `INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt) VALUES (?, ?, ?, ?, 'pending', ?)
+         RETURNING id`,
+      )
+      .get(input.runId, input.toolName, JSON.stringify(input.input), input.summary, now.toISOString());
+    const id = Number(row!.id);
+    if (input.decisionId !== undefined) db.prepare('UPDATE policy_decisions SET approvalId = ? WHERE id = ?').run(id, input.decisionId);
+    db.exec('COMMIT');
+    return getApproval(db, id)!;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 }
 
 export function getApproval(db: Db, id: number): Approval | undefined {

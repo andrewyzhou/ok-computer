@@ -27,6 +27,8 @@ export interface AgentDeps {
   contextLines?: (now: Date) => string;
   clock: Clock;
   newId?: () => string;
+  // the ids of the runs that run now in this process. the stale sweep must not close them.
+  activeRuns?: Set<string>;
 }
 
 export interface RunInput {
@@ -68,6 +70,7 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
     clock().toISOString(),
   );
   logger.info('run started', { trigger: input.trigger, slot: input.slot });
+  deps.activeRuns?.add(runId);
 
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(new Error('timeout')), timeoutMs);
@@ -188,6 +191,7 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
   } finally {
     clearTimeout(timer);
     input.signal?.removeEventListener('abort', onOuterAbort);
+    deps.activeRuns?.delete(runId);
   }
 }
 

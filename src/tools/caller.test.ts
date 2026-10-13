@@ -9,7 +9,7 @@ import { appendEvent } from '../events/log.js';
 import { createBlobStore } from '../observability/blobs.js';
 import { registerSecret } from '../observability/redact.js';
 import { BUILTIN_RULES, type Reviewer, type Rule } from '../policy/policy.js';
-import { sessionTaint } from '../policy/store.js';
+import { sessionTaint, updateDecision } from '../policy/store.js';
 import type { ToolCallerDeps } from './caller.js';
 import { createToolRegistry, defineTool } from './registry.js';
 import { createResultReadTool, QUERY_LIMIT } from './result-read.js';
@@ -49,9 +49,11 @@ function setup(extra: Partial<ToolCallerDeps> = {}) {
   ]);
   const { caller } = createTestCaller(db, tools, clock, {
     blobs,
-    requestApproval: async (approvedTool) => {
+    // the fake links the decision to the approval, as the approval flow does.
+    requestApproval: async (approvedTool, _input, _ctx, why) => {
       approvals.push(approvedTool.name);
-      return { approvalId: approvals.length, output: { content: `approval #${approvals.length} is pending` } };
+      updateDecision(db, why.decisionId, { approvalId: approvals.length });
+      return { content: `approval #${approvals.length} is pending` };
     },
     newHandle: () => `res_${String(++handles).padStart(12, '0')}`,
     ...extra,
