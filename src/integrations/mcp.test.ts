@@ -11,13 +11,14 @@ import { openDb } from '../db/index.js';
 import { createBlobStore, type BlobStore } from '../observability/blobs.js';
 import { silentLogger, type Logger } from '../observability/logger.js';
 import { registerSecret } from '../observability/redact.js';
-import { parseIntegrations, type StdioEntry } from './config.js';
+import { parseIntegrations, type HttpEntry, type StdioEntry } from './config.js';
 import { outcomeOutput } from './discovery.js';
 import {
   classify,
   createMcpConnection,
   createMessageRecorder,
   HEALTHY_AFTER_MS,
+  LIST_CHANGED_DEBOUNCE_MS,
   LIST_PAGES_LIMIT,
   NOTIFICATIONS_PER_MINUTE,
   OWN_LIMIT_PER_MINUTE,
@@ -28,7 +29,7 @@ import {
   type McpTool,
 } from './mcp.js';
 import { createMemorySecretStore, CredentialStoreError } from './secrets.js';
-import { stdioTransport } from './transports.js';
+import { httpTransport, MESSAGE_LIMIT, stdioTransport } from './transports.js';
 
 const FIXTURE = join(import.meta.dirname, '../../test/fixtures/stdio-server.ts');
 
@@ -464,6 +465,43 @@ describe('mcp connection failure modes', () => {
     expect(classify(reset)).toEqual({ kind: 'unknown', reason: 'fetch failed' });
   });
 
+  // the http transport had no size limit: a 400 mb result held the event loop for 13 s and wrote 857 mb of blobs.
+  it('closes an http connection whose answer is over the limit, as a long stdio line does', async () => {
+    const server = createServer((req, res) => {
+      void (async () => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of req) chunks.push(chunk as Buffer);
+        if (req.method !== 'POST') return void res.writeHead(405).end();
+        const message = JSON.parse(Buffer.concat(chunks).toString()) as { id?: number; method: string };
+        if (message.id === undefined) return void res.writeHead(202).end();
+        const results: Record<string, unknown> = {
+          initialize: { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'big', version: '1.0.0' } },
+          'tools/list': { tools: [echo] },
+          'tools/call': { content: [{ type: 'text', text: 'x'.repeat(MESSAGE_LIMIT) }] },
+        };
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: results[message.method] ?? {} }));
+      })();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const parsed = parseIntegrations({
+        integrations: [{ id: 'notes', kind: 'mcp-http', url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`, tools: { allow: ['echo'] } }],
+      });
+      if (!parsed.ok) throw new Error(parsed.error);
+      const { connection, messages } = setup(() => httpTransport(parsed.value[0] as HttpEntry, createMemorySecretStore()));
+      await connection.start();
+      expect(connection.state().status).toBe('connected');
+      const outcome = await connection.callTool('echo', { text: 'hi' }, trace);
+      expect(outcome).toMatchObject({ kind: 'unknown' });
+      await expect.poll(() => connection.state().status).toBe('error');
+      // nothing of the answer reached the trace.
+      expect(messages().filter((row) => row.toolCallId === 'call-1').map((row) => row.direction)).toEqual(['out']);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
   it('names the status and the secret when an http server refuses the key', async () => {
     const server = createServer((_req, res) => res.writeHead(401).end());
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -549,8 +587,9 @@ describe('stdio server', () => {
 });
 
 // rawServer answers json-rpc by hand, so nothing on the server side cleans its answers. tools gives the tool list of
-// each tools/list request: the cursor of the request, or undefined for the first page.
-function rawServer(tools: (cursor: string | undefined) => { tools: unknown[]; nextCursor?: string }, onReady?: (server: Transport) => void) {
+// each tools/list request: the cursor of the request, or undefined for the first page. a promise holds the answer back.
+type Page = { tools: unknown[]; nextCursor?: string | null };
+function rawServer(tools: (cursor: string | undefined) => Page | Promise<Page>, onReady?: (server: Transport) => void) {
   return async (): Promise<Transport> => {
     const [client, server] = InMemoryTransport.createLinkedPair();
     server.onmessage = (message) => {
@@ -558,7 +597,7 @@ function rawServer(tools: (cursor: string | undefined) => { tools: unknown[]; ne
       if (m.id === undefined) return;
       const reply = (result: unknown) => void server.send({ jsonrpc: '2.0', id: m.id!, result } as never);
       if (m.method === 'initialize') reply({ protocolVersion: '2025-06-18', capabilities: { tools: { listChanged: true } }, serverInfo: { name: 'raw', version: '1.0.0' } });
-      else if (m.method === 'tools/list') reply(tools(m.params?.cursor));
+      else if (m.method === 'tools/list') void Promise.resolve(tools(m.params?.cursor)).then(reply);
       else if (m.method === 'tools/call') reply({ content: [{ type: 'text', text: `echo: ${m.params?.arguments?.text}` }] });
       else reply({});
     };
@@ -598,6 +637,70 @@ describe('a server that breaks the rules', () => {
     expect(endless.connection.state()).toMatchObject({ status: 'error', error: expect.stringContaining(`more than ${LIST_PAGES_LIMIT} pages`) });
     expect(endless.messages().filter((row) => row.method === 'tools/list' && row.direction === 'out')).toHaveLength(LIST_PAGES_LIMIT);
   });
+
+  // the strict cursor schema refused the whole list, so the integration retried for ever.
+  it('takes a nextCursor of null as the last page', async () => {
+    const { connection, lists } = setup(rawServer(() => ({ tools: [echo], nextCursor: null })));
+    await connection.start();
+    expect(connection.state().status).toBe('connected');
+    expect(lists).toEqual([['echo']]);
+    expect(resultOf(await connection.callTool('echo', { text: 'hi' }, trace)).content).toEqual([{ type: 'text', text: 'echo: hi' }]);
+  });
+
+  // versioned gives the server's list at the moment of each request. while hold is set, an answer waits in held.
+  function versioned() {
+    const control = { version: 1, hold: false, open: 0, most: 0, held: [] as Array<() => void>, server: undefined as Transport | undefined };
+    const transport = rawServer(
+      () => {
+        const page = { tools: [{ ...echo, name: `v${control.version}` }] };
+        control.most = Math.max(control.most, ++control.open);
+        const answer = () => (control.open--, page);
+        return control.hold ? new Promise<Page>((resolve) => control.held.push(() => resolve(answer()))) : answer();
+      },
+      (each) => (control.server = each),
+    );
+    const changed = () => control.server!.send({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' });
+    return { control, transport, changed };
+  }
+  const quiet = () => new Promise((resolve) => setTimeout(resolve, LIST_CHANGED_DEBOUNCE_MS + 300));
+
+  // two refreshes ran side by side, and a slow answer with an older list replaced the newer list. with large pages,
+  // the walks piled up until the heap was full.
+  it('runs one walk of the tool list at a time, so the newest list stays', async () => {
+    const { control, transport, changed } = versioned();
+    const { connection, lists } = setup(transport);
+    await connection.start();
+    control.hold = true;
+    control.version = 2;
+    await changed();
+    await expect.poll(() => control.held.length, { timeout: 3_000 }).toBe(1);
+    control.hold = false;
+    control.version = 3;
+    await changed();
+    await quiet();
+    expect(control.most).toBe(1);
+    control.held.shift()!();
+    await expect.poll(() => lists.length, { timeout: 3_000 }).toBe(3);
+    expect(lists).toEqual([['v1'], ['v2'], ['v3']]);
+    expect(control.most).toBe(1);
+  }, 10_000);
+
+  it('walks the list again after the first walk when list_changed comes during it', async () => {
+    const { control, transport, changed } = versioned();
+    control.hold = true;
+    const { connection, lists } = setup(transport);
+    const started = connection.start();
+    await expect.poll(() => control.held.length, { timeout: 3_000 }).toBe(1);
+    control.hold = false;
+    control.version = 2;
+    await changed();
+    await quiet();
+    expect(control.most).toBe(1);
+    control.held.shift()!();
+    await started;
+    await expect.poll(() => lists.length, { timeout: 3_000 }).toBe(2);
+    expect(lists).toEqual([['v1'], ['v2']]);
+  }, 10_000);
 
   // a server that quotes its key in an error put the key in plain text into integration_state, the page and the
   // answer of connect.

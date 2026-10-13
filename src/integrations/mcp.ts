@@ -377,17 +377,34 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
     // the default is legacy today. auto mode starts a second stdio process that the recorder never sees, so the mode
     // is fixed here and an sdk update cannot change it.
     const attempt = new Client(CLIENT_INFO, { versionNegotiation: { mode: 'legacy' } });
+    // only one walk of the tool list runs at a time, and the first walk counts as one. a list_changed during a walk
+    // starts one more walk after it. without this, walks ran side by side: a slow, older answer replaced a newer
+    // list, and a server with large pages and frequent list_changed filled the heap until the app crashed.
+    let walking = true;
+    let again = false;
+    const walk = () => {
+      if (mine !== generation) return;
+      if (walking) {
+        again = true;
+        return;
+      }
+      walking = true;
+      again = false;
+      listTools(attempt)
+        .then(
+          (tools) => mine === generation && deps.onTools(tools),
+          (err: unknown) => mine === generation && logger.warn('mcp tool list refresh failed', { integration: id, err }),
+        )
+        .finally(() => {
+          walking = false;
+          if (again) walk();
+        });
+    };
     // the refresh after list_changed waits for a quiet second, because a server often sends several at once.
     let refreshTimer: NodeJS.Timeout | undefined;
     attempt.setNotificationHandler('notifications/tools/list_changed', () => {
       clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(() => {
-        if (mine !== generation) return;
-        listTools(attempt).then(
-          (tools) => mine === generation && deps.onTools(tools),
-          (err: unknown) => mine === generation && logger.warn('mcp tool list refresh failed', { integration: id, err }),
-        );
-      }, LIST_CHANGED_DEBOUNCE_MS);
+      refreshTimer = setTimeout(walk, LIST_CHANGED_DEBOUNCE_MS);
       refreshTimer.unref();
     });
     const stale = async () => {
@@ -431,6 +448,8 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
       setState({ status: 'connected', ...(server ? { server: { name: server.name, version: server.version } } : {}) });
       logger.info('mcp server connected', { integration: id, tools: tools.length });
       deps.onTools(tools);
+      walking = false;
+      if (again) walk();
       // the close handler goes on after the first tool list, so a failed attempt never starts a second retry.
       attempt.onclose = () => {
         if (client !== attempt) return;
@@ -528,7 +547,8 @@ export const LIST_PAGES_LIMIT = 64;
 // the sdk checks a whole tools/list answer against its strict tool schema, so one tool with a sloppy shape, also a
 // tool that the config hides, threw the whole list away, and the integration never connected. this schema takes the
 // list as it is, and the catalog checks each allowed tool on its own.
-const ToolsPage = z.looseObject({ tools: z.array(z.unknown()), nextCursor: z.string().optional() });
+// some servers send nextCursor: null on the last page.
+const ToolsPage = z.looseObject({ tools: z.array(z.unknown()), nextCursor: z.string().nullish() });
 
 export async function listTools(client: Client): Promise<unknown[]> {
   // a server without the tools capability has no tools, and a request would get an error.
@@ -539,7 +559,7 @@ export async function listTools(client: Client): Promise<unknown[]> {
     const result = await client.request({ method: 'tools/list', ...(cursor === undefined ? {} : { params: { cursor } }) }, ToolsPage);
     tools.push(...result.tools);
     // a server that gives the same cursor again has no more pages.
-    if (result.nextCursor === undefined || result.nextCursor === cursor) return tools;
+    if (result.nextCursor === undefined || result.nextCursor === null || result.nextCursor === cursor) return tools;
     if (page >= LIST_PAGES_LIMIT) throw new Error(`the tools/list of the server has more than ${LIST_PAGES_LIMIT} pages`);
     cursor = result.nextCursor;
   }

@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
 import { promisify } from 'node:util';
-import { StreamableHTTPClientTransport, type OAuthClientProvider, type Transport } from '@modelcontextprotocol/client';
+import { STDIO_DEFAULT_MAX_BUFFER_SIZE, StreamableHTTPClientTransport, type OAuthClientProvider, type Transport } from '@modelcontextprotocol/client';
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import type { Logger } from '../observability/logger.js';
 import type { HttpEntry, StdioEntry } from './config.js';
@@ -165,14 +165,63 @@ export async function httpTransport(
   oauth?: { provider: (entry: HttpEntry) => OAuthClientProvider; fetchFor: (entry: HttpEntry) => typeof fetch },
 ): Promise<Transport> {
   const url = new URL(entry.url);
+  // an answer over the limit closes the connection, as a long line does on stdio. the close fails the call, and the
+  // backoff starts.
+  let transport: Transport | undefined;
+  const limited = (base: typeof fetch) => limitBody(base, MESSAGE_LIMIT, () => void transport?.close().catch(() => {}));
   if (entry.auth?.type === 'oauth') {
     if (!oauth) throw new Error('oauth is not set up in this process');
-    return new StreamableHTTPClientTransport(url, { authProvider: oauth.provider(entry), fetch: oauth.fetchFor(entry) });
-  }
-  if (entry.auth?.type === 'bearer') {
+    transport = new StreamableHTTPClientTransport(url, { authProvider: oauth.provider(entry), fetch: limited(oauth.fetchFor(entry)) });
+  } else if (entry.auth?.type === 'bearer') {
     const token = await secrets.get(entry.auth.secretRef);
     if (token === undefined) throw new Error(`the secret ${entry.auth.secretRef} is not in the credential manager`);
-    return new StreamableHTTPClientTransport(url, { requestInit: { headers: { authorization: `Bearer ${token}` } } });
+    transport = new StreamableHTTPClientTransport(url, { requestInit: { headers: { authorization: `Bearer ${token}` } }, fetch: limited(fetch) });
+  } else {
+    transport = new StreamableHTTPClientTransport(url, { fetch: limited(fetch) });
   }
-  return new StreamableHTTPClientTransport(url);
+  return transport;
+}
+
+// the stdio transport of the sdk refuses a message over 10 mb. the http transport had no limit: one large result held
+// the event loop for seconds, and the trace and the raw result stored it twice.
+export const MESSAGE_LIMIT = STDIO_DEFAULT_MAX_BUFFER_SIZE;
+
+// limitBody stops the body of an answer at the limit. an event stream can stay open for a long time, so there the
+// limit applies to each event, and a blank line ends an event. every other body counts as one message.
+export function limitBody(base: typeof fetch, limit: number, onOver: () => void): typeof fetch {
+  return async (input, init) => {
+    const response = await base(input, init);
+    if (!response.body) return response;
+    const events = (response.headers.get('content-type') ?? '').toLowerCase().includes('text/event-stream');
+    let size = 0;
+    let line = 0;
+    let previous = 0;
+    const body = response.body.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          let from = 0;
+          for (;;) {
+            const at = events ? chunk.indexOf(10, from) : -1;
+            const piece = (at === -1 ? chunk.length : at) - from;
+            size += piece;
+            line += piece;
+            if (size > limit) {
+              controller.error(new Error(`the answer of the server is larger than ${limit} bytes`));
+              onOver();
+              return;
+            }
+            if (at === -1) break;
+            // a line with nothing, or with only a carriage return, ends the event.
+            const before = at > 0 ? chunk[at - 1] : previous;
+            if (line === 0 || (line === 1 && before === 13)) size = 0;
+            line = 0;
+            from = at + 1;
+          }
+          if (chunk.length) previous = chunk[chunk.length - 1]!;
+          controller.enqueue(chunk);
+        },
+      }),
+    );
+    return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
+  };
 }
