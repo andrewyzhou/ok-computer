@@ -5,12 +5,14 @@ import { headOf, tailOf } from '../text.js';
 import { systemClock, type Clock } from '../time.js';
 import { buttonSigner } from './telegram-buttons.js';
 import { escapeHtml, htmlToPlain, markdownToHtmlParts } from './telegram-html.js';
+import { neutralizeMarkdown, splitMarkdown } from './telegram-safe.js';
 import type { Button, ChannelAdapter, InboundMessage } from './types.js';
 
 export const TELEGRAM = 'telegram';
 export const TELEGRAM_LIMIT = 4096;
-// a rich message holds up to 32768 characters. the length in utf-16 units is never below the count of characters.
-export const RICH_LIMIT = 32_768;
+// a rich message holds up to 32768 characters. the length in utf-16 units is never below the count of characters. the
+// margin keeps a part under the limit if telegram counts in a different way.
+export const RICH_LIMIT = 30_000;
 
 export const COMMANDS = [
   { command: 'new', description: 'Start a fresh conversation' },
@@ -77,25 +79,37 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
 
   // telegram refuses a format with a 400. the caller then sends a simpler format. other errors can come after the
   // message reached the chat, so they go up, and the message is not sent twice.
-  const refusedAsUndefined = async <T>(method: string, send: () => Promise<T>): Promise<T | undefined> => {
+  // delivery collects the formats of each message and the reasons for each fallback, for one log line per send.
+  type Delivery = { formats: string[]; refused: string[] };
+  const refusedAsUndefined = async <T>(delivery: Delivery, send: () => Promise<T>): Promise<T | undefined> => {
     try {
       return await send();
     } catch (err) {
       if (!(err instanceof GrammyError) || err.error_code !== 400) throw err;
-      logger.warn('telegram refused a format, so a simpler format follows', { method, description: err.description });
+      delivery.refused.push(err.description);
       return undefined;
     }
   };
 
-  const sendParts = async (chatId: string, parts: Array<{ html?: string; plain: string }>, keyboard?: InlineKeyboardMarkup) => {
+  const sendParts = async (
+    chatId: string,
+    parts: Array<{ html?: string; plain: string }>,
+    keyboard: InlineKeyboardMarkup | undefined,
+    delivery: Delivery,
+  ) => {
     let messageId = '';
     for (const [i, part] of parts.entries()) {
       const markup = i === parts.length - 1 && keyboard ? { reply_markup: keyboard } : {};
       const html = part.html;
-      const sent =
-        (html !== undefined
-          ? await refusedAsUndefined('sendMessage', () => bot.api.sendMessage(chatId, html, { parse_mode: 'HTML', ...markup }))
-          : undefined) ?? (await bot.api.sendMessage(chatId, part.plain, markup));
+      let sent =
+        html !== undefined
+          ? await refusedAsUndefined(delivery, () => bot.api.sendMessage(chatId, html, { parse_mode: 'HTML', ...markup }))
+          : undefined;
+      if (sent) delivery.formats.push('html');
+      else {
+        sent = await bot.api.sendMessage(chatId, part.plain, markup);
+        delivery.formats.push('plain');
+      }
       messageId = String(sent.message_id);
     }
     return { messageId };
@@ -164,19 +178,42 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
       const keyboard = out.buttons?.length
         ? { inline_keyboard: out.buttons.map((row) => row.map((button: Button) => ({ text: button.text, callback_data: buttons.sign(button.data) }))) }
         : undefined;
-      if (out.details !== undefined) {
-        const html = cardHtml(out.text, out.details);
-        return sendParts(out.chatId, html ? [{ html, plain: `${out.text}\n\n${out.details}` }] : plainParts(`${out.text}\n\n${out.details}`), keyboard);
+      const delivery: Delivery = { formats: [], refused: [] };
+      let neutralized: string[] = [];
+      let messageId = '';
+      try {
+        if (out.details !== undefined) {
+          const html = cardHtml(out.text, out.details);
+          const plain = `${out.text}\n\n${out.details}`;
+          ({ messageId } = await sendParts(out.chatId, html ? [{ html, plain }] : plainParts(plain), keyboard, delivery));
+        } else if (!out.markdown) {
+          ({ messageId } = await sendParts(out.chatId, plainParts(out.text), keyboard, delivery));
+        } else {
+          const safe = neutralizeMarkdown(out.text);
+          neutralized = safe.neutralized;
+          // a possible injection. the run id leads to the tool results that the model read before it wrote this.
+          if (neutralized.length) logger.warn('markup in a model reply was neutralized', { runId: out.runId, neutralized });
+          const parts = splitMarkdown(safe.text, RICH_LIMIT);
+          // each part falls back on its own, so a part that went out is never sent again.
+          for (const [i, part] of parts.entries()) {
+            const markup = i === parts.length - 1 ? keyboard : undefined;
+            const sent = await refusedAsUndefined(delivery, () =>
+              bot.api.sendRichMessage(out.chatId, { markdown: part }, markup ? { reply_markup: markup } : {}),
+            );
+            if (sent) {
+              delivery.formats.push('rich');
+              messageId = String(sent.message_id);
+              continue;
+            }
+            const html = markdownToHtmlParts(part);
+            const fallback = html.length ? html.map((each) => ({ html: each, plain: htmlToPlain(each) })) : plainParts(part);
+            ({ messageId } = await sendParts(out.chatId, fallback, markup, delivery));
+          }
+        }
+        return { messageId };
+      } finally {
+        logger.info('telegram send', { runId: out.runId, formats: delivery.formats, fallback: delivery.refused, neutralized });
       }
-      if (!out.markdown) return sendParts(out.chatId, plainParts(out.text), keyboard);
-      if (out.text.length <= RICH_LIMIT) {
-        const sent = await refusedAsUndefined('sendRichMessage', () =>
-          bot.api.sendRichMessage(out.chatId, { markdown: out.text }, keyboard ? { reply_markup: keyboard } : {}),
-        );
-        if (sent) return { messageId: String(sent.message_id) };
-      }
-      const html = markdownToHtmlParts(out.text);
-      return sendParts(out.chatId, html.length ? html.map((part) => ({ html: part, plain: htmlToPlain(part) })) : plainParts(out.text), keyboard);
     },
     progress(message, stop) {
       const chatId = Number(message.chatId);

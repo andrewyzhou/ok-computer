@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buttonUpdate, createFakeTelegram, rawButtonUpdate, signed, textUpdate, until } from '../../test/fake-telegram.js';
-import { silentLogger } from '../observability/logger.js';
+import { silentLogger, type Logger } from '../observability/logger.js';
 import { htmlToPlain } from './telegram-html.js';
 import { cardHtml, createTelegramChannel, RICH_LIMIT, splitMessage, TELEGRAM_LIMIT } from './telegram.js';
 import type { InboundMessage } from './types.js';
@@ -146,11 +146,38 @@ describe('telegram formats', () => {
     expect(plain).toEqual({ chat_id: '777', text: `last part ${tail}`, reply_markup: { inline_keyboard: [[{ text: 'OK', callback_data: signed('x') }]] } });
   });
 
-  it('sends a reply over the rich limit as html parts, and does not send again after an error that is not a refusal', async () => {
+  it('falls back for each rich part on its own, never sends a part twice, and logs one line for the send', async () => {
+    const fake = createFakeTelegram();
+    const lines: Array<{ level: string; msg: string; fields?: Record<string, unknown> }> = [];
+    const logger: Logger = {
+      debug: (msg, fields) => lines.push({ level: 'debug', msg, fields }),
+      info: (msg, fields) => lines.push({ level: 'info', msg, fields }),
+      warn: (msg, fields) => lines.push({ level: 'warn', msg, fields }),
+      error: (msg, fields) => lines.push({ level: 'error', msg, fields }),
+      child: () => logger,
+    };
+    const channel = createTelegramChannel({ bot: fake.bot, logger, clock });
+    const half = 'x'.repeat(RICH_LIMIT / 2 + 10);
+    let richCalls = 0;
+    fake.refuse((c) => (c.method === 'sendRichMessage' && ++richCalls === 2 ? 400 : false));
+    await channel.send({ chatId: '777', text: `${half}\n\n${half} <img src=x>`, markdown: true, runId: 'run-1' });
+    expect(methods(fake)).toEqual(['sendRichMessage', 'sendRichMessage', ...Array(4).fill('sendMessage')]);
+    expect(lines.filter((l) => l.level !== 'debug').map((l) => [l.msg, l.fields])).toEqual([
+      ['markup in a model reply was neutralized', { runId: 'run-1', neutralized: ['<img>'] }],
+      ['telegram send', { runId: 'run-1', formats: ['rich', ...Array(4).fill('html')], fallback: ["Bad Request: can't parse entities"], neutralized: ['<img>'] }],
+    ]);
+  });
+
+  it('sends a reply over the rich limit as rich parts, and does not send again after an error that is not a refusal', async () => {
     const fake = createFakeTelegram();
     const channel = createTelegramChannel({ bot: fake.bot, logger: silentLogger, clock });
-    await channel.send({ chatId: '777', text: 'x'.repeat(RICH_LIMIT + 1), markdown: true });
-    expect(new Set(methods(fake))).toEqual(new Set(['sendMessage']));
+    const half = 'x'.repeat(RICH_LIMIT / 2 + 10);
+    await channel.send({ chatId: '777', text: `${half}\n\n${half}`, markdown: true, buttons });
+    expect(methods(fake)).toEqual(['sendRichMessage', 'sendRichMessage']);
+    expect(fake.calls.map((c) => [(c.payload.rich_message as { markdown: string }).markdown, 'reply_markup' in c.payload])).toEqual([
+      [half, false],
+      [half, true],
+    ]);
 
     const broken = createFakeTelegram();
     const other = createTelegramChannel({ bot: broken.bot, logger: silentLogger, clock });

@@ -24,6 +24,8 @@ export interface OutboundMessage {
   markdown?: boolean;
   // details go in a block that the owner can open, for example the exact input of an approval.
   details?: string;
+  // the run that wrote the text. the log of the channel names it.
+  runId?: string;
 }
 
 // progress shows the owner that a run works on a message, and lets the owner stop it.

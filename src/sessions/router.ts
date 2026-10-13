@@ -72,7 +72,7 @@ export function createRouter(deps: RouterDeps): Router {
         logger.error('message from a channel that is not running', { channel: message.channel });
         return;
       }
-      const send = async (card: Card & { markdown?: boolean }) => {
+      const send = async (card: Card & { markdown?: boolean; runId?: string }) => {
         try {
           await channel.send({ chatId: message.chatId, ...card });
         } catch (err) {
@@ -180,7 +180,7 @@ export function createRouter(deps: RouterDeps): Router {
         }
         const text = result.text.trim();
         if (!text) logger.warn('run completed without text', { runId: result.runId });
-        if (text && text !== NO_REPLY) await send({ text: result.text, markdown: true });
+        if (text && text !== NO_REPLY) await send({ text: result.text, markdown: true, runId: result.runId });
       });
     },
   };
