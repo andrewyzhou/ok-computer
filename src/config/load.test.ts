@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { loadConfig, loadSecrets, parseConfig } from './load.js';
+import { durationMs } from './schema.js';
 
 describe('parseConfig', () => {
   it('fills every field with a default', () => {
@@ -16,6 +17,21 @@ describe('parseConfig', () => {
     expect(config.agent.maxIterations).toBe(20);
     expect(config.paths.data).toBe('data');
     expect(config.pricing['anthropic/claude-opus-5-5']?.input).toBe(4);
+    expect(config.heartbeat).toEqual({ every: '30m', activeHours: { start: '08:00', end: '23:00' } });
+    expect(config.routine.reminders).toEqual(['20:00', '21:00', '22:00']);
+    expect(config.scheduler.missedGraceMs).toBe(2 * 60 * 60_000);
+  });
+
+  it('rejects a heartbeat interval that is not minutes or hours', () => {
+    const result = parseConfig({ heartbeat: { every: '30s' } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('"15m"');
+  });
+
+  it('converts heartbeat intervals to milliseconds', () => {
+    expect(durationMs('15m')).toBe(15 * 60_000);
+    expect(durationMs('1h')).toBe(60 * 60_000);
+    expect(durationMs('0')).toBe(0);
   });
 
   it('keeps the defaults of slots that the file does not set', () => {
