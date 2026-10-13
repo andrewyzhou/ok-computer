@@ -72,7 +72,7 @@ Open the dashboard on this PC (`okc open`), then go to **Google**.
   ```
 
   An allow rule on a write tool also holds after the agent read mail. It never lets an event invite people.
-- **Unsubscribe** uses only the sender's own `List-Unsubscribe` header: a one-click link (only when Gmail saw a valid DKIM signature of the sender's domain that covers the unsubscribe headers, and never to an address inside your network) or a mail (only with `send: true`). Otherwise the agent gives you the link.
+- **Unsubscribe** uses only the sender's own `List-Unsubscribe` header: a one-click link (only when Gmail saw a valid DKIM signature of the sender's domain that covers the unsubscribe headers, and never to an address inside your network) or a mail (only with `send: true`, and only with the same DKIM check, because a forged header could make your account mail a stranger). Otherwise the agent gives you the link.
 
 ## 5. When something goes wrong
 

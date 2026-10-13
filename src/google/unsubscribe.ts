@@ -15,46 +15,48 @@ export function unsubscribeTargets(header: string): string[] {
 export type UnsubscribePlan = { way: 'mailto'; to: string; subject: string; body: string } | { way: 'one-click' } | { way: 'refused'; text: string };
 
 export function planUnsubscribe(message: gmail_v1.Schema$Message, sender: string, target: string, send: boolean): UnsubscribePlan {
-  // the address of the from header, parsed. a text test would let '"bank@x" <evil@y>' pass for bank@x.
+  // the address of the from header, parsed. a text test would let '"bank@x" <evil@y>' pass for bank@x. the refusals
+  // do not quote the from header or its domain. the sender writes them, and this output is not marked as untrusted.
   const from = fromAddress(header(message, 'From'));
-  if (!from || from !== sender.trim().toLowerCase()) {
-    return { way: 'refused', text: `the message is from ${from ?? 'an address that cannot be read'}, not from ${JSON.stringify(sender)}` };
-  }
-  // the refusal does not quote the targets of the message. they are outside text, and this output is not marked as
-  // untrusted. the model can read them again with gmail_read_thread.
+  if (!from || from !== sender.trim().toLowerCase()) return { way: 'refused', text: `the message is not from ${JSON.stringify(sender)}. gmail_read_thread shows its sender` };
+  // the refusal does not quote the targets of the message for the same reason. the model can read them again with
+  // gmail_read_thread.
   const targets = unsubscribeTargets(header(message, 'List-Unsubscribe'));
   if (!targets.includes(target)) return { way: 'refused', text: `the message does not offer ${JSON.stringify(target)}. gmail_read_thread shows the targets that it offers` };
-  if (target.toLowerCase().startsWith('mailto:')) {
-    if (!send) return { way: 'refused', text: 'this sender unsubscribes by mail, and sending is off for the google integration' };
-    const mailto = new URL(target);
-    return { way: 'mailto', to: decodeURIComponent(mailto.pathname), subject: mailto.searchParams.get('subject') ?? 'unsubscribe', body: mailto.searchParams.get('body') ?? 'unsubscribe' };
-  }
-  // rfc 8058 needs the post header, and a dkim signature that covers both headers. without a passed dkim check the
-  // header can be forged, and the post would go to a server of the forger.
-  if (!/List-Unsubscribe=One-Click/i.test(header(message, 'List-Unsubscribe-Post'))) {
+  const mail = target.toLowerCase().startsWith('mailto:');
+  if (mail && !send) return { way: 'refused', text: 'this sender unsubscribes by mail, and sending is off for the google integration' };
+  // rfc 8058 needs the post header for a one-click.
+  if (!mail && !/List-Unsubscribe=One-Click/i.test(header(message, 'List-Unsubscribe-Post'))) {
     return { way: 'refused', text: 'the sender offers no one-click unsubscribe. The owner can open the link in a browser' };
   }
+  // both ways need a dkim signature of the from domain that covers the unsubscribe headers. without it a forger
+  // writes the header: a one-click post goes to a server of the forger, and a mailto makes the owner's account send a
+  // mail with the forger's recipient, subject and body.
+  const keys = mail ? ['From', 'List-Unsubscribe'] : ['From', 'List-Unsubscribe', 'List-Unsubscribe-Post'];
   // a signature that names a header once signs its last instance (rfc 6376 5.4.2). a resent signed mail with an added
   // header on top still passes, and the code reads the top one. so each of these headers must be there one time.
   const headers = message.payload?.headers ?? [];
-  const twice = ['From', 'List-Unsubscribe', 'List-Unsubscribe-Post'].find((key) => headers.filter((each) => each.name?.toLowerCase() === key.toLowerCase()).length > 1);
+  const twice = keys.find((key) => headers.filter((each) => each.name?.toLowerCase() === key.toLowerCase()).length > 1);
   if (twice) return { way: 'refused', text: `the message has more than one ${twice} header, so an added one cannot be told from the signed one` };
   const domain = from.slice(from.lastIndexOf('@') + 1);
   const passes = gmailDkimPasses(message).filter((pass) => aligned(pass.domain, domain));
   if (!passes.length) {
-    return { way: 'refused', text: `gmail did not see a passing dkim signature of ${domain} on this message, so its unsubscribe header can be forged` };
+    return { way: 'refused', text: 'gmail did not see a passing dkim signature of the from domain on this message, so its unsubscribe header can be forged. The owner can unsubscribe by hand' };
   }
   const signatures = headers.filter((each) => each.name?.toLowerCase() === 'dkim-signature').map((each) => tags(each.value ?? ''));
   // gmail names a passing signature by its domain and the first characters of b=. a forged signature can copy both.
   // when more than one signature fits a pass, the code cannot know which one gmail checked, so that pass counts for
   // nothing.
+  const needed = keys.slice(1).map((key) => key.toLowerCase());
   const covered = passes.some((pass) => {
     const fits = signatures.filter((tag) => tag.d?.toLowerCase() === pass.domain && (!pass.b || (tag.b ?? '').startsWith(pass.b)));
     const signed = fits.length === 1 ? (fits[0]!.h ?? '').toLowerCase().split(':') : [];
-    return signed.includes('list-unsubscribe') && signed.includes('list-unsubscribe-post');
+    return needed.every((key) => signed.includes(key));
   });
-  if (!covered) return { way: 'refused', text: `the dkim signature of ${domain} does not cover the unsubscribe headers, so they can be forged` };
-  return { way: 'one-click' };
+  if (!covered) return { way: 'refused', text: 'the dkim signature of the from domain does not cover the unsubscribe headers, so they can be forged. The owner can unsubscribe by hand' };
+  if (!mail) return { way: 'one-click' };
+  const mailto = new URL(target);
+  return { way: 'mailto', to: decodeURIComponent(mailto.pathname), subject: mailto.searchParams.get('subject') ?? 'unsubscribe', body: mailto.searchParams.get('body') ?? 'unsubscribe' };
 }
 
 // the passing dkim results in the authentication-results header that gmail added. gmail puts its header on top. a

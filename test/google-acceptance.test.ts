@@ -155,7 +155,7 @@ describe('google acceptance', () => {
     await t.at(pdt('12:05'));
     expect(t.rows('SELECT status FROM approvals WHERE id = 2')).toEqual([{ status: 'approved' }]);
     const [refused] = t.rows("SELECT output FROM tool_calls WHERE toolCallId = 'approval-2'");
-    expect(String(refused!.output)).toContain('the message is from evil@y.example, not from \\"news@shop.example\\"');
+    expect(String(refused!.output)).toContain('the message is not from \\"news@shop.example\\"');
     expect(fake.requests.slice(before).map((each) => each.path)).toEqual(['/gmail/v1/users/me/messages/s1?format=metadata&metadataHeaders=From&metadataHeaders=List-Unsubscribe&metadataHeaders=List-Unsubscribe-Post&metadataHeaders=Authentication-Results&metadataHeaders=DKIM-Signature']);
 
     await t.app.stop();
