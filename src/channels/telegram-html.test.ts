@@ -30,6 +30,18 @@ describe('markdownToHtmlParts', () => {
     expect(html).toBe('A &amp; B &lt; C, *not em*, &lt;b onclick=x&gt;raw&lt;/b&gt;, bad and &lt;a href="https://evil.example"&gt;x&lt;/a&gt;');
   });
 
+  // the references were escaped a second time, so the owner saw "&amp;" where the rich message showed "&".
+  it('shows a character reference as its character, but not in code or after a backslash', () => {
+    const [html] = markdownToHtmlParts(
+      'Tom &amp; Jerry, &copy; 2026, x &lt; y, &#65;&#x42;, &bogus; and \\&amp; **b &amp; c** `a &amp; b` [l](https://a.example/?x=1&amp;y=2)',
+    );
+    expect(htmlToPlain(html!)).toBe('Tom & Jerry, © 2026, x < y, AB, &bogus; and &amp; b & c a &amp; b l');
+    expect(html).toContain('<code>a &amp;amp; b</code>');
+    expect(html).toContain('<a href="https://a.example/?x=1&amp;y=2">l</a>');
+    // a decoded reference is still escaped, so it cannot make a tag.
+    expect(markdownToHtmlParts('&lt;b&gt;x&lt;/b&gt; [s](jav&#97;script:alert(1))')).toEqual(['&lt;b&gt;x&lt;/b&gt; s']);
+  });
+
   it('writes lists, tasks, tables and nested quotes in a form that telegram accepts', () => {
     const [html] = markdownToHtmlParts(['- one', '- two **b**', '  - nested', '', '1. first', '', '- [x] done', '', '> quote', '> > inner', '', '| a | b |', '|---|---|', '| 1 | 2 |'].join('\n'));
     expect(html).toContain('• one\n• two <b>b</b>\n   • nested');

@@ -8,6 +8,21 @@ export const escapeHtml = (text: string) => text.replaceAll('&', '&amp;').replac
 const escapeAttribute = (text: string) => escapeHtml(text).replaceAll('"', '&quot;');
 const SAFE_HREF = /^(https?:|mailto:)/i;
 
+// markdown shows a character reference as its character, but marked keeps a named reference in the text of a token.
+// escapeHtml would then show "&amp;" as text. the table has the names that a model writes. other names stay as text.
+const NAMED: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', copy: '©', reg: '®', trade: '™', hellip: '…',
+  mdash: '—', ndash: '–', lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', laquo: '«', raquo: '»', middot: '·',
+  bull: '•', deg: '°', plusmn: '±', times: '×', divide: '÷', euro: '€', pound: '£', larr: '←', rarr: '→', ne: '≠',
+  le: '≤', ge: '≥',
+};
+const decodeReferences = (text: string) =>
+  text.replace(/&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([A-Za-z][A-Za-z0-9]{1,31}));/g, (ref, dec?: string, hex?: string, name?: string) => {
+    if (name !== undefined) return NAMED[name] ?? ref;
+    const code = dec !== undefined ? Number(dec) : parseInt(hex!, 16);
+    return code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff) ? '�' : String.fromCodePoint(code);
+  });
+
 // the text that telegram shows, without tags. its limit counts this text, not the html.
 export const htmlToPlain = (html: string) =>
   html.replace(/<[^>]*>/g, '').replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"').replaceAll('&amp;', '&');
@@ -112,6 +127,9 @@ function inline(token: Token): string {
   const children = 'tokens' in token && Array.isArray(token.tokens) ? token.tokens : undefined;
   const inner = () => (children ? children.map(inline).join('') : escapeHtml('text' in token ? String(token.text) : token.raw));
   switch (token.type) {
+    // a reference in text shows as its character. a code span shows it as text, as markdown does.
+    case 'text':
+      return children ? inner() : escapeHtml(decodeReferences(String(token.text)));
     case 'strong':
       return `<b>${inner()}</b>`;
     case 'em':
@@ -123,9 +141,10 @@ function inline(token: Token): string {
     case 'br':
       return '\n';
     case 'link': {
-      const link = token as Tokens.Link;
-      // a link to another scheme, for example javascript: or tg:, keeps only its text.
-      return SAFE_HREF.test(link.href) ? `<a href="${escapeAttribute(link.href)}">${inner()}</a>` : inner();
+      // a link to another scheme, for example javascript: or tg:, keeps only its text. the check reads the decoded
+      // address, because the address that telegram opens is the decoded one.
+      const href = decodeReferences((token as Tokens.Link).href);
+      return SAFE_HREF.test(href) ? `<a href="${escapeAttribute(href)}">${inner()}</a>` : inner();
     }
     // an image becomes a link, so the telegram servers do not fetch it before the owner clicks. the adapter turns
     // off the link preview, which would fetch the link too.
@@ -146,5 +165,6 @@ function plainText(token: Token): string {
   const children = 'tokens' in token && Array.isArray(token.tokens) ? token.tokens : undefined;
   if (children) return children.map(plainText).join('');
   if (token.type === 'list') return (token as Tokens.List).items.map((item) => item.text).join('\n');
+  if (token.type === 'text') return decodeReferences(String(token.text));
   return 'text' in token ? String(token.text) : token.raw;
 }
