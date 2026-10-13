@@ -182,10 +182,12 @@ const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
 // the scheme, and a tab or a line break inside the url (the parser drops them). a client that gets a whole string as
 // a url also keeps a space or a quote in its path, and so the query after it. so each "http:" starts a candidate that
 // goes to the next "http:", and the parser judges it. the part up to the first space or quote is the url that a chat
-// app makes a link of. text with no scheme counts too when a host name comes before a path, a query or a fragment,
-// because a chat app makes a link of "evil.example/c?d=1".
-const SCHEME = /https?:/gi;
-const BARE_URL = /(?<![\w.:/@\\-])(?:[a-z0-9-]+\.)+[a-z][a-z0-9-]*[/?#][^\s"'<>]*/gi;
+// app makes a link of. text with no scheme counts too when a host name comes before a port, a path, a query or a
+// fragment, because a chat app makes a link of "evil.example/c?d=1". a client also opens ws:, wss: and ftp:, and a
+// page opens "//evil.example/c" with its own scheme.
+const SCHEME = /(?:https?|wss?|ftp):/gi;
+const BARE_URL = /(?<![\w.:/@\\-])(?:[a-z0-9-]+\.)+[a-z][a-z0-9-]*(?::\d{1,5})?[/?#][^\s"'<>]*/gi;
+const RELATIVE_URL = /(?<![\w:/\\])\/\/[^\s"'<>/\\]+[^\s"'<>]*/g;
 const LINK_END = /[\s"'<>]/;
 
 interface UrlCandidate {
@@ -210,17 +212,22 @@ function urlsIn(raw: string): UrlCandidate[] {
     const rest = text.slice(start, starts[i + 1] ?? text.length).trimEnd();
     const end = rest.search(LINK_END);
     add(end < 0 ? rest : rest.slice(0, end), '', true);
-    if (end >= 0) add(rest, '', false);
+    // a field that holds only the url goes to a client as one url, also with a space or a quote in its path, so it
+    // is judged on every signal. a link with words after it in a message is judged only on the query and its kin.
+    if (end >= 0) add(rest, '', rest === text.trim());
   });
   for (const match of text.matchAll(BARE_URL)) add(match[0], 'https://', true);
+  for (const match of text.matchAll(RELATIVE_URL)) add(match[0], 'https:', true);
   return found;
 }
 
 // a url can carry data in its query, its fragment, a long path, or a long label of its host (dns lookups leave the pc
 // too). a short url such as https://example.com/about carries no more than its choice of page. any query counts,
 // because a length limit let a short secret through (24 bytes in base64 fit in 31 characters), and a false match
-// costs only one call of the reviewer. the limits on the path and the labels are a filter, not a proof.
-const PATH_LIMIT = 100;
+// costs only one call of the reviewer. the path limit is near that size for the same reason: a limit of 100 let about
+// 57 bytes through. a long link usually comes from a page or a mail, and such a link passes as read. the limits on the
+// path and the labels are a filter, not a proof.
+const PATH_LIMIT = 48;
 const LABEL_LIMIT = 32;
 // a url that the session already read carries no new data, for example a link from a mail or a search result. the
 // check of each url reads the event log, so a call with many urls goes to the reviewer without the check.
@@ -261,12 +268,17 @@ function dataLeak(input: PolicyInput): string | undefined {
   return unseen ? `sends a url that can carry data (${headOf(unseen.url, 200)}): ${unseen.signal}` : undefined;
 }
 
-// the walk gives each string and number of a list or an object, at any depth. it does not give the keys, but the
-// json text of the whole value still holds them.
+// the walk gives each string and number of a list or an object, at any depth, and each key of an object, because a
+// tool with a free-form record (for example the headers of a request) sends its keys too.
 function eachString(value: unknown, visit: (text: string) => void): void {
   if (typeof value === 'string' || typeof value === 'number') visit(String(value));
   else if (Array.isArray(value)) for (const item of value) eachString(item, visit);
-  else if (typeof value === 'object' && value !== null) for (const item of Object.values(value)) eachString(item, visit);
+  else if (typeof value === 'object' && value !== null) {
+    for (const [key, item] of Object.entries(value)) {
+      visit(key);
+      eachString(item, visit);
+    }
+  }
 }
 
 const percentDecoded = (value: string) =>

