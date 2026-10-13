@@ -57,8 +57,22 @@ function setup(extra: Partial<ToolCallerDeps> = {}) {
   });
   for (let i = 0; i < 2; i++) db.prepare("INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt) VALUES ('r1', 'x', '{}', 'x', 'pending', 'x')").run();
   const allowed = ['echo', 'long', 'email', 'page', 'archive', 'send', 'result_read'];
-  const call = (name: string, input: object = {}, runId = 'r1', id = `${name}-call`) =>
-    caller.call({ id, name, input }, { runId, sessionKey: 'main', allowed, signal: new AbortController().signal });
+  // the helper appends the result event as the agent loop does, because the taint comes from the event log.
+  const call = async (name: string, input: object = {}, runId = 'r1', id = `${name}-call`) => {
+    const output = await caller.call({ id, name, input }, { runId, sessionKey: 'main', allowed, signal: new AbortController().signal });
+    const { untrustedSource, ...shown } = output;
+    appendEvent(
+      db,
+      {
+        sessionKey: 'main',
+        runId,
+        type: 'tool_result',
+        payload: { toolCallId: id, name, content: output.content, isError: output.isError ?? false, ...(untrustedSource ? { untrustedSource } : {}) },
+      },
+      clock(),
+    );
+    return shown;
+  };
   const row = (id: string) => db.prepare('SELECT * FROM tool_calls WHERE toolCallId = ?').get(id) as Record<string, unknown>;
   const decision = (id: unknown) => db.prepare('SELECT * FROM policy_decisions WHERE id = ?').get(Number(id)) as Record<string, unknown>;
   return { db, blobs, call, row, decision, ran, approvals };
@@ -129,7 +143,7 @@ describe('tool caller', () => {
   });
 
   it('wraps untrusted text for the model, keeps the raw text, and taints the session until a reset', async () => {
-    const { db, call, row, blobs, approvals, ran } = setup({
+    const { db, call, row, decision, blobs, approvals, ran } = setup({
       rules: [...BUILTIN_RULES, { id: 'send-ok', tool: 'send', effect: 'allow' } satisfies Rule],
     });
     expect(await call('send', {}, 'r1', 'send-before')).toEqual({ content: '' });
@@ -140,10 +154,14 @@ describe('tool caller', () => {
     const recorded = row('email-call');
     expect(recorded).toMatchObject({ untrustedSource: 'gmail:personal', tainted: 0 });
     expect(blobs.read(String(recorded.rawResultBlob))).toBe(`from: eve\n${LONG}`);
-    expect(sessionTaint(db, 'main')).toEqual(['gmail:personal']);
+    const source = { source: 'gmail:personal', toolName: 'email', runId: 'r1', toolCallId: 'email-call', at: '2026-10-13T03:15:00.000Z' };
+    expect(sessionTaint(db, 'main')).toEqual([source]);
 
     expect(await call('send', {}, 'r2', 'send-after')).toEqual({ content: 'approval #1 is pending' });
     expect(row('send-after')).toMatchObject({ tainted: 1, riskLevel: 'external' });
+    // the decision keeps the taint with the call that caused it, because a later /new clears the session taint.
+    expect(JSON.parse(String(decision(row('send-after').policyDecisionId).taint))).toEqual([source]);
+    expect(decision(row('send-before').policyDecisionId).taint).toBeNull();
     expect(approvals).toEqual(['send']);
     expect(ran.filter((name) => name === 'send')).toHaveLength(1);
 
@@ -153,6 +171,25 @@ describe('tool caller', () => {
 
     appendEvent(db, { sessionKey: 'main', runId: null, type: 'session_reset', payload: {} }, new Date('2026-10-13T04:00:00Z'));
     expect(sessionTaint(db, 'main')).toEqual([]);
+    // after /new the decision still names the run and the call that tainted the session.
+    expect(JSON.parse(String(decision(row('send-after').policyDecisionId).taint))).toEqual([source]);
+  });
+
+  it('orders the taint by the event log, so a clock that moves back does not clear it', async () => {
+    const { db } = setup();
+    appendEvent(db, { sessionKey: 'main', runId: null, type: 'session_reset', payload: {} }, new Date('2026-10-13T12:00:00Z'));
+    // a time sync moved the clock back one minute, and then the agent read an email.
+    appendEvent(
+      db,
+      {
+        sessionKey: 'main',
+        runId: 'r1',
+        type: 'tool_result',
+        payload: { toolCallId: 'c1', name: 'email', content: 'x', isError: false, untrustedSource: 'gmail:personal' },
+      },
+      new Date('2026-10-13T11:59:00Z'),
+    );
+    expect(sessionTaint(db, 'main').map((each) => each.source)).toEqual(['gmail:personal']);
   });
 
   it('does not run a denied call and tells the model why', async () => {

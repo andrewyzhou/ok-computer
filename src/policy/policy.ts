@@ -44,6 +44,16 @@ export const BUILTIN_RULES: Rule[] = LOCAL_WRITE_TOOLS.map((tool) => ({
   note: 'the tool changes only local data',
 }));
 
+// a taint source names the first tool call that brought one untrusted source into a session. the owner can open
+// that call to see why a later action needs approval.
+export interface TaintSource {
+  source: string;
+  toolName: string;
+  runId: string | null;
+  toolCallId: string;
+  at: string;
+}
+
 export interface PolicyInput {
   tool: string;
   risk: Risk;

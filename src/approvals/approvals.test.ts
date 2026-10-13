@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 import type { Button } from '../channels/types.js';
 import { openDb } from '../db/index.js';
-import { listEvents } from '../events/log.js';
+import { appendEvent, listEvents } from '../events/log.js';
 import { silentLogger } from '../observability/logger.js';
 import { createRunQueue } from '../sessions/queue.js';
 import { createTestCaller } from '../../test/harness.js';
@@ -57,11 +57,37 @@ describe('approvals', () => {
     expect(delivered).toEqual([]);
     expect(sent).toEqual([
       {
-        text: 'Approval needed (#1): send_email {"to":"bob@example.com"}',
+        text: [
+          'Approval needed (#1): send_email {"to":"bob@example.com"}',
+          'Why: send_email sends data off the pc or changes an account, so the owner must approve it.',
+        ].join('\n'),
         buttons: [[{ text: 'Approve', data: 'approval:1:approve' }, { text: 'Deny', data: 'approval:1:deny' }]],
       },
     ]);
     expect(getApproval(db, 1)).toMatchObject({ status: 'pending', sessionKey: 'main', toolName: 'send_email' });
+  });
+
+  it('names the reason and the run that tainted the session in the approval message', async () => {
+    const { db, sent, request } = setup();
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('0a1b2c3d-run', 'main', 'automation', 'main', 'completed', 'x')").run();
+    appendEvent(
+      db,
+      {
+        sessionKey: 'main',
+        runId: '0a1b2c3d-run',
+        type: 'tool_result',
+        payload: { toolCallId: 'm1', name: 'mail_read', content: 'x', isError: false, untrustedSource: 'gmail:work' },
+      },
+      new Date('2026-10-12T21:00:00Z'),
+    );
+    await request();
+    expect(sent[0]!.text).toBe(
+      [
+        'Approval needed (#1): send_email {"to":"bob@example.com"}',
+        "Why: the session read untrusted content (gmail:work), so an external action needs the owner's approval.",
+        'Untrusted content in this session: gmail:work (read by mail_read on 2026-10-12 at 14:00 in run 0a1b2c3d).',
+      ].join('\n'),
+    );
   });
 
   it('runs the tool after approval and gives the result to the session', async () => {

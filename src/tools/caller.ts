@@ -3,7 +3,7 @@ import type { Db } from '../db/index.js';
 import type { ToolCall } from '../models/types.js';
 import type { BlobStore } from '../observability/blobs.js';
 import { redactedJson } from '../observability/redact.js';
-import { decide, type ReviewResult, type Reviewer, type Risk, type Rule } from '../policy/policy.js';
+import { decide, type ReviewResult, type Reviewer, type Risk, type Rule, type TaintSource } from '../policy/policy.js';
 import { decisionOfApproval, recordDecision, sessionTaint } from '../policy/store.js';
 import type { Clock } from '../time.js';
 import type { Tool, ToolContext, ToolOutput, ToolRegistry } from './registry.js';
@@ -16,8 +16,19 @@ export interface CallContext {
   signal: AbortSignal;
 }
 
+// why gives the owner the reason of the policy and the untrusted sources that the session read.
+export interface ApprovalWhy {
+  reason: string;
+  taint: TaintSource[];
+}
+
 // the approval flow asks the owner. its output tells the model that the call waits for the owner.
-export type RequestApproval = (tool: Tool, input: unknown, ctx: ToolContext) => Promise<{ approvalId: number; output: ToolOutput }>;
+export type RequestApproval = (
+  tool: Tool,
+  input: unknown,
+  ctx: ToolContext,
+  why: ApprovalWhy,
+) => Promise<{ approvalId: number; output: ToolOutput }>;
 
 export interface ToolCallerDeps {
   db: Db;
@@ -52,6 +63,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
   const finish = (runId: string, call: ToolCall, output: ToolOutput, started: number, trace: Trace): ToolOutput => {
     const view = modelView(output, deps.newHandle ?? newHandle);
     const result = { content: view.content, ...(output.isError ? { isError: true } : {}) };
+    const untrusted = output.untrustedSource ? { untrustedSource: output.untrustedSource } : {};
     db.prepare(
       `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, riskLevel,
          policyDecisionId, tainted, untrustedSource, rawResultBlob, truncated, resultHandle)
@@ -74,7 +86,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       view.truncated ? 1 : 0,
       view.handle ?? null,
     );
-    return result;
+    return { ...result, ...untrusted };
   };
 
   return {
@@ -85,16 +97,20 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       if (!resolved.ok) return finish(ctx.runId, call, resolved.output, started, {});
       const { tool, input } = resolved;
       const taint = sessionTaint(db, ctx.sessionKey);
+      const sources = taint.map((each) => each.source);
       const verdict = decide(
-        { tool: tool.name, risk: tool.risk, alwaysApprove: tool.needsApproval === true, input, sessionKey: ctx.sessionKey, taint },
+        { tool: tool.name, risk: tool.risk, alwaysApprove: tool.needsApproval === true, input, sessionKey: ctx.sessionKey, taint: sources },
         deps.rules,
       );
+      // without a reviewer model the owner decides a review. the decision row and the owner both get this reason.
+      const reason =
+        verdict.decision === 'review' && !deps.reviewer ? `${verdict.reason}. there is no reviewer model yet, so the owner decides` : verdict.reason;
 
       let review: ReviewResult | undefined;
       let approvalId: number | undefined;
       let held: ToolOutput | undefined;
       const askOwner = async () => {
-        const requested = await deps.requestApproval(tool, input, toolCtx);
+        const requested = await deps.requestApproval(tool, input, toolCtx, { reason, taint });
         approvalId = requested.approvalId;
         held = requested.output;
       };
@@ -109,7 +125,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
             sessionKey: ctx.sessionKey,
             tool: tool.name, input, risk: tool.risk,
             reason: verdict.reason,
-            taint,
+            taint: sources,
           });
           if (review.verdict === 'hold') {
             held = { content: `the reviewer held ${tool.name}, and it did not run: ${review.reason}`, isError: true };
@@ -122,9 +138,8 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         db,
         {
           ...verdict,
-          ...(verdict.decision === 'review' && !deps.reviewer
-            ? { reason: `${verdict.reason}. there is no reviewer model yet, so the owner decides` }
-            : {}),
+          reason,
+          taint,
           runId: ctx.runId,
           toolCallId: call.id,
           toolName: tool.name,

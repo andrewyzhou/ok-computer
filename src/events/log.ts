@@ -1,15 +1,18 @@
 import type { Db } from '../db/index.js';
 import type { AssistantTurn } from '../models/types.js';
 import { redactedJson } from '../observability/redact.js';
+import type { TaintSource } from '../policy/policy.js';
 
 export interface EventPayloads {
   user_message: { text: string; channel: string; chatId: string };
   assistant_message: AssistantTurn;
-  tool_result: { toolCallId: string; name: string; content: string; isError: boolean };
+  // untrustedSource names the outside source of the content. such a result taints the session.
+  tool_result: { toolCallId: string; name: string; content: string; isError: boolean; untrustedSource?: string };
   // the volatile part of the system prompt, recorded at the start of each run.
   context: { text: string };
-  // a message from the system, not from the owner: an automation prompt, a check-in, or an approval result.
-  system_event: { text: string };
+  // a message from the system, not from the owner: an automation prompt, a check-in, or an approval result. taint
+  // lists the untrusted sources behind the text, for example the sources that an automation run read.
+  system_event: { text: string; taint?: TaintSource[] };
   note: { text: string };
   // the summary replaces the events before firstKeptEventId. clearToolResults freezes the trim of the kept events.
   compaction: {

@@ -7,6 +7,8 @@ import { appendEvent } from '../events/log.js';
 import { checkinPrompt, writeDayResults } from '../goals/routine.js';
 import { getGoal, listGoals, startCheckin } from '../goals/store.js';
 import type { Logger } from '../observability/logger.js';
+import type { TaintSource } from '../policy/policy.js';
+import { sessionTaint } from '../policy/store.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
 import type { RunQueue } from '../sessions/queue.js';
 import { MAIN_SESSION, MAIN_TOOLS, NO_REPLY } from '../sessions/router.js';
@@ -88,15 +90,17 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
     );
     if (hasText(result)) {
       await owner.send(result.text);
-      // the main session gets a copy, so the agent knows what the owner answers to.
-      await appendToMain(`The automation "${automation.name}" sent this message to the owner:\n${result.text}`);
+      // the main session gets a copy, so the agent knows what the owner answers to. the text can repeat untrusted
+      // content that the run read, so the copy carries the taint of the run's session.
+      await appendToMain(`The automation "${automation.name}" sent this message to the owner:\n${result.text}`, sessionTaint(db, sessionKey));
     }
     return toJob(result);
   };
 
-  const appendToMain = (text: string) =>
+  const appendToMain = (text: string, taint: TaintSource[] = []) =>
     queue.enqueue(MAIN_SESSION, async () => {
-      appendEvent(db, { sessionKey: MAIN_SESSION, runId: null, type: 'system_event', payload: { text } }, clock());
+      const payload = { text, ...(taint.length ? { taint } : {}) };
+      appendEvent(db, { sessionKey: MAIN_SESSION, runId: null, type: 'system_event', payload }, clock());
     });
 
   return async (automation) => {

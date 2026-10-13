@@ -6,6 +6,7 @@ import type { Db } from '../db/index.js';
 import { getSetting, setSetting } from '../db/settings.js';
 import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
+import { sessionTaint } from '../policy/store.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
 import type { RunQueue } from '../sessions/queue.js';
 import { MAIN_SESSION } from '../sessions/router.js';
@@ -168,6 +169,8 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
     )[0];
     if (answer?.notify && answer.text) {
       await owner.send(answer.text);
+      // the notification can repeat untrusted content that the heartbeat read, so it carries that taint.
+      const taint = sessionTaint(db, sessionKey);
       await queue.enqueue(MAIN_SESSION, async () => {
         appendEvent(
           db,
@@ -175,7 +178,7 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
             sessionKey: MAIN_SESSION,
             runId: null,
             type: 'system_event',
-            payload: { text: `The heartbeat sent this message to the owner:\n${answer.text}` },
+            payload: { text: `The heartbeat sent this message to the owner:\n${answer.text}`, ...(taint.length ? { taint } : {}) },
           },
           clock(),
         );

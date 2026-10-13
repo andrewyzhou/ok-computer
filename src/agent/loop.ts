@@ -165,7 +165,13 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
         const output = outputs[i]!;
         append({
           type: 'tool_result',
-          payload: { toolCallId: call.id, name: call.name, content: output.content, isError: output.isError ?? false },
+          payload: {
+            toolCallId: call.id,
+            name: call.name,
+            content: output.content,
+            isError: output.isError ?? false,
+            ...(output.untrustedSource ? { untrustedSource: output.untrustedSource } : {}),
+          },
         });
       });
       if (abort.signal.aborted) return finish('aborted', '', abortReason(abort.signal));
