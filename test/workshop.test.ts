@@ -57,13 +57,19 @@ describe('skill workshop', () => {
     expect(t.rows("SELECT json_extract(payload, '$.type') AS type, slot FROM automations WHERE name = 'skills: daily review'")).toEqual([
       { type: 'workshop', slot: 'consolidation' },
     ]);
+    mkdirSync(join(t.skillsDir, 'weekly'), { recursive: true });
+    writeFileSync(join(t.skillsDir, 'weekly', 'SKILL.md'), '---\nname: weekly-review\ndescription: Review the week.\n---\nsteps');
 
     await t.at(pdt('09:00', '2026-10-13'));
     const review = t.model.calls[3]!;
     expect(review.system).toContain(WORKSHOP_INSTRUCTIONS);
+    // the review sees the skills that exist, so it can change one instead of adding a second.
+    expect(review.system).toContain('- weekly-review: Review the week.');
+    const [workshop] = t.rows("SELECT sessionKey FROM runs WHERE sessionKey LIKE 'workshop:%'") as Array<{ sessionKey: string }>;
+    expect((await t.app.contextView(workshop!.sessionKey)).tools.map((tool) => tool.name)).toEqual(['skill_read', 'skill_write']);
     expect(review.tools.map((tool) => tool.name)).toEqual(['skill_read', 'skill_write']);
     const input = JSON.stringify(review.messages);
-    expect(input).toContain('Skill review of 2026-10-12: 1 long or corrected tasks.');
+    expect(input).toContain('Skill review of 2026-10-12: 1 long or corrected task.');
     expect(input).toContain('long: 6 tool calls; the next owner message corrects it; the owner corrects the run before');
     expect(input).toContain('owner: no, next time always use the work calendar');
 
@@ -80,7 +86,7 @@ describe('skill workshop', () => {
     await t.app.resolveApproval(approval!.id, 'approve', 'button');
     await t.settle();
     expect(readFileSync(t.skillFile, 'utf8')).toBe(`---\nname: calendar-booking\ndescription: Book an event on the owner calendar.\n---\n\n${draft.body}\n`);
-    expect(loadSkills(t.skillsDir).map((skill) => skill.name)).toEqual(['calendar-booking']);
+    expect(loadSkills(t.skillsDir).map((skill) => skill.name)).toEqual(['calendar-booking', 'weekly-review']);
     expect(t.rows("SELECT name, isError FROM tool_calls WHERE toolCallId = 'approval-1'")).toEqual([{ name: 'skill_write', isError: 0 }]);
   });
 
@@ -111,7 +117,11 @@ describe('skill workshop', () => {
   it('never overwrites a skill with a new skill, and keeps the old text of a change in the trace', async () => {
     const t = setup([
       ...task,
-      toolStep({ id: 'w1', name: 'skill_write', input: draft }, { id: 'w2', name: 'skill_write', input: { ...draft, name: 'weekly-review', replaces: true, body: 'new steps' } }),
+      toolStep(
+        { id: 'w1', name: 'skill_write', input: draft },
+        { id: 'w2', name: 'skill_write', input: { ...draft, name: 'weekly-review', replaces: true, body: 'new steps' } },
+        { id: 'w3', name: 'skill_write', input: { ...draft, name: 'deleted-skill', replaces: true } },
+      ),
       textStep('NO_REPLY'),
     ]);
     await runTask(t);
@@ -125,5 +135,8 @@ describe('skill workshop', () => {
     expect(readFileSync(t.skillFile, 'utf8')).toContain('my steps');
     expect(await t.app.resolveApproval(2, 'approve', 'button')).toContain('changed the skill weekly-review. The old text was:\n---\nname: weekly-review');
     expect(readFileSync(join(t.skillsDir, 'weekly', 'SKILL.md'), 'utf8')).toContain('new steps');
+    // the owner deleted the skill that the change was for, so the change does not make it again.
+    expect(await t.app.resolveApproval(3, 'approve', 'button')).toContain('the skill deleted-skill does not exist now, so the change was not written');
+    expect(existsSync(join(t.skillsDir, 'deleted-skill'))).toBe(false);
   });
 });

@@ -23,8 +23,9 @@ export const WORKSHOP_PREFIX = 'workshop:';
 export const WORKSHOP_TOOLS: readonly string[] = ['skill_read', 'skill_write'];
 // a task with this many tool calls is long. a skill can then save the owner the same work next time.
 export const LONG_TASK_CALLS = 6;
-// the card shows the full body, and one telegram message holds 4,096 characters.
-export const BODY_LIMIT = 3000;
+// the card shows the full body with a bar on each line, and one telegram message holds 4,096 characters. a body of
+// short lines at this limit and the other fields at their limits give a card of about 4,000 characters.
+export const BODY_LIMIT = 2500;
 const REVIEW_AT = '09:00';
 const MAX_TASKS = 5;
 const TASK_CHARS = 12_000;
@@ -207,7 +208,7 @@ export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => 
     const shown = tasks.slice(0, MAX_TASKS);
     const left = tasks.length - shown.length;
     const text = [
-      `Skill review of ${day}: ${tasks.length} long or corrected tasks.${left ? ` The last ${left} are left out.` : ''}`,
+      `Skill review of ${day}: ${tasks.length} long or corrected ${tasks.length === 1 ? 'task' : 'tasks'}.${left ? ` The last ${left} are left out.` : ''}`,
       ...shown.map((task, i) => taskText(task, i + 1)),
     ].join('\n\n');
     const taint = [...new Map(shown.flatMap((task) => task.taint).map((each) => [each.source, each])).values()];
