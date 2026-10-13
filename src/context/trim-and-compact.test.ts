@@ -14,7 +14,7 @@ import { silentLogger } from '../observability/logger.js';
 import { nowTool } from '../tools/now.js';
 import { createToolRegistry } from '../tools/registry.js';
 import { fullHistory } from './full-history.js';
-import { SUMMARY_HEADINGS, SUMMARY_PROMPT } from './summary.js';
+import { DROPPED_HEADING, findIdentifiers, SUMMARY_HEADINGS, SUMMARY_PROMPT } from './summary.js';
 import { createTrimAndCompact, FLUSH_DONE, FLUSH_PROMPT } from './trim-and-compact.js';
 
 const WINDOW = 3000;
@@ -184,6 +184,31 @@ describe('trim-and-compact strategy', () => {
     expect(JSON.stringify(next.messages.slice(0, answer.messages.length))).toBe(JSON.stringify(answer.messages));
     expect(next.system).toBe(answer.system);
     expect(t.model.calls).toHaveLength(5);
+  });
+
+  it('flushes memory again before the second compaction', async () => {
+    // the summary lists every identifier of the session as dropped, so it always passes validation.
+    const summaryStep: FakeStep = async () =>
+      fakeResponse({ text: `${validSummary}\n${DROPPED_HEADING}\n${findIdentifiers(t.events()).join(', ')}` });
+    const t = setup([...flushSteps, summaryStep, textStep('Next is packing.'), ...flushSteps, summaryStep, textStep('Done.')]);
+    seed(t.add);
+    await t.run('What is next?');
+    t.add([user(`More background. ${'blah '.repeat(2000)}`), assistant('Noted.'), user('Window seats are fine too.'), assistant('Got it.')]);
+    await t.run('And then?');
+
+    const flushes = t.events().filter((e) => e.type === 'system_event' && e.payload.text === FLUSH_PROMPT);
+    expect(flushes).toHaveLength(2);
+    expect(t.events().filter((e) => e.type === 'compaction')).toHaveLength(2);
+    expect(t.db.prepare('SELECT slot FROM model_calls ORDER BY id').all().map((r) => r.slot)).toEqual([
+      'main',
+      'main',
+      'compaction',
+      'main',
+      'main',
+      'main',
+      'compaction',
+      'main',
+    ]);
   });
 
   it('does not compact when every summary fails validation, and continues with trimming only', async () => {

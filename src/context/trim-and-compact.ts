@@ -100,8 +100,13 @@ export function createTrimAndCompact(deps: TrimAndCompactDeps): ContextStrategy 
 
   const compact = async (input: ContextInput, hooks: CompactionHooks, tokensBefore: number): Promise<boolean> => {
     let events = input.events;
-    const flushed = currentView(events).live.some(
-      (event) => event.type === 'system_event' && event.payload.text === FLUSH_PROMPT,
+    // the kept events of the last compaction can hold the flush that ran before it. only a newer flush counts.
+    const before = currentView(events);
+    const flushed = before.live.some(
+      (event) =>
+        event.type === 'system_event' &&
+        event.payload.text === FLUSH_PROMPT &&
+        (!before.compaction || event.id > before.compaction.id),
     );
     if (!flushed && input.tools.some((tool) => tool.name === 'memory_write')) {
       const result = await hooks.flush(FLUSH_PROMPT);
