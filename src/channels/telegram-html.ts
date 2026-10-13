@@ -127,7 +127,8 @@ function inline(token: Token): string {
       // a link to another scheme, for example javascript: or tg:, keeps only its text.
       return SAFE_HREF.test(link.href) ? `<a href="${escapeAttribute(link.href)}">${inner()}</a>` : inner();
     }
-    // an image becomes a link, so the telegram servers do not fetch it before the owner clicks.
+    // an image becomes a link, so the telegram servers do not fetch it before the owner clicks. the adapter turns
+    // off the link preview, which would fetch the link too.
     case 'image': {
       const image = token as Tokens.Image;
       const text = escapeHtml(image.text || image.href);

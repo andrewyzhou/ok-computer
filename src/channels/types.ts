@@ -35,7 +35,10 @@ export interface ReplyProgress {
   // activity gives the names of the tools that run now, or undefined when none runs.
   activity(tools: string | undefined): void;
   // end stops the progress. the router calls it before the reply goes out.
-  end(ok: boolean): Promise<void>;
+  end(): Promise<void>;
+  // done shows the result on the owner's message after the reply went out or failed. it does not wait, so a slow
+  // channel never holds the reply or the next message.
+  done(ok: boolean): void;
 }
 
 export interface ChannelAdapter {

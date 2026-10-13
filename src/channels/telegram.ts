@@ -115,7 +115,9 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
   ) => {
     let messageId = '';
     for (const [i, part] of parts.entries()) {
-      const markup = i === parts.length - 1 && keyboard ? { reply_markup: keyboard } : {};
+      // a link preview makes the telegram servers fetch a url without a click. the model chose the urls in a reply
+      // and in the input of a card, and a url can carry data in its query.
+      const markup = { link_preview_options: { is_disabled: true }, ...(i === parts.length - 1 && keyboard ? { reply_markup: keyboard } : {}) };
       const html = part.html;
       let sent =
         html !== undefined
@@ -294,13 +296,15 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
         },
         // no draft goes out after the end, so a stale draft never shows after the reply. a slow draft does not hold
         // the reply for long.
-        async end(ok) {
+        async end() {
           clearInterval(timer);
           stops.delete(draftId);
           let wait: NodeJS.Timeout | undefined;
           await Promise.race([inFlight, new Promise<void>((resolve) => (wait = setTimeout(resolve, DRAFT_WAIT_MS)))]);
           clearTimeout(wait);
-          await react(ok ? DONE : undefined);
+        },
+        done(ok) {
+          void react(ok ? DONE : undefined);
         },
       };
     },

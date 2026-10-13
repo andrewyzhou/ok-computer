@@ -102,10 +102,42 @@ describe('telegram v2 acceptance', () => {
     // no draft goes out after the saved message.
     const methods = t.telegram.calls.map((c) => c.method);
     expect(methods.lastIndexOf('sendMessageDraft')).toBeLessThan(methods.indexOf('sendRichMessage'));
+    await until(() => of(t, 'setMessageReaction').length === 2);
     expect(of(t, 'setMessageReaction').map((r) => r.reaction)).toEqual([[{ type: 'emoji', emoji: '👀' }], [{ type: 'emoji', emoji: '👌' }]]);
     // the event log keeps the full reply, as it did without streaming.
     const saved = listEvents(t.db, 'main').filter((e) => e.type === 'assistant_message');
     expect((saved[0]!.payload as { text: string }).text).toBe(full);
+  });
+
+  // the done reaction once came before the reply, and the router waited for it. one hung reaction then held the
+  // reply, the next message and the stop of the app, and a reply that failed still showed the done mark.
+  it('reacts after the reply without waiting for the reaction, and shows no done mark when the reply failed', async () => {
+    const t = setup([textStep('First.'), textStep('Second.')]);
+    apps.push(t);
+    const held: Array<() => void> = [];
+    t.telegram.bot.api.config.use(async (prev, method, payload, signal) => {
+      const reaction = (payload as { reaction?: Array<{ emoji?: string }> }).reaction;
+      if (method === 'setMessageReaction' && reaction?.[0]?.emoji === '👌') await new Promise<void>((resolve) => held.push(resolve));
+      return prev(method, payload, signal);
+    });
+    await t.app.start();
+    owner(t, 'one');
+    await until(() => of(t, 'sendRichMessage').length === 1);
+    owner(t, 'two');
+    await until(() => of(t, 'sendRichMessage').length === 2);
+    await t.app.idle();
+    expect(held).toHaveLength(2);
+    held.splice(0).forEach((release) => release());
+    await until(() => of(t, 'setMessageReaction').filter((r) => (r.reaction as unknown[]).length > 0).length === 4);
+
+    // telegram refuses the reply with a server error, so the reply is not sent and the mark of the message goes away.
+    const failing = setup([textStep('Lost.')]);
+    apps.push(failing);
+    failing.telegram.refuse((c) => (c.method === 'sendRichMessage' ? 500 : false));
+    await failing.app.start();
+    owner(failing, 'three');
+    await until(() => of(failing, 'setMessageReaction').length === 2);
+    expect(of(failing, 'setMessageReaction').map((r) => r.reaction)).toEqual([[{ type: 'emoji', emoji: '👀' }], []]);
   });
 
   it('stops the run when the owner presses stop on the draft, and ignores a stop from another chat', async () => {
@@ -134,6 +166,7 @@ describe('telegram v2 acceptance', () => {
 
     expect(t.rows("SELECT status, error FROM runs WHERE sessionKey = 'main'")).toEqual([{ status: 'aborted', error: 'the run was aborted' }]);
     expect(of(t, 'sendRichMessage')).toEqual([]);
+    await until(() => of(t, 'setMessageReaction').length === 2);
     expect(of(t, 'setMessageReaction').map((r) => r.reaction)).toEqual([[{ type: 'emoji', emoji: '👀' }], []]);
     const events = listEvents(t.db, 'main');
     expect(events.at(-1)).toMatchObject({ type: 'system_event', payload: { text: 'The owner stopped the previous reply before it was done.' } });
@@ -216,6 +249,19 @@ describe('telegram v2 acceptance', () => {
     ]);
     expect(t.model.calls).toHaveLength(0);
     expect(listEvents(t.db, 'main')).toEqual([]);
+  });
+
+  // without DASHBOARD_TOKEN the dashboard answers the public name with a 403, so the commands must not link to it.
+  it('links to the local dashboard when dashboard.publicUrl is set but no token is', async () => {
+    const t = setup([], { config: { dashboard: { publicUrl: 'https://okc-pc.example.ts.net' } } });
+    apps.push(t);
+    await t.app.start();
+    for (const command of ['/status', '/dashboard']) owner(t, command);
+    await until(() => of(t, 'sendMessage').length === 2);
+    const texts = of(t, 'sendMessage').map((m) => String(m.text));
+    expect(texts[0]).toContain('Dashboard: http://127.0.0.1:4317');
+    expect(texts[1]).toContain('The dashboard: http://127.0.0.1:4317');
+    expect(texts.join('\n')).not.toContain('ts.net');
   });
 
   it('sends a one-time sign-in link for the dashboard over tailscale', async () => {

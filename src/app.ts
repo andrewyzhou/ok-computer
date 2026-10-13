@@ -278,7 +278,9 @@ export function createApp(deps: AppDeps): App {
       db,
       clock,
       timeZone: config.timeZone,
-      dashboardUrl: config.dashboard.publicUrl ?? `http://127.0.0.1:${config.dashboard.port}`,
+      // the dashboard accepts the public name only with a token, and the sign-in codes exist only then. without them,
+      // a link to the public name gets a 403.
+      dashboardUrl: (deps.loginCodes && config.dashboard.publicUrl) || `http://127.0.0.1:${config.dashboard.port}`,
       ...(config.dashboard.publicUrl && deps.loginCodes ? { signInLink: signInLink(config.dashboard.publicUrl, deps.loginCodes) } : {}),
       approvalCard: approvals.card,
       integrations: () => integrations.status(),

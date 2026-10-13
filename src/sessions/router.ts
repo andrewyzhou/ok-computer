@@ -84,11 +84,15 @@ export function createRouter(deps: RouterDeps): Router {
       const send = async (card: Card & { markdown?: boolean; runId?: string }) => {
         try {
           await channel.send({ chatId: message.chatId, ...card });
+          return true;
         } catch (err) {
           logger.error('reply failed', { channel: channel.id, err });
+          return false;
         }
       };
-      const reply = (text: string) => send({ text });
+      const reply = async (text: string) => {
+        await send({ text });
+      };
 
       // the text of an unknown sender never reaches the model or the event log.
       if (!deps.isOwner(message)) {
@@ -139,7 +143,8 @@ export function createRouter(deps: RouterDeps): Router {
         if (command[1]!.toLowerCase() === 'deny') return resolve(deps.approvals, id, 'deny', 'command');
         // the assistant can send a false card with the id of a real approval. the stored card comes back with its
         // buttons, so the owner sees the real input before the call runs.
-        return send(deps.approvalCard(id));
+        await send(deps.approvalCard(id));
+        return;
       }
 
       // the user message goes into the log when its run starts. if it went in earlier, it could land between a
@@ -182,22 +187,28 @@ export function createRouter(deps: RouterDeps): Router {
           });
         } finally {
           current = undefined;
-          await progress?.end(result?.status === 'completed');
+          await progress?.end();
+          // a run that threw sends no reply.
+          if (!result) progress?.done(false);
         }
         // the model did not see that its reply was cut, so the session says so. the next run then does not take the
         // owner's next message as an answer to a reply that never came.
         if (stop.signal.aborted && result.status === 'aborted') {
+          progress?.done(false);
           appendEvent(db, { sessionKey: MAIN_SESSION, runId: null, type: 'system_event', payload: { text: 'The owner stopped the previous reply before it was done.' } }, clock());
           await reply(run.stoppedWhile ? `Stopped while ${run.stoppedWhile} ran. Its effect is unknown.` : 'Stopped.');
           return;
         }
         if (result.status !== 'completed') {
+          progress?.done(false);
           await reply(`Sorry, I could not finish that: ${result.error ?? result.status}.`);
           return;
         }
         const text = result.text.trim();
         if (!text) logger.warn('run completed without text', { runId: result.runId });
-        if (text && text !== NO_REPLY) await send({ text: result.text, markdown: true, runId: result.runId });
+        const sent = text && text !== NO_REPLY ? await send({ text: result.text, markdown: true, runId: result.runId }) : true;
+        // the done mark shows only for a reply that went out.
+        progress?.done(sent);
       });
     },
   };

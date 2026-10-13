@@ -139,11 +139,11 @@ describe('telegram formats', () => {
     await channel.send({ chatId: '777', text, markdown: true, buttons });
     expect(methods(fake)).toEqual(['sendRichMessage', 'sendMessage', 'sendMessage', 'sendMessage']);
     const [, first, refused, plain] = fake.calls.map((c) => c.payload);
-    expect(first).toMatchObject({ parse_mode: 'HTML', text: expect.stringMatching(/^<b>First<\/b> part\.\n\nword word/) });
+    expect(first).toMatchObject({ parse_mode: 'HTML', link_preview_options: { is_disabled: true }, text: expect.stringMatching(/^<b>First<\/b> part\.\n\nword word/) });
     expect(first).not.toHaveProperty('reply_markup');
     expect(refused).toMatchObject({ parse_mode: 'HTML', text: `<i>last</i> part ${tail}` });
     // the plain part has no tags and no parse mode, and it keeps the buttons of the last part.
-    expect(plain).toEqual({ chat_id: '777', text: `last part ${tail}`, reply_markup: { inline_keyboard: [[{ text: 'OK', callback_data: signed('x') }]] } });
+    expect(plain).toEqual({ chat_id: '777', text: `last part ${tail}`, link_preview_options: { is_disabled: true }, reply_markup: { inline_keyboard: [[{ text: 'OK', callback_data: signed('x') }]] } });
   });
 
   it('falls back for each rich part on its own, never sends a part twice, and logs one line for the send', async () => {
@@ -190,7 +190,7 @@ describe('telegram formats', () => {
     const fake = createFakeTelegram();
     const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
     await channel.send({ chatId: '777', text: 'text: "[click](https://evil.example) **now**"' });
-    expect(fake.calls).toEqual([{ method: 'sendMessage', payload: { chat_id: '777', text: 'text: "[click](https://evil.example) **now**"' } }]);
+    expect(fake.calls).toEqual([{ method: 'sendMessage', payload: { chat_id: '777', text: 'text: "[click](https://evil.example) **now**"', link_preview_options: { is_disabled: true } } }]);
   });
 
   it('puts the details of a card in an expandable quote, escaped, and cuts long details with a note', async () => {
@@ -213,7 +213,7 @@ describe('telegram formats', () => {
 
     fake.refuse((c) => (c.payload.parse_mode === 'HTML' ? 400 : false));
     await channel.send({ chatId: '777', text: 'Card', details: '{ "a": 1 }' });
-    expect(fake.calls.at(-1)!.payload).toEqual({ chat_id: '777', text: 'Card\n\n{ "a": 1 }' });
+    expect(fake.calls.at(-1)!.payload).toEqual({ chat_id: '777', text: 'Card\n\n{ "a": 1 }', link_preview_options: { is_disabled: true } });
   });
 });
 
@@ -244,7 +244,8 @@ describe('telegram progress', () => {
     progress.activity(undefined);
     progress.text('Let me look. You are free.');
     await vi.advanceTimersByTimeAsync(2000);
-    await progress.end(true);
+    await progress.end();
+    progress.done(true);
     expect(texts(fake, 'sendMessageDraft')).toEqual(['', '⏳ calendar_list', 'Let me look.\n\n⏳ calendar_list', 'Let me look. You are free.']);
     expect(fake.calls.filter((c) => c.method === 'sendChatAction')).toHaveLength(1);
     expect(fake.calls.filter((c) => c.method === 'setMessageReaction').map((c) => c.payload.reaction)).toEqual([
@@ -261,18 +262,18 @@ describe('telegram progress', () => {
     const progress = channel.progress!(owner, () => {});
     await vi.advanceTimersByTimeAsync(0);
     let ended = false;
-    const end = progress.end(true).then(() => (ended = true));
+    const end = progress.end().then(() => (ended = true));
     await vi.advanceTimersByTimeAsync(1000);
     expect(ended).toBe(false);
     waiting.shift()!();
     await end;
-    // the reaction comes after the draft, so a reply sent after end() comes after the draft too.
-    expect(fake.calls.map((c) => c.method)).toEqual(['setMessageReaction', 'sendMessageDraft', 'setMessageReaction']);
+    // the draft finished before end() returned, so a reply sent after end() comes after the draft too.
+    expect(fake.calls.map((c) => c.method)).toEqual(['setMessageReaction', 'sendMessageDraft']);
 
     const stuck = channel.progress!(owner, () => {});
     await vi.advanceTimersByTimeAsync(0);
     let done = false;
-    const stuckEnd = stuck.end(false).then(() => (done = true));
+    const stuckEnd = stuck.end().then(() => (done = true));
     await vi.advanceTimersByTimeAsync(1999);
     expect(done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
@@ -290,7 +291,8 @@ describe('telegram progress', () => {
       progress.text(`text ${i}`);
       await vi.advanceTimersByTimeAsync(1000);
     }
-    await progress.end(true);
+    await progress.end();
+    progress.done(true);
     expect(fake.calls.filter((c) => c.method === 'sendMessageDraft')).toHaveLength(3);
     expect(fake.calls.filter((c) => c.method === 'sendChatAction')).toHaveLength(2);
 
@@ -303,7 +305,7 @@ describe('telegram progress', () => {
       other.text(`text ${i}`);
       await vi.advanceTimersByTimeAsync(1000);
     }
-    await other.end(true);
+    await other.end();
     expect(flaky.calls.filter((c) => c.method === 'sendMessageDraft')).toHaveLength(9);
   });
 });
