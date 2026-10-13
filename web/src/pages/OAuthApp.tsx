@@ -3,19 +3,31 @@ import type { IntegrationSummary } from '../../../src/dashboard/types';
 import { send } from '../api';
 import { Panel } from '../components';
 
-// the oauth app of an integration: the redirect url to give the app, and the box for the address of the failed
-// callback page, for a server that accepts only an https redirect.
+// the oauth app of an integration: the redirect url to give the app, a form that stores a pre-registered client, and
+// the box for the address of the failed callback page, for a server that accepts only an https redirect.
 export function OAuthApp({ integration, onDone }: { integration: IntegrationSummary; onDone: () => void }) {
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
   const [pasted, setPasted] = useState('');
   const [notice, setNotice] = useState('');
   const app = integration.oauthApp;
   if (!app) return null;
+  const done = (text: string) => {
+    setNotice(text);
+    onDone();
+  };
+  const store = () =>
+    send<{ stored: true }>(`/api/integrations/${encodeURIComponent(integration.id)}/client`, 'POST', {
+      client_id: clientId.trim(),
+      ...(clientSecret.trim() ? { client_secret: clientSecret.trim() } : {}),
+    })
+      .then(() => done('Stored in the credential manager. Press Connect to sign in.'), (err: Error) => setNotice(err.message))
+      .finally(() => setClientSecret(''));
   const finish = () =>
     send<{ text: string }>('/api/integrations/callback', 'POST', { url: pasted }).then(
       (result) => {
-        setNotice(result.text);
         setPasted('');
-        onDone();
+        done(result.text);
       },
       (err: Error) => setNotice(err.message),
     );
@@ -24,6 +36,28 @@ export function OAuthApp({ integration, onDone }: { integration: IntegrationSumm
       <p>
         The app must allow this redirect URL: <code>{app.redirectUrl}</code>
       </p>
+      {app.clientRef ? (
+        <>
+          <p className="muted">
+            The client of the app is stored in the Windows Credential Manager as <code>{app.clientRef}.ok-computer</code>. This page never shows it. Store
+            it again to replace it.
+          </p>
+          <div className="row">
+            <input aria-label="client id" placeholder="client id" value={clientId} onChange={(event) => setClientId(event.target.value)} />
+            <input
+              aria-label="client secret"
+              placeholder="client secret"
+              type="password"
+              autoComplete="off"
+              value={clientSecret}
+              onChange={(event) => setClientSecret(event.target.value)}
+            />
+            <button type="button" disabled={!clientId.trim()} onClick={store}>
+              Store
+            </button>
+          </div>
+        </>
+      ) : null}
       {app.callback === 'paste' ? (
         <>
           <p className="muted">

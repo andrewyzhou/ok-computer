@@ -5,8 +5,8 @@ import type { BlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
 import type { SetTimer } from '../scheduler/scheduler.js';
 import { localTime, type Clock } from '../time.js';
-import { TOOL_CALL, type Explanation, type Tool } from '../tools/registry.js';
-import { redact, redactValue } from '../observability/redact.js';
+import { errorText, TOOL_CALL, type Explanation, type Tool } from '../tools/registry.js';
+import { redact, redactValue, registerSecret } from '../observability/redact.js';
 import type { Risk } from '../policy/policy.js';
 import { createCatalogStore, riskFrom, riskOf, type Catalog, type CatalogTool } from './catalog.js';
 import { sessionProfile, type IntegrationEntry } from './config.js';
@@ -91,6 +91,9 @@ export interface Integrations {
   // finishSignIn takes the address of the callback page that the owner pasted, for a server that accepts only an https
   // redirect. the state in the address selects the flow, as in the loopback callback.
   finishSignIn(pasted: string): Promise<{ ok: boolean; text: string }>;
+  // storeClient saves a pre-registered oauth client (for example a slack app) under the clientRef of its entry. the app
+  // writes the json itself, because a terminal drops the quotes of json that it gives to cmdkey.
+  storeClient(id: string, client: { client_id: string; client_secret?: string }): Promise<{ stored: true } | { error: string }>;
 }
 
 export function createIntegrations(deps: IntegrationsDeps): Integrations {
@@ -402,6 +405,19 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       void deps.oauth.closeIfIdle();
       return { ok: done.status === 200, text: done.text };
     },
+    async storeClient(id, client) {
+      const entry = byId.get(id);
+      const ref = entry?.kind === 'mcp-http' && entry.auth?.type === 'oauth' ? entry.auth.clientRef : undefined;
+      if (!ref) return { error: `${id} has no auth.clientRef in okc.integrations.json, so it has no place for a client.` };
+      registerSecret(client.client_secret, `${ref}#secret`);
+      try {
+        await deps.secrets.set(ref, JSON.stringify(client));
+      } catch (err) {
+        return { error: `the credential manager did not take the client: ${redact(errorText(err))}` };
+      }
+      logger.info('oauth client stored', { integration: id, clientRef: ref });
+      return { stored: true };
+    },
     connect(id) {
       // a second press of Connect while the first one runs joins it. a second attempt would stop the first one before
       // its sign-in link exists.
@@ -418,6 +434,13 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
     const connection = connections.get(id);
     if (!entry || !connection) return { error: `no integration has the id ${id}` };
     const oauth = entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' ? deps.oauth : undefined;
+    // without its pre-registered client the sdk fails later, with words about dynamic registration that do not say what
+    // the owner must do. a failure of the credential manager is not a missing client, so the attempt goes on and shows
+    // its own error.
+    const clientRef = entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' ? entry.auth.clientRef : undefined;
+    if (oauth && clientRef && (await deps.secrets.get(clientRef).catch(() => 'unknown')) === undefined) {
+      return { error: `the OAuth client of ${id} is not stored yet. Enter the client id and the client secret of its app on this page, then press Connect.` };
+    }
     if (oauth) {
       try {
         await oauth.listen(transportOf, signedIn);

@@ -3,13 +3,15 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { parseConfig } from '../src/config/load.js';
+import { createDashboard, type DashboardDeps } from '../src/dashboard/server.js';
 import { openDb } from '../src/db/index.js';
 import { parseIntegrations, type IntegrationEntry } from '../src/integrations/config.js';
 import { createIntegrations, type Integrations } from '../src/integrations/integrations.js';
 import { createOAuth } from '../src/integrations/oauth.js';
 import { createMemorySecretStore } from '../src/integrations/secrets.js';
 import { createBlobStore } from '../src/observability/blobs.js';
-import { createLogger } from '../src/observability/logger.js';
+import { createLogger, silentLogger } from '../src/observability/logger.js';
 import { redact } from '../src/observability/redact.js';
 import { createSlackFake, startSlackOAuth, type SlackOAuthServer } from './slack-server.js';
 
@@ -232,5 +234,46 @@ describe('the issuer stamp of a pre-registered client', () => {
     expect(await search(t.integrations)).toMatchObject({ kind: 'result' });
     expect(t.slack.stats.refreshGrants).toBe(1);
     expect(stamp()).toBe(1);
+  });
+});
+
+describe('storing the client of the slack app', () => {
+  it('says what to do when no client is stored, and sends no request', async () => {
+    const t = await setup({ client: null });
+    await t.integrations.start();
+    expect(await t.integrations.connect('slack-work')).toEqual({
+      error: 'the OAuth client of slack-work is not stored yet. Enter the client id and the client secret of its app on this page, then press Connect.',
+    });
+    expect(t.slack.stats.mcpRequests + t.slack.stats.apiRequests).toBe(0);
+  });
+
+  it('stores the client from the dashboard without an echo, and the next sign-in uses it', async () => {
+    const t = await setup({ client: null });
+    await t.integrations.start();
+    const parsed = parseConfig({ slots: { main: { chain: ['fake/m'] } }, pricing: { 'fake/m': { input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 5 } } });
+    if (!parsed.ok) throw new Error(parsed.error);
+    const app = { integrations: t.integrations } as unknown as DashboardDeps['app'];
+    const dashboard = createDashboard({ db: t.db, config: parsed.value, clock: () => new Date(), logger: silentLogger, app });
+    const post = (path: string, body: unknown) =>
+      dashboard.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+
+    const client = { client_id: t.slack.clientId, client_secret: t.slack.clientSecret };
+    expect((await post('/api/integrations/slack-work/client', { ...client, extra: 1 })).status).toBe(400);
+    expect((await post('/api/integrations/slack-work/client', { client_secret: t.slack.clientSecret })).status).toBe(400);
+    expect((await post('/api/integrations/slack-work/client', { ...client, client_id: 'two words' })).status).toBe(400);
+    expect((await post('/api/integrations/nope/client', client)).status).toBe(404);
+    expect(await t.secrets.get('slack-work-app')).toBeUndefined();
+
+    const stored = await post('/api/integrations/slack-work/client', client);
+    const text = await stored.text();
+    expect(stored.status).toBe(200);
+    expect(JSON.parse(text)).toEqual({ stored: true });
+    expect(text).not.toContain(t.slack.clientSecret);
+    expect(JSON.parse((await t.secrets.get('slack-work-app'))!)).toEqual(client);
+    const page = await (await dashboard.request('/api/integrations/slack-work')).text();
+    expect(page).toContain('slack-work-app');
+    expect(page).not.toContain(t.slack.clientSecret);
+    expect(t.logLines().join('\n')).not.toContain(t.slack.clientSecret);
+    await signIn(t);
   });
 });
