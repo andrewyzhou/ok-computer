@@ -9,7 +9,7 @@ import { ModelError } from '../src/models/types.js';
 import { BUILTIN_RULES, type TaintSource } from '../src/policy/policy.js';
 import { loadSkills } from '../src/skills/skills.js';
 import { skillVersion } from '../src/skills/skill-write.js';
-import { REVIEWED_UNTIL, WORKSHOP_INSTRUCTIONS } from '../src/skills/workshop.js';
+import { REVIEWED_UNTIL, SKILL_LOST_TEXT, WORKSHOP_INSTRUCTIONS } from '../src/skills/workshop.js';
 import { createTestApp } from './app-harness.js';
 
 const pdt = (time: string, day: string) => new Date(`${day}T${time}:00-07:00`).toISOString();
@@ -172,9 +172,39 @@ describe('skill workshop', () => {
     await runTask(t);
     await t.at(pdt('09:00', '2026-10-13'));
     expect(t.model.calls).toHaveLength(3);
-    expect(t.rows("SELECT status, error FROM automation_runs WHERE error LIKE 'left%'")).toEqual([{ status: 'skipped', error: 'left to the background service' }]);
+    expect(t.rows("SELECT id FROM automation_runs WHERE automationId = (SELECT id FROM automations WHERE name = 'skills: daily review')")).toEqual([]);
+    expect(t.rows("SELECT nextRunAt FROM automations WHERE name = 'skills: daily review'")).toEqual([{ nextRunAt: new Date(pdt('09:00', '2026-10-13')).toISOString() }]);
     expect(until(t)).toBeUndefined();
     expect(t.rows('SELECT id FROM approvals')).toEqual([]);
+    // a run now from the chat process is left to the service too.
+    const id = String(t.rows("SELECT id FROM automations WHERE name = 'skills: daily review'")[0]!.id);
+    expect(await t.app.scheduler.runNow(id)).toEqual({ status: 'skipped', error: 'left to the background service' });
+  });
+
+  it('tells the owner that the next review can propose a draft again when the approved draft expired before it ran', async () => {
+    const t = setup([...task, toolStep({ id: 'w1', name: 'skill_write', input: draft }), textStep('NO_REPLY')]);
+    await runTask(t);
+    await t.at(pdt('09:00', '2026-10-13'));
+    // the owner approved, and the app stopped before the call started.
+    t.db.prepare("UPDATE approvals SET status = 'approved', resolvedAt = ?, resolvedBy = 'button'").run(pdt('09:00', '2026-10-13'));
+    await t.at(pdt('12:00', '2026-10-13'));
+    expect(t.rows('SELECT status FROM approvals')).toEqual([{ status: 'expired' }]);
+    expect(t.printed()).toContain(`so it expired and did not run. ${SKILL_LOST_TEXT}`);
+    expect(t.printed()).not.toContain('Ask again');
+  });
+
+  it('runs the review in the service when the chat process ticks first at 09:00', async () => {
+    const t = setup([...task, toolStep({ id: 'w1', name: 'skill_write', input: draft }), textStep('NO_REPLY')]);
+    await runTask(t);
+    const chat = createTestApp([], {
+      start: pdt('09:00', '2026-10-13'),
+      config: { slots: { main: { chain: ['fake/m'] }, heartbeat: { chain: ['fake/m'] }, consolidation: { chain: ['fake/m'] } }, paths: { workspace: mkdtempSync(join(tmpdir(), 'okc-chat-')), skills: t.skillsDir } },
+      deps: { db: t.db, rules: BUILTIN_RULES, background: false },
+    });
+    await chat.at(pdt('09:00', '2026-10-13'));
+    await t.at(pdt('09:00', '2026-10-13'));
+    expect(t.rows("SELECT status FROM automation_runs WHERE automationId = (SELECT id FROM automations WHERE name = 'skills: daily review')")).toEqual([{ status: 'completed' }]);
+    expect(t.rows("SELECT toolName, status FROM approvals")).toEqual([{ toolName: 'skill_write', status: 'pending' }]);
   });
 
   it('never overwrites a skill or a hand edit that came after the draft, and keeps the fields and the old text of a change', async () => {

@@ -12,7 +12,7 @@ import type { TaintSource } from '../policy/policy.js';
 import type { Automation } from '../scheduler/store.js';
 import { createRunQueue } from '../sessions/queue.js';
 import { BODY_LIMIT, BODY_LINES, createSkillWriteTool, skillVersion, skillWriteInput } from './skill-write.js';
-import { correctionIn, createWorkshop, findTasks, LONG_TASK_CALLS, REVIEWED_UNTIL, reviewWindow, taskTranscript, type WorkshopDeps } from './workshop.js';
+import { correctionIn, createWorkshop, findTasks, LONG_TASK_CALLS, REVIEWED_UNTIL, reviewWindow, taskTranscript, WINDOW_OF, type WorkshopDeps } from './workshop.js';
 
 const tz = 'America/Los_Angeles';
 const at = (time: string, day = '2026-10-12') => new Date(`${day}T${time}:00-07:00`);
@@ -131,6 +131,7 @@ describe('reviewWindow', () => {
       at('09:00', '2027-10-13').toISOString(),
     );
     createApproval(db, { runId: 'ahead', toolName: 'skill_write', input: {}, summary: 'draft' }, now);
+    setSetting(db, `${WINDOW_OF}ahead`, at('00:00', '2027-10-13').toISOString(), now);
     setSetting(db, REVIEWED_UNTIL, at('00:00', '2026-10-16').toISOString(), now);
     expect(reviewWindow(db, now, tz).start).toEqual(at('00:00', '2026-10-16'));
     // a review that sent a draft on 10-18 still counts when the other mark is ahead.
@@ -138,6 +139,7 @@ describe('reviewWindow', () => {
       at('09:00', '2026-10-18').toISOString(),
     );
     createApproval(db, { runId: 'sent', toolName: 'skill_write', input: {}, summary: 'draft' }, now);
+    setSetting(db, `${WINDOW_OF}sent`, at('00:00', '2026-10-18').toISOString(), now);
     setSetting(db, REVIEWED_UNTIL, at('00:00', '2027-10-13').toISOString(), now);
     expect(reviewWindow(db, now, tz).start).toEqual(at('00:00', '2026-10-18'));
   });
@@ -189,6 +191,46 @@ describe('the workshop job', () => {
     expect(calls).toEqual(['review-1']);
     // the flag ends with the review, so a later review runs. its window is already reviewed.
     expect((await review(automation)).error).toBe('the main session is already reviewed until 2026-10-13 00:00');
+  });
+
+  // draft is an agent that sends a draft and then fails, as when the app stops during the review.
+  const draft = (db: Db, now: Date): WorkshopDeps['agent'] => async (input) => {
+    const runId = input.runId!;
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES (?, ?, 'automation', 'consolidation', 'running', ?)").run(runId, input.sessionKey, now.toISOString());
+    createApproval(db, { runId, toolName: 'skill_write', input: {}, summary: 'draft' }, now);
+    return { runId, status: 'aborted', text: '', error: 'the app stopped' };
+  };
+
+  it('takes the end of the window that a review with a draft used, also after a change of the time zone', async () => {
+    const db = openDb(':memory:');
+    const now = at('09:00', '2026-10-13');
+    run(db, 'big', at('10:00'), 'big task', LONG_TASK_CALLS);
+    expect((await job(db, now, draft(db, now))(automation)).status).toBe('failed');
+    // the owner moves to tokyo. the next review starts where the last one stopped, not at the start of the tokyo day.
+    expect(reviewWindow(db, new Date('2026-10-14T00:30:00Z'), 'Asia/Tokyo')).toEqual({ start: at('00:00', '2026-10-13'), end: new Date('2026-10-13T15:00:00Z') });
+  });
+
+  it('keeps the end of the window only for a review that sent a draft', async () => {
+    const db = openDb(':memory:');
+    const now = at('09:00', '2026-10-13');
+    run(db, 'big', at('10:00'), 'big task', LONG_TASK_CALLS);
+    await job(db, now, async (input) => ({ runId: input.runId!, status: 'completed', text: '' }))(automation);
+    expect(db.prepare('SELECT key FROM settings WHERE key LIKE ?').all(`${WINDOW_OF}%`)).toEqual([]);
+  });
+
+  it('reviews a window again when the owner approved its draft and the app stopped before the draft ran', async () => {
+    const db = openDb(':memory:');
+    const now = at('09:00', '2026-10-13');
+    run(db, 'big', at('10:00'), 'big task', LONG_TASK_CALLS);
+    const review = job(db, now, draft(db, now));
+    await review(automation);
+    // an approval that expired without an answer is not lost. the owner saw the card and did not want it.
+    db.prepare("UPDATE approvals SET status = 'expired', resolvedAt = ? WHERE runId = 'review-1'").run(now.toISOString());
+    expect(reviewWindow(db, now, tz).start).toEqual(at('00:00', '2026-10-13'));
+    // the sweep expires an approved call that never started.
+    db.prepare("UPDATE approvals SET resolvedBy = 'button' WHERE runId = 'review-1'").run();
+    expect(reviewWindow(db, now, tz).start).toEqual(at('00:00'));
+    expect((await review(automation)).runId).toBe('review-2');
   });
 
   it('reviews a window again after a failed review that sent no draft', async () => {
@@ -253,6 +295,13 @@ describe('correctionIn', () => {
       'no rush',
     ]);
     expect(correctionIn('ok. from now on, ask me first')).toBe('from now on');
+  });
+
+  it('takes a curly apostrophe from a phone keyboard as a straight one', () => {
+    const curly = String.fromCharCode(0x2019);
+    for (const text of [`don${curly}t book it there`, `that${curly}s not what I asked`, `you shouldn${curly}t have deleted it`]) {
+      expect(correctionIn(text), text).toBeDefined();
+    }
   });
 });
 

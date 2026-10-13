@@ -22,6 +22,8 @@ export const WORKSHOP_TOOLS: readonly string[] = ['skill_read', 'skill_write'];
 export const LONG_TASK_CALLS = 8;
 // only a review that ended well moves this mark, so a failed review or a day with the pc off is reviewed later.
 export const REVIEWED_UNTIL = 'workshop_reviewed_until';
+// each review keeps the end of its window under this prefix and its run id, while it has a draft.
+export const WINDOW_OF = 'workshop_window:';
 const MAX_DAYS = 7;
 const REVIEW_AT = '09:00';
 const MAX_TASKS = 5;
@@ -38,8 +40,10 @@ const CORRECTION_START =
   /^\s*(no\b|nope\b|wrong\b|not quite\b|not that\b|that'?s not\b|that is not\b|actually\b|i said\b|i meant\b|i asked\b|you forgot\b|you missed\b|you should(?:n'?t| not)? have\b|don'?t\b|do not\b|stop\b|instead\b|why did you\b)/i;
 const CORRECTION_ANYWHERE = /\b(next time|from now on|in the future|remember to|always use|never use)\b/i;
 
+// a phone keyboard often types a curly apostrophe, so it counts as a straight one.
 export function correctionIn(text: string): string | undefined {
-  return (CORRECTION_START.exec(text) ?? CORRECTION_ANYWHERE.exec(text))?.[1]?.trim();
+  const plain = text.replace(/[\u2018\u2019]/g, "'");
+  return (CORRECTION_START.exec(plain) ?? CORRECTION_ANYWHERE.exec(plain))?.[1]?.trim();
 }
 
 export const WORKSHOP_INSTRUCTIONS = `This is the daily skill review. The owner does not see this session. The input shows tasks from the owner's main conversation that were long or that the owner corrected, and the skills that exist with their versions. For each task, decide if a skill helps next time: a procedure that the owner will ask for again, or a correction of how you do a type of task. Most tasks need no skill.
@@ -81,7 +85,7 @@ export function reviewWindow(db: Db, now: Date, timeZone: string): Window {
   const floor = zonedToUtc(addDays(today, -MAX_DAYS), '00:00', timeZone).getTime();
   // a mark after the end comes from a clock that was ahead. it would stop every review until that date, so it is
   // ignored, and the other marks stay. the end of the next finished review writes a correct mark.
-  const marks = [getSetting<string>(db, REVIEWED_UNTIL), ...proposedUntil(db, timeZone)]
+  const marks = [getSetting<string>(db, REVIEWED_UNTIL), ...proposedUntil(db)]
     .filter((mark) => mark !== undefined)
     .map((mark) => Date.parse(mark))
     .filter((mark) => mark <= end.getTime());
@@ -90,15 +94,21 @@ export function reviewWindow(db: Db, now: Date, timeZone: string): Window {
 }
 
 // a review that sent a draft to the owner counts as done for its window, also when it failed or the app stopped
-// after the draft. a second review of the same window would send a second draft for the same task. a review runs on
-// the day after its window, so its window ends at the start of the day that it started on. each review gives its own
-// mark, so the caller can ignore one that a clock ahead gave.
-function proposedUntil(db: Db, timeZone: string): string[] {
+// after the draft. a second review of the same window would send a second draft for the same task. the mark is the
+// window end that the review stored, because the time zone can change after the review. each review gives its own
+// mark, so the caller can ignore one that a clock ahead gave. a draft that the owner approved and that expired because
+// the app stopped before it ran is lost, so its review does not count, and the next review sees the task again.
+function proposedUntil(db: Db): string[] {
   const rows = db
-    .prepare("SELECT DISTINCT r.startedAt AS startedAt FROM runs r JOIN approvals a ON a.runId = r.id WHERE r.sessionKey LIKE ? AND a.toolName = 'skill_write'")
-    .all(`${WORKSHOP_PREFIX}%`);
-  return rows.map((row) => String(row.startedAt)).map((startedAt) => zonedToUtc(localDay(new Date(startedAt), timeZone), '00:00', timeZone).toISOString());
+    .prepare(
+      `SELECT DISTINCT runId FROM approvals WHERE toolName = 'skill_write' AND runId NOT IN
+         (SELECT runId FROM approvals WHERE toolName = 'skill_write' AND status = 'expired' AND resolvedBy IS NOT NULL AND startedAt IS NULL)`,
+    )
+    .all();
+  return rows.map((row) => getSetting<string>(db, `${WINDOW_OF}${String(row.runId)}`)).filter((mark) => mark !== undefined);
 }
+
+export const SKILL_LOST_TEXT = 'The next skill review looks at that task again and can propose the skill again.';
 
 export interface Task {
   runIds: string[];
@@ -311,6 +321,9 @@ export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => 
 
     const runId = (deps.newId ?? randomUUID)();
     const sessionKey = `${WORKSHOP_PREFIX}${runId}`;
+    // the key is written before the run, so no draft is without its mark.
+    const windowKey = `${WINDOW_OF}${runId}`;
+    setSetting(db, windowKey, window.end.toISOString(), clock());
     const result = await deps.queue.enqueue(sessionKey, () =>
       deps.agent({
         runId,
@@ -325,6 +338,9 @@ export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => 
         signal: deps.signal,
       }),
     );
+    if (!db.prepare("SELECT 1 FROM approvals WHERE runId = ? AND toolName = 'skill_write'").get(runId)) {
+      db.prepare('DELETE FROM settings WHERE key = ?').run(windowKey);
+    }
     if (result.status !== 'completed') return { status: 'failed', runId, error: result.error ?? result.status };
     setSetting(db, REVIEWED_UNTIL, window.end.toISOString(), clock());
     return { status: 'completed', runId };

@@ -42,6 +42,7 @@ import {
 } from './scheduler/heartbeat.js';
 import { AUTOMATION_TOOLS, createJobRunner } from './scheduler/jobs.js';
 import { createScheduler, type Scheduler, type SetTimer } from './scheduler/scheduler.js';
+import type { Automation } from './scheduler/store.js';
 import { createAutomationTools } from './scheduler/tools.js';
 import { createOwnerMessenger } from './sessions/owner.js';
 import { createRunQueue } from './sessions/queue.js';
@@ -49,7 +50,7 @@ import { createRouter, MAIN_SESSION, MAIN_TOOLS } from './sessions/router.js';
 import { localDay, localTime, type Clock } from './time.js';
 import { createSkillTools } from './skills/skills.js';
 import { createSkillWriteTool } from './skills/skill-write.js';
-import { createWorkshop, installWorkshop, WORKSHOP_INSTRUCTIONS, WORKSHOP_PREFIX, WORKSHOP_TOOLS } from './skills/workshop.js';
+import { createWorkshop, installWorkshop, SKILL_LOST_TEXT, WORKSHOP_INSTRUCTIONS, WORKSHOP_PREFIX, WORKSHOP_TOOLS } from './skills/workshop.js';
 import { createToolCaller } from './tools/caller.js';
 import { createMessageOwnerTool } from './tools/message-owner.js';
 import { nowTool } from './tools/now.js';
@@ -253,6 +254,8 @@ export function createApp(deps: AppDeps): App {
     notifyOwner: async (text) => void (await owner.send(text)),
     onTick: (now) => sweep(now),
     ...(deps.setTimer ? { setTimer: deps.setTimer } : {}),
+    // npm run chat leaves the skill review to the service. if chat claimed it, the review of that day would not run.
+    ...(deps.background === false ? { owns: (automation: Automation) => automation.payload.type !== 'workshop' } : {}),
   });
 
   const router = createRouter({
@@ -307,7 +310,7 @@ export function createApp(deps: AppDeps): App {
       }
       for (const approval of stale.expired) {
         const words = (summary: string) =>
-          `Approval #${approval.id} (${summary}) was approved, but the app stopped before it ran, so it expired and did not run. Ask again if you still want it.`;
+          `Approval #${approval.id} (${summary}) was approved, but the app stopped before it ran, so it expired and did not run. ${approval.toolName === 'skill_write' ? SKILL_LOST_TEXT : 'Ask again if you still want it.'}`;
         tell(approval, words, true);
       }
       for (const approval of stale.interrupted) {

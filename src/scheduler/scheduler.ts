@@ -3,7 +3,7 @@ import type { Db } from '../db/index.js';
 import type { Logger } from '../observability/logger.js';
 import type { Clock } from '../time.js';
 import { nextRun } from './schedule.js';
-import { dueAutomations, earliestRunAt, getAutomation, type Automation } from './store.js';
+import { dueAutomations, getAutomation, listAutomations, type Automation } from './store.js';
 
 export interface JobResult {
   status: 'completed' | 'failed' | 'skipped';
@@ -23,6 +23,9 @@ export interface SchedulerDeps {
   setTimer?: SetTimer;
   // the scheduler calls this at the start of each tick, for small periodic work.
   onTick?: (now: Date) => void;
+  // false for an automation that another process runs. this process then does not claim it, so it does not take the
+  // run from that process. without it, the scheduler runs every automation.
+  owns?: (automation: Automation) => boolean;
 }
 
 export interface Scheduler {
@@ -53,13 +56,15 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const setTimer = deps.setTimer ?? realTimer;
   let cancel: (() => void) | undefined;
   let stopped = true;
+  const owns = deps.owns ?? (() => true);
 
   const arm = () => {
     cancel?.();
     cancel = undefined;
     if (stopped) return;
-    const earliest = earliestRunAt(db);
-    const delay = earliest ? Math.max(0, earliest.getTime() - clock().getTime()) : MAX_SLEEP_MS;
+    // an automation of another process can stay due here for a long time, so it does not set the timer.
+    const earliest = listAutomations(db).find((automation) => automation.enabled && automation.nextRunAt !== null && owns(automation))?.nextRunAt;
+    const delay = earliest ? Math.max(0, Date.parse(earliest) - clock().getTime()) : MAX_SLEEP_MS;
     const run = () => void tick().catch((err: unknown) => logger.error('scheduler tick failed', { err }));
     cancel = setTimer(run, Math.min(delay, MAX_SLEEP_MS));
   };
@@ -156,7 +161,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const tick = async (): Promise<void> => {
     const now = clock();
     deps.onTick?.(now);
-    const runs = dueAutomations(db, now).map((automation) => fire(automation, now));
+    const runs = dueAutomations(db, now)
+      .filter(owns)
+      .map((automation) => fire(automation, now));
     arm();
     await Promise.all(runs);
     arm();

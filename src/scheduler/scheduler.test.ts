@@ -222,6 +222,36 @@ describe('scheduler', () => {
     expect(getAutomation(db, job.id)?.consecutiveFailures).toBe(0);
   });
 
+  it('does not claim a job that another process runs, and does not set its timer for it', async () => {
+    const { db, create, now } = setup();
+    const job = create({ name: 'review', schedule: { kind: 'every', everyMs: 60 * MIN } });
+    db.prepare('UPDATE automations SET nextRunAt = ?').run(new Date(now().getTime() - MIN).toISOString());
+    const executed: string[] = [];
+    const timers: number[] = [];
+    const chat = createScheduler({
+      db,
+      clock: now,
+      logger: silentLogger,
+      config: { timeZone: TZ, scheduler: { missedGraceMs: 2 * 60 * MIN } },
+      async execute(automation) {
+        executed.push(automation.name);
+        return { status: 'completed' };
+      },
+      async notifyOwner() {},
+      setTimer(_fn, ms) {
+        timers.push(ms);
+        return () => {};
+      },
+      owns: (automation) => automation.name !== 'review',
+    });
+    await chat.start();
+    expect(executed).toEqual([]);
+    expect(getAutomation(db, job.id)!.nextRunAt).toBe(new Date(now().getTime() - MIN).toISOString());
+    // the due job of the other process would give a timer of 0 ms, and the scheduler would tick without a pause.
+    expect(timers.every((ms) => ms === MIN)).toBe(true);
+    chat.stop();
+  });
+
   it('keeps a timer for the next job, at most one minute away', async () => {
     const { scheduler, create, timers } = setup();
     create({ schedule: { kind: 'at', at: '2026-10-12T17:00:20Z' } });
