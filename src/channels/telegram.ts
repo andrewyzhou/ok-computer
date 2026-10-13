@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { GrammyError, type Bot } from 'grammy';
 import type { InlineKeyboardMarkup } from 'grammy/types';
 import type { Logger } from '../observability/logger.js';
@@ -30,6 +31,12 @@ const TICK_MS = 1000;
 const TYPING_TICKS = 4;
 // telegram removes a draft after 30 seconds, so a draft that did not change is sent again before that.
 const DRAFT_KEEP_MS = 20_000;
+// the end of a reply waits this long for a draft in flight, so the draft does not show after the reply.
+const DRAFT_WAIT_MS = 2000;
+// after this many failed drafts in a row, a reply shows no more drafts. typing goes on.
+const DRAFT_FAILURES = 3;
+// the updates that the bot reads. telegram keeps the list of the last call, so the bot always names it.
+export const ALLOWED_UPDATES = ['message', 'callback_query', 'stopped_message_generation'] as const;
 const CUT_NOTE = '\n[... cut, the dashboard shows the full input]';
 
 // a long reply breaks at a paragraph, else at a line, else at a word, so each part stays readable.
@@ -62,6 +69,8 @@ const draftText = (text: string) => (text.length <= TELEGRAM_LIMIT ? text : `…
 
 export interface TelegramOptions {
   bot: Bot;
+  // the owner's user id, which is also the id of the owner's private chat. only that chat gets the commands menu.
+  ownerId: string;
   logger: Logger;
   clock?: Clock;
 }
@@ -75,7 +84,6 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
   const buttons = buttonSigner(bot.token);
   // the stop button of a draft sends an update with the draft id. the map finds the run of that draft.
   const stops = new Map<number, { chatId: number; stop: () => void }>();
-  let nextDraftId = 1;
 
   // telegram refuses a format with a 400. the caller then sends a simpler format. other errors can come after the
   // message reached the chat, so they go up, and the message is not sent twice.
@@ -165,10 +173,15 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
       bot.catch((err) => logger.error('telegram update failed', { err: err.error }));
 
       // the menu is a convenience. a failure is logged, and the bot works without it.
-      bot.api.setMyCommands(COMMANDS).catch((err: unknown) => logger.warn('telegram commands menu not set', { err }));
+      bot.api
+        .setMyCommands(COMMANDS, { scope: { type: 'chat', chat_id: Number(options.ownerId) } })
+        .catch((err: unknown) => logger.warn('telegram commands menu not set', { err }));
       // polling runs in the background. a network failure is logged, and the other channels keep working.
       void bot
-        .start({ onStart: (info) => logger.info('telegram polling started', { username: info.username }) })
+        .start({
+          allowed_updates: ALLOWED_UPDATES,
+          onStart: (info) => logger.info('telegram polling started', { username: info.username }),
+        })
         .catch((err: unknown) => logger.error('telegram polling stopped', { err }));
     },
     async stop() {
@@ -217,7 +230,8 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
     },
     progress(message, stop) {
       const chatId = Number(message.chatId);
-      const draftId = nextDraftId++;
+      // a random id, so a stop update for a draft of an older process does not stop a new run.
+      const draftId = randomInt(1, 2 ** 31);
       stops.set(draftId, { chatId, stop });
       // progress is a convenience. a failed call is logged and never stops the run.
       const quiet = (what: string, call: () => Promise<unknown>) =>
@@ -228,21 +242,38 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
           : quiet('reaction', () => bot.api.setMessageReaction(chatId, Number(message.messageId), emoji ? [{ type: 'emoji', emoji }] : []));
 
       let latest = '';
+      let tools: string | undefined;
       let shown: string | undefined;
       let shownAt = 0;
       let ticks = 0;
-      let inFlight: Promise<unknown> = Promise.resolve();
-      // an empty draft shows the "Thinking…" placeholder.
+      let failures = 0;
+      let inFlight: Promise<void> | undefined;
+      const composed = () => (tools ? `${latest}\n\n⏳ ${tools}`.trimStart() : latest);
+      // an empty draft shows the "Thinking…" placeholder. one draft at a time, so drafts never arrive out of order.
       const draft = () => {
-        shown = latest;
+        if (inFlight || failures >= DRAFT_FAILURES) return;
+        shown = composed();
         shownAt = clock().getTime();
-        inFlight = quiet('draft', () => bot.api.sendMessageDraft(chatId, draftId, draftText(latest), { can_stop: true }));
+        inFlight = bot.api
+          .sendMessageDraft(chatId, draftId, draftText(shown), { can_stop: true })
+          .then(
+            () => {
+              failures = 0;
+            },
+            (err: unknown) => {
+              failures++;
+              logger.warn('telegram draft failed', { err, failures });
+            },
+          )
+          .finally(() => {
+            inFlight = undefined;
+          });
       };
       void react(WORKING);
       draft();
       const timer = setInterval(() => {
         ticks++;
-        if (latest !== shown || clock().getTime() - shownAt >= DRAFT_KEEP_MS) draft();
+        if (composed() !== shown || clock().getTime() - shownAt >= DRAFT_KEEP_MS) draft();
         if (ticks % TYPING_TICKS === 0) void quiet('typing', () => bot.api.sendChatAction(chatId, 'typing'));
       }, TICK_MS);
 
@@ -250,11 +281,17 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
         text(full) {
           latest = full;
         },
-        // no draft goes out after the end, so a stale draft never shows after the reply.
+        activity(names) {
+          tools = names;
+        },
+        // no draft goes out after the end, so a stale draft never shows after the reply. a slow draft does not hold
+        // the reply for long.
         async end(ok) {
           clearInterval(timer);
           stops.delete(draftId);
-          await inFlight;
+          let wait: NodeJS.Timeout | undefined;
+          await Promise.race([inFlight, new Promise<void>((resolve) => (wait = setTimeout(resolve, DRAFT_WAIT_MS)))]);
+          clearTimeout(wait);
           await react(ok ? DONE : undefined);
         },
       };

@@ -7,7 +7,7 @@ import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
 import type { Clock } from '../time.js';
-import type { Card } from './commands.js';
+import type { Card, RunState } from './commands.js';
 import type { RunQueue } from './queue.js';
 
 // all owner messages from all channels share one continuous conversation.
@@ -48,7 +48,7 @@ export interface RouterDeps {
   // "always allow" asks the owner to confirm, then adds a rule and approves.
   always?: { confirm(id: number): Card; apply(id: number): Promise<string> };
   // commands such as /status answer in code. undefined means that the text is not such a command.
-  commands?: (text: string, state: { runningSince?: Date }) => Card[] | undefined;
+  commands?: (text: string, state: RunState) => Card[] | undefined;
   // the router calls this on /new before the reset event goes into the log.
   onReset?: () => void;
   signal?: AbortSignal;
@@ -63,7 +63,14 @@ export interface Router {
 export function createRouter(deps: RouterDeps): Router {
   const { db, logger, clock, queue } = deps;
   // the main run that runs now. /stop and the stop button of its draft abort it.
-  let current: { stop: AbortController; since: Date } | undefined;
+  let current: { stop: AbortController; since: Date; tools?: string; stoppedWhile?: string } | undefined;
+  // the stop keeps the tools that ran at that moment. their effect is unknown, and the owner must know that.
+  const stopCurrent = () => {
+    if (!current) return false;
+    current.stoppedWhile ??= current.tools;
+    current.stop.abort();
+    return true;
+  };
 
   return {
     async handle(message) {
@@ -113,11 +120,10 @@ export function createRouter(deps: RouterDeps): Router {
       }
       // /stop and the commands answer at once. a message that waits in the queue would wait for the run it stops.
       if (message.text.trim() === '/stop') {
-        if (!current) return reply('Nothing runs now.');
-        current.stop.abort();
+        if (!stopCurrent()) return reply('Nothing runs now.');
         return;
       }
-      const cards = deps.commands?.(message.text, current ? { runningSince: current.since } : {});
+      const cards = deps.commands?.(message.text, current ? { runningSince: current.since, ...(current.tools ? { tools: current.tools } : {}) } : {});
       if (cards) {
         for (const card of cards) await send(card);
         return;
@@ -149,8 +155,9 @@ export function createRouter(deps: RouterDeps): Router {
           return;
         }
         const stop = new AbortController();
-        current = { stop, since: clock() };
-        const progress = channel.progress?.(message, () => stop.abort());
+        const run: NonNullable<typeof current> = { stop, since: clock() };
+        current = run;
+        const progress = channel.progress?.(message, () => (current === run ? stopCurrent() : undefined));
         let result: RunResult | undefined;
         try {
           result = await deps.agent({
@@ -162,6 +169,10 @@ export function createRouter(deps: RouterDeps): Router {
             events: [{ type: 'user_message', payload: { text: message.text, channel: message.channel, chatId: message.chatId } }],
             signal: deps.signal ? AbortSignal.any([deps.signal, stop.signal]) : stop.signal,
             ...(progress ? { onText: (text: string) => progress.text(text) } : {}),
+            onActivity: (tools: string | undefined) => {
+              run.tools = tools;
+              progress?.activity(tools);
+            },
           });
         } finally {
           current = undefined;
@@ -171,7 +182,7 @@ export function createRouter(deps: RouterDeps): Router {
         // owner's next message as an answer to a reply that never came.
         if (stop.signal.aborted && result.status === 'aborted') {
           appendEvent(db, { sessionKey: MAIN_SESSION, runId: null, type: 'system_event', payload: { text: 'The owner stopped the previous reply before it was done.' } }, clock());
-          await reply('Stopped.');
+          await reply(run.stoppedWhile ? `Stopped while ${run.stoppedWhile} ran. Its effect is unknown.` : 'Stopped.');
           return;
         }
         if (result.status !== 'completed') {

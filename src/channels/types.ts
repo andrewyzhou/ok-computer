@@ -32,6 +32,8 @@ export interface OutboundMessage {
 export interface ReplyProgress {
   // text gives the full text of the current model call so far.
   text(full: string): void;
+  // activity gives the names of the tools that run now, or undefined when none runs.
+  activity(tools: string | undefined): void;
   // end stops the progress. the router calls it before the reply goes out.
   end(ok: boolean): Promise<void>;
 }

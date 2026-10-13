@@ -21,7 +21,7 @@ function setup(steps: FakeStep[], options: { integrations?: boolean; policyPath?
   const telegram = createFakeTelegram();
   const entries = options.integrations
     ? parseIntegrations({
-        integrations: [{ id: 'notes', kind: 'mcp-stdio', command: 'node', args: ['server.js'], tools: { allow: ['add_note'] }, sessions: ['main'] }],
+        integrations: [{ id: 'notes', kind: 'mcp-stdio', command: 'node', args: ['server.js'], tools: { allow: ['add_note', 'hang'] }, risk: { hang: 'read' }, sessions: ['main'] }],
       })
     : undefined;
   if (entries && !entries.ok) throw new Error(entries.error);
@@ -34,7 +34,7 @@ function setup(steps: FakeStep[], options: { integrations?: boolean; policyPath?
     start,
     ...(options.config ? { config: options.config } : {}),
     deps: {
-      channels: [createTelegramChannel({ bot: telegram.bot, logger: silentLogger, clock: () => t.clock() })],
+      channels: [createTelegramChannel({ bot: telegram.bot, ownerId: String(OWNER), logger: silentLogger, clock: () => t.clock() })],
       ownerIds: { telegram: String(OWNER) },
       ...(entries ? { integrations: entries.value, mcpTransport: transport } : {}),
       ...(options.policyPath ? { policyPath: options.policyPath } : {}),
@@ -63,7 +63,9 @@ describe('telegram v2 acceptance', () => {
     await until(() => of(t, 'sendRichMessage').length === 1);
     expect(of(t, 'sendRichMessage')).toEqual([{ chat_id: String(OWNER), rich_message: { markdown: '## Today\n\n- **Gym** at 7\n- Read' } }]);
     expect(of(t, 'sendMessage')).toEqual([]);
-    expect(of(t, 'setMyCommands')).toEqual([{ commands: COMMANDS }]);
+    expect(of(t, 'setMyCommands')).toEqual([{ commands: COMMANDS, scope: { type: 'chat', chat_id: OWNER } }]);
+    // the bot names the updates that it reads, so a list that telegram kept from an older call does not apply.
+    expect(of(t, 'getUpdates')[0]).toMatchObject({ allowed_updates: ['message', 'callback_query', 'stopped_message_generation'] });
     expect(COMMANDS.map((c) => c.command)).toEqual(['new', 'status', 'goals', 'approvals', 'dashboard', 'stop']);
   });
 
@@ -72,12 +74,13 @@ describe('telegram v2 acceptance', () => {
     const full = `Here is the plan.\n\n${Array.from({ length: 700 }, (_, i) => `- step ${i}`).join('\n')}`;
     expect(full.length).toBeGreaterThan(4096);
     const streamed: FakeStep = async (_call, _signal, onText) => {
+      // the async advance lets each draft settle, as one second does.
       onText!(full.slice(0, 100));
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       onText!(full.slice(0, 3000));
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       onText!(full);
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       return fakeResponse({ text: full });
     };
     const t = setup([streamed]);
@@ -90,7 +93,8 @@ describe('telegram v2 acceptance', () => {
     const drafts = of(t, 'sendMessageDraft');
     // the first draft is empty, which shows "Thinking…". a long draft shows its end.
     expect(drafts.map((d) => d.text)).toEqual(['', full.slice(0, 100), full.slice(0, 3000), `…${full.slice(-4095)}`]);
-    expect(new Set(drafts.map((d) => `${d.chat_id}:${d.draft_id}:${d.can_stop}`))).toEqual(new Set([`${OWNER}:1:true`]));
+    expect(new Set(drafts.map((d) => `${d.chat_id}:${d.draft_id}:${d.can_stop}`))).toEqual(new Set([`${OWNER}:${drafts[0]!.draft_id}:true`]));
+    expect(Number(drafts[0]!.draft_id)).toBeGreaterThan(0);
     expect(of(t, 'sendRichMessage')).toEqual([{ chat_id: String(OWNER), rich_message: { markdown: full } }]);
     // no draft goes out after the saved message.
     const methods = t.telegram.calls.map((c) => c.method);
@@ -154,6 +158,23 @@ describe('telegram v2 acceptance', () => {
     expect(JSON.stringify(listEvents(t.db, 'main'))).not.toContain('/stop');
     owner(t, '/stop');
     await until(() => of(t, 'sendMessage').some((m) => m.text === 'Nothing runs now.'));
+  });
+
+  // the stop abandons the tool. it can still act, so the owner must know which tool ran.
+  it('names the tool that ran when the owner stopped the run, and shows it in the draft', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const t = setup([call('c1', 'notes__hang', {})], { integrations: true });
+    apps.push(t);
+    await t.app.start();
+    await expect.poll(() => t.app.integrations.status()[0]!.state.status).toBe('connected');
+    owner(t, 'run the slow thing');
+    await expect.poll(() => t.rows("SELECT decision FROM policy_decisions WHERE toolCallId = 'c1'").length).toBe(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(of(t, 'sendMessageDraft').map((d) => d.text)).toContain('⏳ notes__hang');
+    owner(t, '/stop');
+    await until(() => of(t, 'sendMessage').some((m) => String(m.text).startsWith('Stopped')));
+    await t.app.idle();
+    expect(of(t, 'sendMessage').map((m) => m.text)).toContain('Stopped while notes__hang ran. Its effect is unknown.');
   });
 
   it('answers /status, /goals, /approvals and /dashboard in code', async () => {

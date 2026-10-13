@@ -38,7 +38,7 @@ function setup(steps: FakeStep[], start = '2026-10-12T09:00:00-07:00') {
     logger: silentLogger,
     clients: { fake: model },
     channels: [
-      createTelegramChannel({ bot: telegram.bot, logger: silentLogger, clock: () => now }),
+      createTelegramChannel({ bot: telegram.bot, ownerId: String(OWNER), logger: silentLogger, clock: () => now }),
       createCliChannel({ input: new PassThrough(), output: cliOut, clock: () => now }),
     ],
     ownerIds: { telegram: String(OWNER) },

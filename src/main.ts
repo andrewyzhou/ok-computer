@@ -63,7 +63,7 @@ async function main(): Promise<void> {
   const ownerIds: Record<string, string> = {};
   // npm run chat is the cli only. without a token or an owner id, telegram does not start and the cli still runs.
   if (!chatMode && secrets.telegramBotToken && telegramOwnerId) {
-    channels.push(createTelegramChannel({ bot: new Bot(secrets.telegramBotToken), logger }));
+    channels.push(createTelegramChannel({ bot: new Bot(secrets.telegramBotToken), ownerId: telegramOwnerId, logger }));
     ownerIds[TELEGRAM] = telegramOwnerId;
   } else if (!chatMode) {
     logger.info('telegram is off, because TELEGRAM_BOT_TOKEN or TELEGRAM_OWNER_ID is not set');

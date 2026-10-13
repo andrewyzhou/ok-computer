@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buttonUpdate, createFakeTelegram, rawButtonUpdate, signed, textUpdate, until } from '../../test/fake-telegram.js';
 import { silentLogger, type Logger } from '../observability/logger.js';
 import { htmlToPlain } from './telegram-html.js';
@@ -32,7 +32,7 @@ describe('splitMessage', () => {
 describe('telegram channel', () => {
   it('sends plain text in parts and puts the buttons on the last part', async () => {
     const fake = createFakeTelegram();
-    const channel = createTelegramChannel({ bot: fake.bot, logger: silentLogger, clock });
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
     const result = await channel.send({
       chatId: '777',
       text: `${'a'.repeat(3000)}\n\n${'b'.repeat(3000)}`,
@@ -59,7 +59,7 @@ describe('telegram channel', () => {
 
   it('turns polled messages and button presses into inbound messages and stops polling', async () => {
     const fake = createFakeTelegram();
-    const channel = createTelegramChannel({ bot: fake.bot, logger: silentLogger, clock });
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
     const inbound: InboundMessage[] = [];
     await channel.start((message) => inbound.push(message));
 
@@ -88,7 +88,7 @@ describe('telegram channel', () => {
   // the model can write a button with the data of a real approval into rich markdown. it has no valid mark.
   it('answers the press of a button without a valid mark, and never passes it on', async () => {
     const fake = createFakeTelegram();
-    const channel = createTelegramChannel({ bot: fake.bot, logger: silentLogger, clock });
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
     const inbound: InboundMessage[] = [];
     await channel.start((message) => inbound.push(message));
     const real = signed('approval:1:approve');
@@ -115,7 +115,7 @@ describe('telegram formats', () => {
 
   it('sends a markdown reply as one rich message with its buttons', async () => {
     const fake = createFakeTelegram();
-    const channel = createTelegramChannel({ bot: fake.bot, logger: silentLogger, clock });
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
     await channel.send({ chatId: '777', text: '# Hi\n\n- **one**\n- two', markdown: true, buttons });
     expect(fake.calls).toEqual([
       {
@@ -131,7 +131,7 @@ describe('telegram formats', () => {
 
   it('falls back to html parts when telegram refuses the rich message, and to plain text for a part it refuses', async () => {
     const fake = createFakeTelegram();
-    const channel = createTelegramChannel({ bot: fake.bot, logger: silentLogger, clock });
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
     // the second paragraph fills the first part, so the last paragraph needs a second part.
     const tail = 'y'.repeat(100);
     const text = `**First** part.\n\n${'word '.repeat(810)}\n\n_last_ part ${tail}`;
@@ -156,7 +156,7 @@ describe('telegram formats', () => {
       error: (msg, fields) => lines.push({ level: 'error', msg, fields }),
       child: () => logger,
     };
-    const channel = createTelegramChannel({ bot: fake.bot, logger, clock });
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger, clock });
     const half = 'x'.repeat(RICH_LIMIT / 2 + 10);
     let richCalls = 0;
     fake.refuse((c) => (c.method === 'sendRichMessage' && ++richCalls === 2 ? 400 : false));
@@ -170,7 +170,7 @@ describe('telegram formats', () => {
 
   it('sends a reply over the rich limit as rich parts, and does not send again after an error that is not a refusal', async () => {
     const fake = createFakeTelegram();
-    const channel = createTelegramChannel({ bot: fake.bot, logger: silentLogger, clock });
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
     const half = 'x'.repeat(RICH_LIMIT / 2 + 10);
     await channel.send({ chatId: '777', text: `${half}\n\n${half}`, markdown: true, buttons });
     expect(methods(fake)).toEqual(['sendRichMessage', 'sendRichMessage']);
@@ -180,7 +180,7 @@ describe('telegram formats', () => {
     ]);
 
     const broken = createFakeTelegram();
-    const other = createTelegramChannel({ bot: broken.bot, logger: silentLogger, clock });
+    const other = createTelegramChannel({ bot: broken.bot, ownerId: '777', logger: silentLogger, clock });
     broken.refuse(() => 500);
     await expect(other.send({ chatId: '777', text: 'hi', markdown: true })).rejects.toThrow();
     expect(methods(broken)).toEqual(['sendRichMessage']);
@@ -188,14 +188,14 @@ describe('telegram formats', () => {
 
   it('never parses plain text, for example an approval card, as markdown or html', async () => {
     const fake = createFakeTelegram();
-    const channel = createTelegramChannel({ bot: fake.bot, logger: silentLogger, clock });
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
     await channel.send({ chatId: '777', text: 'text: "[click](https://evil.example) **now**"' });
     expect(fake.calls).toEqual([{ method: 'sendMessage', payload: { chat_id: '777', text: 'text: "[click](https://evil.example) **now**"' } }]);
   });
 
   it('puts the details of a card in an expandable quote, escaped, and cuts long details with a note', async () => {
     const fake = createFakeTelegram();
-    const channel = createTelegramChannel({ bot: fake.bot, logger: silentLogger, clock });
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
     await channel.send({ chatId: '777', text: 'Approval needed (#1): a <b>', details: '{\n  "to": "<x@y.example>"\n}', buttons });
     expect(fake.calls[0]!.payload).toMatchObject({
       parse_mode: 'HTML',
@@ -208,5 +208,96 @@ describe('telegram formats', () => {
     fake.refuse((c) => (c.payload.parse_mode === 'HTML' ? 400 : false));
     await channel.send({ chatId: '777', text: 'Card', details: '{ "a": 1 }' });
     expect(fake.calls.at(-1)!.payload).toEqual({ chat_id: '777', text: 'Card\n\n{ "a": 1 }' });
+  });
+});
+
+describe('telegram progress', () => {
+  afterEach(() => vi.useRealTimers());
+  const owner: InboundMessage = { channel: 'telegram', senderId: '777', chatId: '777', text: 'hi', messageId: '5', receivedAt: '' };
+  // the gate holds each draft call until the test opens it, as a slow network does.
+  function slowDrafts(fake: ReturnType<typeof createFakeTelegram>) {
+    const waiting: Array<() => void> = [];
+    fake.bot.api.config.use(async (prev, method, payload, signal) => {
+      if (method === 'sendMessageDraft') await new Promise<void>((resolve) => waiting.push(resolve));
+      return prev(method, payload, signal);
+    });
+    return waiting;
+  }
+  const texts = (fake: ReturnType<typeof createFakeTelegram>, method: string) =>
+    fake.calls.filter((c) => c.method === method).map((c) => c.payload.text);
+
+  it('shows the tools that run under the text, and sends typing every 4 seconds', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
+    const fake = createFakeTelegram();
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
+    const progress = channel.progress!(owner, () => {});
+    progress.activity('calendar_list');
+    await vi.advanceTimersByTimeAsync(1000);
+    progress.text('Let me look.');
+    await vi.advanceTimersByTimeAsync(1000);
+    progress.activity(undefined);
+    progress.text('Let me look. You are free.');
+    await vi.advanceTimersByTimeAsync(2000);
+    await progress.end(true);
+    expect(texts(fake, 'sendMessageDraft')).toEqual(['', '⏳ calendar_list', 'Let me look.\n\n⏳ calendar_list', 'Let me look. You are free.']);
+    expect(fake.calls.filter((c) => c.method === 'sendChatAction')).toHaveLength(1);
+    expect(fake.calls.filter((c) => c.method === 'setMessageReaction').map((c) => c.payload.reaction)).toEqual([
+      [{ type: 'emoji', emoji: '👀' }],
+      [{ type: 'emoji', emoji: '👌' }],
+    ]);
+  });
+
+  it('waits for a slow draft before the end, but at most 2 seconds', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
+    const fake = createFakeTelegram();
+    const waiting = slowDrafts(fake);
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
+    const progress = channel.progress!(owner, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+    let ended = false;
+    const end = progress.end(true).then(() => (ended = true));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(ended).toBe(false);
+    waiting.shift()!();
+    await end;
+    // the reaction comes after the draft, so a reply sent after end() comes after the draft too.
+    expect(fake.calls.map((c) => c.method)).toEqual(['setMessageReaction', 'sendMessageDraft', 'setMessageReaction']);
+
+    const stuck = channel.progress!(owner, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+    let done = false;
+    const stuckEnd = stuck.end(false).then(() => (done = true));
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await stuckEnd;
+    expect(done).toBe(true);
+  });
+
+  it('sends no more drafts after 3 failures in a row, and typing goes on', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
+    const fake = createFakeTelegram();
+    fake.refuse((c) => (c.method === 'sendMessageDraft' ? 429 : false));
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
+    const progress = channel.progress!(owner, () => {});
+    for (let i = 1; i <= 8; i++) {
+      progress.text(`text ${i}`);
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    await progress.end(true);
+    expect(fake.calls.filter((c) => c.method === 'sendMessageDraft')).toHaveLength(3);
+    expect(fake.calls.filter((c) => c.method === 'sendChatAction')).toHaveLength(2);
+
+    // a draft that goes out resets the count, so only failures in a row turn the drafts off.
+    const flaky = createFakeTelegram();
+    let drafts = 0;
+    flaky.refuse((c) => (c.method === 'sendMessageDraft' && ++drafts % 3 !== 0 ? 429 : false));
+    const other = createTelegramChannel({ bot: flaky.bot, ownerId: '777', logger: silentLogger, clock }).progress!(owner, () => {});
+    for (let i = 1; i <= 8; i++) {
+      other.text(`text ${i}`);
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    await other.end(true);
+    expect(flaky.calls.filter((c) => c.method === 'sendMessageDraft')).toHaveLength(9);
   });
 });

@@ -9,6 +9,13 @@ export interface Card {
   details?: string;
 }
 
+// the main run that runs now, as the router knows it.
+export interface RunState {
+  runningSince?: Date;
+  // the tools that the run calls now.
+  tools?: string;
+}
+
 export interface CommandDeps {
   db: Db;
   clock: Clock;
@@ -29,7 +36,7 @@ export function createCommands(deps: CommandDeps) {
       .all()
       .map((row) => Number(row.id));
 
-  return (text: string, state: { runningSince?: Date }): Card[] | undefined => {
+  return (text: string, state: RunState): Card[] | undefined => {
     switch (text.trim().toLowerCase()) {
       case '/status': {
         const run = state.runningSince
