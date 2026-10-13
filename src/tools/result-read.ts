@@ -4,10 +4,12 @@ import type { BlobStore } from '../observability/blobs.js';
 import { safeEnd, safeStart } from '../text.js';
 import { defineTool } from './registry.js';
 
-// the limit keeps a page under the handle limit, so a page never gets a handle of its own. the output also repeats
-// the query, so the query has a limit too.
+// the limit keeps a page under the handle limit, also inside the untrusted wrapper, so a page never gets a handle of
+// its own. the output of a search also repeats the query, so the query has a limit too.
 export const READ_LIMIT = 3500;
 export const QUERY_LIMIT = 200;
+// the header of a search and its last line take at most this many characters, without the query.
+const SEARCH_FRAME = 200;
 const AROUND = 150;
 // the search looks at most at this many more matches after the passages are full.
 const SCAN_LIMIT = 10_000;
@@ -48,6 +50,8 @@ function page(text: string, handle: string, from: number, length: number): strin
 function search(text: string, handle: string, query: string): string {
   const words = [...new Set(query.split(/\s+/).filter(Boolean))].sort((a, b) => b.length - a.length);
   const pattern = new RegExp(words.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
+  // the passages share the limit with the header, the query in it, and the last line.
+  const budget = READ_LIMIT - query.length - SEARCH_FRAME;
   const passages: string[] = [];
   let used = 0;
   let full = false;
@@ -59,14 +63,14 @@ function search(text: string, handle: string, query: string): string {
     count++;
     if (full) return;
     const passage = `[at ${start}] ${text.slice(start, end)}`;
-    if (used + passage.length > READ_LIMIT && passages.length) {
+    if (used + passage.length > budget && passages.length) {
       full = true;
       return;
     }
-    passages.push(passage.slice(0, safeEnd(passage, READ_LIMIT)));
+    passages.push(passage.slice(0, safeEnd(passage, budget)));
     // the separator between two passages counts too.
     used += passage.length + 2;
-    if (used >= READ_LIMIT) full = true;
+    if (used >= budget) full = true;
   };
   // the matches come in text order, so a span can only join the span before it.
   let span: [number, number] | undefined;
@@ -78,7 +82,7 @@ function search(text: string, handle: string, query: string): string {
     const start = safeStart(text, Math.max(0, match.index - AROUND));
     const end = safeEnd(text, Math.min(text.length, match.index + match[0].length + AROUND));
     // a span longer than the limit is cut anyway, so a dense match closes it early.
-    if (span && start <= span[1] && span[1] - span[0] < READ_LIMIT) {
+    if (span && start <= span[1] && span[1] - span[0] < budget) {
       span[1] = Math.max(span[1], end);
       continue;
     }

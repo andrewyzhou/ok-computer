@@ -149,6 +149,21 @@ describe('tool caller', () => {
     expect((await call('result_read', { handle, query: `${query}a` }, 'r1', 'too-long')).isError).toBe(true);
   });
 
+  // the search counted only its passages, and a page of text full of closing tags grew in the wrapper. both outputs
+  // then got a handle of their own, and a part of the passages was behind the second handle.
+  it('keeps result_read under the handle limit inside the longest wrapper', async () => {
+    const { call, row } = setup();
+    await call('fetch', { text: Array.from({ length: 20_000 }, (_, i) => `row ${i} ab`).join('\n') }, 'r1', 'rows');
+    const rows = String(row('rows').resultHandle);
+    const found = await call('result_read', { handle: rows, query: `ab ${'z'.repeat(QUERY_LIMIT - 3)}` }, 'r1', 'rows-search');
+    expect(found.content).toContain('more passages match');
+    expect(row('rows-search')).toMatchObject({ truncated: 0, resultHandle: null });
+    await call('fetch', { text: '</note>'.repeat(2000) }, 'r1', 'tags');
+    const page = await call('result_read', { handle: String(row('tags').resultHandle) }, 'r1', 'tags-page');
+    expect(page.content.length).toBeLessThanOrEqual(HANDLE_OVER);
+    expect(row('tags-page')).toMatchObject({ truncated: 0, resultHandle: null });
+  });
+
   // a lone half of a pair stays in the event log for good, and a provider can refuse each later request with it.
   it('never cuts a surrogate pair in a page or a search passage of result_read', async () => {
     const { call, row } = setup();
