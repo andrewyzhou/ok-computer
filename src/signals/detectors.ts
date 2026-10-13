@@ -47,8 +47,8 @@ function nearest(today: string, month: number, day: number): string | undefined 
 }
 
 // the days that a text names, relative to the day that it arrived in the owner's time zone. it reads iso dates,
-// "Oct 17", "17 October", us dates (10/17), a weekday after a word that sets a day ("by Friday"), and "tomorrow". a
-// past date and a date past the window are not deadlines.
+// "Oct 17", "17 October", us dates (10/17), a weekday or the same day after a word that sets a day ("by Friday", "due
+// today", "by end of day"), and "tomorrow". a past date and a date past the window are not deadlines.
 export function mentionedDates(text: string, arrived: Date, timeZone: string): Mention[] {
   const today = localDay(arrived, timeZone);
   const last = addDays(today, WINDOW_DAYS);
@@ -76,13 +76,16 @@ export function mentionedDates(text: string, arrived: Date, timeZone: string): M
     add(addDays(today, ahead), m[0]);
   }
   for (const m of text.matchAll(/\btomorrow\b/gi)) add(addDays(today, 1), m[0]);
+  // a deadline on the day of the mail is the most urgent kind. "today" alone is in many newsletters, so it counts
+  // only after a word that sets a day, as a weekday does.
+  for (const m of text.matchAll(/\b(?:by|until|before|due)\s+(?:the\s+)?(?:today|tonight|end\s+of\s+(?:the\s+)?day|eod|cob)\b/gi)) add(today, m[0]);
   return [...found.values()].sort((a, b) => a.day.localeCompare(b.day));
 }
 
 // these words say nothing about which event a mail means.
 const STOP = new Set([
   'about', 'after', 'again', 'also', 'before', 'deadline', 'from', 'have', 'here', 'just', 'meeting', 'please', 'reminder',
-  'regarding', 'that', 'there', 'this', 'today', 'tomorrow', 'update', 'week', 'when', 'with', 'your', 'will', 'until',
+  'regarding', 'that', 'there', 'this', 'today', 'tonight', 'tomorrow', 'update', 'week', 'when', 'with', 'your', 'will', 'until',
   ...WEEKDAYS,
   'january', 'february', 'march', 'april', 'june', 'july', 'august', 'september', 'october', 'november', 'december',
 ]);

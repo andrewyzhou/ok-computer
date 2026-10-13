@@ -42,6 +42,16 @@ describe('date mentions', () => {
     expect(days('The essay is due Thursday')).toEqual(['2026-10-15']);
     expect(days('next Friday')).toEqual(['2026-10-23']);
   });
+
+  // a deadline on the day of the mail is the most urgent kind. "today" alone is in many newsletters.
+  it('reads the day of the mail after a word that sets a day', () => {
+    expect(days('Reminder: the permission form is due today at 5pm')).toEqual(['2026-10-13']);
+    expect(days('Submit the lab report by tonight')).toEqual(['2026-10-13']);
+    expect(days('please send it by end of day')).toEqual(['2026-10-13']);
+    expect(days('Need this by EOD')).toEqual(['2026-10-13']);
+    expect(days("Today's deals: 20% off")).toEqual([]);
+    expect(days('see you tonight')).toEqual([]);
+  });
 });
 
 describe('date_not_on_calendar', () => {
