@@ -131,7 +131,7 @@ describe('reviewWindow', () => {
       at('09:00', '2027-10-13').toISOString(),
     );
     createApproval(db, { runId: 'ahead', toolName: 'skill_write', input: {}, summary: 'draft' }, now);
-    setSetting(db, `${WINDOW_OF}ahead`, at('00:00', '2027-10-13').toISOString(), now);
+    setSetting(db, `${WINDOW_OF}ahead`, { start: at('00:00', '2027-10-12').toISOString(), end: at('00:00', '2027-10-13').toISOString() }, now);
     setSetting(db, REVIEWED_UNTIL, at('00:00', '2026-10-16').toISOString(), now);
     expect(reviewWindow(db, now, tz).start).toEqual(at('00:00', '2026-10-16'));
     // a review that sent a draft on 10-18 still counts when the other mark is ahead.
@@ -139,7 +139,7 @@ describe('reviewWindow', () => {
       at('09:00', '2026-10-18').toISOString(),
     );
     createApproval(db, { runId: 'sent', toolName: 'skill_write', input: {}, summary: 'draft' }, now);
-    setSetting(db, `${WINDOW_OF}sent`, at('00:00', '2026-10-18').toISOString(), now);
+    setSetting(db, `${WINDOW_OF}sent`, { start: at('00:00', '2026-10-17').toISOString(), end: at('00:00', '2026-10-18').toISOString() }, now);
     setSetting(db, REVIEWED_UNTIL, at('00:00', '2027-10-13').toISOString(), now);
     expect(reviewWindow(db, now, tz).start).toEqual(at('00:00', '2026-10-18'));
   });
@@ -230,7 +230,51 @@ describe('the workshop job', () => {
     // the sweep expires an approved call that never started.
     db.prepare("UPDATE approvals SET resolvedBy = 'button' WHERE runId = 'review-1'").run();
     expect(reviewWindow(db, now, tz).start).toEqual(at('00:00'));
+    // the lost draft opens its window also a day later, when no review moved the mark yet.
+    expect(reviewWindow(db, at('09:00', '2026-10-14'), tz).start).toEqual(at('00:00'));
     expect((await review(automation)).runId).toBe('review-2');
+  });
+
+  it('opens the window of a lost draft once, also after a later mark, and lists the drafts of that window with their decisions', async () => {
+    const db = openDb(':memory:');
+    run(db, 'big', at('10:00'), 'big task', LONG_TASK_CALLS);
+    const inputs: string[] = [];
+    let now = at('09:00', '2026-10-13');
+    const names = [['calendar-booking', 'dentist-booking', 'gym-plan']];
+    const review = createWorkshop({
+      db,
+      clock: () => now,
+      config: { timeZone: tz, paths: { skills: join(mkdtempSync(join(tmpdir(), 'okc-workshop-')), 'skills') } } as WorkshopDeps['config'],
+      queue: createRunQueue(),
+      signal: new AbortController().signal,
+      background: true,
+      newId: (() => { let n = 0; return () => `review-${++n}`; })(),
+      agent: async (input) => {
+        const runId = input.runId!;
+        inputs.push((input.events![0]!.payload as { text: string }).text);
+        db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES (?, ?, 'automation', 'consolidation', 'completed', ?)").run(runId, input.sessionKey, now.toISOString());
+        for (const name of names.shift() ?? []) createApproval(db, { runId, toolName: 'skill_write', input: { name, replaces: false }, summary: name }, now);
+        return { runId, status: 'completed', text: '' };
+      },
+    });
+    expect((await review(automation)).status).toBe('completed');
+    // the owner approves the first draft and the app stops before it runs, denies the second, and does not answer the third.
+    db.prepare("UPDATE approvals SET status = 'expired', resolvedBy = 'button' WHERE id = 1").run();
+    db.prepare("UPDATE approvals SET status = 'denied', resolvedBy = 'button' WHERE id = 2").run();
+    now = at('09:00', '2026-10-14');
+    expect((await review(automation)).status).toBe('completed');
+    expect(inputs[1]).toContain('Skill review of the main session from 2026-10-12 00:00 to 2026-10-14 00:00: 1 long or corrected task.');
+    expect(inputs[1]).toContain(
+      [
+        'Do not propose again a draft that the owner denied or that waits for the owner:',
+        '- "calendar-booking": the owner approved it, but the app stopped before it ran, so it is not written',
+        '- "dentist-booking": denied by the owner',
+        '- "gym-plan": waits for the owner',
+      ].join('\n'),
+    );
+    // the review of 10-14 covered the lost draft, so the review of 10-15 starts at the mark.
+    now = at('09:00', '2026-10-15');
+    expect(await review(automation)).toEqual({ status: 'skipped', error: 'no long or corrected task from 2026-10-14 00:00 to 2026-10-15 00:00' });
   });
 
   it('reviews a window again after a failed review that sent no draft', async () => {

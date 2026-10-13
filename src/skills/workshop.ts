@@ -22,7 +22,7 @@ export const WORKSHOP_TOOLS: readonly string[] = ['skill_read', 'skill_write'];
 export const LONG_TASK_CALLS = 8;
 // only a review that ended well moves this mark, so a failed review or a day with the pc off is reviewed later.
 export const REVIEWED_UNTIL = 'workshop_reviewed_until';
-// each review keeps the end of its window under this prefix and its run id, while it has a draft.
+// each review keeps its window under this prefix and its run id, while it has a draft.
 export const WINDOW_OF = 'workshop_window:';
 const MAX_DAYS = 7;
 const REVIEW_AT = '09:00';
@@ -85,27 +85,67 @@ export function reviewWindow(db: Db, now: Date, timeZone: string): Window {
   const floor = zonedToUtc(addDays(today, -MAX_DAYS), '00:00', timeZone).getTime();
   // a mark after the end comes from a clock that was ahead. it would stop every review until that date, so it is
   // ignored, and the other marks stay. the end of the next finished review writes a correct mark.
-  const marks = [getSetting<string>(db, REVIEWED_UNTIL), ...proposedUntil(db)]
+  const reviews = draftReviews(db).filter((review) => Date.parse(review.end) <= end.getTime());
+  const marks = [getSetting<string>(db, REVIEWED_UNTIL), ...reviews.map((review) => review.end)]
     .filter((mark) => mark !== undefined)
     .map((mark) => Date.parse(mark))
     .filter((mark) => mark <= end.getTime());
-  if (!marks.length) return { start: yesterday, end };
-  return { start: new Date(Math.max(...marks, floor)), end };
+  const start = marks.length ? Math.max(...marks, floor) : yesterday.getTime();
+  // a lost draft opens the window of its review again, also when a later mark is after it.
+  const lost = reviews.filter((review) => review.lost).map((review) => Date.parse(review.start));
+  return { start: new Date(Math.max(Math.min(start, ...lost), floor)), end };
+}
+
+// a draft is lost when it expired before it ran, and the owner approved it or never got its card. the app stopped
+// before the approved draft ran, or the network was down when the review sent the card.
+const LOST = "status = 'expired' AND startedAt IS NULL AND (resolvedBy IS NOT NULL OR unsentAt IS NOT NULL)";
+
+interface DraftReview {
+  runId: string;
+  start: string;
+  end: string;
+  lost: boolean;
 }
 
 // a review that sent a draft to the owner counts as done for its window, also when it failed or the app stopped
 // after the draft. a second review of the same window would send a second draft for the same task. the mark is the
-// window end that the review stored, because the time zone can change after the review. each review gives its own
-// mark, so the caller can ignore one that a clock ahead gave. a draft that the owner approved and that expired because
-// the app stopped before it ran is lost, so its review does not count, and the next review sees the task again.
-function proposedUntil(db: Db): string[] {
+// window that the review stored, because the time zone can change after the review. each review gives its own mark,
+// so the caller can ignore one that a clock ahead gave. a review with a lost draft gives the start of its window, so
+// the next review sees its tasks again. the next finished review removes that mark.
+function draftReviews(db: Db): DraftReview[] {
+  const rows = db.prepare(`SELECT runId, MAX(${LOST}) AS lost FROM approvals WHERE toolName = 'skill_write' GROUP BY runId`).all();
+  return rows.flatMap((row) => {
+    const runId = String(row.runId);
+    const window = getSetting<{ start: string; end: string }>(db, `${WINDOW_OF}${runId}`);
+    return window ? [{ runId, start: window.start, end: window.end, lost: Number(row.lost) === 1 }] : [];
+  });
+}
+
+const DRAFT_STATES: Record<string, string> = {
+  pending: 'waits for the owner',
+  approved: 'approved by the owner',
+  denied: 'denied by the owner',
+  expired: 'the owner did not answer in 24 hours',
+};
+
+// a lost draft opens its window again, so the review sees the tasks of the other drafts of that window again. it must
+// not send a draft again that the owner denied or that waits for the owner.
+function draftsText(db: Db, since: Date): string | undefined {
   const rows = db
-    .prepare(
-      `SELECT DISTINCT runId FROM approvals WHERE toolName = 'skill_write' AND runId NOT IN
-         (SELECT runId FROM approvals WHERE toolName = 'skill_write' AND status = 'expired' AND resolvedBy IS NOT NULL AND startedAt IS NULL)`,
-    )
-    .all();
-  return rows.map((row) => getSetting<string>(db, `${WINDOW_OF}${String(row.runId)}`)).filter((mark) => mark !== undefined);
+    .prepare(`SELECT input, status, resolvedBy, ${LOST} AS lost FROM approvals WHERE toolName = 'skill_write' AND requestedAt >= ? ORDER BY id`)
+    .all(since.toISOString());
+  if (!rows.length) return undefined;
+  const lines = rows.map((row) => {
+    const input = JSON.parse(String(row.input)) as { name?: unknown; replaces?: unknown };
+    const name = typeof input.name === 'string' ? JSON.stringify(headOf(input.name, 64)) : 'a draft without a name';
+    const state = Number(row.lost) !== 1
+      ? DRAFT_STATES[String(row.status)]
+      : row.resolvedBy !== null
+        ? 'the owner approved it, but the app stopped before it ran, so it is not written'
+        : 'its card did not reach the owner, so it is not written';
+    return `- ${name}${input.replaces === true ? ' (a change)' : ''}: ${state}`;
+  });
+  return `Skill drafts since the start of this window. Do not propose again a draft that the owner denied or that waits for the owner:\n${lines.join('\n')}`;
 }
 
 export const SKILL_LOST_TEXT = 'The next skill review looks at that task again and can propose the skill again.';
@@ -305,9 +345,16 @@ export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => 
     const window = reviewWindow(db, clock(), config.timeZone);
     const span = `from ${local(window.start)} to ${local(window.end)}`;
     if (window.start >= window.end) return { status: 'skipped', error: `the main session is already reviewed until ${local(window.start)}` };
+    // this review covers the windows of the lost drafts that it knows now. a draft that gets lost later opens its
+    // window for the next review.
+    const lost = draftReviews(db).filter((each) => each.lost && Date.parse(each.end) <= window.end.getTime());
+    const covered = () => {
+      for (const each of lost) db.prepare('DELETE FROM settings WHERE key = ?').run(`${WINDOW_OF}${each.runId}`);
+    };
     const tasks = findTasks(db, window);
     if (!tasks.length) {
       setSetting(db, REVIEWED_UNTIL, window.end.toISOString(), clock());
+      covered();
       return { status: 'skipped', error: `no long or corrected task ${span}` };
     }
     const shown = tasks.slice(0, MAX_TASKS);
@@ -315,6 +362,7 @@ export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => 
     const text = [
       `Skill review of the main session ${span}: ${tasks.length} long or corrected ${tasks.length === 1 ? 'task' : 'tasks'}.${left ? ` The last ${left} are left out.` : ''}`,
       skillsText(config.paths.skills),
+      ...[draftsText(db, window.start)].filter((each) => each !== undefined),
       ...shown.map((task, i) => taskText(task, i + 1)),
     ].join('\n\n');
     const taint = [...new Map(shown.flatMap((task) => task.taint).map((each) => [each.source, each])).values()];
@@ -323,7 +371,7 @@ export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => 
     const sessionKey = `${WORKSHOP_PREFIX}${runId}`;
     // the key is written before the run, so no draft is without its mark.
     const windowKey = `${WINDOW_OF}${runId}`;
-    setSetting(db, windowKey, window.end.toISOString(), clock());
+    setSetting(db, windowKey, { start: window.start.toISOString(), end: window.end.toISOString() }, clock());
     const result = await deps.queue.enqueue(sessionKey, () =>
       deps.agent({
         runId,
@@ -338,11 +386,12 @@ export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => 
         signal: deps.signal,
       }),
     );
-    if (!db.prepare("SELECT 1 FROM approvals WHERE runId = ? AND toolName = 'skill_write'").get(runId)) {
-      db.prepare('DELETE FROM settings WHERE key = ?').run(windowKey);
-    }
+    // a review with a draft covers its window, so a lost draft of that window does not open it again.
+    if (db.prepare("SELECT 1 FROM approvals WHERE runId = ? AND toolName = 'skill_write'").get(runId)) covered();
+    else db.prepare('DELETE FROM settings WHERE key = ?').run(windowKey);
     if (result.status !== 'completed') return { status: 'failed', runId, error: result.error ?? result.status };
     setSetting(db, REVIEWED_UNTIL, window.end.toISOString(), clock());
+    covered();
     return { status: 'completed', runId };
   }
 }

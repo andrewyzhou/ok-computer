@@ -181,16 +181,49 @@ describe('skill workshop', () => {
     expect(await t.app.scheduler.runNow(id)).toEqual({ status: 'skipped', error: 'left to the background service' });
   });
 
-  it('tells the owner that the next review can propose a draft again when the approved draft expired before it ran', async () => {
-    const t = setup([...task, toolStep({ id: 'w1', name: 'skill_write', input: draft }), textStep('NO_REPLY')]);
+  it('reviews the task of a draft again when the owner approved it and it expired before it ran, as the owner is told', async () => {
+    const steps = [toolStep({ id: 'w1', name: 'skill_write', input: draft }), textStep('NO_REPLY')];
+    const t = setup([...task, ...steps, ...steps]);
     await runTask(t);
     await t.at(pdt('09:00', '2026-10-13'));
+    // the review ended well, so it moved the mark to the end of its window.
+    expect(until(t)).toBe(pdt('00:00', '2026-10-13'));
     // the owner approved, and the app stopped before the call started.
     t.db.prepare("UPDATE approvals SET status = 'approved', resolvedAt = ?, resolvedBy = 'button'").run(pdt('09:00', '2026-10-13'));
     await t.at(pdt('12:00', '2026-10-13'));
     expect(t.rows('SELECT status FROM approvals')).toEqual([{ status: 'expired' }]);
     expect(t.printed()).toContain(`so it expired and did not run. ${SKILL_LOST_TEXT}`);
     expect(t.printed()).not.toContain('Ask again');
+
+    await t.at(pdt('09:00', '2026-10-14'));
+    const input = JSON.stringify(t.model.calls.at(-1)!.messages);
+    expect(input).toContain('Skill review of the main session from 2026-10-12 00:00 to 2026-10-14 00:00: 1 long or corrected task.');
+    expect(input).toContain('book the dentist for friday 3pm');
+    expect(input).toContain('calendar-booking\\\": the owner approved it, but the app stopped before it ran, so it is not written');
+    expect(t.rows('SELECT id, status FROM approvals')).toEqual([{ id: 1, status: 'expired' }, { id: 2, status: 'pending' }]);
+    await t.app.resolveApproval(2, 'approve', 'button');
+    await t.settle();
+    expect(existsSync(t.skillFile)).toBe(true);
+    // the review of 10-14 covered the window of the lost draft, so the next review does not open it again.
+    await t.at(pdt('09:00', '2026-10-15'));
+    expect(t.rows("SELECT error FROM automation_runs WHERE automationId = (SELECT id FROM automations WHERE name = 'skills: daily review') ORDER BY rowid").at(-1)).toEqual({
+      error: 'no long or corrected task from 2026-10-14 00:00 to 2026-10-15 00:00',
+    });
+  });
+
+  it('reviews the task of a draft again when its card did not reach the owner and it expired', async () => {
+    const steps = [toolStep({ id: 'w1', name: 'skill_write', input: draft }), textStep('NO_REPLY')];
+    const t = setup([...task, ...steps, ...steps]);
+    await runTask(t);
+    await t.at(pdt('09:00', '2026-10-13'));
+    // the flow marks a card that did not reach the owner. the approvals test checks that mark.
+    t.db.prepare('UPDATE approvals SET unsentAt = ?').run(pdt('09:00', '2026-10-13'));
+    // the sweep of the tick expires the card before the review of 10-14 starts, so that review sees the task again.
+    await t.at(pdt('09:00', '2026-10-14'));
+    const input = JSON.stringify(t.model.calls.at(-1)!.messages);
+    expect(input).toContain('Skill review of the main session from 2026-10-12 00:00 to 2026-10-14 00:00: 1 long or corrected task.');
+    expect(input).toContain('calendar-booking\\\": its card did not reach the owner, so it is not written');
+    expect(t.rows('SELECT id, status FROM approvals')).toEqual([{ id: 1, status: 'expired' }, { id: 2, status: 'pending' }]);
   });
 
   it('runs the review in the service when the chat process ticks first at 09:00', async () => {
