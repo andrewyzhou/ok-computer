@@ -5,10 +5,11 @@ import { z } from 'zod';
 import type { Logger } from '../observability/logger.js';
 import { cleanLine } from '../signals/store.js';
 import { headOf } from '../text.js';
+import { zonedToUtc } from '../time.js';
 import { defineTool, type Tool, type ToolOutput } from '../tools/registry.js';
 import type { GoogleAccounts, GoogleApis } from './accounts.js';
 import type { GoogleConfig } from './config.js';
-import { toGoogleError } from './errors.js';
+import { GoogleError, toGoogleError } from './errors.js';
 import { badAddress, bodyText, header, rawMessage } from './mime.js';
 import { failed, sendDraft } from './send.js';
 import { requestContext } from './trace.js';
@@ -94,7 +95,8 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
     } catch (err) {
       const error = toGoogleError(err);
       if (error.kind === 'not_found' || error.kind === 'gone') return 'gone';
-      throw err;
+      // only the read failed, and the change did not leave. so the effect is none, and the owner can approve again.
+      throw new GoogleError(error.kind, error.message, error.status, false);
     }
     if (event.status === 'cancelled') return 'gone';
     if ((event.summary ?? '') === currentTitle) return undefined;
@@ -243,15 +245,24 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
       input: z.object({ account: anyAccount, from: time, to: time }),
       risk: 'read',
       untrustedOutput: 'calendar',
-      run: async ({ account: which, from, to }) => {
+      run: async ({ account: which, from, to }, ctx) => {
         const output = await eachAccount(name('calendar_list_events'), which, 'calendar', async (apis, alias) => {
           const { data } = await apis.calendar.events.list({ calendarId: 'primary', timeMin: from, timeMax: to, singleEvents: true, orderBy: 'startTime', maxResults: 100 });
           return (data.items ?? []).map((event) =>
             cleanLine(`${event.start?.dateTime ?? event.start?.date} [${alias}] id=${event.id} ${event.summary ?? '(no title)'}${event.organizer?.self ? '' : ` (from ${event.organizer?.email ?? 'someone'})`}`, 400),
           );
         });
-        // the lines of all accounts sort by time, so a merged list reads as one day.
-        return { ...output, content: output.content.split('\n').sort().join('\n') };
+        // the lines of all accounts sort by time, so a merged list reads as one day. google writes each start in the
+        // zone of its calendar, so the sort uses the time and not the text. an all-day event starts at midnight in the
+        // owner's zone. a line without a time (an error, or an account without events) comes after the events.
+        const at = (line: string) => {
+          const start = line.slice(0, line.indexOf(' '));
+          const time = /^\d{4}-\d{2}-\d{2}$/.test(start) ? zonedToUtc(start, '00:00', ctx.timeZone).getTime() : Date.parse(start);
+          return Number.isNaN(time) ? Infinity : time;
+        };
+        const lines = output.content.split('\n').map((line) => ({ line, time: at(line) }));
+        lines.sort((a, b) => (a.time === b.time ? 0 : a.time < b.time ? -1 : 1));
+        return { ...output, content: lines.map((each) => each.line).join('\n') };
       },
     }),
     googleTool({

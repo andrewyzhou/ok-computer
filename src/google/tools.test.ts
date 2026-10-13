@@ -210,6 +210,24 @@ describe('read tools', () => {
     expect(out.untrustedSource).toBe('gmail:personal, gmail:school');
   });
 
+  // google writes each start in the zone of its calendar, so the text of two starts does not sort by time.
+  it('merges the events of all accounts by their time, with the lines without a time at the end', async () => {
+    const call = await setup();
+    const event = (id: string, summary: string, start: { dateTime: string } | { date: string }) => ({ id, summary, start, end: start, organizer: { self: true } });
+    h.fake.upsertEvent('personal', event('p1', 'seventeen utc', { dateTime: '2026-10-14T10:00:00-07:00' }));
+    h.fake.upsertEvent('personal', { ...event('p2', 'all day', { date: '2026-10-14' }), end: { date: '2026-10-15' } });
+    h.fake.upsertEvent('school', event('s1', 'sixteen utc', { dateTime: '2026-10-14T16:00:00Z' }));
+    const range = { account: 'all', from: '2026-10-14T00:00:00-07:00', to: '2026-10-15T00:00:00-07:00' };
+    const ids = (content: string) => content.split('\n').map((line) => /id=(\w+)/.exec(line)?.[1]);
+    expect(ids((await call('calendar_list_events', range)).content)).toEqual(['p2', 's1', 'p1']);
+
+    // the fault hits one of the two accounts, so its line stands at the end.
+    h.fake.fault({ route: 'GET /calendar/v3/calendars/primary/events', status: 503, times: 1 });
+    const lines = (await call('calendar_list_events', range)).content.split('\n');
+    expect(lines.at(-1)).toContain('calendar_list_events failed for');
+    expect(ids(lines.slice(0, -1).join('\n'))).toEqual(lines.at(-1)!.includes('for school') ? ['p2', 'p1'] : ['s1']);
+  });
+
   it('refuses an account alias that the config does not have', async () => {
     const call = await setup();
     expect(await call('gmail_search', { account: 'boss', query: 'x' })).toMatchObject({ isError: true, content: expect.stringContaining('invalid input') });
@@ -244,6 +262,18 @@ describe('calendar writes', () => {
     expect(await call('calendar_create_event', input)).toMatchObject({ isError: true, effect: 'unknown' });
     h.fake.fault({ route: 'POST /calendar/v3/calendars/primary/events', late: true, times: 1 });
     expect(await call('calendar_create_event', input)).toMatchObject({ isError: true, effect: 'unknown' });
+  });
+
+  // the read of the title comes before the change. when only that read fails, nothing changed.
+  it('says none when the read of the title fails before a change or a delete', async () => {
+    const call = await setup();
+    h.fake.upsertEvent('personal', { id: 'e1', summary: 'x', start: { dateTime: '2026-10-20T09:00:00Z' }, end: { dateTime: '2026-10-20T10:00:00Z' } });
+    h.fake.fault({ route: 'GET /calendar/v3/calendars/primary/events/e1', status: 503, times: 2 });
+    const deleted = await call('calendar_delete_event', { account: 'personal', eventId: 'e1', currentTitle: 'x' });
+    expect(deleted).toMatchObject({ isError: true, effect: 'none' });
+    expect(deleted.content).not.toContain('unknown');
+    expect(await call('calendar_update_event', { account: 'personal', eventId: 'e1', currentTitle: 'x', summary: 'y' })).toMatchObject({ isError: true, effect: 'none' });
+    expect(h.fake.mailbox('personal').events.get('e1')).toMatchObject({ summary: 'x', status: 'confirmed' });
   });
 
   it('treats a repeated delete as done', async () => {
