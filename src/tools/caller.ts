@@ -71,7 +71,11 @@ interface Trace {
   tainted?: boolean;
   // abandoned: the run stopped while the tool ran. a later result changes it to late.
   outcome?: 'abandoned';
+  source?: string;
+  serverId?: string;
 }
+
+const sourceOf = (tool: Tool) => ({ ...(tool.source ? { source: tool.source } : {}), ...(tool.serverId ? { serverId: tool.serverId } : {}) });
 
 const STOPPED = Symbol('stopped');
 
@@ -132,8 +136,8 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       const row = db
         .prepare(
           `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, riskLevel,
-             policyDecisionId, tainted, untrustedSource, rawResultBlob, truncated, resultHandle, outcome)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+             policyDecisionId, tainted, untrustedSource, rawResultBlob, truncated, resultHandle, outcome, source, serverId)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
         )
         .get(
           runId,
@@ -152,6 +156,8 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
           view.truncated ? 1 : 0,
           view.handle ?? null,
           trace.outcome ?? null,
+          trace.source ?? 'builtin',
+          trace.serverId ?? null,
         );
       return { ...result, rowId: Number(row!.id) };
     } catch (err) {
@@ -294,7 +300,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
   }
 
   return {
-    async call(call, ctx) {
+    async call(modelCall, ctx) {
       const started = performance.now();
       const toolCtx: ToolContext = {
         runId: ctx.runId,
@@ -302,11 +308,12 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         timeZone: deps.timeZone,
         clock,
         signal: ctx.signal,
-        toolCallId: call.id,
+        toolCallId: modelCall.id,
       };
-      const resolved = tools.resolve(call, ctx.allowed);
-      if (!resolved.ok) return strip(record(ctx.runId, call, resolved.output, started, {}));
-      const { tool, input } = resolved;
+      const resolved = tools.resolve(modelCall, ctx.allowed);
+      if (!resolved.ok) return strip(record(ctx.runId, modelCall, resolved.output, started, {}));
+      // for tool_call this is the integration tool that it names, with the same id.
+      const { tool, input, call } = resolved;
 
       let gate: { decisionId: number; taint: TaintSource[]; held?: ToolOutput };
       try {
@@ -316,7 +323,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         const output = { content: `${tool.name} did not run, because its policy check failed: ${errorText(err)}`, isError: true };
         return strip(record(ctx.runId, call, output, started, { risk: tool.risk }));
       }
-      const trace = { risk: tool.risk, decisionId: gate.decisionId, tainted: gate.taint.length > 0 };
+      const trace = { risk: tool.risk, decisionId: gate.decisionId, tainted: gate.taint.length > 0, ...sourceOf(tool) };
       const finish = (output: ToolOutput, outcome?: 'abandoned') =>
         record(ctx.runId, call, output, started, { ...trace, ...(outcome ? { outcome } : {}) });
       if (gate.held) return strip(finish(gate.held));
@@ -366,7 +373,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       let abandoned = false;
       const finish = (output: ToolOutput, outcome?: 'abandoned') => {
         abandoned = outcome === 'abandoned';
-        return record(approval.runId, call, output, started, { ...trace, risk: resolved.tool.risk, ...(outcome ? { outcome } : {}) });
+        return record(approval.runId, call, output, started, { ...trace, risk: resolved.tool.risk, ...sourceOf(resolved.tool), ...(outcome ? { outcome } : {}) });
       };
       // no await comes between the check of the signal and this line, so the tool starts.
       const output = strip(await run(resolved.tool, resolved.input, toolCtx, call, finish, onLate));

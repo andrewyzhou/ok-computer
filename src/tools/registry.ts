@@ -33,10 +33,21 @@ export interface Tool<I = unknown> {
   // the source of all outputs of a tool that returns outside text. the registry marks each output with it, also an
   // error, because the message of an error can contain outside text, for example an http body.
   untrustedOutput?: string;
+  // the trace columns of a tool that an integration gives, for example 'mcp' and the integration id.
+  source?: string;
+  serverId?: string;
   run(input: I, ctx: ToolContext): Promise<ToolOutput>;
 }
 
-export type Resolved = { ok: true; tool: Tool; input: unknown } | { ok: false; output: ToolOutput };
+// call is the call that runs. it differs from the model's call when tool_call names an integration tool: the policy,
+// the approval and the trace then see that tool and its arguments, never tool_call.
+export type Resolved = { ok: true; tool: Tool; input: unknown; call: ToolCall } | { ok: false; output: ToolOutput };
+
+export const TOOL_CALL = 'tool_call';
+
+// an integration tool is not in the tools parameter. the model reaches it through tool_call, and an approval reaches it
+// by its name. the lookup gives undefined for a name that no integration offers now.
+export type DynamicTools = (name: string) => Tool | undefined;
 
 export interface ToolRegistry {
   specs(allowed: readonly string[]): ToolSpec[];
@@ -51,25 +62,41 @@ export function defineTool<I>(tool: Tool<I>): Tool<unknown> {
   return tool as Tool<unknown>;
 }
 
-export function createToolRegistry(tools: Tool[], logger: Logger = silentLogger): ToolRegistry {
+export function createToolRegistry(tools: Tool[], logger: Logger = silentLogger, dynamic?: DynamicTools): ToolRegistry {
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   // the tool list is part of the cached prefix, so the order must not change between requests.
   const sorted = [...tools].sort((a, b) => a.name.localeCompare(b.name));
   const specs = new Map(sorted.map((tool) => [tool.name, toSpec(tool)]));
+
+  const resolveOne = (call: ToolCall, allowed: readonly string[]): Resolved => {
+    const tool = byName.get(call.name) ?? dynamic?.(call.name);
+    // a tool outside the allowlist is the same as a tool that does not exist.
+    if (!tool || !allowed.includes(call.name)) return { ok: false, output: { content: `unknown tool: ${call.name}`, isError: true } };
+    const parsed = tool.input.safeParse(call.input);
+    if (!parsed.success) {
+      return { ok: false, output: { content: `invalid input for ${tool.name}:\n${z.prettifyError(parsed.error)}`, isError: true } };
+    }
+    return { ok: true, tool, input: parsed.data, call };
+  };
 
   return {
     specs(allowed) {
       return sorted.filter((tool) => allowed.includes(tool.name)).map((tool) => specs.get(tool.name)!);
     },
     resolve(call, allowed) {
-      const tool = byName.get(call.name);
-      // a tool outside the allowlist is the same as a tool that does not exist.
-      if (!tool || !allowed.includes(call.name)) return { ok: false, output: { content: `unknown tool: ${call.name}`, isError: true } };
-      const parsed = tool.input.safeParse(call.input);
-      if (!parsed.success) {
-        return { ok: false, output: { content: `invalid input for ${tool.name}:\n${z.prettifyError(parsed.error)}`, isError: true } };
+      if (call.name === TOOL_CALL && dynamic && allowed.includes(TOOL_CALL)) {
+        const outer = byName.get(TOOL_CALL)?.input.safeParse(call.input);
+        if (!outer?.success) {
+          return { ok: false, output: { content: `invalid input for ${TOOL_CALL}:\n${outer ? z.prettifyError(outer.error) : 'no schema'}`, isError: true } };
+        }
+        const { name, arguments: args } = outer.data as { name: string; arguments: unknown };
+        // only an integration tool goes through tool_call. a built-in tool has its own entry in the tools parameter.
+        if (byName.has(name) || !dynamic(name) || !allowed.includes(name)) {
+          return { ok: false, output: { content: `unknown integration tool: ${name}. use tool_search to find the exact name.`, isError: true } };
+        }
+        return resolveOne({ id: call.id, name, input: args }, allowed);
       }
-      return { ok: true, tool, input: parsed.data };
+      return resolveOne(call, allowed);
     },
     async execute(tool, input, ctx) {
       let output: ToolOutput;

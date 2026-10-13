@@ -57,8 +57,11 @@ export function createMessageRecorder(deps: { db: Db; blobs: BlobStore; clock: C
     let latencyMs: number | null = null;
     // a request from the server to the client has its own ids, so the key includes the direction of the request.
     const key = (from: 'out' | 'in') => `${from}:${rpcId}`;
+    // only a tools/call and its cancel belong to a tool call. other requests can run in the async context of a call,
+    // for example the tools/list that a list_changed during the call starts, but the call did not send them.
+    const ownTrace = () => (direction === 'out' && (method === 'tools/call' || method === 'notifications/cancelled') ? activeCall.getStore() : undefined);
     if (method && rpcId !== null) {
-      trace = direction === 'out' ? activeCall.getStore() : undefined;
+      trace = ownTrace();
       pending.set(key(direction), { method, sentAt: performance.now(), trace });
     } else if (!method && rpcId !== null) {
       const request = pending.get(key(direction === 'in' ? 'out' : 'in'));
@@ -68,8 +71,8 @@ export function createMessageRecorder(deps: { db: Db; blobs: BlobStore; clock: C
         trace = request.trace;
         latencyMs = Math.round(performance.now() - request.sentAt);
       }
-    } else if (direction === 'out') {
-      trace = activeCall.getStore();
+    } else {
+      trace = ownTrace();
     }
     const small = Buffer.byteLength(text) <= INLINE_LIMIT;
     insert.run(

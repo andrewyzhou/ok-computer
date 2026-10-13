@@ -1,0 +1,88 @@
+import { describe, expect, it } from 'vitest';
+import { openDb } from '../db/index.js';
+import { silentLogger } from '../observability/logger.js';
+import { HANDLE_OVER, modelView } from '../tools/results.js';
+import { buildSnapshot, createCatalogStore, riskOf, type CatalogTool } from './catalog.js';
+import { parseIntegrations, type IntegrationEntry } from './config.js';
+import { search, type Discoverable } from './discovery.js';
+import type { McpTool } from './mcp.js';
+
+const clock = () => new Date('2026-10-13T10:00:00Z');
+
+function entry(allow: string[], risk: Record<string, string> = {}): IntegrationEntry {
+  const parsed = parseIntegrations({ integrations: [{ id: 'notes', kind: 'mcp-stdio', command: 'node', args: ['x'], tools: { allow }, risk }] });
+  if (!parsed.ok) throw new Error(parsed.error);
+  return parsed.value[0]!;
+}
+
+const tool = (name: string, extra: Partial<McpTool> = {}): McpTool => ({ name, inputSchema: { type: 'object' }, ...extra }) as McpTool;
+
+describe('catalog', () => {
+  it('keeps only allowed tools, names each one, and says why a tool is missing', () => {
+    const snapshot = buildSnapshot(entry(['echo', 'files.read', 'gone', 'bad']), [
+      tool('echo', { description: 'x'.repeat(5_000) }),
+      tool('files.read'),
+      tool('hidden_admin'),
+      tool('bad', { inputSchema: { type: 'object', properties: { a: { type: 'string', pattern: '(' } }, $defs: { d: 'x'.repeat(20_000) } } as never }),
+    ]);
+    expect(snapshot.tools.map((each) => each.mcpName)).toEqual(['echo', 'files.read']);
+    expect(snapshot.tools[0]!.description).toHaveLength(1_024);
+    expect(snapshot.rejected).toEqual([
+      { mcpName: 'bad', reason: expect.stringContaining('bytes') },
+      { mcpName: 'gone', reason: 'the server does not offer this tool' },
+    ]);
+  });
+
+  it('never trusts a read hint: the config decides, and the default is a review or an approval', () => {
+    const e = entry(['a', 'b', 'c'], { c: 'read' });
+    const snap = buildSnapshot(e, [tool('a', { annotations: { readOnlyHint: true } }), tool('b'), tool('c')]);
+    expect(snap.tools.map((each) => riskOf(e, each))).toEqual(['write', 'external', 'read']);
+  });
+
+  it('records a version only when the catalog changed, and hides a stored tool that the config no longer allows', () => {
+    const db = openDb(':memory:');
+    const store = createCatalogStore({ db, clock, logger: silentLogger, entries: [entry(['a', 'b'])] });
+    store.update(entry(['a', 'b']), [tool('a'), tool('b')]);
+    store.update(entry(['a', 'b']), [tool('b'), tool('a')]);
+    expect(db.prepare('SELECT count(*) AS n FROM integration_catalogs').get()).toEqual({ n: 1 });
+    store.update(entry(['a', 'b']), [tool('a')]);
+    expect(db.prepare('SELECT count(*) AS n FROM integration_catalogs').get()).toEqual({ n: 2 });
+
+    const restarted = createCatalogStore({ db, clock, logger: silentLogger, entries: [entry(['b'])] });
+    expect(restarted.get('notes')).toMatchObject({ stored: true, snapshot: { tools: [] } });
+  });
+});
+
+describe('tool_search', () => {
+  const big = (i: number): Discoverable => ({
+    tool: {
+      name: `notes__tool_${i}`,
+      integrationId: 'notes',
+      mcpName: `tool_${i}`,
+      description: `find notes ${'word '.repeat(150)}`,
+      inputSchema: { type: 'object', properties: Object.fromEntries(Array.from({ length: 30 }, (_, k) => [`field_${k}`, { type: 'string', description: 'a field' }])) },
+      readOnlyHint: false,
+    } satisfies CatalogTool,
+    risk: 'external',
+    untrusted: true,
+    status: 'connected',
+  });
+
+  it('stays under the handle limit with its wrapper, so the model never gets a cut list', () => {
+    const output = search(Array.from({ length: 10 }, (_, i) => big(i)), 'find notes', 10);
+    const view = modelView(output);
+    expect(view.truncated).toBe(false);
+    expect(view.content.length).toBeLessThanOrEqual(HANDLE_OVER);
+    expect(view.content).toContain('search for the exact name to see it');
+  });
+
+  it('gives the full schema for an exact name', () => {
+    const output = search([big(1), big(2)], 'notes__tool_2', 5);
+    expect(output.content).toContain('field_29');
+    expect(output.content.startsWith('notes__tool_2')).toBe(true);
+  });
+
+  it('says how many tools exist when nothing matches', () => {
+    expect(search([big(1)], 'calendar', 5).content).toContain('1 integration tools exist');
+  });
+});

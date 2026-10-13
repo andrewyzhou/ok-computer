@@ -22,6 +22,9 @@ import {
 } from './memory/consolidate.js';
 import { appendToDailyNote, sessionExcerpt } from './memory/daily.js';
 import { createMemoryTools } from './memory/tools.js';
+import type { IntegrationEntry } from './integrations/config.js';
+import { createIntegrations, type Integrations, type IntegrationsDeps } from './integrations/integrations.js';
+import { createMemorySecretStore, type SecretStore } from './integrations/secrets.js';
 import { createSlotRunner } from './models/slots.js';
 import type { ModelClient, ModelRequest } from './models/types.js';
 import { createBlobStore } from './observability/blobs.js';
@@ -63,6 +66,11 @@ export interface AppDeps {
   rules?: readonly Rule[];
   setTimer?: SetTimer;
   newId?: () => string;
+  // the entries of okc.integrations.json, and the store of their secrets.
+  integrations?: IntegrationEntry[];
+  secrets?: SecretStore;
+  // tests connect in-memory servers. the app starts stdio processes and http connections.
+  mcpTransport?: IntegrationsDeps['transport'];
 }
 
 export interface App {
@@ -75,6 +83,7 @@ export interface App {
   // contextView renders the session with the same strategy, prompt and tools as its next model call.
   contextView(sessionKey: string): Promise<ModelRequest>;
   resolveApproval: ApprovalFlow['resolve'];
+  integrations: Integrations;
 }
 
 // a run ends at its timeout. the margin covers the end of the run itself, so a live run is never closed as stale.
@@ -101,6 +110,19 @@ export function createApp(deps: AppDeps): App {
   const owner = createOwnerMessenger({ db, channels, logger, clock, ...(preferred ? { preferred } : {}) });
   const ids = deps.newId ? { newId: deps.newId } : {};
   const blobs = createBlobStore(db, join(config.paths.data, 'blobs'), clock);
+  const integrations = createIntegrations({
+    db,
+    blobs,
+    logger,
+    clock,
+    entries: deps.integrations ?? [],
+    secrets: deps.secrets ?? createMemorySecretStore(),
+    ...(deps.mcpTransport ? { transport: deps.mcpTransport } : {}),
+    ...(deps.setTimer ? { setTimer: deps.setTimer } : {}),
+  });
+  // each run gets the integration tools of its session. the list comes from the config, not from a catalog, so the
+  // tools parameter of a session never changes when a server changes its tools.
+  const withIntegrations = (sessionKey: string, base: readonly string[]) => [...base, ...integrations.allowedNames(sessionKey)];
   const activeRuns = new Set<string>();
 
   const approvals = createApprovalFlow({
@@ -127,8 +149,10 @@ export function createApp(deps: AppDeps): App {
       createMessageOwnerTool(owner),
       ...createSkillTools({ skillsDir: config.paths.skills }),
       createResultReadTool({ db, blobs }),
+      ...integrations.tools,
     ],
     logger,
+    integrations.resolve,
   );
   const caller = createToolCaller({
     db,
@@ -172,7 +196,7 @@ export function createApp(deps: AppDeps): App {
     ...ids,
   };
   const agent = async (input: Parameters<typeof runAgent>[1]) => {
-    const result = await runAgent(agentDeps, input);
+    const result = await runAgent(agentDeps, { ...input, allowedTools: withIntegrations(input.sessionKey, input.allowedTools) });
     // the router tells the owner about a stopped message run in its reply. a background run has no reply, so the owner gets a message here.
     if (result.stoppedAtLimit && input.trigger !== 'message') {
       await owner.send(`The ${input.trigger} run did not finish: ${result.error}.`);
@@ -286,6 +310,8 @@ export function createApp(deps: AppDeps): App {
       syncHeartbeat(db, config, clock());
       // missed jobs can take minutes, so the start does not wait for them.
       void scheduler.start().catch((err: unknown) => logger.error('scheduler start failed', { err }));
+      // a server can need many seconds to start. a call waits for its server, and tool_search reads the stored catalog.
+      void integrations.start().catch((err: unknown) => logger.error('integrations start failed', { err }));
     },
     idle: () => queue.drain(),
     async stop() {
@@ -293,14 +319,16 @@ export function createApp(deps: AppDeps): App {
       for (const channel of channels.values()) await channel.stop();
       shutdown.abort();
       await queue.drain();
+      await integrations.stop();
     },
+    integrations,
     // without compaction hooks the strategy only renders. it does not call a model or append an event.
     contextView: (sessionKey) =>
       strategy.build({
         sessionKey,
         events: listEvents(db, sessionKey),
         system: agentDeps.stablePrompt(sessionKey),
-        tools: tools.specs(sessionTools(sessionKey)),
+        tools: tools.specs(withIntegrations(sessionKey, sessionTools(sessionKey))),
       }),
     resolveApproval: approvals.resolve,
   };
