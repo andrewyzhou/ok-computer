@@ -27,8 +27,6 @@ export const FIRST_LOOKBACK_S = 24 * 60 * 60;
 export const PAGE_SIZE = 20;
 // one poll reads at most this many pages. the next poll goes on from the position.
 export const PAGES_PER_POLL = 10;
-// a ts later than the clock plus this skew never moves the position.
-export const FUTURE_SKEW_S = 10 * 60;
 const SUMMARY_LIMIT = 300;
 
 interface PollState {
@@ -118,11 +116,11 @@ export function createSlackDmPoll(deps: SlackDmPollDeps): (integrationId: string
     return added;
   };
 
-  // the text of a dm is in the answer too, so a sender can write a block that looks like a message with a ts far in
-  // the future. a position there would hide every later dm. such a ts never moves the position; the message is still
-  // stored as untrusted text.
+  // the text of a dm is in the answer too, so a sender can try to write a message with a ts in the future. a position
+  // after the clock makes the overlap of the next poll smaller, and then a dm that the index shows late is lost. so a
+  // ts later than the clock never moves the position. the message is still stored as untrusted text.
   const newest = (position: string | null, messages: SlackMessage[]) => {
-    const limit = clock().getTime() / 1000 + FUTURE_SKEW_S;
+    const limit = clock().getTime() / 1000;
     return messages.reduce<string | null>(
       (best, message) => (Number(message.ts) <= limit && (best === null || Number(message.ts) > Number(best)) ? message.ts : best),
       position,
@@ -200,12 +198,18 @@ function ascending(messages: SlackMessage[]): boolean {
 // the answer.
 
 const TS_VALUE = /^\d{9,10}\.\d{6}$/;
-const TS = /\b(\d{9,10}\.\d{6})\b/g;
 const HAS_TS = /\b\d{9,10}\.\d{6}\b/;
 const LABELED_TS = /\b(?:message_ts|msg_?id|ts)\b["'*\s:=]*(\d{9,10}\.\d{6})\b/i;
-// d is a dm, g an older private group or a group dm, and c a channel.
-const CHANNEL = /\b([CDG][A-Z0-9]{8,})\b/;
-const USER = /\b([UW][A-Z0-9]{8,})\b/;
+// d is a dm, g an older private group or a group dm, and c a channel. a slack id has upper case letters and digits. so
+// the id patterns have no i flag, and they need a digit, because a name in capitals such as GREGORYSMITH is not an id.
+const id = (first: string) => `\\b([${first}](?=[A-Z0-9]*\\d)[A-Z0-9]{8,})\\b`;
+const CHANNEL = new RegExp(id('CDG'));
+const USER = new RegExp(id('UW'));
+// only the label can be in upper or lower case. a name on the line, as in "From: Christopher (U0...)", is not the id.
+const CHANNEL_LINE = new RegExp(`\\b[Cc]hannel\\b[^\\n]*?${id('CDG')}`);
+const USER_LINE = new RegExp(`\\b(?:[Ff]rom|[Uu]ser|[Aa]uthor)\\b[^\\n]*?${id('UW')}`);
+const USER_ID_LINE = new RegExp(`\\b[Uu]ser[ _]?(?:id|Id|ID)\\b[^\\n]*?${id('UW')}`);
+const HEADING = /^\s*#{1,6}\s+\S/;
 const NOTHING = /\bno (?:results|messages|matches)\b|\b0 (?:results|messages|matches)\b|^\s*$/i;
 
 // readSearchPage takes structured content or json first, because those keep their shape when the server changes its
@@ -219,20 +223,25 @@ export function readSearchPage(result: CallToolResult): SlackPage {
   const text = resultText(result);
   const trimmed = text.trim();
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    let parsed: unknown;
     try {
-      const fromJson = messagesInJson(JSON.parse(trimmed));
-      if (fromJson) return fromJson;
+      parsed = JSON.parse(trimmed);
     } catch {
       // the text only looks like json. the markdown reader tries it.
+      return messagesInMarkdown(text);
     }
+    // json without a list that the reader knows is unreadable. the markdown reader would see all of it as one message.
+    return messagesInJson(parsed) ?? { ok: false, reason: 'it is json without a list of messages that the reader knows' };
   }
   return messagesInMarkdown(text);
 }
 
-// a json answer has a list of objects with a ts. the list can be under any of a few keys.
+// a json answer has a list of objects with a ts. the list can be under any of a few keys, or under messages.matches as
+// in the search.messages answer of the slack web api.
 function messagesInJson(value: unknown): SlackPage | undefined {
-  const root = value as Record<string, unknown>;
-  const list = Array.isArray(value) ? value : (['messages', 'results', 'matches'].map((key) => root[key]).find(Array.isArray) as unknown[] | undefined);
+  const root = (value ?? {}) as Record<string, unknown>;
+  const nested = (root.messages ?? {}) as Record<string, unknown>;
+  const list = Array.isArray(value) ? value : ([root.messages, root.results, root.matches, nested.matches].find(Array.isArray) as unknown[] | undefined);
   if (!list) return undefined;
   const messages: SlackMessage[] = [];
   for (const item of list) {
@@ -248,20 +257,54 @@ function messagesInJson(value: unknown): SlackPage | undefined {
   return { ok: true, messages };
 }
 
-// markdown results are blocks split by headings or rules. a block with a ts is a message.
+// a markdown result is a block after a numbered heading of the server, for example "### Result 3 of 20". the text of a
+// dm is in the answer too, and it can hold headings, rules and lines that look like a result. so the first heading
+// before any ts gives the form of the server, and only a line of that form with the next number starts a block. each
+// other line is text of the block before it. thus a dm cannot cut a block or add one at a wrong place. a dm that
+// guesses the next number can put a false block in place of the next real result, whose text then stays in that block.
 function messagesInMarkdown(text: string): SlackPage {
   if (!HAS_TS.test(text)) return NOTHING.test(text) ? { ok: true, messages: [] } : { ok: false, reason: 'it has no message that the reader knows' };
-  const blocks = text.split(/^\s*(?:#{1,6}\s.*|-{3,}|\*{3,}|_{3,})\s*$/m).filter((block) => HAS_TS.test(block));
+  const lines = text.split(/\r?\n/);
+  const first = lines.findIndex((line) => HEADING.test(line));
+  const numberOf = first < 0 || HAS_TS.test(lines.slice(0, first).join('\n')) ? undefined : headingForm(lines[first]!);
+  if (!numberOf) return { ok: false, reason: 'it has no numbered heading before its first message' };
+  // a count before the first heading, as in "Found 3 results.", is the number of blocks. a block after the last one is
+  // text of a dm, and a wrong count means that the reader does not know this form.
+  const count = /\b(\d+) (?:results|messages|matches)\b/i.exec(lines.slice(0, first).join('\n'));
+  const total = count ? Number(count[1]) : Infinity;
+  const blocks: string[][] = [];
+  for (const line of lines.slice(first)) {
+    if (blocks.length < total && numberOf(line) === blocks.length + 1) blocks.push([]);
+    else blocks.at(-1)!.push(line);
+  }
+  if (count && blocks.length !== total) return { ok: false, reason: 'its number of results is not the number of blocks' };
   const messages: SlackMessage[] = [];
-  for (const block of blocks) {
-    // a reply also names the ts of its thread, which is older. without a label the newest ts is the message.
-    const ts = LABELED_TS.exec(block)?.[1] ?? [...block.matchAll(TS)].map((match) => match[1]!).sort((a, b) => Number(b) - Number(a))[0]!;
-    const channel = /\bchannel\b[^\n]*?\b([CDG][A-Z0-9]{8,})\b/i.exec(block)?.[1] ?? CHANNEL.exec(block)?.[1];
+  for (const lines of blocks) {
+    // the fields of the server come before the text of the dm, so the first match of a field is the one of the server.
+    // a heading before the ts is not text of a dm. it shows that the first heading was not the form of a result.
+    const at = lines.findIndex((line) => LABELED_TS.test(line));
+    if (at < 0) return { ok: false, reason: 'a message has no labeled ts' };
+    if (lines.slice(0, at).some((line) => HEADING.test(line))) return { ok: false, reason: 'a message has a heading before its ts' };
+    const block = lines.join('\n');
+    const ts = LABELED_TS.exec(lines[at]!)![1]!;
+    const channel = CHANNEL_LINE.exec(block)?.[1] ?? CHANNEL.exec(block)?.[1];
     if (!channel) return { ok: false, reason: 'a message has no channel id' };
-    const user = /\b(?:from|user|author)\b[^\n]*?\b([UW][A-Z0-9]{8,})\b/i.exec(block)?.[1] ?? USER.exec(block)?.[1];
+    const user = USER_LINE.exec(block)?.[1] ?? USER.exec(block)?.[1];
     messages.push({ channel, ts, ...(user ? { user } : {}), text: block.trim() });
   }
   return { ok: true, messages };
+}
+
+// headingForm reads the form of the first heading, whose first number must be 1. it gives a function that returns the
+// first number of a line of the same form, in which only the numbers can change.
+function headingForm(heading: string): ((line: string) => number | undefined) | undefined {
+  const parts = heading.trim().split(/\d+/);
+  if (parts.length < 2 || /\d+/.exec(heading)![0] !== '1') return undefined;
+  const form = new RegExp(`^${parts.map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(\\d+)')}$`);
+  return (line) => {
+    const match = form.exec(line.trim());
+    return match ? Number(match[1]) : undefined;
+  };
 }
 
 // readSelfId reads the user id of the owner from the answer of a profile read.
@@ -272,5 +315,5 @@ export function readSelfId(result: CallToolResult): string | undefined {
     if (typeof value === 'string' && USER.test(value)) return value;
   }
   const text = resultText(result);
-  return /\buser[ _]?id\b[^\n]*?\b([UW][A-Z0-9]{8,})\b/i.exec(text)?.[1] ?? USER.exec(text)?.[1];
+  return USER_ID_LINE.exec(text)?.[1] ?? USER.exec(text)?.[1];
 }
