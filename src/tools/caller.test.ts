@@ -330,7 +330,8 @@ describe('tool caller', () => {
     const { call, row, decision, ran } = setup({ reviewer });
     expect(await call('archive', { text: 'ok' }, 'r1', 'a1')).toEqual({ content: 'ok' });
     expect(await call('archive', { text: 'no' }, 'r1', 'a2')).toEqual({
-      content: 'the reviewer held archive, and it did not run: checked',
+      content:
+        "the reviewer held archive, and it did not run: checked. Change course, or ask the owner. The reviewer reads the owner's last message, so if the owner confirms this exact action, you can try it again.",
       isError: true,
     });
     expect(ran).toEqual(['archive']);

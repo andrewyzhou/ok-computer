@@ -109,6 +109,15 @@ function untilStopped<T>(work: Promise<T>, signal: AbortSignal, onLateError: (er
   return Promise.race([work, stopped]).finally(() => signal.removeEventListener('abort', onAbort));
 }
 
+// a hold goes back to the agent. the text gives the way out: the reviewer reads the owner's last message, so the owner
+// can confirm the action. a child cannot ask the owner, so it reports the hold to its parent.
+const holdNext = (sessionKey: string) =>
+  sessionKey.startsWith('sub:')
+    ? 'Return to the parent agent and say which call it held.'
+    : "Change course, or ask the owner. The reviewer reads the owner's last message, so if the owner confirms this exact action, you can try it again.";
+
+const sentence = (text: string) => (/[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`);
+
 export const abandonedText = (name: string) =>
   `${name} did not finish before the run stopped. It can still finish later, so its effect is unknown. Check the result before you try it again.`;
 
@@ -324,7 +333,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       }
       updateDecision(db, decisionId, { review });
       if (review.verdict === 'hold') {
-        return { ...gate, held: { content: `the reviewer held ${tool.name}, and it did not run: ${review.reason}`, isError: true } };
+        return { ...gate, held: { content: `the reviewer held ${tool.name}, and it did not run: ${sentence(review.reason)} ${holdNext(ctx.sessionKey)}`, isError: true } };
       }
     }
     return gate;

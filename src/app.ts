@@ -31,6 +31,7 @@ import type { ModelClient, ModelRequest } from './models/types.js';
 import { createBlobStore } from './observability/blobs.js';
 import type { Logger } from './observability/logger.js';
 import { BUILTIN_RULES, type Rule } from './policy/policy.js';
+import { createReviewer } from './policy/reviewer.js';
 import { scheduleContext } from './scheduler/context.js';
 import {
   createHeartbeat,
@@ -172,11 +173,13 @@ export function createApp(deps: AppDeps): App {
     integrations.find,
     integrations.explain,
   );
+  const slots = createSlotRunner({ db, config, clients: deps.clients, logger, clock });
   const caller = createToolCaller({
     db,
     blobs,
     tools,
     rules: deps.rules ?? BUILTIN_RULES,
+    reviewer: createReviewer({ db, slots }),
     requestApproval: approvals.request,
     queue,
     logger,
@@ -184,7 +187,6 @@ export function createApp(deps: AppDeps): App {
     timeZone: config.timeZone,
   });
 
-  const slots = createSlotRunner({ db, config, clients: deps.clients, logger, clock });
   const strategy = createTrimAndCompact({ db, slots, logger, clock, windowTokens: config.context.windowTokens });
   const agentDeps: AgentDeps = {
     db,
