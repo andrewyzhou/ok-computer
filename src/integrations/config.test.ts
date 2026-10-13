@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -30,6 +30,16 @@ describe('integration registry', () => {
     expect(parseIntegrations({ integrations: [{ ...polled, poll: 'slack-channels' }] })).toMatchObject({ ok: false });
     const stdio = { id: 'slack-home', kind: 'mcp-stdio', command: 'npx', args: ['-y', 'slack-mcp-server@1.3.0'], tools: polled.tools, poll: 'slack-dms' };
     expect(parseIntegrations({ integrations: [stdio] })).toMatchObject({ ok: false });
+  });
+
+  it('loads both json examples of the slack guide', () => {
+    // a checkout on windows can turn the guide into crlf text.
+    const guide = readFileSync(join(import.meta.dirname, '../../docs/setup/slack.md'), 'utf8');
+    const examples = [...guide.matchAll(/```json\r?\n([\s\S]*?)```/g)].map((match) => JSON.parse(match[1]!) as Record<string, unknown>);
+    expect(examples).toHaveLength(2);
+    const [official, fallback] = examples.map((example) => parseIntegrations('integrations' in example ? example : { integrations: [example] }));
+    expect(official).toMatchObject({ ok: true, value: [{ id: 'slack-work', poll: 'slack-dms', auth: { callback: 'paste' }, risk: { slack_send_message: 'external' } }] });
+    expect(fallback).toMatchObject({ ok: true, value: [{ id: 'slack-work', kind: 'mcp-stdio' }] });
   });
 
   it('takes the paste callback for an oauth entry and refuses another word', () => {
