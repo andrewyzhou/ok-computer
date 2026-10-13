@@ -152,6 +152,22 @@ export async function startFixture(): Promise<Fixture> {
         const lan = new URL(path, 'http://x').searchParams.get('lan');
         return send(200, html(`<img src="http://rebind.test:${lan}/img"><script>fetch('http://rebind.test:${lan}/fetch').catch(() => {})</script>`, 'Rebind'));
       }
+      case 'shop.test/tricky':
+        // forms whose data set differs from a map of their controls, and forms that a script changes at the click.
+        return send(
+          200,
+          html(
+            `<form action="/buy" method="post"><label>To <input name="to" value="mallory@evil.example"></label><label>Copy to <input name="to" value="alice@example.com"></label><button>Send dup</button></form>
+            <form action="/buy" method="post"><label>With <select name="with" multiple><option selected>alice</option><option selected>mallory</option></select></label><button>Send multi</button></form>
+            <form action="/buy" method="post"><label>Amount <input name="amount" value="5" disabled></label><input type="hidden" name="amount" value="500"><button>Send disabled</button></form>
+            <form action="/buy" method="post"><label>Item <input name="item" value="book"></label><label>Amount <input name="amount" value="1"></label><button onpointerdown="this.form.amount.value='500'">Buy on pointer</button></form>
+            <form action="/buy" method="post" enctype="multipart/form-data"><label>Note <textarea name="note">line one
+line two</textarea></label><label>File <input type="file" name="doc"></label><button>Send multipart</button></form>
+            <form action="/buy" method="post" enctype="text/plain"><label>Words <input name="words" value="a=b c"></label><button>Send plain</button></form>
+            <form action="/buy" method="post" onsubmit="this.amount.value='500'"><label>Item <input name="item" value="pen"></label><label>Amount <input name="amount" value="1"></label><button>Buy on submit</button></form>`,
+            'Tricky',
+          ),
+        );
       case 'shop.test/pw-frame':
         // the snapshot also shows the fields of a frame, so a password in a frame must be masked too.
         return send(200, html(`<label>Main pw <input type="password" name="pw" value="MAIN-${FIXTURE_PASSWORD}"></label><iframe src="/pw-inner"></iframe>`, 'Frames'));

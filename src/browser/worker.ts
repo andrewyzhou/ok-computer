@@ -10,7 +10,7 @@ import { redact, redactedJson } from '../observability/redact.js';
 import type { Clock } from '../time.js';
 import { errorText } from '../tools/registry.js';
 import { checkUrlShape, type Egress } from '../web/egress.js';
-import { allowedBy, guardContext, guardSockets, guardTab, siteOf, tooBroad, type Blocked, type Sent, type TabRules } from './gate.js';
+import { allowedBy, guardContext, guardSockets, guardTab, siteOf, tooBroad, type ApprovedForm, type Blocked, type Sent, type TabRules } from './gate.js';
 import { startEgressProxy, type EgressProxy } from './proxy.js';
 
 export interface BrowserDeps {
@@ -94,7 +94,8 @@ export interface ActTab {
   allowlist: ReadonlySet<string>;
   // the number of the last snapshot. its refs carry it, for example s3e12.
   snapshot: number;
-  setSubmit(on: boolean): void;
+  // the form data set of an approved submit while it runs, else undefined.
+  setSubmit(form: ApprovedForm | undefined): void;
 }
 
 interface Tab {
@@ -103,7 +104,7 @@ interface Tab {
   sessionKey: string;
   page: Page;
   allowlist: Set<string>;
-  submit: boolean;
+  submit?: ApprovedForm;
   blocked: Blocked[];
   sent: Sent[];
   // the hosts off the allowlist that the gate let a request reach in this step.
@@ -344,7 +345,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   async function newTab(ctx: BrowserContext, kind: Tab['kind'], step: StepInput, allowlist: string[]): Promise<Tab> {
     const page = await ctx.newPage();
     owned.add(page);
-    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), submit: false, blocked: [], sent: [], reached: new Set(), console: [], lastUsed: performance.now(), queue: Promise.resolve(), snapshot: 0, runId: step.runId } as unknown as Tab;
+    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), blocked: [], sent: [], reached: new Set(), console: [], lastUsed: performance.now(), queue: Promise.resolve(), snapshot: 0, runId: step.runId } as unknown as Tab;
     tab.rules = {
       allows: (host) => allowedBy(tab.allowlist, host),
       submitting: () => tab.submit,
@@ -677,7 +678,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     async act(input, action, scope = 'session') {
       const tab = scope === 'open' ? ownTask() : tasks.get(input.sessionKey);
       if (!tab) return { refused: `No page is open${scope === 'open' ? '' : ' in this session'}. Use browser_open first.` };
-      return step(tab, input, (page) => action(page, { allowlist: tab.allowlist, snapshot: tab.snapshot, setSubmit: (on) => void (tab.submit = on) }));
+      return step(tab, input, (page) => action(page, { allowlist: tab.allowlist, snapshot: tab.snapshot, setSubmit: (form) => void (tab.submit = form) }));
     },
     async inTab(input, hosts, work) {
       const ctx = await contextOrRefusal();

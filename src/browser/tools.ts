@@ -65,6 +65,8 @@ const SUBMIT_CONTROL = 'button:not([type]), button[type=submit], input[type=subm
 
 // the server code has no dom types. these are the few members that the code in the page uses.
 interface PageControl {
+  name: string;
+  value: string;
   closest(selector: string): PageControl | null;
   getAttribute(name: string): string | null;
   matches(selector: string): boolean;
@@ -74,7 +76,7 @@ interface PageField {
   name: string;
   type: string;
   value: string;
-  checked: boolean;
+  disabled: boolean;
 }
 
 // a get form only reads, for example a search box, so a click may send it. the gate allows only get anyway.
@@ -97,27 +99,48 @@ async function find(page: Page, tab: ActTab, id: string): Promise<Locator> {
 }
 
 interface FormState {
-  fields: Record<string, string>;
+  // the visible part, as the owner reads it on the card. a name that the form sends more than once has a list.
+  fields: Record<string, string | string[]>;
+  // the whole form data set that the browser sends, also the hidden fields. the gate compares the request with it.
+  pairs: Array<[string, string]>;
+  // the click position of an image button. the browser sends it, and the check cannot know it before the click.
+  skip: string[];
   password: boolean;
 }
 
-// the fields that the owner reads on the card: every named field that a person sees and can change. a password
-// shows as its length only. the result is null when the element does not send a form.
+// the browser's own FormData gives the set that a submit sends: no disabled field, every selected option, every
+// field of a name. the card shows that set without the hidden fields, which a person does not see. a map of the
+// controls showed a disabled field that was never sent, and one value of a name that was sent twice.
 async function formOf(page: Page, control: ElementHandle): Promise<FormState | null> {
   return untraced(page, () => control.evaluate((el, selector) => {
     const button = el as unknown as PageControl;
     if (!button.matches(selector) || !button.form) return null;
-    const fields: Record<string, string> = {};
-    let password = false;
-    for (const item of Array.from(button.form.elements)) {
-      if (item.type === 'password') password = true;
-      if (!item.name || ['hidden', 'submit', 'button', 'image', 'reset', 'file'].includes(item.type)) continue;
-      if ((item.type === 'checkbox' || item.type === 'radio') && !item.checked) continue;
-      fields[item.name] = item.type === 'password' ? `(password of ${item.value.length} characters)` : item.value;
+    const { FormData } = globalThis as unknown as { FormData: new (form: unknown, submitter: unknown) => Iterable<[string, string | { name: string }]> };
+    const pairs: Array<[string, string]> = [...new FormData(button.form, button)].map(([name, value]) => [name, typeof value === 'string' ? value : value.name]);
+    const image = button.matches('input[type=image]') && button.name ? [`${button.name}.x`, `${button.name}.y`] : [];
+    const left = new Map<string, number>();
+    const key = (name: string, value: string) => JSON.stringify([name, value]);
+    const leave = (name: string, value: string) => left.set(key(name, value), (left.get(key(name, value)) ?? 0) + 1);
+    for (const item of Array.from(button.form.elements)) if (item.type === 'hidden' && item.name && !item.disabled) leave(item.name, item.value);
+    if (button.name && !image.length) leave(button.name, button.value);
+    const fields: Record<string, string | string[]> = {};
+    for (const [name, value] of pairs) {
+      const count = left.get(key(name, value)) ?? 0;
+      if (count > 0 || image.includes(name)) {
+        left.set(key(name, value), count - 1);
+        continue;
+      }
+      const old = fields[name];
+      fields[name] = old === undefined ? value : Array.isArray(old) ? [...old, value] : [old, value];
     }
-    return { fields, password };
+    const password = Array.from(button.form.elements).some((item) => item.type === 'password');
+    return { fields, pairs: pairs.filter(([name]) => !image.includes(name)), skip: image, password };
   }, SUBMIT_CONTROL));
 }
+
+// the order of the fields does not matter to the owner, so both sides are compared as sorted pairs.
+const sortedPairs = (fields: Record<string, string | string[]>) =>
+  JSON.stringify(Object.entries(fields).flatMap(([name, value]) => (Array.isArray(value) ? value : [value]).map((each) => [name, each])).sort());
 
 const sameAddress = (a: string, b: string) => {
   try {
@@ -237,7 +260,9 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
       input: z.object({
         url: z.string().min(1).max(2000).describe('the address of the page with the form'),
         button: z.string().min(1).max(200).describe('the name of the button, as the snapshot shows it'),
-        fields: z.record(z.string(), z.string().max(5000)).describe('each named field of the form and its value'),
+        fields: z
+          .record(z.string(), z.union([z.string().max(5000), z.array(z.string().max(5000)).max(50)]))
+          .describe('each named field of the form and its value, or a list of values for a name that the form has more than once'),
       }),
       risk: 'external',
       async run({ url, button, fields }, ctx) {
@@ -253,15 +278,14 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
           const form = await formOf(page, control);
           if (!form) throw new Error(`the button ${JSON.stringify(name)} does not send a form. Nothing was sent. Use browser_click`);
           if (form.password) throw new Error('the form has a password field. The agent never sends a password. Nothing was sent. The owner signs in with okc browser login');
-          const want = JSON.stringify(Object.entries(fields).sort());
-          const have = JSON.stringify(Object.entries(form.fields).sort());
-          if (want !== have) throw new Error(`the form now has these fields: ${JSON.stringify(form.fields)}. Nothing was sent. Ask again with these values`);
-          tab.setSubmit(true);
+          if (sortedPairs(fields) !== sortedPairs(form.fields)) throw new Error(`the form now has these fields: ${JSON.stringify(form.fields)}. Nothing was sent. Ask again with these values`);
+          // the gate compares the request with this set, so a page script that changes a field at the click sends nothing.
+          tab.setSubmit({ pairs: form.pairs, skip: form.skip });
           try {
             await control.click();
             await page.waitForLoadState('domcontentloaded');
           } finally {
-            tab.setSubmit(false);
+            tab.setSubmit(undefined);
           }
           return `sent the form with ${button}`;
         }, 'open');

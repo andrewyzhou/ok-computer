@@ -48,7 +48,8 @@ export interface BrowserStep {
   screenshotBlob: string | null;
   consoleErrors: string[];
   blockedRequests: Array<{ url: string; reason: string }>;
-  sent: Array<{ method: string; url: string }>;
+  // body is the start of the request body, redacted.
+  sent: Array<{ method: string; url: string; body?: string }>;
   // the hosts off the allowlist that a request of the step reached, for example an image. a page script can carry
   // typed text in such a request.
   offsiteHosts: string[];

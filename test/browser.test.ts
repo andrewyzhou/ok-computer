@@ -206,7 +206,7 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(sent.content).toContain('Order placed');
     expect(site.hitsOn('shop.test').filter((hit) => hit.path === '/buy')).toEqual([expect.objectContaining({ method: 'POST', body: 'name=Ada&size=S&csrf=t0k3n' })]);
     // the step lists what the submit let out: one post, once, although both layers of the gate saw it.
-    expect(JSON.parse(String(h.steps().at(-1)!.sent))).toEqual([{ method: 'POST', url: site.url('shop.test', '/buy') }]);
+    expect(JSON.parse(String(h.steps().at(-1)!.sent))).toEqual([{ method: 'POST', url: site.url('shop.test', '/buy'), body: 'name=Ada&size=S&csrf=t0k3n' }]);
     expect(sent.content).toContain(`POST ${site.url('shop.test', '/buy')}`);
   });
 
@@ -229,6 +229,48 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(sent.isError).toBe(false);
     expect(sent.content).toContain('Message sent');
     expect(posts()).toEqual([expect.objectContaining({ path: '/send', body: 'msg=hi' })]);
+  });
+
+  // the check read a map of the controls, so a name sent twice showed one value, a multiple select showed one option,
+  // and a disabled field showed a value that was never sent.
+  it('checks the fields as the browser sends them: each value of a name, each selected option, no disabled field', async () => {
+    const h = harness();
+    await h.run('browser_open', { url: site.url('shop.test', '/tricky') });
+    site.hits.length = 0;
+    const url = site.url('shop.test', '/tricky');
+    const dup = await h.run('browser_submit', { url, button: 'Send dup', fields: { to: 'alice@example.com' } });
+    expect(dup).toMatchObject({ isError: true, content: expect.stringContaining('"to":["mallory@evil.example","alice@example.com"]') });
+    const multi = await h.run('browser_submit', { url, button: 'Send multi', fields: { with: 'alice' } });
+    expect(multi).toMatchObject({ isError: true, content: expect.stringContaining('"with":["alice","mallory"]') });
+    const disabled = await h.run('browser_submit', { url, button: 'Send disabled', fields: { amount: '5' } });
+    expect(disabled).toMatchObject({ isError: true, content: expect.stringContaining('the form now has these fields: {}') });
+    expect(site.hitsOn('shop.test').filter((hit) => hit.method === 'POST')).toEqual([]);
+    const sent = await h.run('browser_submit', { url, button: 'Send dup', fields: { to: ['alice@example.com', 'mallory@evil.example'] } });
+    expect(sent.isError).toBe(false);
+    expect(site.hitsOn('shop.test').filter((hit) => hit.method === 'POST')).toEqual([expect.objectContaining({ body: 'to=mallory%40evil.example&to=alice%40example.com' })]);
+    // the other two encodings of a form also match the check, also with a new line in a value and an empty file field.
+    for (const [button, fields] of [
+      ['Send multipart', { note: 'line one\nline two', doc: '' }],
+      ['Send plain', { words: 'a=b c' }],
+    ] as const) {
+      const out = await h.run('browser_open', { url });
+      expect(out.isError).toBe(false);
+      expect(await h.run('browser_submit', { url, button, fields })).toMatchObject({ isError: false, content: expect.stringContaining('Order placed') });
+    }
+    expect(site.hitsOn('shop.test').filter((hit) => hit.method === 'POST')).toHaveLength(3);
+  });
+
+  it.each([
+    ['Buy on pointer', 'book'],
+    ['Buy on submit', 'pen'],
+  ])('sends nothing when the page changes a field at the click (%s)', async (button, item) => {
+    const h = harness();
+    await h.run('browser_open', { url: site.url('shop.test', '/tricky') });
+    site.hits.length = 0;
+    const out = await h.run('browser_submit', { url: site.url('shop.test', '/tricky'), button, fields: { item, amount: '1' } });
+    expect(site.hitsOn('shop.test').filter((hit) => hit.method === 'POST')).toEqual([]);
+    expect(out.content).toContain('the page changed the form after the check');
+    expect(JSON.parse(String(h.steps().at(-1)!.blockedRequests))).toContainEqual(expect.objectContaining({ url: site.url('shop.test', '/buy') }));
   });
 
   it('masks a password in every snapshot, and refuses to type or send one', async () => {
