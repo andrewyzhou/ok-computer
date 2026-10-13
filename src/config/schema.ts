@@ -54,6 +54,11 @@ const timeZone = z.string().refine((tz) => {
 
 const timeOfDay = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'use 24-hour time in the form HH:MM');
 
+// node sets a timer over 2^31-1 ms (about 24.8 days) to 1 ms. a large value would then stop each run at once, while
+// its tools go on to run.
+const MAX_TIMER_MS = 2_147_483_647;
+const timeoutMs = z.number().int().positive().max(MAX_TIMER_MS, `use at most ${MAX_TIMER_MS} ms (about 24 days), the limit of a node timer`);
+
 export const configSchema = z.object({
   timeZone: timeZone.default('America/Los_Angeles'),
   slots: z
@@ -68,8 +73,8 @@ export const configSchema = z.object({
   agent: z
     .object({
       maxIterations: z.number().int().positive().default(20),
-      chatTimeoutMs: z.number().int().positive().default(10 * 60_000),
-      backgroundTimeoutMs: z.number().int().positive().default(30 * 60_000),
+      chatTimeoutMs: timeoutMs.default(10 * 60_000),
+      backgroundTimeoutMs: timeoutMs.default(30 * 60_000),
     })
     .prefault({}),
   // the window is a budget for the input of one model call, not the limit of the model. a long session compacts

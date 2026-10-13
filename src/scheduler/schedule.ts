@@ -2,11 +2,16 @@ import { Cron } from 'croner';
 import { z } from 'zod';
 import { formatLocal } from '../time.js';
 
+// the store compares times as iso text. a time in the year 10000 or later has the form "+010000-...", which sorts
+// before "2026-...", so such a job would be due at once and on each tick. the schema and nextRun stop at this limit.
+const LAST_TIME = Date.parse('9999-12-31T23:59:59.999Z');
+
 // an iso time without an offset means a different moment on each machine, so the schema requires one.
 const isoWithOffset = z
   .string()
   .regex(/(Z|[+-]\d{2}:\d{2})$/, 'give an iso time with an offset, for example 2026-10-12T21:00:00-07:00')
-  .refine((value) => !Number.isNaN(Date.parse(value)), 'not a valid iso time');
+  .refine((value) => !Number.isNaN(Date.parse(value)), 'not a valid iso time')
+  .refine((value) => Date.parse(value) <= LAST_TIME, 'give a time before the year 10000');
 
 const cronExpr = z.string().refine((expr) => {
   try {
@@ -19,14 +24,25 @@ const cronExpr = z.string().refine((expr) => {
 
 export const scheduleSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('at'), at: isoWithOffset }),
-  // an interval under one minute is usually a mistake. it can send the owner too many messages.
-  z.object({ kind: z.literal('every'), everyMs: z.number().int().min(60_000), anchor: isoWithOffset.optional() }),
+  // an interval under one minute is usually a mistake. it can send the owner too many messages. an interval over a
+  // year is a mistake too, and a very long one gives a time past the limit of the store.
+  z.object({
+    kind: z.literal('every'),
+    everyMs: z.number().int().min(60_000).max(366 * 24 * 60 * 60_000, 'use at most 366 days, or a cron or a one-shot time'),
+    anchor: isoWithOffset.optional(),
+  }),
   z.object({ kind: z.literal('cron'), expr: cronExpr, tz: z.string().optional() }),
 ]);
 export type Schedule = z.infer<typeof scheduleSchema>;
 
-// the result is strictly after the given time. a one-shot schedule gives null when its time has passed.
+// the result is strictly after the given time. a one-shot schedule gives null when its time has passed. a time past
+// the limit of the store also gives null, so a row from before the schema limit cannot run on each tick.
 export function nextRun(schedule: Schedule, after: Date, createdAt: Date, timeZone: string): Date | null {
+  const next = plannedRun(schedule, after, createdAt, timeZone);
+  return next && next.getTime() <= LAST_TIME ? next : null;
+}
+
+function plannedRun(schedule: Schedule, after: Date, createdAt: Date, timeZone: string): Date | null {
   switch (schedule.kind) {
     case 'at': {
       const at = new Date(schedule.at);

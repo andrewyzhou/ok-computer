@@ -75,6 +75,18 @@ describe('schedules', () => {
     expect(scheduleSchema.safeParse({ kind: 'every', everyMs: 1000 }).success).toBe(false);
   });
 
+  // "+255536-..." sorts before "2026-..." in the store, so a job past the year 9999 was due on each tick.
+  it('refuses a time past the year 9999, and never plans a run past it', () => {
+    const after = new Date('2026-10-12T17:00:00Z');
+    expect(scheduleSchema.safeParse({ kind: 'at', at: '+020000-01-01T00:00:00Z' }).success).toBe(false);
+    expect(scheduleSchema.safeParse({ kind: 'at', at: '9999-12-31T23:00:00Z' }).success).toBe(true);
+    expect(scheduleSchema.safeParse({ kind: 'every', everyMs: 60 * MIN, anchor: '+010000-01-01T00:00:00Z' }).success).toBe(false);
+    expect(scheduleSchema.safeParse({ kind: 'every', everyMs: 8e15 }).success).toBe(false);
+    expect(scheduleSchema.safeParse({ kind: 'every', everyMs: 366 * 24 * 60 * MIN }).success).toBe(true);
+    expect(nextRun({ kind: 'every', everyMs: 8e15 }, after, after, TZ)).toBeNull();
+    expect(nextRun({ kind: 'at', at: '+020000-01-01T00:00:00Z' }, after, after, TZ)).toBeNull();
+  });
+
   it('describes schedules in plain words', () => {
     expect(describeSchedule({ kind: 'every', everyMs: 60 * MIN }, TZ)).toBe('every 1 h');
     expect(describeSchedule({ kind: 'every', everyMs: 15 * MIN }, TZ)).toBe('every 15 min');

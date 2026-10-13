@@ -55,6 +55,16 @@ describe('parseConfig', () => {
     if (!result.ok) expect(result.error).toContain('unknown time zone');
   });
 
+  // node sets a longer timer to 1 ms, so each run stopped at once while its tools went on to run.
+  it('rejects a run timeout over the limit of a node timer', () => {
+    expect(parseConfig({ agent: { chatTimeoutMs: 2_147_483_647 } }).ok).toBe(true);
+    for (const agent of [{ chatTimeoutMs: 3e9 }, { backgroundTimeoutMs: 2_147_483_648 }]) {
+      const result = parseConfig({ agent });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('the limit of a node timer');
+    }
+  });
+
   it('rejects a model reference without a provider', () => {
     const result = parseConfig({ slots: { main: { chain: ['claude-haiku-5-5'] } } });
     expect(result.ok).toBe(false);
