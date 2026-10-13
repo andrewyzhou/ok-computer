@@ -9,8 +9,8 @@ import type { Logger } from '../observability/logger.js';
 import { redactedJson } from '../observability/redact.js';
 import type { Clock } from '../time.js';
 import { errorText } from '../tools/registry.js';
-import type { Egress } from '../web/egress.js';
-import { allowedBy, guardContext, guardTab, siteOf, type Blocked, type Sent, type TabRules } from './gate.js';
+import { checkUrlShape, type Egress } from '../web/egress.js';
+import { allowedBy, guardContext, guardTab, siteOf, tooBroad, type Blocked, type Sent, type TabRules } from './gate.js';
 
 export interface BrowserDeps {
   db: Db;
@@ -579,6 +579,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       return { refused: `${host} is not on the allowlist of this task (${[...tab.allowlist].join(', ')}). Use browser_allow_domain to ask the owner, or browser_close and start a new task.` };
     }
     if (tab) return tab;
+    if (tooBroad(siteOf(host))) return { refused: `${host} is not a site that a task can start on, because its allowlist would allow every site under ${siteOf(host)}. Nothing was opened.` };
     // the task of another session can wait for the owner to approve a submit, for hours, so it is never taken.
     const other = ownTask();
     if (other) {
@@ -593,12 +594,10 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
 
   return {
     async open(input, url) {
-      let host: string;
-      try {
-        host = new URL(url).hostname;
-      } catch {
-        return { refused: `${JSON.stringify(url)} is not a full web address.` };
-      }
+      // a page of chrome itself, such as chrome://history, never passes the gate, so only web addresses open.
+      const shape = checkUrlShape(url);
+      if (!shape.ok) return { refused: `${shape.reason}. Nothing was opened.` };
+      const host = shape.url.hostname;
       // the check and the start of a task wait for chrome and a new tab. two opens at the same moment, in one turn or
       // from two sessions, would each start a task, so they run one at a time.
       const claimed = opening.then(() => claim(input, host));
@@ -647,6 +646,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       if (!host || !allowedBy(tab.allowlist, host)) {
         return { refused: `The open browser task is for ${[...tab.allowlist].join(', ')}, not for ${JSON.stringify(pageUrl)}. The domain was not added. Ask again with the address of the open page.` };
       }
+      if (tooBroad(siteOf(domain))) return { refused: `${domain} would allow every site under ${siteOf(domain)}. The domain was not added. Ask for the site itself, such as pay.example.com.` };
       tab.allowlist.add(siteOf(domain));
       try {
         db.prepare('UPDATE browser_tasks SET allowlist = ? WHERE id = ?').run(JSON.stringify([...tab.allowlist]), tab.id);

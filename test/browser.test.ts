@@ -4,6 +4,7 @@ import { createServer, get } from 'node:http';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { browserLogin } from '../src/browser/login.js';
+import { siteOf } from '../src/browser/gate.js';
 import { profileBusy } from '../src/browser/worker.js';
 import { createBrowserHarness, hasChrome, killChrome, traceEntries } from './browser-harness.js';
 import { FIXTURE_COOKIE, FIXTURE_PASSWORD, startFixture, type Fixture } from './web-fixture.js';
@@ -268,6 +269,23 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     await h.run('browser_allow_domain', { url: site.url('shop.test'), domain: 'evil.test', reason: 'test' });
     expect((await h.run('browser_open', { url: site.url('evil.test') })).isError).toBe(false);
     expect(site.hitsOn('evil.test').length).toBeGreaterThan(0);
+  });
+
+  it('opens only web addresses, and never puts a public suffix on the allowlist', async () => {
+    const h = harness();
+    for (const url of ['chrome://history/', 'chrome://settings/', 'file:///C:/', `http://user:pw@shop.test:${site.port}/`, `http://test:${site.port}/`, `http://www.co.uk:${site.port}/`]) {
+      expect(await h.run('browser_open', { url }), url).toMatchObject({ isError: true, effect: 'none', content: expect.stringContaining('Nothing was opened') });
+    }
+    expect(h.tasks()).toEqual([]);
+    await h.run('browser_open', { url: site.url('shop.test') });
+    for (const domain of ['co.uk', 'www.co.uk', 'com.au']) {
+      expect(await h.run('browser_allow_domain', { url: site.url('shop.test'), domain, reason: 'test' }), domain).toMatchObject({ isError: true, content: expect.stringContaining('was not added') });
+    }
+    // www.com is a site of its own, so it stays whole and does not allow every .com site.
+    await h.run('browser_allow_domain', { url: site.url('shop.test'), domain: 'www.com', reason: 'test' });
+    expect(JSON.parse(String(h.tasks()[0]!.allowlist))).toEqual(['shop.test', 'www.com']);
+    expect(siteOf('www.com')).toBe('www.com');
+    expect(siteOf('WWW.Shop.test.')).toBe('shop.test');
   });
 
   it('keeps the task of a session from another session, also when it is idle for more than a minute', async () => {

@@ -21,8 +21,16 @@ export interface TabRules {
 }
 
 // an entry allows its host and the subdomains of the host. "www." is not part of an entry, so www.shop.example and
-// shop.example are the same site.
-export const siteOf = (host: string) => host.toLowerCase().replace(/\.$/, '').replace(/^www\./, '');
+// shop.example are the same site. "www." stays when no dot is left without it, so www.com is not the site com.
+export const siteOf = (host: string) => {
+  const name = host.toLowerCase().replace(/\.$/, '');
+  const rest = name.replace(/^www\./, '');
+  return rest.includes('.') ? rest : name;
+};
+
+// an entry allows every host under it, so it must be a site and not a public suffix such as com or co.uk. the rule
+// for two labels covers the common suffixes: a generic name under a country code. a full suffix list was not added.
+export const tooBroad = (site: string) => !site.includes('.') || /^(ac|co|com|edu|go|gob|gov|mil|ne|net|nic|or|org)\.[a-z]{2}$/.test(site);
 export const allowedBy = (list: Iterable<string>, host: string) => {
   const site = siteOf(host);
   for (const entry of list) if (site === entry || site.endsWith(`.${entry}`)) return true;
