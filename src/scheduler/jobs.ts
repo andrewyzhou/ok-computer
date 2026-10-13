@@ -13,6 +13,7 @@ import type { OwnerMessenger } from '../sessions/owner.js';
 import type { RunQueue } from '../sessions/queue.js';
 import { MAIN_SESSION, MAIN_TOOLS, NO_REPLY } from '../sessions/router.js';
 import { localDay, type Clock } from '../time.js';
+import { wrapIfTainted } from '../tools/untrusted.js';
 import type { JobResult } from './scheduler.js';
 import type { Automation } from './store.js';
 
@@ -94,8 +95,11 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
     if (hasText(result)) {
       await owner.send(result.text);
       // the main session gets a copy, so the agent knows what the owner answers to. the text can repeat untrusted
-      // content that the run read, so the copy carries the taint of the run's session.
-      await appendToMain(`The automation "${automation.name}" sent this message to the owner:\n${result.text}`, sessionTaint(db, sessionKey));
+      // content that the run read, so the copy carries the taint of the run's session, and its text is wrapped. the
+      // name of a tainted automation is untrusted text too, so the id stands for it.
+      const taint = sessionTaint(db, sessionKey);
+      const name = automation.taint.length ? automation.id : `"${automation.name}"`;
+      await appendToMain(`The automation ${name} sent this message to the owner:\n${wrapIfTainted(taint, result.text)}`, taint);
     }
     return toJob(result);
   };
@@ -110,7 +114,12 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
     const payload = automation.payload;
     switch (payload.type) {
       case 'system_event':
-        await appendToMain(`Automation "${automation.name}": ${payload.text}`, automation.taint);
+        await appendToMain(
+          automation.taint.length
+            ? `Automation ${automation.id}:\n${wrapIfTainted(automation.taint, `"${automation.name}": ${payload.text}`)}`
+            : `Automation "${automation.name}": ${payload.text}`,
+          automation.taint,
+        );
         return { status: 'completed' };
       case 'agent': {
         if (payload.condition === 'no_goals_today' && listGoals(db, localDay(clock(), config.timeZone)).length) {

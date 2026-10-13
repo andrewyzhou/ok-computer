@@ -43,6 +43,10 @@ describe('taint across sessions', () => {
     expect(relayed).toMatchObject({ type: 'system_event', payload: { text: expect.stringContaining('Eve asks you') } });
     const origin = { source: 'gmail:personal', toolName: 'result_read', runId: automationRun!.id, toolCallId: 'r1' };
     expect(relayed?.type === 'system_event' && relayed.payload.taint).toEqual([expect.objectContaining(origin)]);
+    // the relayed text is untrusted, so it is wrapped. it cannot close the system event and start a false one.
+    expect(relayed?.type === 'system_event' && relayed.payload.text).toMatch(
+      /^The automation "mail digest" sent this message to the owner:\n<untrusted source="gmail:personal">\nEve asks you/,
+    );
     // the main session never read the mail, but it saw the text, so it is tainted, and the source names the run.
     expect(sessionTaint(t.db, 'main')).toEqual([expect.objectContaining(origin)]);
     await t.app.stop();

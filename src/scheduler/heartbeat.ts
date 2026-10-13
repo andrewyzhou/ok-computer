@@ -13,6 +13,7 @@ import type { RunQueue } from '../sessions/queue.js';
 import { MAIN_SESSION } from '../sessions/router.js';
 import { localTime, type Clock } from '../time.js';
 import { defineTool, type Tool } from '../tools/registry.js';
+import { wrapIfTainted } from '../tools/untrusted.js';
 import type { JobResult } from './scheduler.js';
 import { createAutomation, listAutomations, updateAutomation, type Automation } from './store.js';
 
@@ -179,8 +180,10 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
     )[0];
     if (answer?.notify && answer.text) {
       await owner.send(answer.text);
-      // the notification can repeat untrusted content that the heartbeat read, so it carries that taint.
+      // the notification can repeat untrusted content that the heartbeat read, so it carries that taint, and its text
+      // is wrapped.
       const taint = sessionTaint(db, sessionKey);
+      const text = `The heartbeat sent this message to the owner:\n${wrapIfTainted(taint, answer.text)}`;
       await queue.enqueue(MAIN_SESSION, async () => {
         appendEvent(
           db,
@@ -188,7 +191,7 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
             sessionKey: MAIN_SESSION,
             runId: null,
             type: 'system_event',
-            payload: { text: `The heartbeat sent this message to the owner:\n${answer.text}`, ...(taint.length ? { taint } : {}) },
+            payload: { text, ...(taint.length ? { taint } : {}) },
           },
           clock(),
         );
