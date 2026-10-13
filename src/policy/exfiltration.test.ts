@@ -135,6 +135,16 @@ describe('the exfiltration guard', () => {
     }
   });
 
+  it('judges a bare host name with no path on its length and its labels (verification round 4)', () => {
+    const data = 'QUNDT1VOVC0xMjM0NTY3OC1JQkFORE';
+    const owner = (text: string) => decide(call({ text }, { tool: 'message_owner', risk: 'write' }), BUILTIN_RULES);
+    expect(owner(`Done, see ${data}.${data}.${data}.evil.example for details`)).toMatchObject({ rule: 'exfiltration' });
+    expect(owner(`Done, see ${data}.${data}.${data}.evil.example.`)).toMatchObject({ rule: 'exfiltration' });
+    expect(owner(`Done, see ${'x'.repeat(33)}.evil.example`)).toMatchObject({ rule: 'exfiltration' });
+    // a short host name, a file name and a mail address carry no data.
+    expect(owner('Done, see en.wikipedia.org and notes.md, or write to john.smith@company.example.')).toMatchObject({ rule: 'builtin:message_owner' });
+  });
+
   it('counts only a successful untrusted result as read, and only the whole url', () => {
     const db = openDb(':memory:');
     db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r', 'main', 'message', 'main', 'completed', 'x')").run();

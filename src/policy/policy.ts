@@ -193,11 +193,11 @@ const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
 // the scheme, and a tab or a line break inside the url (the parser drops them). a client that gets a whole string as
 // a url also keeps a space or a quote in its path, and so the query after it. so each "http:" starts a candidate that
 // goes to the next "http:", and the parser judges it. the part up to the first space or quote is the url that a chat
-// app makes a link of. text with no scheme counts too when a host name comes before a port, a path, a query or a
-// fragment, because a chat app makes a link of "evil.example/c?d=1". a client also opens ws:, wss: and ftp:, and a
-// page opens "//evil.example/c" with its own scheme.
+// app makes a link of. a host name with no scheme counts too, with or without a port, a path, a query or a fragment,
+// because a chat app makes a link of "evil.example/c?d=1" and of "evil.example", and its preview looks up the host. a
+// client also opens ws:, wss: and ftp:, and a page opens "//evil.example/c" with its own scheme.
 const SCHEME = /(?:https?|wss?|ftp):/gi;
-const BARE_URL = /(?<![\w.:/@\\-])(?:[a-z0-9-]+\.)+[a-z][a-z0-9-]*(?::\d{1,5})?[/?#][^\s"'<>]*/gi;
+const BARE_URL = /(?<![\w.:/@\\-])(?:[a-z0-9-]+\.)+[a-z][a-z0-9-]*(?::\d{1,5})?(?:[/?#][^\s"'<>]*)?/gi;
 const RELATIVE_URL = /(?<![\w:/\\])\/\/[^\s"'<>/\\]+[^\s"'<>]*/g;
 const LINK_END = /[\s"'<>]/;
 const CANDIDATE_LIMIT = 1024;
