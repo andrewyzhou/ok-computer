@@ -189,19 +189,30 @@ export function createSync(deps: SyncDeps): Sync {
     try {
       await readCalendar(alias, cursor, runId);
     } catch (err) {
-      // a sync token that google no longer knows gives 410. the read starts again like a first read.
-      if (!(err instanceof GoogleError) || err.kind !== 'gone' || cursor === null) throw err;
+      if (!(err instanceof GoogleError)) throw err;
+      // google can refuse an old page token. the next poll then reads from the cursor again.
+      if (err.kind === 'request') db.prepare('UPDATE google_accounts SET calendarPage = NULL WHERE alias = ?').run(alias);
+      // a sync token that google no longer knows gives 410. the read starts again like a first read. an old page
+      // token can also give 410, so the position goes too.
+      if (err.kind !== 'gone') throw err;
       logger.warn('calendar sync token expired, so the account syncs again', { alias });
-      inTransaction(db, () => moveCursor(alias, 'calendarSyncToken', cursor, null));
+      inTransaction(db, () => {
+        moveCursor(alias, 'calendarSyncToken', cursor, null);
+        db.prepare('UPDATE google_accounts SET calendarPage = NULL WHERE alias = ?').run(alias);
+      });
       await readCalendar(alias, null, runId);
     }
   };
 
   // a first read (no cursor) only gets the sync token, and it makes no signals, because the events in it are not
   // changes. a later read uses the same singleEvents, because google ties the token to the parameters of the first read.
+  // a read that is longer than one poll keeps its position, and the next poll goes on from there with the same
+  // parameters. without the position, each poll would read the same first pages again and never end.
   const readCalendar = async (alias: string, cursor: string | null, runId: string) => {
-    const timeMin = new Date(clock().getTime() - FIRST_READ_BACK_MS).toISOString();
-    let pageToken: string | undefined;
+    const saved = db.prepare('SELECT calendarPage FROM google_accounts WHERE alias = ?').get(alias)?.calendarPage;
+    const position = saved ? (JSON.parse(String(saved)) as { pageToken: string; timeMin?: string }) : undefined;
+    const timeMin = position?.timeMin ?? new Date(clock().getTime() - FIRST_READ_BACK_MS).toISOString();
+    let pageToken = position?.pageToken;
     for (let page = 0; page < CALENDAR_PAGES; page++) {
       const { data } = await accounts.run(alias, (apis) =>
         apis.calendar.events.list({
@@ -212,17 +223,21 @@ export function createSync(deps: SyncDeps): Sync {
           ...(pageToken ? { pageToken } : {}),
         }),
       );
-      // each page commits its signals. the cursor moves only after the last page, and a page that comes again adds
-      // nothing, because the signal key holds the version of the event.
-      if (cursor !== null) inTransaction(db, () => addSignals(db, (data.items ?? []).flatMap((event) => calendarSignal(alias, event, runId)), clock()));
       pageToken = data.nextPageToken ?? undefined;
-      if (!pageToken) {
-        if (!data.nextSyncToken) throw new GoogleError('request', 'the calendar list ended without a sync token');
-        inTransaction(db, () => moveCursor(alias, 'calendarSyncToken', cursor, data.nextSyncToken!));
-        return;
-      }
+      if (!pageToken && !data.nextSyncToken) throw new GoogleError('request', 'the calendar list ended without a sync token');
+      // each page commits its signals and the position after it. the cursor moves only after the last page, and a page
+      // that comes again adds nothing, because the signal key holds the version of the event. the position is a
+      // compare and set on the cursor too, so a second process cannot mix its read with this one.
+      inTransaction(db, () => {
+        if (cursor !== null) addSignals(db, (data.items ?? []).flatMap((event) => calendarSignal(alias, event, runId)), clock());
+        if (!pageToken) moveCursor(alias, 'calendarSyncToken', cursor, data.nextSyncToken!);
+        const next = pageToken ? JSON.stringify({ pageToken, ...(cursor === null ? { timeMin } : {}) }) : null;
+        const kept = db.prepare('UPDATE google_accounts SET calendarPage = ? WHERE alias = ? AND calendarSyncToken IS ?').run(next, alias, pageToken ? cursor : data.nextSyncToken!);
+        if (Number(kept.changes) !== 1) throw new CursorMoved();
+      });
+      if (!pageToken) return;
     }
-    throw new GoogleError('request', `the calendar has more than ${CALENDAR_PAGES} pages of changes. the next poll goes on.`);
+    logger.info('the calendar read did not end in this poll, so the next poll goes on from its position', { alias });
   };
 
   // only a change by another person is news. a change that the owner made, for example through the agent, is not.
@@ -281,11 +296,21 @@ export function createSync(deps: SyncDeps): Sync {
 
   const pollAccount = async (alias: string, runId: string): Promise<AccountPoll> => {
     let resync = false;
+    let events: CalendarItem[] | undefined;
     try {
       resync = !!(await discoverMail(alias, runId)).resync;
       await hydrateMail(alias);
-      await syncCalendar(alias, runId);
-      const events = await readRange(alias);
+      // the detectors need the events also when the change list fails. without them, each deadline in the mail of the
+      // account looks missing from the calendar.
+      let calendarError: unknown;
+      try {
+        await syncCalendar(alias, runId);
+      } catch (err) {
+        if (err instanceof CursorMoved) throw err;
+        calendarError = err;
+      }
+      events = await readRange(alias);
+      if (calendarError) throw calendarError;
       db.prepare("UPDATE google_accounts SET failures = 0, lastError = NULL, lastErrorAt = NULL WHERE alias = ? AND status = 'ok'").run(alias);
       return { alias, ok: true, failures: 0, events, ...(resync ? { resync } : {}) };
     } catch (err) {
@@ -299,7 +324,7 @@ export function createSync(deps: SyncDeps): Sync {
         .prepare('UPDATE google_accounts SET failures = failures + 1, lastError = ?, lastErrorAt = ?, updatedAt = ? WHERE alias = ? RETURNING failures')
         .get(error.message, now, now, alias);
       logger.warn('google poll failed', { alias, err: error });
-      return { alias, ok: false, error: error.message, failures: Number(row?.failures ?? 0), ...(resync ? { resync } : {}) };
+      return { alias, ok: false, error: error.message, failures: Number(row?.failures ?? 0), ...(events ? { events } : {}), ...(resync ? { resync } : {}) };
     }
   };
 
@@ -312,7 +337,7 @@ export function createSync(deps: SyncDeps): Sync {
     },
     reset(alias) {
       inTransaction(db, () => {
-        db.prepare('UPDATE google_accounts SET historyId = NULL, calendarSyncToken = NULL WHERE alias = ?').run(alias);
+        db.prepare('UPDATE google_accounts SET historyId = NULL, calendarSyncToken = NULL, calendarPage = NULL WHERE alias = ?').run(alias);
         db.prepare("UPDATE integration_events SET handledAt = ?, handledAs = 'stale', handledBy = 'reset' WHERE account = ? AND source IN ('gmail', 'calendar') AND handledAt IS NULL").run(
           clock().toISOString(),
           alias,

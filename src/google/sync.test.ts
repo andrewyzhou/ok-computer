@@ -351,19 +351,81 @@ describe('calendar sync', () => {
     h.signedIn('personal');
     await poll();
     for (let i = 0; i < 300; i++) h.fake.upsertEvent('personal', event(`e${i}`, `invite ${i}`, '2026-10-20T17:00:00Z'));
-    // the second page fails once. the first page committed its rows, and the retry reads them again.
+    // the second page fails once. the first page committed its rows and its position, so the next poll goes on from
+    // the second page.
     h.fake.fault({ route: 'GET /calendar/v3/calendars/primary/events', contains: 'pageToken=', status: 503, times: 1 });
     const [failed] = await poll();
     expect(failed).toMatchObject({ ok: false });
     expect(calendarSignals()).toHaveLength(250);
+    const before = listCalls().length;
     await poll();
     expect(calendarSignals()).toHaveLength(300);
+    expect(listCalls().slice(before).map((each) => each.get('pageToken'))).toEqual(['250']);
 
     h.fake.mailbox('personal').oldestSyncVersion = 10_000;
     const [again] = await poll();
     expect(again).toMatchObject({ ok: true });
     expect(calendarSignals()).toHaveLength(300);
     expect(cursor('personal', 'calendarSyncToken')).toMatch(/^st-/);
+  });
+
+  // a change list longer than one poll reads, for example an edited daily series without an end. each poll must go on
+  // from where the last one stopped, or the list never ends and the account fails at every poll.
+  it('goes on from its position when a change list is longer than one poll reads', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    await poll();
+    const token = cursor('personal', 'calendarSyncToken');
+    for (let i = 0; i < 20 * 250 + 10; i++) h.fake.upsertEvent('personal', event(`s${i}`, 'standup', new Date(Date.UTC(2026, 9, 14, 16) + i * 3_600_000).toISOString()));
+    const [first] = await poll();
+    expect(first).toMatchObject({ ok: true, failures: 0, events: expect.any(Array) });
+    expect(cursor('personal', 'calendarSyncToken')).toBe(token);
+    expect(JSON.parse(String(cursor('personal', 'calendarPage')))).toEqual({ pageToken: '5000' });
+    expect(calendarSignals()).toHaveLength(5000);
+    const before = listCalls().length;
+    expect(await poll()).toEqual([expect.objectContaining({ ok: true })]);
+    expect(listCalls().slice(before).map((each) => [each.get('syncToken'), each.get('pageToken')])).toEqual([[token, '5000']]);
+    expect(calendarSignals()).toHaveLength(5010);
+    expect(cursor('personal', 'calendarSyncToken')).not.toBe(token);
+    expect(cursor('personal', 'calendarPage')).toBeNull();
+  }, 60_000);
+
+  it('keeps the timeMin of a first read that goes on in the next poll', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    const mine = { email: 'personal@example.com', self: true };
+    for (let i = 0; i < 20 * 250 + 10; i++) h.fake.upsertEvent('personal', event(`s${i}`, 'block', new Date(Date.UTC(2026, 9, 14, 16) + i * 3_600_000).toISOString(), mine));
+    await poll();
+    expect(cursor('personal', 'calendarSyncToken')).toBeNull();
+    const firstMin = listCalls()[0]!.get('timeMin');
+    h.now.value = new Date(h.now.value.getTime() + 15 * 60_000);
+    const before = listCalls().length;
+    expect(await poll()).toEqual([expect.objectContaining({ ok: true })]);
+    expect(listCalls().slice(before).map((each) => [each.get('timeMin'), each.get('pageToken')])).toEqual([[firstMin, '5000']]);
+    expect(cursor('personal', 'calendarSyncToken')).toMatch(/^st-/);
+    expect(calendarSignals()).toEqual([]);
+  }, 60_000);
+
+  it('drops a page position that google refuses, so the next poll reads from the cursor again', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    await poll();
+    h.db.prepare("UPDATE google_accounts SET calendarPage = ? WHERE alias = 'personal'").run(JSON.stringify({ pageToken: 'old' }));
+    h.fake.fault({ route: 'GET /calendar/v3/calendars/primary/events', contains: 'pageToken=old', status: 400, times: 1 });
+    expect(await poll()).toEqual([expect.objectContaining({ ok: false })]);
+    expect(cursor('personal', 'calendarPage')).toBeNull();
+    expect(await poll()).toEqual([expect.objectContaining({ ok: true })]);
+  });
+
+  // without the events of the account, the date detector would call each deadline in its mail missing.
+  it('still reads the live range for the detectors when the change list fails', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    h.fake.upsertEvent('personal', event('soon', 'Standup', '2026-10-13T17:30:00Z'));
+    await poll();
+    h.fake.fault({ route: 'GET /calendar/v3/calendars/primary/events', contains: 'syncToken=', status: 503, times: 1 });
+    const [report] = await poll();
+    expect(report).toMatchObject({ ok: false, failures: 1, events: [expect.objectContaining({ id: 'soon' })] });
   });
 
   it('reads the live range of the calendar for the detectors, without declined and cancelled events', async () => {
