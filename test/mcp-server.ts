@@ -65,3 +65,30 @@ export function createPagedServer(): Server {
   server.setRequestHandler('tools/call', async (request) => text(`ran ${request.params.name}`));
   return server;
 }
+
+// the shape server answers with results that a strict client refuses: structured content that does not match the
+// output schema, no structured content, a hostile pattern in the output schema, and a text block without text. each
+// tool runs before it answers, and calls counts the runs.
+export function createShapeServer(): { server: Server; calls: string[] } {
+  const calls: string[] = [];
+  const server = new Server({ name: 'okc-shape-server', version: '1.0.0' }, { capabilities: { tools: {} } });
+  const object = (properties: Record<string, unknown>) => ({ type: 'object' as const, properties, additionalProperties: false });
+  server.setRequestHandler('tools/list', async () => ({
+    tools: [
+      { name: 'stamp', description: 'Stamp a note.', inputSchema: object({}), outputSchema: object({ id: { type: 'string' } }) },
+      { name: 'text_only', description: 'Answer with text.', inputSchema: object({}), outputSchema: object({ id: { type: 'string' } }) },
+      { name: 'slow_check', description: 'Answer a word.', inputSchema: object({}), outputSchema: object({ v: { type: 'string', pattern: '^(a+)+$' } }) },
+      { name: 'garbled', description: 'Answer a broken block.', inputSchema: object({}) },
+    ],
+  }) as never);
+  server.setRequestHandler('tools/call', async (request) => {
+    calls.push(request.params.name);
+    const done = { type: 'text' as const, text: 'done' };
+    if (request.params.name === 'stamp') return { content: [done], structuredContent: { id: 42, ts: 'now' } };
+    if (request.params.name === 'slow_check') return { content: [done], structuredContent: { v: 'a'.repeat(34) + '!' } };
+    // the test removes the text of this block on the way, as a server with a bug would send it.
+    if (request.params.name === 'garbled') return { content: [{ type: 'text' as const, text: 'garble me' }] };
+    return { content: [done] };
+  });
+  return { server, calls };
+}

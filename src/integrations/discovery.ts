@@ -161,6 +161,12 @@ export function outcomeOutput(name: string, server: string, outcome: CallOutcome
     case 'refused':
       return { content: `${name} did not run. ${server} answered with error ${outcome.code}: ${outcome.message}`, isError: true };
     case 'unknown':
+      if (outcome.answered) {
+        return {
+          content: `${name} ran on ${server}, but its answer could not be read (${outcome.reason}). It probably acted. Check the result before you try it again.`,
+          isError: true,
+        };
+      }
       return {
         content: `${name} was sent to ${server}, but no answer came (${outcome.reason}). Its effect is unknown. Check the result before you try it again.`,
         isError: true,

@@ -1,15 +1,27 @@
 import { mkdtempSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { InMemoryTransport, SdkError, SdkErrorCode, type Transport } from '@modelcontextprotocol/client';
+import { InMemoryTransport, SdkError, SdkErrorCode, StreamableHTTPClientTransport, type Transport } from '@modelcontextprotocol/client';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createTestServer } from '../../test/mcp-server.js';
+import { createShapeServer, createTestServer } from '../../test/mcp-server.js';
 import { openDb } from '../db/index.js';
 import { createBlobStore, type BlobStore } from '../observability/blobs.js';
 import { silentLogger, type Logger } from '../observability/logger.js';
 import { parseIntegrations, type StdioEntry } from './config.js';
-import { createMcpConnection, HEALTHY_AFTER_MS, type CallOutcome, type McpConnection, type McpTool } from './mcp.js';
+import { outcomeOutput } from './discovery.js';
+import {
+  createMcpConnection,
+  createMessageRecorder,
+  HEALTHY_AFTER_MS,
+  NOTIFICATIONS_PER_MINUTE,
+  PING_EVERY_MS,
+  type CallOutcome,
+  type McpConnection,
+  type McpTool,
+} from './mcp.js';
 import { createMemorySecretStore } from './secrets.js';
 import { stdioTransport } from './transports.js';
 
@@ -31,7 +43,10 @@ afterEach(async () => {
   for (const connection of open.splice(0)) await connection.stop();
 });
 
-function setup(transport: () => Promise<Transport>, options: { logger?: Logger; blobs?: (real: BlobStore) => BlobStore } = {}) {
+function setup(
+  transport: () => Promise<Transport>,
+  options: { logger?: Logger; blobs?: (real: BlobStore) => BlobStore; answerWaitMs?: number; refusedKeyHint?: string } = {},
+) {
   const db = openDb(':memory:');
   db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r1', 'main', 'message', 'main', 'running', 'x')").run();
   let now = new Date('2026-10-13T03:15:00Z').getTime();
@@ -48,6 +63,8 @@ function setup(transport: () => Promise<Transport>, options: { logger?: Logger; 
     clock,
     transport,
     onTools: (tools: McpTool[]) => lists.push(tools.map((tool) => tool.name)),
+    ...(options.answerWaitMs ? { answerWaitMs: options.answerWaitMs } : {}),
+    ...(options.refusedKeyHint ? { refusedKeyHint: options.refusedKeyHint } : {}),
     setTimer: (fn, ms) => {
       const timer = { fn, ms };
       timers.push(timer);
@@ -284,6 +301,84 @@ describe('mcp connection failure modes', () => {
     await connection.start();
     expect(resultOf(await connection.callTool('slow', { ms: 50 }, trace)).content).toEqual([{ type: 'text', text: 'done after 50 ms' }]);
     expect(messages().map((row) => row.method)).not.toContain('notifications/cancelled');
+  });
+
+  it('ends the wait at the answer limit with a cancel that the trace links to the call', async () => {
+    const { connection, messages } = setup(memoryTransport(), { answerWaitMs: 100 });
+    await connection.start();
+    expect(await connection.callTool('hang', {}, trace)).toMatchObject({ kind: 'unknown', reason: 'Request timed out' });
+    const cancels = messages().filter((row) => row.method === 'notifications/cancelled');
+    expect(cancels).toEqual([expect.objectContaining({ direction: 'out', runId: 'r1', toolCallId: 'call-1' })]);
+  });
+
+  it('says that a tool ran when its answer came but the client cannot read it', async () => {
+    const shape = createShapeServer();
+    const { connection } = setup(async () => {
+      const [client, server] = InMemoryTransport.createLinkedPair();
+      const send = server.send.bind(server);
+      server.send = (message, options) => send(JSON.parse(JSON.stringify(message).replace('"text":"garble me"', '"textx":"garble me"')), options);
+      await shape.server.connect(server);
+      return client;
+    });
+    await connection.start();
+    // the client does not check the output schema, so a result that does not match it, or that has only text, is
+    // still a result.
+    expect(resultOf(await connection.callTool('stamp', {}, trace)).structuredContent).toEqual({ id: 42, ts: 'now' });
+    expect(resultOf(await connection.callTool('text_only', {}, trace)).content).toEqual([{ type: 'text', text: 'done' }]);
+    // a hostile pattern in the output schema never runs.
+    const start = performance.now();
+    expect(await connection.callTool('slow_check', {}, trace)).toMatchObject({ kind: 'result' });
+    expect(performance.now() - start).toBeLessThan(500);
+    // a block without its text is not a result. the server ran the tool, so the model must not hear "did not run".
+    const garbled = await connection.callTool('garbled', {}, trace);
+    expect(garbled).toMatchObject({ kind: 'unknown', answered: true });
+    expect(outcomeOutput('chat__garbled', 'chat', garbled).content).toMatch(/^chat__garbled ran on chat, but its answer could not be read/);
+    expect(shape.calls).toEqual(['stamp', 'text_only', 'slow_check', 'garbled']);
+  });
+
+  it('sends no ping during a call, so a server with one thread is not closed in the middle of its work', async () => {
+    const { connection, messages, fire } = setup(memoryTransport());
+    await connection.start();
+    const pending = connection.callTool('slow', { ms: 100 }, trace);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    fire(PING_EVERY_MS);
+    expect(messages().map((row) => row.method)).not.toContain('ping');
+    expect(resultOf(await pending).content).toEqual([{ type: 'text', text: 'done after 100 ms' }]);
+    fire(PING_EVERY_MS);
+    await expect.poll(() => messages().filter((row) => row.method === 'ping').length).toBe(2);
+    expect(connection.state().status).toBe('connected');
+  });
+
+  it('records at most the limit of notifications in a minute, and says where it stops', () => {
+    const db = openDb(':memory:');
+    let now = 0;
+    const clock = () => new Date(now);
+    const record = createMessageRecorder({ db, blobs: createBlobStore(db, mkdtempSync(join(tmpdir(), 'okc-mcp-')), clock), clock, serverId: 'noisy' });
+    const log = { jsonrpc: '2.0' as const, method: 'notifications/message', params: { level: 'info', data: 'x' } };
+    for (let i = 0; i < NOTIFICATIONS_PER_MINUTE + 50; i++) record('in', log);
+    record('in', { jsonrpc: '2.0', method: 'notifications/tools/list_changed' });
+    const count = () => db.prepare("SELECT count(*) AS n FROM mcp_messages WHERE method = 'notifications/message'").get();
+    expect(count()).toEqual({ n: NOTIFICATIONS_PER_MINUTE + 1 });
+    expect(db.prepare('SELECT payload FROM mcp_messages ORDER BY id DESC LIMIT 2').all().map((row) => String(row.payload))).toEqual([
+      expect.stringContaining('list_changed'),
+      expect.stringContaining('not recorded'),
+    ]);
+    now += 60_000;
+    record('in', log);
+    expect(count()).toEqual({ n: NOTIFICATIONS_PER_MINUTE + 2 });
+  });
+
+  it('names the status and the secret when an http server refuses the key', async () => {
+    const server = createServer((_req, res) => res.writeHead(401).end());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const url = new URL(`http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`);
+    try {
+      const { connection } = setup(async () => new StreamableHTTPClientTransport(url), { refusedKeyHint: 'Update the secret notes-key.' });
+      await connection.start();
+      expect(connection.state()).toMatchObject({ status: 'error', error: 'the server refused the key (http 401). Update the secret notes-key.' });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 
   it('reports a json-rpc error from the server as refused', async () => {

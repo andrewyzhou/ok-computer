@@ -5,6 +5,7 @@ import {
   ProtocolError,
   SdkError,
   SdkErrorCode,
+  SdkHttpError,
   UnauthorizedError,
   type CallToolResult,
   type JSONRPCMessage,
@@ -29,19 +30,33 @@ export interface CallTrace {
   toolCallId: string;
 }
 
+// the tool call that sent a request. answer says what came back for it: a result or a json-rpc error. the sdk throws
+// the same error type for a refusal of the server and for a result that it cannot read, so only the message tells
+// whether the tool ran.
+interface ActiveCall {
+  trace: CallTrace;
+  answer?: 'result' | 'error';
+}
+
 interface Pending {
   method: string;
   sentAt: number;
-  trace: CallTrace | undefined;
+  call: ActiveCall | undefined;
 }
 
-// the trace of the tool call that sent a request. the response row gets the same trace through the rpc id.
-const activeCall = new AsyncLocalStorage<CallTrace>();
+// the call that sent a request. the response row gets the same trace through the rpc id.
+const activeCall = new AsyncLocalStorage<ActiveCall>();
 
 // unsent marks a message whose out row exists, but the transport refused to send it. its row holds the error.
 export interface MessageRecorder {
   (direction: 'out' | 'in' | 'unsent', message: JSONRPCMessage, error?: string): void;
 }
+
+// a server can send notifications without a limit, and each row is a synchronous write on the event loop. so each
+// window records this many. the client still gets every message.
+export const NOTIFICATIONS_PER_MINUTE = 100;
+// these notifications change what the app does, so the trace always keeps them.
+const ALWAYS_RECORDED = new Set(['notifications/tools/list_changed', 'notifications/cancelled']);
 
 // each connection attempt gets its own recorder. a new client numbers its requests from 0 again, so a shared map of
 // pending requests would pair a new response with a request of the old attempt.
@@ -51,35 +66,56 @@ export function createMessageRecorder(deps: { db: Db; blobs: BlobStore; clock: C
     `INSERT INTO mcp_messages (serverId, runId, toolCallId, direction, method, rpcId, payload, payloadBlob, latencyMs, createdAt)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
+  let windowStart = 0;
+  let notifications = 0;
+  // over reports whether a notification from the server is over the limit of its window. the first one over the
+  // limit leaves one row that says so.
+  const over = (method: string) => {
+    const now = deps.clock().getTime();
+    if (now - windowStart >= 60_000) {
+      windowStart = now;
+      notifications = 0;
+    }
+    if (++notifications <= NOTIFICATIONS_PER_MINUTE) return false;
+    if (notifications === NOTIFICATIONS_PER_MINUTE + 1) {
+      const note = JSON.stringify({ dropped: `the server sent more than ${NOTIFICATIONS_PER_MINUTE} notifications in one minute. the others of this minute are not recorded.` });
+      insert.run(deps.serverId, null, null, 'in', method, null, note, null, null, deps.clock().toISOString());
+    }
+    return true;
+  };
   return (direction, message, error) => {
-    const text = redactedJson(direction === 'unsent' ? { error } : message);
     const rpcId = 'id' in message && message.id !== undefined ? String(message.id) : null;
     let method = 'method' in message ? message.method : null;
-    let trace: CallTrace | undefined;
+    if (direction === 'in' && method && rpcId === null && !ALWAYS_RECORDED.has(method) && over(method)) return;
+    let call: ActiveCall | undefined;
     let latencyMs: number | null = null;
     // a request from the server to the client has its own ids, so the key includes the direction of the request.
     const key = (from: 'out' | 'in') => `${from}:${rpcId}`;
     // only a tools/call and its cancel belong to a tool call. other requests can run in the async context of a call,
     // for example the tools/list that a list_changed during the call starts, but the call did not send them.
-    const ownTrace = () => (direction === 'out' && (method === 'tools/call' || method === 'notifications/cancelled') ? activeCall.getStore() : undefined);
+    const ownCall = () => (direction === 'out' && (method === 'tools/call' || method === 'notifications/cancelled') ? activeCall.getStore() : undefined);
     if (direction === 'unsent') {
       // no answer comes for a request that did not leave, so its pending entry ends here.
-      trace = pending.get(key('out'))?.trace;
+      call = pending.get(key('out'))?.call;
       pending.delete(key('out'));
     } else if (method && rpcId !== null) {
-      trace = ownTrace();
-      pending.set(key(direction), { method, sentAt: performance.now(), trace });
+      call = ownCall();
+      pending.set(key(direction), { method, sentAt: performance.now(), call });
     } else if (!method && rpcId !== null) {
       const request = pending.get(key(direction === 'in' ? 'out' : 'in'));
       if (request) {
         pending.delete(key(direction === 'in' ? 'out' : 'in'));
         method = request.method;
-        trace = request.trace;
+        call = request.call;
         latencyMs = Math.round(performance.now() - request.sentAt);
+        // the answer is noted before the write, so a failed write cannot hide that the tool ran.
+        if (call && direction === 'in') call.answer = 'error' in message ? 'error' : 'result';
       }
     } else {
-      trace = ownTrace();
+      call = ownCall();
     }
+    const trace = call?.trace;
+    const text = redactedJson(direction === 'unsent' ? { error } : message);
     const small = Buffer.byteLength(text) <= INLINE_LIMIT;
     insert.run(
       deps.serverId,
@@ -173,11 +209,12 @@ export interface ConnectionState {
 // - not_sent: the request never left, so the tool did not run. a retry is safe.
 // - refused: the server answered with a json-rpc error, for example invalid params. the tool did not give a result.
 // - unknown: the request left, but no answer came, for example because the connection closed. the tool can have acted.
+//   answered marks an answer that came but that the client could not read. the tool then ran.
 export type CallOutcome =
   | { kind: 'result'; result: CallToolResult }
   | { kind: 'not_sent'; reason: string }
   | { kind: 'refused'; code: number; message: string }
-  | { kind: 'unknown'; reason: string };
+  | { kind: 'unknown'; reason: string; answered?: true };
 
 export interface McpConnectionDeps {
   id: string;
@@ -193,6 +230,11 @@ export interface McpConnectionDeps {
   // the longest time to wait for the answer of one tools/call. the run does not wait this long, but the late result
   // still reaches the trace and the session.
   answerWaitMs?: number;
+  // the reason when the last sign-in step failed because the sign-in server was down, for example a refresh that got
+  // a 503. the sdk then asks for a new sign-in, but the stored tokens can still be good, so the app tries again later.
+  signInOutage?: () => string | undefined;
+  // the text for the owner when the server refuses the key with a 401 or a 403, for example the name of the secret.
+  refusedKeyHint?: string;
 }
 
 export interface McpConnection {
@@ -254,11 +296,19 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
     cancelTimer = setTimer(() => void (mine === generation && connect()), delay);
   };
 
+  // the tools/call requests that wait for an answer. a server with one thread does not answer a ping during a long
+  // call, and a close then would end a call that would answer later.
+  let calls = 0;
   const ping = async (attempt: Client) => {
     cancelTimer = setTimer(() => void ping(attempt), PING_EVERY_MS);
+    if (calls > 0) return;
     try {
       await attempt.ping({ timeout: 30_000 });
     } catch (err) {
+      if (calls > 0) {
+        logger.info('mcp server did not answer a ping during a call', { integration: id, err });
+        return;
+      }
       // a closed transport starts the next attempt through onclose.
       logger.warn('mcp server did not answer a ping', { integration: id, err });
       await attempt.close().catch(() => {});
@@ -293,6 +343,13 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
     };
     let transportError: string | undefined;
     const reason = (text: string) => (transportError && !text.includes(transportError) ? `${text}: ${transportError}` : text);
+    // the sdk gives no status in the text of an http error, for example "Error POSTing to endpoint: " for a 401.
+    // the hint of a refused key says all that the owner needs, so the transport error does not follow it.
+    const describe = (err: unknown) => {
+      const status = err instanceof SdkHttpError ? err.status : undefined;
+      if ((status === 401 || status === 403) && deps.refusedKeyHint) return `the server refused the key (http ${status}). ${deps.refusedKeyHint}`;
+      return reason(status ? `http ${status}: ${errorText(err)}` : errorText(err));
+    };
     try {
       const transport = await deps.transport();
       if (mine !== generation || stopped) {
@@ -334,12 +391,17 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
       if (mine !== generation || stopped) return;
       // a server that needs the owner's authorization waits for the owner. a retry loop would ask again and again, and a
       // revoked refresh token would hit the token endpoint at each attempt.
+      const outage = isAuthError(err) ? deps.signInOutage?.() : undefined;
+      if (outage) {
+        retry(`the sign-in server did not answer: ${outage}`);
+        return;
+      }
       if (isAuthError(err)) {
         setState({ status: 'needs_auth', error: 'the server needs authorization. connect it from the dashboard.' });
         logger.warn('mcp server needs authorization', { integration: id });
         return;
       }
-      retry(reason(errorText(err)));
+      retry(describe(err));
     }
   }
 
@@ -367,14 +429,25 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
     async callTool(name, args, trace) {
       const connected = client;
       if (!connected) return { kind: 'not_sent', reason: `${id} is not connected (${state.status}${state.error ? `: ${state.error}` : ''})` };
+      const call: ActiveCall = { trace };
+      calls++;
       try {
         // the run's signal does not go to the request. after an abort the sdk sends a cancel and drops the answer, so
-        // the app would never learn whether the tool acted. the wait has its own long limit instead.
-        const result = await activeCall.run(trace, () =>
-          connected.callTool({ name, arguments: args }, { timeout: deps.answerWaitMs ?? ANSWER_WAIT_MS }),
+        // the app would never learn whether the tool acted. the wait has its own long limit. at that limit the sdk
+        // sends notifications/cancelled, and the trace links it to the call.
+        // a plain request and not callTool: callTool checks the result against the outputSchema of the server. that
+        // check runs the server's patterns on the event loop, and it throws for a tool that ran.
+        const result = await activeCall.run(call, () =>
+          connected.request({ method: 'tools/call', params: { name, arguments: args } }, { timeout: deps.answerWaitMs ?? ANSWER_WAIT_MS }),
         );
         return { kind: 'result', result: result as CallToolResult };
       } catch (err) {
+        if (call.answer === 'result') return { kind: 'unknown', reason: errorText(err), answered: true };
+        const outage = isAuthError(err) ? deps.signInOutage?.() : undefined;
+        if (outage) {
+          // the stored tokens can still be good, so the connection stays, and the next call tries the refresh again.
+          return { kind: 'not_sent', reason: `the sign-in server did not answer (${outage}). Try again later.` };
+        }
         if (isAuthError(err) && client === connected) {
           // the server refused the token before it acted, and the refresh failed too. the owner must sign in again.
           client = undefined;
@@ -385,6 +458,8 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
           logger.warn('mcp server needs authorization again', { integration: id });
         }
         return classify(err);
+      } finally {
+        calls--;
       }
     },
   };
@@ -397,6 +472,8 @@ const isAuthError = (err: unknown) => err instanceof UnauthorizedError || err in
 export function classify(err: unknown): CallOutcome {
   if (err instanceof ProtocolError) return { kind: 'refused', code: err.code, message: err.message };
   if (isAuthError(err)) return { kind: 'not_sent', reason: `the server refused the sign-in: ${errorText(err)}` };
+  // an http server checks the key before it acts.
+  if (err instanceof SdkHttpError && (err.status === 401 || err.status === 403)) return { kind: 'not_sent', reason: `the server refused the key (http ${err.status})` };
   if (err instanceof SdkError && (err.code === SdkErrorCode.NotConnected || err.code === SdkErrorCode.SendFailed)) {
     return { kind: 'not_sent', reason: err.message };
   }
