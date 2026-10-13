@@ -105,6 +105,8 @@ interface Tab {
   submit: boolean;
   blocked: Blocked[];
   sent: Sent[];
+  // a navigation of the page itself was blocked in this step.
+  topBlocked: boolean;
   console: string[];
   lastUsed: number;
   queue: Promise<unknown>;
@@ -203,6 +205,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   let launching: Promise<BrowserContext> | undefined;
   let closing = false;
   let tracing: string | undefined;
+  let userAgent: string | undefined;
   let lastActivity = Date.now();
 
   const now = () => clock().toISOString();
@@ -236,15 +239,28 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     hardenProfile(profile, downloads);
     // no other chrome holds the profile, so no task row that is open can be live. the app crashed while it ran.
     sweep();
-    const ctx = await chromium.launchPersistentContext(profile, {
-      channel: 'chrome',
-      headless: true,
-      serviceWorkers: 'block',
-      acceptDownloads: true,
-      downloadsPath: downloads,
-      viewport: { width: 1280, height: 800 },
-      args: deps.args ?? [],
-    });
+    const start = () =>
+      chromium.launchPersistentContext(profile, {
+        channel: 'chrome',
+        headless: true,
+        serviceWorkers: 'block',
+        acceptDownloads: true,
+        downloadsPath: downloads,
+        viewport: { width: 1280, height: 800 },
+        args: deps.args ?? [],
+        ...(userAgent ? { userAgent } : {}),
+      });
+    let ctx = await start();
+    // headless chrome names itself HeadlessChrome in its user agent, and a search engine shows more captchas to it. the
+    // first launch reads the name, and chrome starts once more with the name of normal chrome.
+    if (!userAgent) {
+      const agent = await (ctx.pages()[0] ?? (await ctx.newPage())).evaluate(() => navigator.userAgent);
+      userAgent = agent.replace('HeadlessChrome/', 'Chrome/');
+      if (userAgent !== agent) {
+        await ctx.close();
+        ctx = await start();
+      }
+    }
     ctx.on('close', onContextClosed);
     await guardContext(
       ctx,
@@ -289,7 +305,10 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     tab.rules = {
       allows: (host) => allowedBy(tab.allowlist, host),
       submitting: () => tab.submit,
-      onBlocked: (blocked) => void tab.blocked.push(blocked),
+      onBlocked: (blocked, top) => {
+        tab.blocked.push(blocked);
+        if (top) tab.topBlocked = true;
+      },
       // the route and the cdp layer both see the first request of a page, so one request comes here twice.
       onSent: (sent) => void (tab.sent.some((each) => each.method === sent.method && each.url === sent.url) || tab.sent.push(sent)),
     };
@@ -357,6 +376,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     let snapshot: string | undefined;
     let png: Buffer | undefined;
     try {
+      if (tab.page.url().startsWith('chrome-error:')) throw new Error('the tab is on the error page of chrome, which is not the site');
       // a script can change a value while the snapshot runs, so the values before and after it are both masked.
       const before = await passwordsOf(tab.page, t.capture);
       const text = await tab.page.ariaSnapshot({ mode: 'ai', timeout: t.capture });
@@ -436,6 +456,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       lastActivity = Date.now();
       tab.blocked = [];
       tab.sent = [];
+      tab.topBlocked = false;
       tab.console = [];
       const urlBefore = tab.page.url();
       let note = '';
@@ -449,6 +470,8 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       }
       // a navigation can still run. the snapshot waits for the document, with the capture limit.
       await tab.page.waitForLoadState('domcontentloaded', { timeout: t.capture }).catch(() => undefined);
+      const stayed = await leaveErrorPage(tab, urlBefore);
+      if (stayed) note = note ? `${note}. ${stayed}` : stayed;
       const shot = await capture(tab);
       const urlAfter = tab.page.url();
       const stepId = record(tab, input, { urlBefore, urlAfter, snapshot: shot.snapshot, png: shot.png, started, ...(error || shot.errors.length ? { error: [error, ...shot.errors].filter(Boolean).join('; ') } : {}) });
@@ -460,8 +483,20 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
         return { ...base, ok: false, title: '', note: `${error ? `${error}. ` : ''}The page stopped responding, so its tab closed and the task ended.` };
       }
       const title = await within(tab.page.title(), t.capture).catch(() => '');
-      return { ...base, ok: !error, note: error ?? note, title: typeof title === 'string' ? title : '' };
+      return { ...base, ok: !error, note: error ? [error, stayed].filter(Boolean).join('. ') : note, title: typeof title === 'string' ? title : '' };
     });
+  }
+
+  // a blocked navigation leaves chrome on its own error page. the model would read that page as the site, and its
+  // host would become a taint source, so the tab goes back to the page of the step start. the error page commits a
+  // moment after the block, so the wait has a short limit.
+  async function leaveErrorPage(tab: Tab, urlBefore: string): Promise<string | undefined> {
+    const onError = () => tab.page.url().startsWith('chrome-error:');
+    if (tab.topBlocked && !onError()) await tab.page.waitForURL((url) => url.protocol === 'chrome-error:', { timeout: 2_000 }).catch(() => undefined);
+    if (!onError() || urlBefore.startsWith('chrome-error:')) return undefined;
+    await tab.page.goBack({ waitUntil: 'domcontentloaded', timeout: t.capture }).catch(() => undefined);
+    if (tab.page.url() !== urlBefore) await tab.page.goto(urlBefore, { waitUntil: 'domcontentloaded', timeout: t.capture }).catch(() => undefined);
+    return `The navigation was blocked, so the page stayed at ${urlBefore}.`;
   }
 
   function sweep(): number {

@@ -73,6 +73,29 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(steps.length).toBeGreaterThan(1);
   });
 
+  it('goes back from the error page of chrome after a blocked link', async () => {
+    const h = harness();
+    const first = await h.run('browser_open', { url: site.url('shop.test') });
+    const out = await h.run('browser_click', { ref: refOf(first.content, /link "Evil link"/), element: 'Evil link' });
+    expect(out.content).toContain(`Address: ${site.url('shop.test')}`);
+    expect(out.content).toContain('the page stayed at');
+    expect(out.content).toContain('button "Buy now"');
+    expect(out.untrustedSource).toBe(`browser:shop.test:${site.port}`);
+    const last = h.steps().at(-1)!;
+    expect(last.urlAfter).toBe(site.url('shop.test'));
+    expect(h.blobs.read(String(last.snapshotBlob))).toContain('Buy now');
+    expect(JSON.stringify(h.steps())).not.toContain('chromewebdata');
+  });
+
+  it('sends the user agent of normal chrome', async () => {
+    const h = harness();
+    site.hits.length = 0;
+    await h.run('browser_open', { url: site.url('shop.test', '/about') });
+    const [hit] = site.hitsOn('shop.test');
+    expect(hit!.agent).toMatch(/ Chrome\/\d+/);
+    expect(hit!.agent).not.toContain('Headless');
+  });
+
   it('refuses a click on a button that sends a form, and blocks a form that a script sends', async () => {
     const h = harness();
     const first = await h.run('browser_open', { url: site.url('shop.test') });
