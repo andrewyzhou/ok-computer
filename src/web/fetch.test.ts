@@ -167,6 +167,32 @@ describe('extraction', () => {
     expect(Date.now() - started).toBeLessThan(2000);
   });
 
+  it('strips tags in linear time, also with a run of "<", of "<title" or of white space that is not a new line', () => {
+    for (const tail of ['<'.repeat(200_000), '<title'.repeat(100_000), '　'.repeat(200_000), '\v'.repeat(200_000)]) {
+      const started = Date.now();
+      expect(stripTags(`<p>hello</p>${tail}`).text).toMatch(/^hello/);
+      expect(Date.now() - started, JSON.stringify(tail.slice(0, 6))).toBeLessThan(500);
+    }
+  });
+
+  // the exit after a result ran the fallback on the main thread, so each extraction of such a page held the event loop.
+  it('keeps the event loop free while and after the worker reads a hostile page', async () => {
+    let gap = 0;
+    let last = performance.now();
+    const tick = setInterval(() => {
+      gap = Math.max(gap, performance.now() - last);
+      last = performance.now();
+    }, 20);
+    try {
+      const page = await extractIsolated(`<p>hello</p>${'<'.repeat(100_000)}`, 'https://x.example/');
+      expect(page.note).toBeUndefined();
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    } finally {
+      clearInterval(tick);
+    }
+    expect(gap).toBeLessThan(500);
+  });
+
   // the walk read childNodes in its loop, and linkedom builds that list on each read, so 50,000 siblings never ended.
   it('reads a page of 50,000 siblings in linear time', async () => {
     const got = await fetchFixture(site.url('shop.test', '/many'));

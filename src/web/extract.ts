@@ -132,18 +132,35 @@ function dropBlocks(html: string): string {
   return out.join('');
 }
 
+const BLOCK_TAG = /^<\/?(p|div|br|li|h[1-6]|tr|section|article)\b/i;
+
+// every pass is linear. a regular expression for a tag, the title or a run of white space went back over the rest of
+// the text from each start, so 200,000 "<" with no ">" took 24 s, and this fallback runs on the main thread.
 export function stripTags(html: string): Extracted {
-  const title = /<title[^>]*>([^<]*)/i.exec(html)?.[1]?.trim() ?? '';
-  const text = dropBlocks(html)
-    .replace(/<\/?(p|div|br|li|h[1-6]|tr|section|article)\b[^>]*>/gi, '\n')
-    .replace(/<[^>]*>/g, ' ')
+  const lower = html.toLowerCase();
+  const open = lower.indexOf('<title');
+  const start = open < 0 ? -1 : lower.indexOf('>', open);
+  const end = start < 0 ? -1 : lower.indexOf('<', start);
+  const title = start < 0 ? '' : html.slice(start + 1, end < 0 ? html.length : end).trim();
+  const body = dropBlocks(html);
+  const out: string[] = [];
+  let at = 0;
+  for (;;) {
+    const tag = body.indexOf('<', at);
+    const close = tag < 0 ? -1 : body.indexOf('>', tag);
+    // no tag closes after this point, so the rest is text.
+    if (close < 0) break;
+    out.push(body.slice(at, tag), BLOCK_TAG.test(body.slice(tag, Math.min(close + 1, tag + 12))) ? '\n' : ' ');
+    at = close + 1;
+  }
+  out.push(body.slice(at));
+  const text = out
+    .join('')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\s*\n\s*/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\s+/g, (run) => (run.includes('\n') ? '\n' : ' '))
     .trim();
   return { title, text, method: 'raw' };
 }
