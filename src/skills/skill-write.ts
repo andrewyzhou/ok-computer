@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, relative } from 'node:path';
 import { z } from 'zod';
 import { redact } from '../observability/redact.js';
 import { defineTool, type Tool } from '../tools/registry.js';
-import { loadSkills } from './skills.js';
+import { frontmatter, loadSkills } from './skills.js';
 
 // the card shows the full body with a bar on each line, and one telegram message holds 4,096 characters. a body at
 // these limits and the other fields at their limits give a card under that size.
@@ -19,14 +19,26 @@ export const skillVersion = (text: string) => createHash('sha256').update(text, 
 // windows does not tell "Foo" from "foo".
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const DEVICE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/;
-// a control character other than a line break or a tab, a direction mark, an invisible character, or a line separator
-// can hide text from the owner on the card. a skill has no use for them, so the draft is refused. a joiner and a
-// variation selector stay, because they make emoji.
-const HIDDEN = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b\u200c\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb]/;
+// a control character other than a line break or a tab, a format character, or another character that a reader need
+// not show can hide text from the owner. tag characters can spell a full instruction that the model reads and the
+// owner does not see. a skill has no use for them, so the draft is refused. this set holds every character that the
+// card shows as a \u code, so a draft that passes gives a card without such codes, and the card keeps its size limit.
+// one variation selector after an emoji and a joiner between two emoji parts stay, because they make emoji.
+const HIDDEN = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2028\u2029]/gu;
+const EMOJI = /\p{Emoji}$/u;
+const EMOJI_PART = /[\p{Extended_Pictographic}\p{Emoji_Modifier}\ufe0f]$/u;
+const EMOJI_NEXT = /^\p{Extended_Pictographic}/u;
 
 function hiddenIn(text: string): string | undefined {
-  const found = HIDDEN.exec(text);
-  return found ? `it has a hidden or control character (U+${found[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}) at position ${found.index}` : undefined;
+  for (const found of text.matchAll(HIDDEN)) {
+    const char = found[0];
+    const before = text.slice(0, found.index);
+    if (char === '\n' || char === '\t') continue;
+    if ((char === '\ufe0e' || char === '\ufe0f') && EMOJI.test(before)) continue;
+    if (char === '\u200d' && EMOJI_PART.test(before) && EMOJI_NEXT.test(text.slice(found.index + 1))) continue;
+    return `it has a hidden or control character (U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}) at position ${found.index}`;
+  }
+  return undefined;
 }
 
 // a skill has no reason to hold a secret. the card shows a secret as [redacted], and the file would get the real value.
@@ -56,7 +68,17 @@ export const skillWriteInput = z
     base: z.string().regex(/^[0-9a-f]{12}$/).optional(),
     why: z.string().min(1).max(300),
   })
-  .refine((input) => !input.replaces || input.base !== undefined, { message: 'a change needs base: the version of the skill from the review input', path: ['base'] });
+  .refine((input) => !input.replaces || input.base !== undefined, { message: 'a change needs base: the version of the skill from the review input', path: ['base'] })
+  // the loader trims a field and removes quotes around it, and it leaves out a skill without a description. so a
+  // description that the loader reads in a different form is refused before the owner approves a skill that the app
+  // cannot load.
+  .refine(
+    (input) => {
+      const read = frontmatter(renderSkill({ ...input, body: 'x' }));
+      return read.name === input.name && read.description === input.description.trim() && read.description !== '';
+    },
+    { message: 'the description must have text and must not start and end with the same quote mark', path: ['description'] },
+  );
 
 export type SkillWriteInput = z.infer<typeof skillWriteInput>;
 
@@ -111,8 +133,9 @@ export function createSkillWriteTool(deps: { skillsDir: string }): Tool {
     input: skillWriteInput,
     risk: 'write',
     needsApproval: true,
-    // the owner approves instructions that every later run can follow, so the card must show all of them.
-    fullFields: ['body'],
+    // the owner approves instructions that every later run can follow, so the card must show all of them. the
+    // description goes into the skills list of every prompt, so the card shows it in full too.
+    fullFields: ['description', 'body'],
     taintNote: 'Careful: the task read untrusted content. A skill guides later runs, so check that it has no instruction that you did not give.',
     async run(input) {
       const skills = loadSkills(skillsDir);

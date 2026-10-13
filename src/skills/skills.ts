@@ -9,7 +9,7 @@ export interface Skill {
   path: string;
 }
 
-function frontmatter(text: string): Record<string, string> {
+export function frontmatter(text: string): Record<string, string> {
   const block = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? '';
   const fields: Record<string, string> = {};
   for (const line of block.split(/\r?\n/)) {
