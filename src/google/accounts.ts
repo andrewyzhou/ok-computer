@@ -25,14 +25,6 @@ export interface GoogleEndpoints {
   revokeUrl?: string;
 }
 
-export interface AccountStatus {
-  alias: string;
-  email: string | null;
-  status: 'signed_out' | 'ok' | 'needs_auth';
-  authorizedAt: string | null;
-  lastError: string | null;
-}
-
 export interface GoogleAccounts {
   aliases: string[];
   // run gives fn the apis of one account. every error becomes a GoogleError. a 401 gets one new access token and one
@@ -44,7 +36,6 @@ export interface GoogleAccounts {
   saveClient(file: unknown): Promise<{ saved: true } | { error: string }>;
   beginSignIn(alias: string): Promise<{ url: string } | { error: string }>;
   finishSignIn(state: string, code: string): Promise<{ email: string } | { error: string }>;
-  status(): AccountStatus[];
   close(): Promise<void>;
 }
 
@@ -348,17 +339,6 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
       }
     },
     finishSignIn,
-    status: () =>
-      aliases.map((alias) => {
-        const state = row(alias);
-        return {
-          alias,
-          email: state?.email ?? null,
-          status: (state?.status ?? 'signed_out') as AccountStatus['status'],
-          authorizedAt: state?.authorizedAt ?? null,
-          lastError: state?.lastError ?? null,
-        };
-      }),
     async close() {
       flows.clear();
       await closeIfIdle();

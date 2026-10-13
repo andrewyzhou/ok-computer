@@ -11,6 +11,7 @@ import { useApi } from '../api';
 import { Expand, Json, Load, Page, Panel, Status } from '../components';
 import { EventView } from '../events';
 import { bytes, duration, ms, time, tokens, usd } from '../format';
+import { GoogleRequests } from './Google';
 import { McpMessages } from './Integrations';
 import { sessionHref } from './Runs';
 
@@ -208,7 +209,7 @@ function ToolCallItem({ call }: { call: ToolCallRow }) {
         <strong>tool call</strong> {call.name} <Status value={call.outcome} />
         {call.serverId ? (
           <span className="muted">
-            on <a href={`#/integrations/${encodeURIComponent(call.serverId)}`}>{call.serverId}</a>
+            on <a href={call.source === 'google' ? '#/google' : `#/integrations/${encodeURIComponent(call.serverId)}`}>{call.serverId}</a>
           </span>
         ) : null}
         {call.policy ? (
@@ -224,7 +225,11 @@ function ToolCallItem({ call }: { call: ToolCallRow }) {
       <Expand label="input">{() => <Json value={call.input} />}</Expand>
       <Expand label="result and what the model saw">{() => <ResultView call={call} />}</Expand>
       {call.policy ? <Expand label="policy decision">{() => <PolicyView policy={call.policy!} />}</Expand> : null}
-      {call.serverId ? (
+      {call.source === 'google' ? (
+        <Expand label="http requests to google">
+          {() => <GoogleRequests query={`runId=${encodeURIComponent(call.runId)}&toolCallId=${encodeURIComponent(call.toolCallId)}`} />}
+        </Expand>
+      ) : call.serverId ? (
         <Expand label={`${call.mcpMessages.length} json-rpc messages with ${call.serverId}`}>{() => <McpMessages messages={call.mcpMessages} />}</Expand>
       ) : null}
     </li>
@@ -274,6 +279,11 @@ export function RunDetail({ id }: { id: string }) {
                 )}
               </ol>
             </Panel>
+            {run.trigger === 'poll' ? (
+              <Panel title="Requests of this poll">
+                <GoogleRequests query={`runId=${encodeURIComponent(run.id)}`} />
+              </Panel>
+            ) : null}
             <Panel title="Events of this run">
               <div className="log">
                 {events.map((event) => (

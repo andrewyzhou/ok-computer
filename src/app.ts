@@ -158,6 +158,7 @@ export function createApp(deps: AppDeps): App {
         polls: deps.connectIntegrations !== false,
         signal: shutdown.signal,
         ...(deps.googleEndpoints ? { endpoints: deps.googleEndpoints } : {}),
+        ...ids,
       })
     : undefined;
   // each run gets the integration tools of its session. the list comes from the config, not from a catalog, so the
