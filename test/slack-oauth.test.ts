@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openDb } from '../src/db/index.js';
 import { parseIntegrations, type IntegrationEntry } from '../src/integrations/config.js';
 import { createIntegrations, type Integrations } from '../src/integrations/integrations.js';
@@ -10,6 +10,7 @@ import { createOAuth } from '../src/integrations/oauth.js';
 import { createMemorySecretStore } from '../src/integrations/secrets.js';
 import { createBlobStore } from '../src/observability/blobs.js';
 import { createLogger } from '../src/observability/logger.js';
+import { redact } from '../src/observability/redact.js';
 import { createSlackFake, startSlackOAuth, type SlackOAuthServer } from './slack-server.js';
 
 // the real sdk and the real oauth provider sign in to a fake of the official slack server over local http.
@@ -115,5 +116,121 @@ describe('slack sign-in with the paste callback', () => {
     expect(await t.integrations.finishSignIn(address)).toEqual({ ok: false, text: 'This sign-in link is not valid any more. Start again from the dashboard.' });
     expect(await t.integrations.finishSignIn('not an address')).toMatchObject({ ok: false, text: expect.stringContaining('not an address') });
     expect(t.slack.stats.codeGrants).toBe(1);
+  });
+});
+
+describe('slack sign-in with a pre-registered client', () => {
+  const lastError = (t: Awaited<ReturnType<typeof setup>>) =>
+    String(t.db.prepare("SELECT lastError FROM integration_state WHERE integrationId = 'slack-work'").get()?.lastError ?? '');
+
+  it('signs in without a registration, with only the configured scopes, and keeps the token and the client secret out of every record', async () => {
+    const t = await setup();
+    await t.integrations.start();
+    await signIn(t);
+    expect(t.slack.stats.registrations).toBe(0);
+    // the metadata offers more scopes, and the configured list wins.
+    expect(t.slack.scopes).toEqual([SCOPES.join(' ')]);
+    // the secret goes only in the token request, in the basic header.
+    expect(t.slack.tokenAuth).toEqual(['basic']);
+    const tokens = JSON.parse((await t.secrets.get('slack-work:oauth-tokens'))!) as { access_token: string };
+    expect(tokens.access_token).toMatch(/^xoxp-/);
+    // the client is read from clientRef only. a copy under another name would hide a client that the owner stores later.
+    expect(await t.secrets.get('slack-work:oauth-client')).toBeUndefined();
+    expect(await search(t.integrations)).toMatchObject({ kind: 'result' });
+    const stored = [
+      ...t.db.prepare('SELECT payload FROM mcp_messages').all().map((row) => String(row.payload)),
+      JSON.stringify(t.db.prepare('SELECT * FROM integration_state').all()),
+      JSON.stringify(t.integrations.status()),
+      ...t.logLines(),
+    ].join('\n');
+    expect(stored).not.toContain(tokens.access_token);
+    expect(stored).not.toContain(t.slack.clientSecret);
+    // a server can quote the secret in an error, so the redactor knows it after the first read.
+    expect(redact(`said ${t.slack.clientSecret}`)).toBe('said [redacted]');
+  });
+
+  it('uses a client that the owner stores again after the first sign-in', async () => {
+    const t = await setup();
+    await t.integrations.start();
+    await signIn(t);
+    await t.secrets.set('slack-work-app', JSON.stringify({ client_id: t.slack.clientId, client_secret: 'cs-a-wrong-secret' }));
+    await t.secrets.delete('slack-work:oauth-tokens');
+    const started = await t.integrations.connect('slack-work');
+    if (!('url' in started)) throw new Error('expected a link');
+    expect(await t.integrations.finishSignIn(await consent(t.slack, started.url))).toMatchObject({ ok: false });
+    expect(lastError(t)).toContain('the server said bad_client_secret');
+    // the sdk drops the stored client after invalid_client. that is its own copy, never the client of the owner.
+    expect(await t.secrets.get('slack-work-app')).toContain('cs-a-wrong-secret');
+    await t.secrets.set('slack-work-app', JSON.stringify({ client_id: t.slack.clientId, client_secret: t.slack.clientSecret }));
+    await signIn(t);
+  });
+
+  it('keeps the slack code of a refused code, which comes with http 200', async () => {
+    const t = await setup();
+    await t.integrations.start();
+    const started = await t.integrations.connect('slack-work');
+    if (!('url' in started)) throw new Error('expected a link');
+    const address = new URL(await consent(t.slack, started.url));
+    address.searchParams.set('code', 'not-a-code');
+    expect(await t.integrations.finishSignIn(address.href)).toMatchObject({ ok: false });
+    expect(lastError(t)).toBe('the sign-in step /api/oauth.v2.user.access failed. The server said: invalid_grant: the server said invalid_code');
+  });
+
+  it('clears the tokens of a refresh that slack refuses with http 200, tells the owner once, and parks after a restart', async () => {
+    const t = await setup({ rotation: true });
+    await t.integrations.start();
+    await signIn(t);
+    t.slack.options.refreshError = 'invalid_refresh_token';
+    t.slack.expire();
+    expect(await search(t.integrations)).toMatchObject({ kind: 'not_sent' });
+    expect(t.state().status).toBe('needs_auth');
+    expect(await t.secrets.get('slack-work:oauth-tokens')).toBeUndefined();
+    expect(t.needsAuth).toEqual([['slack-work', 'invalid_grant: the server said invalid_refresh_token']]);
+    await t.integrations.stop();
+    const before = t.slack.stats.mcpRequests + t.slack.stats.apiRequests;
+    await t.integrations.start();
+    expect(t.integrations.status()[0]!.state).toMatchObject({ status: 'needs_auth', error: expect.stringContaining('not signed in yet') });
+    expect(t.slack.stats.mcpRequests + t.slack.stats.apiRequests).toBe(before);
+    expect(t.needsAuth).toHaveLength(1);
+  });
+
+  it('keeps the tokens through a rate limit on the refresh, and sends no message', async () => {
+    const t = await setup({ rotation: true });
+    await t.integrations.start();
+    await signIn(t);
+    t.slack.options.refreshError = 'ratelimited';
+    t.slack.expire();
+    expect(await search(t.integrations)).toMatchObject({ kind: 'not_sent', reason: expect.stringContaining('did not answer') });
+    expect(await t.secrets.get('slack-work:oauth-tokens')).toBeDefined();
+    expect(t.needsAuth).toEqual([]);
+    // the limit ends, and the stored refresh token still works.
+    t.slack.options.refreshError = undefined;
+    expect(await search(t.integrations, 'c2')).toMatchObject({ kind: 'result' });
+    expect(t.slack.stats.refreshGrants).toBe(1);
+  });
+
+  it('says that a client without quotes, as cmdkey stores json, is not valid json, and never shows the secret', async () => {
+    const t = await setup({ client: '{client_id:1111111111.2222222222,client_secret:cs-secret-from-cmdkey}' });
+    await t.integrations.start();
+    const started = await t.integrations.connect('slack-work');
+    expect(started).toEqual({ error: expect.stringContaining('the secret slack-work-app in the credential manager is not valid json') });
+    const shown = [JSON.stringify(started), JSON.stringify(t.integrations.status()), JSON.stringify(t.db.prepare('SELECT * FROM integration_state').all()), ...t.logLines()].join('\n');
+    expect(shown).not.toContain('cs-secret-from-cmdkey');
+  });
+});
+
+describe('the issuer stamp of a pre-registered client', () => {
+  it('stays in memory, so the sdk warns about a missing stamp only at the first sign-in of the process', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    cleanup.push(async () => warn.mockRestore());
+    const t = await setup({ rotation: true });
+    await t.integrations.start();
+    await signIn(t);
+    const stamp = () => warn.mock.calls.filter((call) => String(call[0]).includes("no 'issuer' stamp")).length;
+    expect(stamp()).toBe(1);
+    t.slack.expire();
+    expect(await search(t.integrations)).toMatchObject({ kind: 'result' });
+    expect(t.slack.stats.refreshGrants).toBe(1);
+    expect(stamp()).toBe(1);
   });
 });

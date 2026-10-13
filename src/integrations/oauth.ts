@@ -7,6 +7,7 @@ import { redact, registerSecret } from '../observability/redact.js';
 import type { Clock } from '../time.js';
 import { errorText } from '../tools/registry.js';
 import type { HttpEntry } from './config.js';
+import { normalizeTokenErrors } from './oauth-errors.js';
 import { CredentialStoreError, type SecretStore } from './secrets.js';
 
 export const CALLBACK_PORT = 4318;
@@ -96,8 +97,18 @@ export function createOAuth(deps: OAuthDeps): OAuth {
   };
   const readJson = async <T>(ref: string): Promise<T | undefined> => {
     const text = await vault(() => secrets.get(ref));
-    return text === undefined ? undefined : (JSON.parse(text) as T);
+    if (text === undefined) return undefined;
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      // the message of JSON.parse can quote the value, and the value is a secret. a terminal also drops the quotes of
+      // json that it gives to cmdkey, so this is the usual result of a client that the owner stored with cmdkey.
+      throw new CredentialStoreError(`the secret ${ref} in the credential manager is not valid json`);
+    }
   };
+  // the issuer that the sdk adds to a pre-registered client. the client itself is never copied, so a new client that
+  // the owner stores under clientRef takes effect at the next sign-in.
+  const issuers = new Map<string, { clientId: string; issuer: string }>();
   // new tokens that the credential manager did not take. a server with rotation already spent the old refresh token,
   // so a lost new set would end the sign-in at the next refresh. the provider uses this copy and saves it again at
   // each read, until a save works. a restart before that loses it.
@@ -145,10 +156,21 @@ export function createOAuth(deps: OAuthDeps): OAuth {
         return state;
       },
       async clientInformation() {
-        // a pre-registered client (for example one slack app per workspace) is a secret that the owner stores once.
-        return (await readJson<StoredOAuthClientInformation>(clientRef(id))) ?? (auth?.clientRef ? await readJson(auth.clientRef) : undefined);
+        if (!auth?.clientRef) return readJson<StoredOAuthClientInformation>(clientRef(id));
+        // a pre-registered client (for example one slack app per workspace) is a secret that the owner stores.
+        const client = await readJson<StoredOAuthClientInformation>(auth.clientRef);
+        // the secret goes in each token request, and a server can quote it in an error.
+        registerSecret(client?.client_secret, `${auth.clientRef}#secret`);
+        const stamp = issuers.get(id);
+        return client && stamp?.clientId === client.client_id ? { ...client, issuer: stamp.issuer } : client;
       },
       async saveClientInformation(info) {
+        // the sdk saves a pre-registered client again only to add the issuer. a copy under another name would hide a
+        // new client that the owner stores later.
+        if (auth?.clientRef) {
+          if (info.issuer) issuers.set(id, { clientId: info.client_id, issuer: info.issuer });
+          return;
+        }
         await vault(() => secrets.set(clientRef(id), JSON.stringify(info)));
       },
       async tokens() {
@@ -197,6 +219,9 @@ export function createOAuth(deps: OAuthDeps): OAuth {
           logger.error('oauth flow without its state or verifier', { integration: id });
           return;
         }
+        // the sdk asks for every scope that the metadata of the server offers. the configured scopes win, so the app
+        // gets only the access that the owner names, and an app that lacks one of the offered scopes still works.
+        if (auth?.scopes) url.searchParams.set('scope', auth.scopes.join(' '));
         prune();
         for (const [key, flow] of flows) if (flow.integrationId === id) flows.delete(key);
         flows.set(state, {
@@ -229,7 +254,10 @@ export function createOAuth(deps: OAuthDeps): OAuth {
           unsaved.delete(id);
           await vault(() => secrets.delete(tokensRef(id)));
         }
-        if (scope === 'all' || scope === 'client') await vault(() => secrets.delete(clientRef(id)));
+        if (scope === 'all' || scope === 'client') {
+          issuers.delete(id);
+          await vault(() => secrets.delete(clientRef(id)));
+        }
         if (scope === 'all' || scope === 'verifier') drafts.delete(id);
       },
     };
@@ -277,7 +305,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
       const started = performance.now();
       let response: Response;
       try {
-        response = await fetch(input, init);
+        response = await normalizeTokenErrors(fetch)(input, init);
       } catch (err) {
         outages.set(entry.id, `${url.pathname}: ${errorText(err)}`);
         logger.warn('oauth step failed', { ...fields, err });
