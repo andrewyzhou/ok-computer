@@ -55,6 +55,7 @@ export function createSlotRunner(deps: SlotRunnerDeps): SlotRunner {
             const response = await client.complete(call, signal);
             const cost = costUsd(config.pricing, ref, response.usage);
             record(db, { runId, slot, provider, model, call, response, cost, latencyMs: response.latencyMs }, clock());
+            if (response.warnings) logger.warn('provider changed the input', { slot, ref, runId, warnings: response.warnings });
             if (response.stopReason === 'refusal') {
               lastError = `${ref} refused the request`;
               logger.warn('model refused, trying the next model', { slot, ref, runId });

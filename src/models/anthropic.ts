@@ -1,4 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
+import type {
+  BetaContentBlockParam,
+  BetaMessage,
+  BetaMessageParam,
+  BetaStopReason,
+  BetaTool,
+  MessageCreateParamsNonStreaming,
+} from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import {
   ModelError,
   type ModelCall,
@@ -11,6 +19,10 @@ import {
 
 export const ANTHROPIC = 'anthropic';
 
+// with this beta the api drops a thinking block that no longer matches the conversation. without it the request
+// fails. a persona file edit or a new tool changes the prefix, so the agent must not fail on that change.
+const THINKING_BINDING_BETA = 'thinking-binding-controls-2026-08-01';
+
 export function createAnthropicClient(apiKey: string, options: { fetch?: typeof fetch } = {}): ModelClient {
   // the slot chain does the retries, so the sdk does not retry.
   const client = new Anthropic({ apiKey, maxRetries: 0, ...options });
@@ -18,9 +30,9 @@ export function createAnthropicClient(apiKey: string, options: { fetch?: typeof 
     provider: ANTHROPIC,
     async complete(call, signal) {
       const started = performance.now();
-      let message: Anthropic.Message;
+      let message: BetaMessage;
       try {
-        message = await client.messages.create(toAnthropicParams(call), { signal });
+        message = await client.beta.messages.create(toAnthropicParams(call), { signal });
       } catch (err) {
         throw toModelError(err);
       }
@@ -31,22 +43,25 @@ export function createAnthropicClient(apiKey: string, options: { fetch?: typeof 
 
 // the rendered request must stay byte-stable between turns. the prompt cache and the thinking blocks both depend
 // on an unchanged prefix. for this reason the function has no time values and no random values.
-export function toAnthropicParams(call: ModelCall): Anthropic.MessageCreateParamsNonStreaming {
+export function toAnthropicParams(call: ModelCall): MessageCreateParamsNonStreaming {
   return {
     model: call.model,
     max_tokens: call.maxTokens,
-    thinking: { type: 'adaptive' },
+    betas: [THINKING_BINDING_BETA],
+    thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } },
     ...(call.effort ? { output_config: { effort: call.effort } } : {}),
     // the explicit breakpoint keeps the tools and the stable system prompt cached. the top-level breakpoint
     // follows the end of the conversation.
     ...(call.system ? { system: [{ type: 'text', text: call.system, cache_control: { type: 'ephemeral' } }] } : {}),
     ...(call.tools.length
       ? {
-          tools: call.tools.map((tool) => ({
-            name: tool.name,
-            description: tool.description,
-            input_schema: tool.inputSchema as Anthropic.Tool.InputSchema,
-          })),
+          tools: call.tools.map(
+            (tool): BetaTool => ({
+              name: tool.name,
+              description: tool.description,
+              input_schema: tool.inputSchema as BetaTool.InputSchema,
+            }),
+          ),
         }
       : {}),
     cache_control: { type: 'ephemeral' },
@@ -54,12 +69,12 @@ export function toAnthropicParams(call: ModelCall): Anthropic.MessageCreateParam
   };
 }
 
-function toAnthropicMessage(message: ModelMessage): Anthropic.MessageParam[] {
+function toAnthropicMessage(message: ModelMessage): BetaMessageParam[] {
   if (message.role === 'user') {
     return [
       {
         role: 'user',
-        content: message.content.map((block): Anthropic.ContentBlockParam =>
+        content: message.content.map((block): BetaContentBlockParam =>
           block.type === 'text'
             ? { type: 'text', text: block.text }
             : { type: 'tool_result', tool_use_id: block.toolCallId, content: block.content, is_error: block.isError },
@@ -69,9 +84,9 @@ function toAnthropicMessage(message: ModelMessage): Anthropic.MessageParam[] {
   }
   // the api checks the thinking blocks against the earlier conversation, so the blocks go back unchanged.
   if (message.provider === ANTHROPIC) {
-    return message.content.length ? [{ role: 'assistant', content: message.content as Anthropic.ContentBlockParam[] }] : [];
+    return message.content.length ? [{ role: 'assistant', content: message.content as BetaContentBlockParam[] }] : [];
   }
-  const content: Anthropic.ContentBlockParam[] = [
+  const content: BetaContentBlockParam[] = [
     ...(message.text ? [{ type: 'text' as const, text: message.text }] : []),
     ...message.toolCalls.map((call) => ({
       type: 'tool_use' as const,
@@ -83,13 +98,16 @@ function toAnthropicMessage(message: ModelMessage): Anthropic.MessageParam[] {
   return content.length ? [{ role: 'assistant', content }] : [];
 }
 
-export function fromAnthropicMessage(message: Anthropic.Message, latencyMs: number): ModelResponse {
+export function fromAnthropicMessage(message: BetaMessage, latencyMs: number): ModelResponse {
   const toolCalls: ToolCall[] = [];
   let text = '';
   for (const block of message.content) {
     if (block.type === 'text') text += block.text;
     if (block.type === 'tool_use') toolCalls.push({ id: block.id, name: block.name, input: block.input });
   }
+  const warnings = (message.input_transformations ?? []).map(
+    (change) => `${change.type} at ${change.path}: ${change.reason}`,
+  );
   return {
     content: message.content,
     toolCalls,
@@ -103,10 +121,11 @@ export function fromAnthropicMessage(message: Anthropic.Message, latencyMs: numb
     },
     model: message.model,
     latencyMs,
+    ...(warnings.length ? { warnings } : {}),
   };
 }
 
-function toStopReason(reason: Anthropic.StopReason | null): StopReason {
+function toStopReason(reason: BetaStopReason | null): StopReason {
   switch (reason) {
     case 'end_turn':
     case 'stop_sequence':

@@ -1,4 +1,4 @@
-import type Anthropic from '@anthropic-ai/sdk';
+import type { BetaMessage } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import { describe, expect, it } from 'vitest';
 import { createAnthropicClient, fromAnthropicMessage, toAnthropicParams } from './anthropic.js';
 import type { AssistantTurn, ModelCall } from './types.js';
@@ -25,7 +25,8 @@ const nativeTurn: AssistantTurn = {
 describe('toAnthropicParams', () => {
   it('renders caching, adaptive thinking, effort and tools without forced tool choice', () => {
     const params = toAnthropicParams(call([{ role: 'user', content: [{ type: 'text', text: 'hi' }] }]));
-    expect(params.thinking).toEqual({ type: 'adaptive' });
+    expect(params.thinking).toEqual({ type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } });
+    expect(params.betas).toEqual(['thinking-binding-controls-2026-08-01']);
     expect(params.output_config).toEqual({ effort: 'low' });
     expect(params.system).toEqual([{ type: 'text', text: 'stable prompt', cache_control: { type: 'ephemeral' } }]);
     expect(params.cache_control).toEqual({ type: 'ephemeral' });
@@ -68,18 +69,31 @@ describe('fromAnthropicMessage', () => {
       stop_reason: 'tool_use',
       stop_sequence: null,
       usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 90, cache_creation_input_tokens: null },
-    } as unknown as Anthropic.Message;
+    } as unknown as BetaMessage;
     const response = fromAnthropicMessage(message, 42);
     expect(response.text).toBe('let me check');
     expect(response.toolCalls).toEqual([{ id: 'toolu_1', name: 'now', input: {} }]);
     expect(response.stopReason).toBe('tool_use');
     expect(response.usage).toEqual({ inputTokens: 10, outputTokens: 5, cacheReadTokens: 90, cacheWriteTokens: 0 });
     expect(response.content).toBe(message.content);
+    expect(response.warnings).toBeUndefined();
+  });
+
+  it('reports thinking blocks that the api dropped', () => {
+    const message = {
+      content: [],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 1, output_tokens: 1 },
+      input_transformations: [{ type: 'thinking_dropped', path: 'messages.1.content.0', reason: 'prefix_binding_mismatch' }],
+    };
+    expect(fromAnthropicMessage(message as unknown as BetaMessage, 1).warnings).toEqual([
+      'thinking_dropped at messages.1.content.0: prefix_binding_mismatch',
+    ]);
   });
 
   it('maps a refusal', () => {
     const message = { content: [], stop_reason: 'refusal', usage: { input_tokens: 1, output_tokens: 0 } };
-    expect(fromAnthropicMessage(message as unknown as Anthropic.Message, 1).stopReason).toBe('refusal');
+    expect(fromAnthropicMessage(message as unknown as BetaMessage, 1).stopReason).toBe('refusal');
   });
 });
 

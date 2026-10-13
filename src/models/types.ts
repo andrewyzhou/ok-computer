@@ -58,6 +58,8 @@ export interface ModelResponse {
   usage: Usage;
   model: string;
   latencyMs: number;
+  // the provider changed the input before the model saw it, for example it dropped an old thinking block.
+  warnings?: string[];
 }
 
 export interface ModelClient {
