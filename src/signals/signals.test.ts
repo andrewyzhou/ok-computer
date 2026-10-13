@@ -128,6 +128,18 @@ describe('classifier', () => {
     db.prepare("UPDATE runs SET status = 'completed' WHERE id = 'poll'").run();
     expect(signalDigest(db, NOW, TZ)?.shown).toEqual([1]);
   });
+
+  // round 4: a stop of the app during the call is not a try. the rows get their label after the restart.
+  it('uses up no try when the call was aborted', async () => {
+    const db = openDb(':memory:');
+    mail(db, 'a', 'Deals of the week');
+    const aborted = { call: async () => ({ ok: false as const, error: 'the run was aborted', aborted: true }) };
+    for (let i = 0; i < 3; i++) await classifySignals({ db, slots: aborted, logger: silentLogger, runId: null });
+    expect(db.prepare('SELECT labelAttempts FROM integration_events').get()).toEqual({ labelAttempts: 0 });
+    const { slots } = runner([fakeResponse({ toolCalls: [{ id: 'x', name: 'label_signals', input: { labels: [{ id: 1, label: 'newsletter' }] } }] })]);
+    await classifySignals({ db, slots, logger: silentLogger, runId: null });
+    expect(db.prepare('SELECT label, labelAttempts FROM integration_events').get()).toEqual({ label: 'newsletter', labelAttempts: 1 });
+  });
 });
 
 describe('digest', () => {

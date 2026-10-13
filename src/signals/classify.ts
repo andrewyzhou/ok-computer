@@ -103,6 +103,9 @@ async function classifyBatch(deps: ClassifyDeps, after: number): Promise<{ label
     }
   } else {
     logger.warn('the classifier call failed', { error: result.error });
+    // a stop of the app says nothing about the rows, so it uses up no try. three restarts during a poll would else
+    // leave the batch without a label for good.
+    if (result.aborted) return { labeled: 0, failed: ids.size, last: rows.at(-1)!.id };
   }
   const modelCallId = result.ok ? result.modelCallId : null;
   const save = db.prepare('UPDATE integration_events SET label = ?, labelModelCallId = ?, labelAttempts = labelAttempts + 1 WHERE id = ? AND label IS NULL');
