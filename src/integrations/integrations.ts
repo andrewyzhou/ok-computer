@@ -170,9 +170,19 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
 
   // begin connects an integration, or parks an oauth integration that has no tokens.
   const begin = async (entry: IntegrationEntry, connection: McpConnection) => {
-    if (entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' && deps.oauth && !(await deps.oauth.hasTokens(entry.id))) {
-      parked.set(entry.id, { status: 'needs_auth', error: 'it is not signed in yet. connect it from the dashboard.' });
-      return;
+    if (entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' && deps.oauth) {
+      let signedIn = true;
+      try {
+        signedIn = await deps.oauth.hasTokens(entry.id);
+      } catch (err) {
+        // the credential manager can fail, for example while its service starts. the connection reads the tokens
+        // again, and its retry gives the owner the error and tries again later.
+        logger.warn('the credential manager failed before an oauth integration started', { integration: entry.id, err });
+      }
+      if (!signedIn) {
+        parked.set(entry.id, { status: 'needs_auth', error: 'it is not signed in yet. connect it from the dashboard.' });
+        return;
+      }
     }
     parked.delete(entry.id);
     await connection.start();

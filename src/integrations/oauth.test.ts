@@ -249,6 +249,30 @@ describe('oauth', () => {
     });
   }
 
+  it('tries again when the credential manager fails at the start, so the integration does not stay stopped', async () => {
+    const { secrets, integrations, needsAuth } = await setup();
+    await integrations.start();
+    await connect(integrations);
+    await integrations.stop();
+    needsAuth.length = 0;
+    const get = secrets.get.bind(secrets);
+    let broken = true;
+    secrets.get = async (ref) => {
+      if (broken) throw new Error('the credential manager is not available');
+      return get(ref);
+    };
+    await integrations.start();
+    const remote = () => integrations.status().find((each) => each.id === 'remote')!;
+    expect(remote().state).toMatchObject({ status: 'error', error: expect.stringContaining('the credential manager is not available'), retryAt: expect.any(String) });
+    expect(remote().lastError).toContain('the credential manager is not available');
+    // a pause and a resume from the dashboard do not throw to the request either.
+    await expect(integrations.setPaused('remote', true)).resolves.toBe(true);
+    await expect(integrations.setPaused('remote', false)).resolves.toBe(true);
+    broken = false;
+    await expect.poll(() => remote().state.status, { timeout: 5_000 }).toBe('connected');
+    expect(needsAuth).toEqual([]);
+  });
+
   it('tries again later when the token endpoint is down at the start', async () => {
     const { as, integrations, needsAuth } = await setup();
     await integrations.start();
