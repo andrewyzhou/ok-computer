@@ -48,6 +48,19 @@ describe('egress', () => {
     }
   });
 
+  it('refuses the loopback address inside ipv6 for a live server, as a model writes it and as node writes it', async () => {
+    // the fixture listens on 127.0.0.1, and a raw connection to ::ffff:7f00:1 reaches it.
+    const tool = createWebFetchTool({ egress: publicEgress, limits });
+    site.hits.length = 0;
+    for (const host of ['[::ffff:127.0.0.1]', '[::ffff:7f00:1]']) {
+      const url = `http://${host}:${site.port}/about`;
+      expect(await fetchText(publicEgress, url, never, limits), url).toMatchObject({ ok: false, reason: expect.stringContaining('local network') });
+      const out = await tool.run({ url }, { runId: 'r', sessionKey: 'main', timeZone: 'UTC', clock: () => new Date(), signal: never });
+      expect(out, url).toMatchObject({ isError: true, content: expect.stringContaining('local network') });
+    }
+    expect(site.hits).toEqual([]);
+  });
+
   it('refuses a name when one of its addresses is private', async () => {
     expect(await checkHost(fixtureEgress(), 'private.test')).toMatchObject({ ok: false, reason: expect.stringContaining('10.0.0.1') });
   });

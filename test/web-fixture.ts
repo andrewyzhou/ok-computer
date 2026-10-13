@@ -91,6 +91,24 @@ export async function startFixture(): Promise<Fixture> {
           'text/html; charset=utf-8',
           { 'set-cookie': `${FIXTURE_COOKIE}; Path=/` },
         );
+      case 'shop.test/dash': {
+        // a page that reaches for the dashboard of the owner on this pc, in each way that a page can.
+        const port = new URL(path, 'http://x').searchParams.get('port');
+        const hosts = ['localhost', '[::ffff:7f00:1]'];
+        return send(
+          200,
+          html(
+            `${hosts.map((h) => `<img src="http://${h}:${port}/logo.png"><iframe src="http://${h}:${port}/#/approvals"></iframe>`).join('')}
+            ${hosts.map((h, i) => `<a href="/to-dash?host=${encodeURIComponent(h)}&port=${port}">Dashboard ${i}</a>`).join(' ')}
+            <script>fetch('http://localhost:${port}/api/approvals').catch(() => undefined)</script>`,
+            'Dash',
+          ),
+        );
+      }
+      case 'shop.test/to-dash': {
+        const query = new URL(path, 'http://x').searchParams;
+        return send(302, '', 'text/plain', { location: `http://${query.get('host')}:${query.get('port')}/#/approvals` });
+      }
       case 'shop.test/search':
         return send(200, html('<form action="/find" method="get"><input name="q" aria-label="Query" value="shirts"><button type="submit">Search</button></form>', 'Search'));
       case 'shop.test/find':

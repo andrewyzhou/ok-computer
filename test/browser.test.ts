@@ -1,5 +1,6 @@
 import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createServer, get } from 'node:http';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { browserLogin } from '../src/browser/login.js';
@@ -188,6 +189,29 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(out).toMatchObject({ isError: true, effect: 'none', content: expect.stringContaining('older snapshot') });
     expect(site.hitsOn('shop.test')).toEqual([]);
     expect(h.steps().at(-1)).toMatchObject({ action: 'click', urlAfter: site.url('shop.test') });
+  });
+
+  it('never reaches the dashboard on this pc from a page: images, frames, a script and redirect hops', async () => {
+    // a stand-in for the dashboard. it listens on every address, so localhost and ::ffff:7f00:1 both reach it.
+    const dashboard: string[] = [];
+    const server = createServer((req, res) => (dashboard.push(`${req.method} ${req.url}`), res.end('ok')));
+    await new Promise<void>((resolve) => server.listen({ port: 0, host: '::', ipv6Only: false }, resolve));
+    const port = (server.address() as { port: number }).port;
+    try {
+      // the address form reaches the stand-in without the gate.
+      await new Promise((resolve) => get(`http://[::ffff:7f00:1]:${port}/probe`, (res) => res.resume().on('end', resolve)));
+      expect(dashboard).toEqual(['GET /probe']);
+      dashboard.length = 0;
+      const h = harness();
+      let page = await h.run('browser_open', { url: site.url('shop.test', `/dash?port=${port}`) });
+      for (const link of ['Dashboard 0', 'Dashboard 1']) page = await h.run('browser_click', { ref: refOf(page.content, new RegExp(`link "${link}"`)), element: link });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(dashboard).toEqual([]);
+      const blocked = h.steps().flatMap((step) => (step.blockedRequests ? (JSON.parse(String(step.blockedRequests)) as Array<{ url: string }>) : []));
+      for (const host of ['localhost', '[::ffff:7f00:1]']) expect(blocked.filter((each) => each.url.includes(`${host}:${port}`)).length, host).toBeGreaterThanOrEqual(3);
+    } finally {
+      server.close();
+    }
   });
 
   it('opens an off-list site only after browser_allow_domain', async () => {
