@@ -144,7 +144,7 @@ If the loop ends on the iteration limit, append a short note to the session and 
 | Consolidation | `consolidate:<date>` | Nightly memory job |
 
 - There is no automatic topic detection and no automatic reset. Compaction keeps the main session bounded.
-- The owner can type `/new` to start a fresh main session. The old session stays in the log. A `session_reset` event marks the boundary, and the daily note gets a short excerpt of the last messages.
+- The owner can type `/new` to start a fresh main session. The old session stays in the log. A `session_reset` event marks the boundary, and the daily note gets a short excerpt of the last messages (the last 6 owner and assistant messages, under `## notes`).
 - Old context returns through memory search, not by reopening old sessions.
 
 ## 8. Context management
@@ -177,11 +177,12 @@ interface ContextStrategy {
     events: StoredEvent[];      // full history of the session, in order
     system: string;             // stable part only; the volatile part is a `context` event
     tools: ToolSpec[];
+    compaction?: CompactionHooks; // runId, signal, flush(text); absent when the strategy must not compact
   }): Promise<ModelRequest>;
 }
 ```
 
-M1 ships `full-history`, which renders every event after the last `session_reset`. M3 adds `trim-and-compact` and adds a `model` input (context window, provider) when the strategy needs it.
+M1 ships `full-history`, which renders every event after the last `session_reset`. M3 adds `trim-and-compact`, which the app uses. It does not take a `model` input: the window is `context.windowTokens` from config (default 200,000), a cost budget for the input of one call rather than the limit of the model.
 
 The default strategy is `trim-and-compact`:
 
@@ -191,9 +192,18 @@ The default strategy is `trim-and-compact`:
 4. **Memory flush.** Before compaction, run one silent turn in the same session with the instruction to save durable facts to today's daily note through the memory tool. Its final text must be `NO_REPLY`.
 5. **Summarize.** Send the events to be compacted to the `compaction` slot with a fixed prompt. The summary must contain these headings: `## goals and commitments`, `## decisions`, `## open requests`, `## facts and identifiers`, `## recent progress`. Keep the most recent ~20,000 tokens of events verbatim. Never split a tool call from its result.
 6. **Validate.** Check that every heading is present and that identifiers found in the compacted events (dates, times, numbers, ids, file paths, URLs) appear in the summary or are listed as dropped. Retry up to 2 times with the failures named. If all attempts fail, do not compact; log a warning and continue with trimming only.
-7. **Record.** Append a `compaction` event with `{ summary, firstKeptEventId, tokensBefore, tokensAfter, model }`.
+7. **Record.** Append a `compaction` event with `{ summary, firstKeptEventId, tokensBefore, tokensAfter, model, clearToolResults }`.
 
 Token estimation: use the provider's token counting endpoint when cheap and available, otherwise estimate at 4 characters per token. Keep this in one module.
+
+Decisions from M3:
+
+- **Where trimming happens.** Step 2 changes old turns, so it runs only on the kept events of a compaction, or in the fallback after a failed compaction. Below the trigger, the view is the same as `full-history`. After a compaction, the view is the summary (a `<summary>` text block at the start of the first user message), then the kept events, then the events after the compaction event. The kept events lose their thinking blocks and get the step 2 trim. The 50% clear decision is made at compaction time and stored as `clearToolResults`. The view then depends only on the compaction event, so it is byte-stable until the next compaction. Events after the compaction event are not changed.
+- **Sizes.** The reserve and the kept part are each `min(20,000, window / 4)` tokens. The kept part starts at an event that is not a `tool_result`. It is the longest such part under the limit, or the shortest one if even that is larger.
+- **Memory flush.** The flush is a nested run in the same session with trigger `system`, the same slot and tools, and `noCompaction`. Its first event is a `system_event` with the flush prompt. After it, the strategy appends a `system_event` that says the flush is done. Without that event the next request would end with an assistant turn, which the API refuses. The flush is skipped when the session has no `memory_write` tool, or when a flush already ran after the last compaction.
+- **Summary.** The compaction slot gets a fixed system prompt and a plain-text transcript, so any provider can summarize any other provider's turns. The previous summary goes with it. Validation checks the five headings (an optional `## dropped identifiers` heading lists dropped values). It also checks dates, times, `#ids`, 8-hex ids, uuids, paths, URLs, and numbers with two or more digits. These come from owner text, assistant text, tool inputs and results, system events, notes, and the previous summary. `context` events are left out, because they repeat the clock. A full ISO timestamp counts as its date.
+- **Failure.** After 3 failed attempts there is no compaction, and the rest of that run uses the trimmed fallback without new attempts. The next run tries again.
+- **Estimate.** Only the 4-characters-per-token estimate is used (`context/tokens.ts`). A token counting call on every iteration would add latency and cost.
 
 ### 8.3 Provider rules that affect context
 
@@ -204,7 +214,7 @@ Decisions from M1:
 - The Anthropic adapter calls the beta messages endpoint with the `thinking-binding-controls-2026-08-01` beta and `thinking.block_binding.prefix_mismatch_behavior: "drop_block"`. The stable prompt is rebuilt each run, so an edit to a persona file or `MEMORY.md`, or a deploy that changes tools, changes the prefix. With `drop_block` the API drops the stale thinking blocks one time; without it the request fails with a 400 on enforced accounts. Dropped blocks come back in `input_transformations` and are logged as warnings.
 - Requests use adaptive thinking, an explicit effort per slot, an explicit cache breakpoint on the stable system prompt, and top-level automatic caching for the conversation tail. They never force `tool_choice`.
 - Refusals fall back through the slot chain on the client side (section 9.3). The server-side `fallbacks` parameter is not used.
-- For M3: trimming an old tool result in place is a history edit. It invalidates every later thinking block and the cache. Trimming must happen only at a compaction boundary, or through server-side context editing. Keep-tail compaction must strip the thinking blocks from the turns that it keeps (or rely on `drop_block`).
+- For M3: trimming an old tool result in place is a history edit. It invalidates every later thinking block and the cache. Trimming must happen only at a compaction boundary, or through server-side context editing. Keep-tail compaction must strip the thinking blocks from the turns that it keeps (or rely on `drop_block`). M3 does both: it strips them, and `drop_block` stays on for the trimmed fallback. Compaction is client-side, so the summary can follow the five-heading format and its validation. Server-side compaction is not used.
 
 ### 8.4 System prompt
 
@@ -283,7 +293,11 @@ interface OutboundMessage { chatId: string; text: string; buttons?: Button[][] }
 
 - **cli**: a terminal chat for development (`npm run chat`). It counts as the owner. Buttons show as numbered choices.
 - **telegram**: grammY with long polling. Owner is set by `TELEGRAM_OWNER_ID`. Split messages over 4,096 characters at paragraph boundaries. Escape formatting safely, or send plain text. Inline keyboard buttons for approvals. If `TELEGRAM_BOT_TOKEN` is missing, the adapter does not start and the log says so. The process still runs with the cli channel.
-- The owner's main chat for proactive messages is the most recent chat the owner used, stored in the database (`settings.owner_chat`), with Telegram preferred when configured. Before the first owner message it is the cli, when the cli runs.
+  - M3 sends plain text with no parse mode. A split falls back from paragraphs to lines, then words, then a hard cut that never breaks a surrogate pair. Buttons go on the last part.
+  - Polling runs in the background, so a network failure is logged and the cli keeps working. A button press is answered (`answerCallbackQuery`) and becomes an inbound message with `button`. Messages without text are logged and ignored.
+  - Telegram starts only when both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID` are set, and never in `npm run chat`. The owner id is not registered as a secret.
+  - The cli runs in chat mode, when Telegram does not run, or when stdin is a terminal. When Telegram runs, the end of cli input does not stop the process.
+- The owner's main chat for proactive messages is the most recent chat the owner used, stored in the database (`settings.owner_chat`), with Telegram preferred when configured. Before the first owner message it is the cli, when the cli runs. In M3 the order is: the saved chat when it is not the cli, then the owner's private Telegram chat (its chat id is `TELEGRAM_OWNER_ID`), then a saved cli chat, then the cli.
 - An inbound message can carry `button` (the data of a pressed button). Such a message never goes to the model.
 
 ## 11. Scheduler
@@ -300,7 +314,7 @@ Schedule kinds:
 Payloads:
 - `{ type: 'agent', prompt, condition? }`: a run with this prompt in a fresh isolated session (or the main session when `sessionMode` is `main`). With `condition: 'no_goals_today'` the run is skipped in code, without a model call, when today already has goals.
 - `{ type: 'system_event', text }`: append to the main session without a model call. The next run sees it.
-- System payloads that only code creates: `{ type: 'heartbeat' }`, `{ type: 'goal_checkin', goalId }`, and `{ type: 'goals_results' }`. The agent's tools can change their schedule and enabled state, but not their payload.
+- System payloads that only code creates: `{ type: 'heartbeat' }`, `{ type: 'goal_checkin', goalId }`, `{ type: 'goals_results' }`, and `{ type: 'consolidation' }`. The agent's tools can change their schedule and enabled state, but not their payload.
 
 Behavior:
 - The scheduler computes `nextRunAt` for all enabled automations and sleeps until the earliest one, but never more than one minute, because a timer can fire late after the PC sleeps. It re-plans when automations change.
@@ -357,6 +371,15 @@ Nightly consolidation, a system automation at 03:00:
 4. Write a short entry to `data/memory/consolidation-log.md`.
 Statistics come from the database, never from the model's reading of notes.
 
+Decisions from M3:
+
+- **Writes.** `memory_write { text, section = 'notes', day? }` writes only to daily notes. A write goes to the end of its section, and a missing section goes in the fixed order. Sections that the owner adds by hand stay in place, and the 23:45 day results use the same writer. `MEMORY.md` changes only through consolidation. An edit during a session would change the stable prompt on every write.
+- **Search.** Chunks are about 1,600 characters. They break at each heading and keep the heading path (`2026-10-12 > notes`) and their line numbers. Each `memory_search` first indexes again the files whose size or time changed and removes deleted files, so no watcher is needed. `history/` is not indexed. Each query word is quoted and joined with `OR`, and results are ranked by bm25. `memory_get` refuses paths outside `data/memory/`.
+- **Consolidation run.** The automation runs at `memory.consolidateAt` (default 03:00). It is installed one time, with a `settings` flag, like the routine. It runs in `consolidate:<run date>` with trigger `consolidation` and the only tool `consolidation_save { weeklyTrends, memory?, logNote }`. Its stable prompt is the base instructions, `USER.md`, and the consolidation rules. Its first `system_event` holds the inputs of step 1.
+- **Weekly file.** Code writes the weekly file of the consolidated day's ISO week: a `## stats` section from the database, then the model's `## trends`. The stats are the 7- and 30-day hit rate, the on-time count, the streaks, and the counts of done goals and of slipped or late goals for each part of the day.
+- **MEMORY.md.** A `memory` over 8,000 characters is refused with an error that asks for a shorter text. The weekly file and the log line are still written. Before a change, the first backup of the run date goes to `history/MEMORY.md.bak-<date>` and is not overwritten later that day.
+- **Failure.** A run that ends without a successful `consolidation_save` fails the job, so the scheduler backoff retries it.
+
 ## 14. Tools, policy, approvals
 
 ### 14.1 Registry
@@ -373,11 +396,12 @@ interface Tool<I> {
 
 The registry converts zod schemas to JSON Schema for the providers, in input mode, so a field with a default is optional for the model. Each session type has an allowlist of tools. Heartbeat and consolidation sessions get only the tools they need:
 
-- main: goals tools, automations tools, `heartbeat_checklist_set`, `now`.
-- isolated automation runs: goals tools, `automations_list`, `automations_create`, `automations_update`, `message_owner`, `now`.
+- main: goals tools, automations tools, `heartbeat_checklist_set`, `memory_write`, `memory_search`, `memory_get`, `now`.
+- isolated automation runs: goals tools, `automations_list`, `automations_create`, `automations_update`, `memory_write`, `memory_search`, `memory_get`, `message_owner`, `now`.
 - heartbeat: `goals_list`, `heartbeat_respond`, `now`.
+- consolidation: `consolidation_save`.
 
-Phase 1 tools: `goals_set`, `goals_list`, `goal_update`, `goals_stats`, `automations_list`, `automations_create`, `automations_update`, `automations_delete`, `memory_write`, `memory_search`, `memory_get`, `heartbeat_respond`, `heartbeat_checklist_set`, `skill_read`, `message_owner` (send a message now; used by isolated runs), `now` (current time in the owner's zone).
+Phase 1 tools: `goals_set`, `goals_list`, `goal_update`, `goals_stats`, `automations_list`, `automations_create`, `automations_update`, `automations_delete`, `memory_write`, `memory_search`, `memory_get`, `heartbeat_respond`, `heartbeat_checklist_set`, `consolidation_save`, `skill_read`, `message_owner` (send a message now; used by isolated runs), `now` (current time in the owner's zone).
 
 There is no shell tool, no file write tool outside `data/memory/`, and no network tool in Phase 1.
 
@@ -436,7 +460,7 @@ Everything below is queryable from SQLite:
 ## 17. Configuration
 
 - Secrets in `.env`: `CLAUDE_API_KEY` (also accept `ANTHROPIC_API_KEY`), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_ID`, optional `OPENAI_COMPAT_BASE_URL`, `OPENAI_COMPAT_API_KEY`, `DASHBOARD_TOKEN`.
-- Non-secret settings in `okc.config.json`, validated with zod, with defaults for every field: time zone, slot chains, pricing, missed-run grace (`scheduler.missedGraceMs`), heartbeat interval and active hours, routine times (`routine.askAt`, `routine.reminders`, `routine.resultsAt`), dashboard port, paths.
+- Non-secret settings in `okc.config.json`, validated with zod, with defaults for every field: time zone, slot chains, pricing, missed-run grace (`scheduler.missedGraceMs`), heartbeat interval and active hours, routine times (`routine.askAt`, `routine.reminders`, `routine.resultsAt`), the consolidation time (`memory.consolidateAt`), the context budget (`context.windowTokens`), dashboard port, paths.
 - Invalid config stops the process at start with a clear message.
 
 ## 18. Process and operations
