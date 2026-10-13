@@ -50,6 +50,8 @@ export interface Fault {
   late?: boolean;
   // echoAuth puts the authorization header and the body of the request in the error message.
   echoAuth?: boolean;
+  // delayMs computes the answer at once and sends it after this many milliseconds.
+  delayMs?: number;
   times?: number;
 }
 
@@ -242,6 +244,15 @@ export async function startFakeGoogle(): Promise<FakeGoogle> {
       if (fault) {
         if (fault.times !== undefined && --fault.times <= 0) faults.splice(faults.indexOf(fault), 1);
         if (fault.reset) return void req.socket.destroy();
+        if (fault.delayMs) {
+          // the route answers now, and the answer arrives later, as from a slow network.
+          const held: Array<() => void> = [];
+          const slow = {
+            writeHead: (...args: Parameters<ServerResponse['writeHead']>) => (held.push(() => res.writeHead(...args)), slow),
+            end: (...args: [unknown?]) => setTimeout(() => (held.forEach((each) => each()), res.end(...(args as []))), fault.delayMs),
+          };
+          return void route(req, slow as unknown as ServerResponse, url, body);
+        }
         if (fault.late) {
           // the route acts, but the answer never arrives.
           const sink = { writeHead: () => sink, end: () => req.socket.destroy() } as unknown as ServerResponse;

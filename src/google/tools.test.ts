@@ -113,7 +113,7 @@ describe('gmail_unsubscribe', () => {
 
   // a sender writes the header, so a link can point at the pc, the router or a metadata address.
   it('never posts to a private address', async () => {
-    for (const address of ['127.0.0.1', '10.1.2.3', '192.168.1.1', '169.254.169.254', '::1', 'fe80::1', 'fd00::1', '::ffff:127.0.0.1', '0.0.0.0', '100.64.0.1']) {
+    for (const address of ['127.0.0.1', '10.1.2.3', '192.168.1.1', '169.254.169.254', '::1', 'fe80::1', 'fd00::1', '::ffff:127.0.0.1', '::ffff:7f00:1', '0.0.0.0', '100.64.0.1']) {
       expect(isPrivateAddress(address), address).toBe(true);
     }
     for (const address of ['8.8.8.8', '2606:4700::1111']) expect(isPrivateAddress(address), address).toBe(false);
@@ -160,6 +160,18 @@ describe('calendar writes', () => {
     expect((await call('calendar_create_event', input, context)).content).toMatch(/^created event okc/);
     expect((await call('calendar_create_event', input, context)).content).toContain('already exists');
     expect(h.fake.mailbox('personal').events.size).toBe(1);
+  });
+
+  // the approval flow reads the effect: none puts the approval back to pending, unknown tells the owner to check.
+  it('says none for a refused write and unknown for a write without an answer', async () => {
+    const call = await setup();
+    const input = { account: 'personal', summary: 'x', start: '2026-10-20T09:00:00-07:00', end: '2026-10-20T10:00:00-07:00' };
+    h.fake.fault({ route: 'POST /calendar/v3/calendars/primary/events', status: 400, times: 1 });
+    expect(await call('calendar_create_event', input)).toMatchObject({ isError: true, effect: 'none' });
+    h.fake.fault({ route: 'POST /calendar/v3/calendars/primary/events', status: 503, times: 1 });
+    expect(await call('calendar_create_event', input)).toMatchObject({ isError: true, effect: 'unknown' });
+    h.fake.fault({ route: 'POST /calendar/v3/calendars/primary/events', late: true, times: 1 });
+    expect(await call('calendar_create_event', input)).toMatchObject({ isError: true, effect: 'unknown' });
   });
 
   it('treats a repeated delete as done', async () => {

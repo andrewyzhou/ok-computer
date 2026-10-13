@@ -121,6 +121,37 @@ describe('gmail sync', () => {
   });
 });
 
+describe('gmail cursor', () => {
+  // the unique key already stops a duplicate. the compare and set stops a slow poller from moving the cursor back,
+  // which would read the same history again at each poll.
+  it('never moves the cursor back when a slow poll ends after a newer one', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    await h.sync.pollAll();
+    const slow = createSync({ db: h.db, clock: () => h.now.value, logger: h.logger, blobs: h.blobs, accounts: h.accounts });
+    h.fake.fault({ route: 'GET /gmail/v1/users/me/history', delayMs: 300, times: 1 });
+    const late = slow.pollAll();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    h.fake.deliver('personal', mail('m1', 'one'));
+    await h.sync.pollAll();
+    h.fake.deliver('personal', mail('m2', 'two'));
+    await h.sync.pollAll();
+    expect(cursor('personal')).toBe('1002');
+    await late;
+    expect(cursor('personal')).toBe('1002');
+  });
+
+  it('follows the history id of a mailbox that changes without new mail', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    await h.sync.pollAll();
+    // labels and reads move the history id, and history.list gives no messagesAdded record for them.
+    h.fake.mailbox('personal').historyId += 40;
+    await h.sync.pollAll();
+    expect(cursor('personal')).toBe('1040');
+  });
+});
+
 describe('token health', () => {
   it('parks a revoked account, tells the owner once, and keeps polling the other accounts', async () => {
     h = await createGoogleHarness({ accounts: ['personal', 'school'] });
@@ -147,6 +178,23 @@ describe('token health', () => {
     h.restart();
     await h.sync.pollAll();
     expect(h.alerts).toHaveLength(1);
+  });
+
+  it('tells the owner once when two calls find the dead token at the same time', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    h.fake.revoke(refreshOf('personal'));
+    const call = () => h.accounts.run('personal', (apis) => apis.gmail.users.getProfile({ userId: 'me' })).catch((err: Error) => err);
+    await Promise.all([call(), call(), call()]);
+    expect(h.alerts).toHaveLength(1);
+  });
+
+  // a bug or a database error inside a call is not a google error. it must not park the account or change its name.
+  it('passes an error that does not come from the sdk through unchanged', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    await expect(h.accounts.run('personal', async () => { throw new TypeError('a bug'); })).rejects.toThrow(TypeError);
+    expect(h.accounts.unavailable('personal')).toBeUndefined();
   });
 
   it('names testing mode when the sign-in died after about seven days', async () => {

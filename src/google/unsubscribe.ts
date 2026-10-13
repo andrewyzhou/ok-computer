@@ -35,9 +35,8 @@ for (const [net, prefix] of [
   PRIVATE.addSubnet(net, prefix, 'ipv6');
 }
 
+// the block list also checks an ipv4 address inside ipv6 (::ffff:127.0.0.1 and ::ffff:7f00:1) against the ipv4 rules.
 export function isPrivateAddress(address: string): boolean {
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)?.[1];
-  if (mapped) return PRIVATE.check(mapped, 'ipv4');
   const family = isIP(address);
   if (family === 0) return true;
   return PRIVATE.check(address, family === 4 ? 'ipv4' : 'ipv6');
