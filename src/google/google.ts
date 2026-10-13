@@ -42,7 +42,8 @@ export interface GoogleDeps {
   slots: SlotRunner;
   config: GoogleConfig;
   timeZone: string;
-  notifyOwner: (text: string) => void;
+  // false means that the message did not reach the owner. the alerts of the poll then try again at the next poll.
+  notifyOwner: (text: string) => Promise<boolean>;
   endpoints?: GoogleEndpoints;
   // false in npm run chat. the background app polls, so two processes do not poll the same accounts.
   polls?: boolean;
@@ -75,7 +76,8 @@ export function syncGooglePoll(db: Db, config: Pick<Config, 'google' | 'timeZone
 }
 
 // after this many failed polls in a row (about three hours at 15 minutes), the owner hears one time. a long outage
-// would otherwise hide every deadline without a word.
+// would otherwise hide every deadline without a word. the claim (stallAlertedAt) stays only after a send that reached
+// the owner, so a failed send tries again at the next poll. a poll that works ends the run of failures.
 const STALL_POLLS = 12;
 export const POLL_SESSION = 'poll:google';
 // the detectors check mail that arrived in the last three days. older mail is closed as stale anyway.
@@ -134,6 +136,17 @@ export function createGoogle(deps: GoogleDeps): Google {
     return { id: Number(row.id), subject, text: `${subject} ${fields.snippet ?? ''}`, arrived };
   };
 
+  const stallAlerts = async (polls: AccountPoll[]) => {
+    db.prepare('UPDATE google_accounts SET stallAlertedAt = NULL WHERE failures < ?').run(STALL_POLLS);
+    for (const each of polls.filter((poll) => !poll.ok && poll.failures >= STALL_POLLS)) {
+      const at = clock().toISOString();
+      const claimed = db.prepare('UPDATE google_accounts SET stallAlertedAt = ? WHERE alias = ? AND stallAlertedAt IS NULL').run(at, each.alias);
+      if (Number(claimed.changes) !== 1) continue;
+      if (await deps.notifyOwner(`The Google poll of the ${each.alias} account has failed ${each.failures} times in a row: ${each.error}`)) continue;
+      db.prepare('UPDATE google_accounts SET stallAlertedAt = NULL WHERE alias = ? AND stallAlertedAt = ?').run(each.alias, at);
+    }
+  };
+
   const notes = (polls: AccountPoll[]) => [
     ...polls.filter((each) => each.resync).map((each) => `the gmail history of ${each.alias} was too old, so only its inbox mail of the last 2 days made signals`),
     ...polls.filter((each) => !each.ok).map((each) => `${each.alias}: ${each.error}`),
@@ -152,9 +165,8 @@ export function createGoogle(deps: GoogleDeps): Google {
       let note: string;
       try {
         const polls = await requestContext.run({ runId }, () => sync.pollAll(runId));
-        for (const each of polls.filter((poll) => !poll.ok && poll.failures === STALL_POLLS)) {
-          deps.notifyOwner(`The Google poll of the ${each.alias} account has failed ${each.failures} times in a row: ${each.error}`);
-        }
+        await accounts.alertPending();
+        await stallAlerts(polls);
         detect(polls, runId);
         try {
           await classifySignals({ db, slots: deps.slots, logger, runId, ...(deps.signal ? { signal: deps.signal } : {}) });

@@ -154,7 +154,7 @@ export function createApp(deps: AppDeps): App {
         slots: { call: (...args) => slots.call(...args) },
         config: config.google,
         timeZone: config.timeZone,
-        notifyOwner: (text) => void owner.send(text).catch((err: unknown) => logger.error('google message failed', { err })),
+        notifyOwner: (text) => owner.send(text),
         polls: deps.connectIntegrations !== false,
         signal: shutdown.signal,
         ...(deps.googleEndpoints ? { endpoints: deps.googleEndpoints } : {}),

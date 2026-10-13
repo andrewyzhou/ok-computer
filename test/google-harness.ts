@@ -77,7 +77,7 @@ export async function createGoogleHarness(options: { accounts?: string[]; config
         config,
         trace: createRequestTrace({ db, blobs, logger, clock }),
         endpoints,
-        onNeedsAuth: (alias, text) => alerts.push({ alias, text }),
+        onNeedsAuth: async (alias, text) => (alerts.push({ alias, text }), true),
         onNewMailbox: (alias) => harness.sync.reset(alias),
         ...(options.requestTimeoutMs ? { requestTimeoutMs: options.requestTimeoutMs } : {}),
       });

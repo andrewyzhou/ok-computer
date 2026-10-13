@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { CLIENT_ID, createGoogleHarness, type GoogleHarness } from '../../test/google-harness.js';
+import { CLIENT_ID, createGoogleHarness, refreshOf, type GoogleHarness } from '../../test/google-harness.js';
 import { createFakeClient } from '../models/fake.js';
 import { createSlotRunner } from '../models/slots.js';
 import { openDb } from '../db/index.js';
@@ -29,12 +29,63 @@ describe('google poll job', () => {
       slots,
       config: h.config,
       timeZone: 'America/Los_Angeles',
-      notifyOwner: (text) => void told.push(text),
+      notifyOwner: async (text) => (told.push(text), true),
       endpoints: { apiRoot: h.fake.url, tokenUrl: `${h.fake.url}token` },
     });
     h.fake.fault({ route: 'GET /gmail/v1/users/me/profile', status: 503, times: 14 });
     for (let i = 0; i < 14; i++) expect(await google.poll()).toMatchObject({ status: 'completed', error: expect.stringContaining('personal: 503') });
     expect(told).toEqual([expect.stringContaining('The Google poll of the personal account has failed 12 times in a row')]);
+    await google.close();
+  });
+
+  // round 4: a send that fails must not use up the one message. the next poll sends it again.
+  const withChannel = (up: () => boolean, told: string[]) =>
+    createGoogle({
+      db: h.db,
+      clock: () => h.now.value,
+      logger: h.logger,
+      blobs: h.blobs,
+      secrets: h.secrets,
+      slots: { call: async () => ({ ok: false, error: 'x', aborted: false }) },
+      config: h.config,
+      timeZone: 'UTC',
+      notifyOwner: async (text) => up() && (told.push(text), true),
+      endpoints: { apiRoot: h.fake.url, tokenUrl: `${h.fake.url}token` },
+    });
+
+  it('sends the stall message again at the next poll when the channel failed', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    const told: string[] = [];
+    let polls = 0;
+    const google = withChannel(() => polls !== 12, told);
+    h.fake.fault({ route: 'GET /gmail/v1/users/me/profile', status: 503, times: 15 });
+    while (polls < 15) {
+      polls++;
+      await google.poll();
+    }
+    expect(told).toEqual([expect.stringContaining('has failed 13 times in a row')]);
+    // a poll that works ends the run of failures, so a new long outage gets its own message.
+    await google.poll();
+    h.fake.fault({ route: 'GET /gmail/v1/users/me/history', status: 503, times: 12 });
+    for (let i = 0; i < 12; i++) await google.poll();
+    expect(told).toHaveLength(2);
+    await google.close();
+  });
+
+  it('sends the needs-auth message again at the next poll when the channel failed', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    const told: string[] = [];
+    let up = false;
+    const google = withChannel(() => up, told);
+    h.fake.revoke(refreshOf('personal'));
+    await google.poll();
+    expect(h.rows("SELECT status, alertedAt FROM google_accounts WHERE alias = 'personal'")).toEqual([{ status: 'needs_auth', alertedAt: null }]);
+    up = true;
+    for (let i = 0; i < 3; i++) await google.poll();
+    expect(told).toEqual([expect.stringContaining('Google stopped accepting the sign-in of the personal account')]);
+    expect(h.rows("SELECT alertedAt IS NOT NULL AS alerted FROM google_accounts WHERE alias = 'personal'")).toEqual([{ alerted: 1 }]);
     await google.close();
   });
 
@@ -50,7 +101,7 @@ describe('google poll job', () => {
       slots: { call: async () => ({ ok: false, error: 'x', aborted: false }) },
       config: h.config,
       timeZone: 'UTC',
-      notifyOwner: () => {},
+      notifyOwner: async () => true,
       endpoints: { apiRoot: h.fake.url, tokenUrl: `${h.fake.url}token` },
       newId: () => `poll-${h.fake.requests.length}`,
     });
@@ -107,7 +158,7 @@ describe('google poll job', () => {
       slots: { call: async () => ({ ok: false, error: 'x', aborted: false }) },
       config: h.config,
       timeZone: 'UTC',
-      notifyOwner: () => {},
+      notifyOwner: async () => true,
       polls: false,
     });
     expect(await google.poll()).toEqual({ status: 'skipped', error: 'the google poll runs only in the background app' });
@@ -127,7 +178,7 @@ describe('google poll job', () => {
       slots: { call: async () => ({ ok: false, error: 'x', aborted: false }) },
       config: h.config,
       timeZone: 'America/Los_Angeles',
-      notifyOwner: () => {},
+      notifyOwner: async () => true,
       endpoints: { apiRoot: h.fake.url, tokenUrl: `${h.fake.url}token` },
     });
     await google.poll();
@@ -155,7 +206,7 @@ describe('google poll job', () => {
       slots: { call: async () => ({ ok: false, error: 'x', aborted: false }) },
       config: h.config,
       timeZone: 'America/Los_Angeles',
-      notifyOwner: () => {},
+      notifyOwner: async () => true,
       endpoints: { apiRoot: h.fake.url, tokenUrl: `${h.fake.url}token` },
     });
     await google.poll();

@@ -32,6 +32,8 @@ export interface GoogleAccounts {
   run<T>(alias: string, fn: (apis: GoogleApis) => Promise<T>): Promise<T>;
   // why the account cannot take a call now, or undefined.
   unavailable(alias: string): string | undefined;
+  // alertPending sends the needs-auth messages that did not reach the owner yet. each poll calls it.
+  alertPending(): Promise<void>;
   // saveClient stores the oauth client from the json file that google cloud gives for a desktop app.
   saveClient(file: unknown): Promise<{ saved: true } | { error: string }>;
   beginSignIn(alias: string): Promise<{ url: string } | { error: string }>;
@@ -48,8 +50,9 @@ export interface AccountsDeps {
   // every request of the clients goes through the trace, the token requests too.
   trace: RequestTrace;
   endpoints?: GoogleEndpoints;
-  // the owner hears once when a sign-in that worked stops working.
-  onNeedsAuth: (alias: string, text: string) => void;
+  // the owner hears once when a sign-in that worked stops working. false means that the message did not reach the
+  // owner, so the next poll tries again.
+  onNeedsAuth: (alias: string, text: string) => Promise<boolean>;
   // called when an account gets a new mailbox, so the sync starts again from nothing.
   onNewMailbox?: (alias: string) => void;
   // tests use a short timeout.
@@ -153,24 +156,53 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
   const parkAll = (err: GoogleError) => {
     cached.clear();
     db.prepare("UPDATE google_accounts SET status = 'needs_auth', lastError = ?, lastErrorAt = ?, updatedAt = ? WHERE status = 'ok'").run(err.message, now(), now());
-    const claimed = db.prepare('UPDATE google_accounts SET alertedAt = ? WHERE alertedAt IS NULL AND authorizedAt IS NOT NULL').run(now());
-    if (Number(claimed.changes) === 0) return;
-    deps.onNeedsAuth('', `Google refused the OAuth client of OK Computer (${err.message}), so no Google account is checked. Check clientId in okc.config.json, then upload the client file again on the Google page.`);
+    void alertPending();
   };
 
   const park = (alias: string, err: GoogleError) => {
     if (err.kind === 'client') return parkAll(err);
     cached.delete(alias);
-    const before = row(alias);
     db.prepare("UPDATE google_accounts SET status = 'needs_auth', lastError = ?, lastErrorAt = ?, updatedAt = ? WHERE alias = ?").run(err.message, now(), now(), alias);
-    // only a sign-in that worked can stop working. the compare and set sends the message one time, also over a restart
-    // and with a second process.
-    if (!before?.authorizedAt) return;
-    const claimed = db.prepare('UPDATE google_accounts SET alertedAt = ? WHERE alias = ? AND alertedAt IS NULL').run(now(), alias);
-    if (Number(claimed.changes) !== 1) return;
-    const age = clock().getTime() - Date.parse(before.authorizedAt);
-    const testing = age > 6.5 * DAY_MS && age < 7.5 * DAY_MS ? ' The sign-in is about 7 days old, so the consent screen is probably still in Testing mode; set it to In production.' : '';
-    deps.onNeedsAuth(alias, `Google stopped accepting the sign-in of the ${alias} account (${err.message}). Its mail and calendar are not checked until you sign in again on the PC.${testing}`);
+    void alertPending();
+  };
+
+  // only a sign-in that worked can stop working, so only such an account gets the message. the compare and set on
+  // alertedAt comes before the send, so a restart or a second process does not send it again. a send that fails
+  // releases the claim, and the next poll tries again. else one channel failure at the moment that the token dies
+  // hides for ever that the account is not checked. a park by the client has a lastError that starts with
+  // CLIENT_REFUSED, and its accounts share one message.
+  const alertPending = async (): Promise<void> => {
+    const at = now();
+    const claim = (where: string) =>
+      db
+        .prepare(
+          `UPDATE google_accounts SET alertedAt = ? WHERE status = 'needs_auth' AND alertedAt IS NULL AND authorizedAt IS NOT NULL AND ${where}
+           RETURNING alias, authorizedAt, lastError`,
+        )
+        .all(at, `${CLIENT_REFUSED}%`) as Array<{ alias: string; authorizedAt: string; lastError: string | null }>;
+    const tell = async (list: string[], text: string) => {
+      let sent = false;
+      try {
+        sent = await deps.onNeedsAuth(list.length === 1 ? list[0]! : '', text);
+      } catch (err) {
+        logger.error('the google sign-in message failed', { err });
+      }
+      if (sent) return;
+      const release = db.prepare('UPDATE google_accounts SET alertedAt = NULL WHERE alias = ? AND alertedAt = ?');
+      for (const alias of list) release.run(alias, at);
+    };
+    const sends: Array<Promise<void>> = [];
+    const client = claim('lastError LIKE ?');
+    if (client.length) {
+      const text = `Google refused the OAuth client of OK Computer (${client[0]!.lastError}), so no Google account is checked. Check clientId in okc.config.json, then upload the client file again on the Google page.`;
+      sends.push(tell(client.map((each) => each.alias), text));
+    }
+    for (const each of claim('(lastError IS NULL OR lastError NOT LIKE ?)')) {
+      const age = clock().getTime() - Date.parse(each.authorizedAt);
+      const testing = age > 6.5 * DAY_MS && age < 7.5 * DAY_MS ? ' The sign-in is about 7 days old, so the consent screen is probably still in Testing mode; set it to In production.' : '';
+      sends.push(tell([each.alias], `Google stopped accepting the sign-in of the ${each.alias} account (${each.lastError ?? 'unknown reason'}). Its mail and calendar are not checked until you sign in again on the PC.${testing}`));
+    }
+    await Promise.all(sends);
   };
 
   const unavailable = (alias: string): string | undefined => {
@@ -280,6 +312,7 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
   return {
     aliases,
     unavailable,
+    alertPending,
     async run(alias, fn) {
       const why = unavailable(alias);
       if (why) throw new GoogleError('auth', why, undefined, false);
