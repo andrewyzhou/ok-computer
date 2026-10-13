@@ -109,19 +109,33 @@ function toolNameOf(db: Db, name: string, runId: string | null, toolCallId: stri
   return row ? String(row.name) : name;
 }
 
-// a url that the session already read carries no new data. the newest 2,000 events bound the work of one check. the
-// payload is redacted json text, so a url with a secret or an escaped character does not match, and goes to review.
+// a url that the session already read carries no new data. only text from outside counts: a successful tool result
+// with an untrusted source. text of the agent does not count, also when it is wrapped as untrusted, because an
+// injected model can put a data url in it: a hold or an error that quotes the call, an unknown tool name, or the
+// answer of a sub-agent (delegate). a system event does not count, because it is model text too, for example the task
+// of a sub-agent or the result of an automation. the newest 2,000 events bound the work of one check. the payload is
+// redacted json text, so a url with a secret or an escaped character does not match, and goes to review. the url must
+// end where the read url ends, so the model cannot send a part of a longer url and choose where the part ends.
 export function urlSeen(db: Db, sessionKey: string, url: string): boolean {
-  return (
-    db
-      .prepare(
-        `SELECT 1 FROM (
-           SELECT type, payload FROM events
-           WHERE sessionKey = ? AND type IN ('tool_result', 'system_event')
-             AND seq > (SELECT COALESCE(MAX(seq), 0) FROM events WHERE sessionKey = ? AND type = 'session_reset')
-           ORDER BY seq DESC LIMIT 2000)
-         WHERE (type = 'tool_result' OR json_extract(payload, '$.taint') IS NOT NULL) AND instr(payload, ?) > 0 LIMIT 1`,
-      )
-      .get(sessionKey, sessionKey, url) !== undefined
-  );
+  const rows = db
+    .prepare(
+      `SELECT payload FROM (
+         SELECT payload FROM events
+         WHERE sessionKey = ? AND type = 'tool_result'
+           AND seq > (SELECT COALESCE(MAX(seq), 0) FROM events WHERE sessionKey = ? AND type = 'session_reset')
+         ORDER BY seq DESC LIMIT 2000)
+       WHERE json_extract(payload, '$.untrustedSource') IS NOT NULL AND json_extract(payload, '$.isError') = 0
+         AND json_extract(payload, '$.name') <> 'delegate' AND instr(payload, ?) > 0`,
+    )
+    .all(sessionKey, sessionKey, url);
+  return rows.some((row) => {
+    const payload = String(row.payload);
+    for (let at = payload.indexOf(url); at >= 0; at = payload.indexOf(url, at + 1)) {
+      if (!URL_CHAR.test(payload.charAt(at + url.length))) return true;
+    }
+    return false;
+  });
 }
+
+// a character that can continue a url. a backslash cannot, because it starts an escape in the json text.
+const URL_CHAR = /[A-Za-z0-9\-._~%!$&'()*+,;=:@/?#[\]]/;

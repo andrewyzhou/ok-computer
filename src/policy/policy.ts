@@ -164,13 +164,12 @@ function denyForms(value: unknown): string[] {
     const normal = percentDecoded(raw).replace(IGNORABLE, '').normalize('NFKC').replace(/[。｡]/g, '.');
     forms.add(raw).add(normal);
     // a url can be the whole value or a part of a command or a message. the parser gives the host that a client uses.
-    for (const candidate of [raw.trim(), ...(normal.match(URL_IN_TEXT) ?? [])]) {
-      try {
-        forms.add(new URL(candidate).href);
-      } catch {
-        // a text that is not a url keeps its other forms.
-      }
+    try {
+      forms.add(new URL(raw.trim()).href);
+    } catch {
+      // a text that is not a url keeps its other forms.
     }
+    for (const each of urlsIn(normal)) forms.add(each.url.href);
   };
   add(text(value));
   if (typeof value === 'object' && value !== null) eachString(value, add);
@@ -178,7 +177,44 @@ function denyForms(value: unknown): string[] {
 }
 
 const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
-const URL_IN_TEXT = /https?:\/\/[^\s"'<>]+/gi;
+
+// a url parser reads more than "https://host/path" as a url: a scheme in any case, no slashes or back slashes after
+// the scheme, and a tab or a line break inside the url (the parser drops them). a client that gets a whole string as
+// a url also keeps a space or a quote in its path, and so the query after it. so each "http:" starts a candidate that
+// goes to the next "http:", and the parser judges it. the part up to the first space or quote is the url that a chat
+// app makes a link of. text with no scheme counts too when a host name comes before a path, a query or a fragment,
+// because a chat app makes a link of "evil.example/c?d=1".
+const SCHEME = /https?:/gi;
+const BARE_URL = /(?<![\w.:/@\\-])(?:[a-z0-9-]+\.)+[a-z][a-z0-9-]*[/?#][^\s"'<>]*/gi;
+const LINK_END = /[\s"'<>]/;
+
+interface UrlCandidate {
+  text: string;
+  url: URL;
+  // false when the text holds more than the link, for example the words after a link in a message.
+  whole: boolean;
+}
+
+function urlsIn(raw: string): UrlCandidate[] {
+  const text = raw.normalize('NFKC').replace(/[\t\r\n]/g, '');
+  const found: UrlCandidate[] = [];
+  const add = (each: string, base: string, whole: boolean) => {
+    try {
+      found.push({ text: each, url: new URL(base + each), whole });
+    } catch {
+      // a text that does not parse as a url cannot reach a host.
+    }
+  };
+  const starts = [...text.matchAll(SCHEME)].map((match) => match.index);
+  starts.forEach((start, i) => {
+    const rest = text.slice(start, starts[i + 1] ?? text.length).trimEnd();
+    const end = rest.search(LINK_END);
+    add(end < 0 ? rest : rest.slice(0, end), '', true);
+    if (end >= 0) add(rest, '', false);
+  });
+  for (const match of text.matchAll(BARE_URL)) add(match[0], 'https://', true);
+  return found;
+}
 
 // a url can carry data in its query, its fragment, a long path, or a long label of its host (dns lookups leave the pc
 // too). a short url such as https://example.com/about carries no more than its choice of page. any query counts,
@@ -193,23 +229,21 @@ const SEEN_CHECKS = 20;
 export function dataUrls(value: unknown): Array<{ url: string; signal: string }> {
   const found: Array<{ url: string; signal: string }> = [];
   eachString(value, (text) => {
-    for (const each of text.normalize('NFKC').match(URL_IN_TEXT) ?? []) {
+    for (const each of urlsIn(text)) {
       const signal = urlSignal(each);
-      if (signal) found.push({ url: each, signal });
+      if (signal) found.push({ url: each.text, signal });
     }
   });
   return found;
 }
 
-function urlSignal(text: string): string | undefined {
-  let url: URL;
-  try {
-    url = new URL(text);
-  } catch {
-    // a text that does not parse as a url cannot reach a host.
-    return undefined;
-  }
+// the words after a link make a long path, so a candidate with more than the link is judged only by the parts that
+// carry data in place of a page name: the query, the fragment, and the user name and password (a browser sends them
+// after a 401 answer).
+function urlSignal({ url, whole }: UrlCandidate): string | undefined {
   if (url.search.length > 1 || url.hash.length > 1) return 'it has a query or a fragment';
+  if (url.username || url.password) return 'it has a user name or a password';
+  if (!whole) return undefined;
   if (url.hostname.length + url.pathname.length > PATH_LIMIT) return `its host and path have over ${PATH_LIMIT} characters`;
   if (url.hostname.split('.').some((label) => label.length > LABEL_LIMIT)) return `a label of its host has over ${LABEL_LIMIT} characters`;
   return undefined;
