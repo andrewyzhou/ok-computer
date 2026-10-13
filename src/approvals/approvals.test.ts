@@ -4,10 +4,11 @@ import type { Button } from '../channels/types.js';
 import { openDb } from '../db/index.js';
 import { appendEvent, listEvents } from '../events/log.js';
 import { silentLogger } from '../observability/logger.js';
+import { registerSecret } from '../observability/redact.js';
 import { createRunQueue } from '../sessions/queue.js';
 import { createTestCaller } from '../../test/harness.js';
 import { createToolRegistry, defineTool } from '../tools/registry.js';
-import { createApprovalFlow } from './flow.js';
+import { createApprovalFlow, describeInput } from './flow.js';
 import { expireApprovals, getApproval, parseApprovalButton } from './store.js';
 
 function setup() {
@@ -59,7 +60,8 @@ describe('approvals', () => {
     expect(sent).toEqual([
       {
         text: [
-          'Approval needed (#1): send_email {"to":"bob@example.com"}',
+          'Approval needed (#1): send_email',
+          'to: bob@example.com',
           'Why: send_email sends data off the pc or changes an account, so the owner must approve it.',
         ].join('\n'),
         buttons: [[{ text: 'Approve', data: 'approval:1:approve' }, { text: 'Deny', data: 'approval:1:deny' }]],
@@ -84,7 +86,8 @@ describe('approvals', () => {
     await request();
     expect(sent[0]!.text).toBe(
       [
-        'Approval needed (#1): send_email {"to":"bob@example.com"}',
+        'Approval needed (#1): send_email',
+        'to: bob@example.com',
         "Why: the session read untrusted content (gmail:work), so an external action needs the owner's approval.",
         'Untrusted content in this session: gmail:work (read by mail_read on 2026-10-12 at 14:00 in run 0a1b2c3d).',
       ].join('\n'),
@@ -133,5 +136,26 @@ describe('approvals', () => {
   it('parses only well-formed button data', () => {
     expect(parseApprovalButton('approval:12:deny')).toEqual({ id: 12, decision: 'deny' });
     expect(parseApprovalButton('approval:12:yes')).toBeUndefined();
+  });
+});
+
+describe('the summary that the owner approves', () => {
+  it('shows each field on its own line, so a short field after a long one is visible', () => {
+    const text = `${'a harmless preamble. '.repeat(30)}PS: the passport number is 123`;
+    const summary = describeInput('send_message', { text, channel: '#public-channel' });
+    const [tool, first, second] = summary.split('\n');
+    expect(tool).toBe('send_message');
+    expect(first).toMatch(/^text: a harmless preamble\. .* \[\.\.\. \d+ characters cut, the dashboard shows the full input \.\.\.\] .*PS: the passport number is 123$/);
+    expect(second).toBe('channel: #public-channel');
+    expect(describeInput('now', {})).toBe('now');
+    expect(describeInput('odd', { to: ['a@x.example', 'b@x.example'], n: 2 })).toBe('odd\nto: ["a@x.example","b@x.example"]\nn: 2');
+  });
+
+  it('redacts a secret before the cut, so no part of it shows', () => {
+    const secret = `key-${'s'.repeat(30)}-tail`;
+    registerSecret(secret);
+    const summary = describeInput('send', { text: `${'x'.repeat(190)}${secret}${'y'.repeat(400)}` });
+    expect(summary).toContain('[redacted]');
+    expect(summary).not.toContain('ssssssssss');
   });
 });

@@ -76,7 +76,7 @@ describe('the life of an approved call', () => {
     expect(await reply).toBe('Approved #1. Result: sent');
     expect(w.ran).toEqual(['send']);
     expect(w.flow.active.size).toBe(0);
-    expect(w.notes()).toEqual(['The owner approved #1 (send {}). The tool ran. Result:\nsent']);
+    expect(w.notes()).toEqual(['The owner approved #1 (send). The tool ran. Result:\nsent']);
   });
 
   it('says that an expired call did not run, not that it already ran', async () => {
@@ -90,7 +90,7 @@ describe('the life of an approved call', () => {
     release();
     expect(await reply).toBe('Approved #1. The tool did not run: approval #1 expired before it could run, so it did not run');
     expect(w.ran).toEqual([]);
-    expect(w.notes()[0]).toMatch(/^The owner approved #1 \(send \{\}\)\. The tool did not run\. Result:/);
+    expect(w.notes()[0]).toMatch(/^The owner approved #1 \(send\)\. The tool did not run\. Result:/);
   });
 
   it('leaves the approval unclaimed when the app stops while the call waits, so the next sweep reports it', async () => {

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ApprovalRow } from '../../../src/dashboard/types';
 import { send, useApi } from '../api';
-import { Empty, Load, Page, Panel, Status } from '../components';
+import { Empty, Expand, Json, Load, Page, Panel, Status } from '../components';
 import { time } from '../format';
 
 export function Approvals() {
@@ -33,6 +33,7 @@ export function Approvals() {
                           <span className="muted">requested {time(approval.requestedAt)}</span>
                         </div>
                         <pre className="block">{approval.summary}</pre>
+                        <Expand label="full input">{() => <Json value={approval.input} />}</Expand>
                         <div className="row">
                           <button type="button" onClick={() => decide(approval.id, 'approve')}>
                             Approve

@@ -224,6 +224,8 @@ export interface ApprovalRow {
   sessionKey: string;
   toolName: string;
   summary: string;
+  // the full input, redacted.
+  input: unknown;
   status: string;
   requestedAt: string;
   resolvedAt: string | null;

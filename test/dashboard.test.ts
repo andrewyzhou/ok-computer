@@ -20,6 +20,7 @@ import { startDashboard } from '../src/dashboard/server.js';
 import { appendEvent } from '../src/events/log.js';
 import type { ModelCall } from '../src/models/types.js';
 import { silentLogger } from '../src/observability/logger.js';
+import { registerSecret } from '../src/observability/redact.js';
 import { seedDashboard, SUMMARY, WEEKLY } from './seed.js';
 
 const json = (body: unknown, method = 'POST') => ({
@@ -224,6 +225,12 @@ ${WEEKLY}`);
       [pendingApprovalId, 'pending'],
       [deniedApprovalId, 'denied'],
     ]);
+    // the stored input is not redacted, because the tool runs with it. the dashboard redacts it.
+    const secret = `dashboard-secret-${'z'.repeat(20)}`;
+    registerSecret(secret);
+    t.db.prepare('UPDATE approvals SET input = ? WHERE id = ?').run(JSON.stringify({ to: 'bob', key: secret }), deniedApprovalId);
+    const denied = (await get<ApprovalRow[]>(dashboard, '/api/approvals')).find((approval) => approval.id === deniedApprovalId);
+    expect(denied?.input).toEqual({ to: 'bob', key: '[redacted]' });
     const response = await dashboard.request(`/api/approvals/${pendingApprovalId}`, json({ decision: 'approve' }));
     expect(((await response.json()) as { message: string }).message).toMatch(/^Approved #1\. Result: /);
     expect(t.rows('SELECT status, resolvedBy FROM approvals WHERE id = ?', pendingApprovalId)).toEqual([

@@ -371,8 +371,8 @@ function blobTotals(db: Db): Overview['blobs'] {
   return { count: Number(row.count), bytes: Number(row.bytes ?? 0) };
 }
 
-// the stored input of an approval is not redacted, because the tool runs again with it. the dashboard shows only the
-// summary, and it redacts the summary.
+// the stored input of an approval is not redacted, because the tool runs again with it. the dashboard redacts the
+// summary and the input. the owner checks the full input here when the summary cuts a long field.
 export function listApprovals(db: Db): ApprovalRow[] {
   return db
     .prepare(
@@ -386,6 +386,7 @@ export function listApprovals(db: Db): ApprovalRow[] {
       sessionKey: String(row.sessionKey),
       toolName: String(row.toolName),
       summary: redact(String(row.summary)),
+      input: JSON.parse(redact(String(row.input))) as unknown,
       status: String(row.status),
       requestedAt: String(row.requestedAt),
       resolvedAt: str(row.resolvedAt),

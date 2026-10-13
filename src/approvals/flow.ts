@@ -1,6 +1,7 @@
 import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
+import { redact } from '../observability/redact.js';
 import type { TaintSource } from '../policy/policy.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
 import type { RunQueue } from '../sessions/queue.js';
@@ -31,6 +32,24 @@ export interface ApprovalFlow {
 }
 
 const SUMMARY_LIMIT = 500;
+// a long field keeps its start and its end. a cut in the middle keeps a short field after a long one visible.
+const FIELD_HEAD = 200;
+const FIELD_TAIL = 100;
+
+// the owner approves what the summary shows, so the summary shows each field of the input on its own line. a long
+// value is cut in its middle with a mark. the dashboard shows the full input. the value is redacted before the cut,
+// because a cut secret no longer matches the redaction.
+export function describeInput(toolName: string, input: unknown): string {
+  const fields: Array<[string, unknown]> =
+    input !== null && typeof input === 'object' && !Array.isArray(input) ? Object.entries(input) : [['input', input]];
+  const lines = fields.map(([key, value]) => {
+    const text = redact(typeof value === 'string' ? value : String(JSON.stringify(value)));
+    if (text.length <= FIELD_HEAD + FIELD_TAIL) return `${key}: ${text}`;
+    const cut = text.length - FIELD_HEAD - FIELD_TAIL;
+    return `${key}: ${text.slice(0, FIELD_HEAD)} [... ${cut} characters cut, the dashboard shows the full input ...] ${text.slice(-FIELD_TAIL)}`;
+  });
+  return [toolName, ...lines].join('\n');
+}
 
 // the run does not wait for the owner. the tool result says that the call is pending, and the decision comes back
 // to the same session as a system event.
@@ -41,7 +60,7 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
   return {
     active,
     async request(tool, input, ctx, why) {
-      const summary = `${tool.name} ${JSON.stringify(input)}`.slice(0, SUMMARY_LIMIT);
+      const summary = describeInput(tool.name, input);
       const approval = createApproval(db, { runId: ctx.runId, toolName: tool.name, input, summary, decisionId: why.decisionId }, clock());
       logger.info('approval requested', { approvalId: approval.id, tool: tool.name, runId: ctx.runId });
       // the owner sees the reason with the request. the taint can come from an older run, so the message names it.
