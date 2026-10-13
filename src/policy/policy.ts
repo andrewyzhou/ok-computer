@@ -10,7 +10,8 @@ const ruleSchema = z.object({
   tool: z.string().min(1),
   session: z.string().min(1).optional(),
   // each key is a top-level field of the tool input. an object value matches against its json text. a list
-  // matches an allow rule only when each item matches. a deny pattern matches anywhere in the text.
+  // matches an allow rule only when each item matches. a deny pattern matches anywhere in the text. a star in an allow
+  // pattern also matches a comma or a ".." segment, so a field with several recipients must be a list in the schema.
   args: z.record(z.string(), z.string()).optional(),
   effect: z.enum(['allow', 'deny']),
   note: z.string().optional(),
@@ -124,22 +125,40 @@ function matches(rule: Rule, input: PolicyInput): boolean {
 
 const text = (value: unknown) => (typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value));
 
-// a url parser, a mail server, or a browser reads "ev%69l.example", fullwidth letters, and "evil。example" as
-// "evil.example". so a deny rule also tests the forms that such a reader makes: the nfkc form after percent decoding
-// with the other full stops as ".", and the href of each value that parses as a url. allow rules keep the raw text,
-// because a form that only looks like an allowed value must not pass.
+// a url parser, a mail server, or a browser reads "ev%69l.example", fullwidth letters, "evil。example", and
+// "evil.example" with a soft hyphen in it as "evil.example". so a deny rule also tests the forms that such a reader
+// makes: the nfkc form after percent decoding, without default-ignorable characters and with the other full stops as
+// ".", and the href of each url in the text. the json text of a list or an object escapes a backslash and a quote, so
+// a deny rule also tests each string of the value on its own. allow rules keep the raw text, because a form that only
+// looks like an allowed value must not pass.
 function denyForms(value: unknown): string[] {
-  const raw = text(value);
-  const forms = new Set([raw, percentDecoded(raw).normalize('NFKC').replace(/[。｡]/g, '.')]);
-  for (const item of Array.isArray(value) ? value : [value]) {
-    if (typeof item !== 'string') continue;
-    try {
-      forms.add(new URL(item.trim()).href);
-    } catch {
-      // a value that is not a url keeps its other forms.
+  const forms = new Set<string>();
+  const add = (raw: string) => {
+    const normal = percentDecoded(raw).replace(IGNORABLE, '').normalize('NFKC').replace(/[。｡]/g, '.');
+    forms.add(raw).add(normal);
+    // a url can be the whole value or a part of a command or a message. the parser gives the host that a client uses.
+    for (const candidate of [raw.trim(), ...(normal.match(URL_IN_TEXT) ?? [])]) {
+      try {
+        forms.add(new URL(candidate).href);
+      } catch {
+        // a text that is not a url keeps its other forms.
+      }
     }
-  }
+  };
+  add(text(value));
+  if (typeof value === 'object' && value !== null) eachString(value, add);
   return [...forms];
+}
+
+const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
+const URL_IN_TEXT = /https?:\/\/[^\s"'<>]+/gi;
+
+// the walk gives each string and number of a list or an object, at any depth. it does not give the keys, but the
+// json text of the whole value still holds them.
+function eachString(value: unknown, visit: (text: string) => void): void {
+  if (typeof value === 'string' || typeof value === 'number') visit(String(value));
+  else if (Array.isArray(value)) for (const item of value) eachString(item, visit);
+  else if (typeof value === 'object' && value !== null) for (const item of Object.values(value)) eachString(item, visit);
 }
 
 const percentDecoded = (value: string) =>

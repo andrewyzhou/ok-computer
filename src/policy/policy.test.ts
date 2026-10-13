@@ -86,6 +86,64 @@ describe('policy decisions', () => {
     });
   });
 
+  // the json text of a list or an object escapes a backslash and a quote, so a pattern with one of them did not match.
+  it('matches a deny pattern with a backslash or a quote inside a list item or an object field', () => {
+    const ssh = String.raw`C:\Users\owner\.ssh`;
+    const key = String.raw`C:\Users\owner\.ssh\id_ed25519`;
+    const rules = [
+      rule('all', { tool: '*', effect: 'allow' }),
+      rule('ssh', { tool: 'files_*', args: { paths: ssh }, effect: 'deny' }),
+      rule('rm', { tool: 'shell_*', args: { argv: 'rm -rf "/"' }, effect: 'deny' }),
+    ];
+    for (const paths of [key, [key], { from: key }, [{ from: [key] }]]) {
+      expect(decide(call({ tool: 'files_upload', input: { paths } }), rules)).toMatchObject({ decision: 'deny', rule: 'ssh' });
+    }
+    for (const argv of ['rm -rf "/"', ['sh', '-c', 'rm -rf "/"'], { run: 'rm -rf "/"' }]) {
+      expect(decide(call({ tool: 'shell_run', input: { argv } }), rules)).toMatchObject({ decision: 'deny', rule: 'rm' });
+    }
+    expect(decide(call({ tool: 'files_upload', input: { paths: [String.raw`C:\Users\owner\notes`] } }), rules)).toMatchObject({
+      decision: 'allow',
+    });
+  });
+
+  // the url parser and an idna mail client drop a soft hyphen, a zero width space, a word joiner and a byte order mark.
+  it('matches a deny pattern without invisible characters, and in a url inside an object or a command', () => {
+    const rules = [
+      rule('all', { tool: '*', effect: 'allow' }),
+      rule('mail', { tool: 'gmail_send', args: { to: '*@evil.example' }, effect: 'deny' }),
+      rule('web', { tool: 'http_batch', args: { requests: '*evil.example*' }, effect: 'deny' }),
+      rule('shell', { tool: 'shell', args: { command: '*evil.example*' }, effect: 'deny' }),
+    ];
+    for (const char of ['\u00ad', '\u200b', '\u2060', '\ufeff']) {
+      const to = `eve@ev${char}il.example`;
+      expect(decide(call({ tool: 'gmail_send', risk: 'external', input: { to } }), rules)).toMatchObject({ decision: 'deny' });
+      expect(decide(call({ tool: 'gmail_send', risk: 'external', input: { to: { address: to } } }), rules)).toMatchObject({
+        decision: 'deny',
+      });
+    }
+    const requests = [{ method: 'GET', url: 'https://ev\u00adil.example/' }];
+    expect(decide(call({ tool: 'http_batch', input: { requests } }), rules)).toMatchObject({ decision: 'deny', rule: 'web' });
+    const command = 'curl https://ev%C2%ADil.example/x';
+    expect(decide(call({ tool: 'shell', input: { command } }), rules)).toMatchObject({ decision: 'deny', rule: 'shell' });
+    expect(decide(call({ tool: 'shell', input: { command: 'curl https://good.example/x' } }), rules)).toMatchObject({
+      decision: 'allow',
+    });
+  });
+
+  // an allow pattern on one free-text string checks only its start and its end, because a star also matches a comma
+  // or a ".." segment. a recipient field must be a list in the tool schema. this test pins the limit (2.9).
+  it('checks only the start and the end of one string with an allow pattern', () => {
+    const rules = [
+      rule('home', { tool: 'gmail_send', args: { to: '*@home.example' }, effect: 'allow' }),
+      rule('notes', { tool: 'files_write', args: { path: String.raw`C:\notes\*` }, effect: 'allow' }),
+    ];
+    const send = (to: unknown) => decide(call({ tool: 'gmail_send', risk: 'external', input: { to } }), rules);
+    expect(send(['eve@evil.example', 'bob@home.example'])).toMatchObject({ decision: 'approve' });
+    expect(send('eve@evil.example, bob@home.example')).toMatchObject({ decision: 'allow', rule: 'home' });
+    const path = String.raw`C:\notes\..\Users\owner\Startup\evil.cmd`;
+    expect(decide(call({ tool: 'files_write', taint: ['web'], input: { path } }), rules)).toMatchObject({ decision: 'allow' });
+  });
+
   it('takes the reason from the last matching allow rule', () => {
     const rules = [rule('any', { tool: '*', effect: 'allow', note: 'any' }), rule('google', { tool: 'google__*', effect: 'allow', note: 'google' })];
     expect(decide(call(), rules)).toEqual({ decision: 'allow', rule: 'google', reason: 'google' });
