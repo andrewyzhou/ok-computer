@@ -17,6 +17,7 @@ import { createAutomation, listAutomations, updateAutomation, type Automation } 
 export const HEARTBEAT_TOOLS: readonly string[] = ['goals_list', 'heartbeat_respond', 'now'];
 export const HEARTBEAT_PREFIX = 'heartbeat:';
 const CHECKLIST = 'heartbeat_checklist';
+const SYNCED_EVERY = 'heartbeat_synced_every_ms';
 const RECENT_LIMIT = 5;
 
 export const HEARTBEAT_INSTRUCTIONS = `This is a heartbeat run. The owner does not see this session. Check the items of the heartbeat checklist against the context that you have. Then call heartbeat_respond one time. Use notify true with a short message only when something needs the owner's attention now. Use notify false in all other cases. Do not repeat a recent notification. After heartbeat_respond, reply NO_REPLY.`;
@@ -36,9 +37,13 @@ export function inActiveHours(now: Date, timeZone: string, hours: { start: strin
 }
 
 // the heartbeat automation follows the config at each start. a config value of "0" turns it off.
+// the app keeps the last synced config value. a pause by the owner then stays until the config changes.
 export function syncHeartbeat(db: Db, config: Pick<Config, 'heartbeat' | 'timeZone'>, now: Date): void {
   const everyMs = durationMs(config.heartbeat.every);
   const existing = listAutomations(db).find((automation) => automation.payload.type === 'heartbeat');
+  const synced =
+    getSetting<number>(db, SYNCED_EVERY) ?? (existing?.schedule.kind === 'every' ? existing.schedule.everyMs : undefined);
+  setSetting(db, SYNCED_EVERY, everyMs, now);
   if (!everyMs) {
     if (existing?.enabled) updateAutomation(db, existing.id, { enabled: false }, now, config.timeZone);
     return;
@@ -51,7 +56,7 @@ export function syncHeartbeat(db: Db, config: Pick<Config, 'heartbeat' | 'timeZo
       now,
       config.timeZone,
     );
-  } else if (existing.schedule.kind !== 'every' || existing.schedule.everyMs !== everyMs) {
+  } else if (synced !== everyMs) {
     updateAutomation(db, existing.id, { schedule, enabled: true }, now, config.timeZone);
   }
 }

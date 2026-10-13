@@ -46,4 +46,12 @@ describe('syncHeartbeat', () => {
     syncHeartbeat(db, config('30m'), at('10:00'));
     expect(listAutomations(db)[0]?.enabled).toBe(false);
   });
+
+  it('turns the heartbeat on again when the config goes from 0 back to the same interval', () => {
+    const db = openDb(':memory:');
+    syncHeartbeat(db, config('30m'), at('09:00'));
+    syncHeartbeat(db, config('0'), at('09:05'));
+    syncHeartbeat(db, config('30m'), at('09:10'));
+    expect(listAutomations(db)[0]).toMatchObject({ enabled: true, nextRunAt: expect.any(String) });
+  });
 });
