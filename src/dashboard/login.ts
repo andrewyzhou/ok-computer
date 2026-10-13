@@ -29,6 +29,33 @@ export function createLoginCodes(clock: Clock): LoginCodes {
   };
 }
 
+// a browser sends a cookie of 127.0.0.1 to every port of 127.0.0.1, so each local server that the owner opens gets
+// it. a cookie from a sign-in on the pc is for this reason a random id that lives in memory for a short time, not a
+// value that stays valid until the token changes.
+const LOCAL_SESSION_MS = 12 * 60 * 60_000;
+
+export interface LocalSessions {
+  issue(): string;
+  valid(id: string | undefined): boolean;
+}
+
+export function createLocalSessions(clock: Clock): LocalSessions {
+  const sessions = new Map<string, number>();
+  return {
+    issue() {
+      const now = clock().getTime();
+      for (const [id, expires] of sessions) if (expires <= now) sessions.delete(id);
+      const id = randomBytes(32).toString('hex');
+      sessions.set(id, now + LOCAL_SESSION_MS);
+      return id;
+    },
+    valid(id) {
+      const expires = id === undefined ? undefined : sessions.get(id);
+      return expires !== undefined && clock().getTime() < expires;
+    },
+  };
+}
+
 // the page does not spend the code when it loads. a link preview or a scanner can load the page, but only the button
 // sends the code, so only the owner signs in with it.
 export const LOGIN_PAGE = `<!doctype html>

@@ -45,7 +45,7 @@ The dashboard listens only on `127.0.0.1:4317` on the PC. Tailscale Serve makes 
 
    The browser keeps a sign-in cookie for 30 days. The cookie holds a value made from the token, not the token itself.
 
-The dashboard on the PC (`http://127.0.0.1:4317`) asks for the token too while `DASHBOARD_TOKEN` is set.
+The dashboard on the PC (`http://127.0.0.1:4317`) asks for the token too while `DASHBOARD_TOKEN` is set. A sign-in there lasts until you close the browser, for at most 12 hours, and ends when the app restarts. The browser sends a cookie of `127.0.0.1` to every local port, also to other programs that you open there, so this cookie is short.
 
 ## Sign everyone out
 

@@ -38,7 +38,7 @@ import {
   toMcpMessage,
 } from './queries.js';
 import { integrationDetail, summaryOf } from './integrations.js';
-import { LOGIN_PAGE, type LoginCodes } from './login.js';
+import { createLocalSessions, LOGIN_PAGE, type LoginCodes } from './login.js';
 import { createFeed } from './stream.js';
 import type { ContextView, MemoryFile, Meta } from './types.js';
 
@@ -86,8 +86,10 @@ export function createDashboard(deps: DashboardDeps): Hono {
   const blobs = createBlobStore(db, join(config.paths.data, 'blobs'), clock);
   const server = new Hono();
 
-  // the cookie holds a value derived from the token, not the token. a new token makes every old cookie invalid.
+  // the cookie of the public host holds a value derived from the token, not the token. a new token makes every old
+  // cookie invalid. the browser sends it only to the public host, so it stays valid for 30 days and over a restart.
   const session = deps.token ? createHmac('sha256', deps.token).update('okc dashboard session').digest('hex') : undefined;
+  const localSessions = createLocalSessions(clock);
   // tailscale serve forwards the requests of the tailnet name. that name is accepted only with a token, so the
   // dashboard is never open on the tailnet without one.
   const remoteHost = deps.token && config.dashboard.publicUrl ? new URL(config.dashboard.publicUrl).hostname : undefined;
@@ -102,7 +104,8 @@ export function createDashboard(deps: DashboardDeps): Hono {
       // the login is the one api request that comes before a sign-in. it checks its own code or token.
       const open = c.req.path === '/api/login';
       const given = c.req.header('authorization')?.replace(/^Bearer /, '') ?? c.req.query('token');
-      const signedIn = (given !== undefined && same(given, deps.token)) || same(getCookie(c, SESSION_COOKIE), session);
+      const cookie = getCookie(c, SESSION_COOKIE);
+      const signedIn = (given !== undefined && same(given, deps.token)) || (host === remoteHost && same(cookie, session)) || localSessions.valid(cookie);
       if (deps.token && !signedIn && !open) return c.json({ error: 'unauthorized' }, 401);
       const write = c.req.method !== 'GET' && c.req.method !== 'HEAD';
       if (write && !c.req.header('content-type')?.startsWith('application/json')) {
@@ -131,7 +134,15 @@ export function createDashboard(deps: DashboardDeps): Hono {
     }
     // tailscale serve forwards plain http, so the public host or the forwarded protocol tells that the browser uses https.
     const https = host === remoteHost || c.req.header('x-forwarded-proto') === 'https' || new URL(c.req.url).protocol === 'https:';
-    setCookie(c, SESSION_COOKIE, session, { httpOnly: true, sameSite: 'Strict', path: '/', maxAge: SESSION_SECONDS, secure: https });
+    // a cookie of a sign-in on the pc goes to every local port, so it is short and ends with the browser (see login.ts).
+    const remote = host === remoteHost;
+    setCookie(c, SESSION_COOKIE, remote ? session : localSessions.issue(), {
+      httpOnly: true,
+      sameSite: 'Strict',
+      path: '/',
+      ...(remote ? { maxAge: SESSION_SECONDS } : {}),
+      secure: https,
+    });
     logger.info('dashboard login', { host, via: 'code' in given ? 'code' : 'token' });
     return c.json({ ok: true });
   });

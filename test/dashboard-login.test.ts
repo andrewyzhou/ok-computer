@@ -12,14 +12,14 @@ const REMOTE = 'https://okc-pc.example.ts.net';
 // tailscale serve forwards plain http with the host name of the tailnet.
 const FORWARDED = 'http://okc-pc.example.ts.net';
 
-function dashboard(options: { token?: string; publicUrl?: string; codes?: LoginCodes }) {
+function dashboard(options: { token?: string; publicUrl?: string; codes?: LoginCodes; clock?: () => Date }) {
   const dir = mkdtempSync(join(tmpdir(), 'okc-login-'));
   const parsed = parseConfig({ paths: { data: dir, workspace: dir }, ...(options.publicUrl ? { dashboard: { publicUrl: options.publicUrl } } : {}) });
   if (!parsed.ok) throw new Error(parsed.error);
   return createDashboard({
     db: openDb(':memory:'),
     config: parsed.value,
-    clock: () => new Date('2026-10-13T16:00:00Z'),
+    clock: options.clock ?? (() => new Date('2026-10-13T16:00:00Z')),
     logger: silentLogger,
     app: {} as never,
     webDir: dir,
@@ -33,7 +33,8 @@ const login = (server: ReturnType<typeof dashboard>, body: unknown, base = 'http
 
 describe('dashboard login', () => {
   it('signs in once with the token and then uses an http-only cookie', async () => {
-    const server = dashboard({ token: 'secret-token' });
+    let now = new Date('2026-10-13T16:00:00Z');
+    const server = dashboard({ token: 'secret-token', clock: () => now });
     const page = await server.request('/login');
     expect(page.status).toBe(200);
     expect(await page.text()).toContain("fetch('/api/login'");
@@ -48,9 +49,11 @@ describe('dashboard login', () => {
     const right = await login(server, { token: 'secret-token' });
     expect(right.status).toBe(200);
     const cookie = right.headers.get('set-cookie')!;
-    expect(cookie).toMatch(/^okc_session=[0-9a-f]{64}; Max-Age=2592000; Path=\/; HttpOnly; SameSite=Strict$/);
-    // the cookie holds a value derived from the token, not the token.
+    // a browser sends a cookie of 127.0.0.1 to every local port, so the cookie of a local sign-in is a random id that
+    // ends with the browser, and the server forgets it after 12 hours.
+    expect(cookie).toMatch(/^okc_session=[0-9a-f]{64}; Path=\/; HttpOnly; SameSite=Strict$/);
     expect(cookie).not.toContain('secret-token');
+    expect((await login(server, { token: 'secret-token' })).headers.get('set-cookie')).not.toBe(cookie);
 
     const session = cookie.split(';')[0]!;
     expect((await server.request('/api/meta', { headers: { cookie: session } })).status).toBe(200);
@@ -58,8 +61,12 @@ describe('dashboard login', () => {
     expect((await server.request('/api/meta')).status).toBe(401);
     expect((await server.request('/api/meta', { headers: { authorization: 'Bearer secret-token' } })).status).toBe(200);
     expect((await server.request('/api/meta?token=secret-token')).status).toBe(200);
-    // a new token makes the old cookie invalid.
-    expect((await dashboard({ token: 'new-token' }).request('/api/meta', { headers: { cookie: session } })).status).toBe(401);
+    // a restart forgets the local cookie, and it expires after 12 hours.
+    expect((await dashboard({ token: 'secret-token' }).request('/api/meta', { headers: { cookie: session } })).status).toBe(401);
+    now = new Date(now.getTime() + 12 * 60 * 60_000 - 1);
+    expect((await server.request('/api/meta', { headers: { cookie: session } })).status).toBe(200);
+    now = new Date(now.getTime() + 1);
+    expect((await server.request('/api/meta', { headers: { cookie: session } })).status).toBe(401);
   });
 
   it('takes a code one time, only before it expires, and a page load does not spend it', async () => {
@@ -94,9 +101,15 @@ describe('dashboard login', () => {
     expect((await login(server, { token: 'secret-token' })).headers.get('set-cookie')).not.toContain('Secure');
     expect((await login(server, { token: 'secret-token' }, 'http://127.0.0.1', { 'x-forwarded-proto': 'https' })).headers.get('set-cookie')).toContain('; Secure');
     const right = await login(server, { token: 'secret-token' }, FORWARDED);
-    expect(right.headers.get('set-cookie')).toContain('; Secure');
+    // the browser sends the cookie of the public host only to that host, so it lasts 30 days and holds a value derived
+    // from the token. a new token makes it invalid.
+    expect(right.headers.get('set-cookie')).toMatch(/^okc_session=[0-9a-f]{64}; Max-Age=2592000; Path=\/; HttpOnly; Secure; SameSite=Strict$/);
     const session = right.headers.get('set-cookie')!.split(';')[0]!;
     expect((await server.request(`${REMOTE}/api/meta`, { headers: { cookie: session } })).status).toBe(200);
+    expect((await dashboard({ token: 'secret-token', publicUrl: REMOTE }).request(`${REMOTE}/api/meta`, { headers: { cookie: session } })).status).toBe(200);
+    expect((await dashboard({ token: 'new-token', publicUrl: REMOTE }).request(`${REMOTE}/api/meta`, { headers: { cookie: session } })).status).toBe(401);
+    // the cookie of the public host does not open the local address.
+    expect((await server.request('/api/meta', { headers: { cookie: session } })).status).toBe(401);
   });
 
   it('refuses a public url that is not https', () => {
