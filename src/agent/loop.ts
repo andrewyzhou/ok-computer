@@ -109,7 +109,8 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
           now: clock(),
           timeZone: config.timeZone,
           channel: input.channel,
-          ...(deps.contextLines ? { extra: deps.contextLines(clock()) } : {}),
+          // a sub-agent gets only its task. the goals and the automations of the owner are not part of it.
+          ...(deps.contextLines && input.trigger !== 'subagent' ? { extra: deps.contextLines(clock()) } : {}),
         }),
       },
     });

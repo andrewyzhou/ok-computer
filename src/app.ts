@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { createDelegateTool, PROFILES, profileOf, SUBAGENT_INSTRUCTIONS } from './agent/delegate.js';
 import { runAgent, type AgentDeps } from './agent/loop.js';
 import { closeStaleWork, interruptedText, repairSession } from './agent/recovery.js';
 import { buildStablePrompt } from './agent/system-prompt.js';
@@ -97,6 +99,7 @@ function sessionTools(sessionKey: string): readonly string[] {
   if (sessionKey === MAIN_SESSION) return MAIN_TOOLS;
   if (sessionKey.startsWith(HEARTBEAT_PREFIX)) return HEARTBEAT_TOOLS;
   if (sessionKey.startsWith(CONSOLIDATION_PREFIX)) return CONSOLIDATION_TOOLS;
+  if (sessionKey.startsWith('sub:')) return profileOf(sessionKey)?.tools ?? [];
   return AUTOMATION_TOOLS;
 }
 
@@ -156,17 +159,30 @@ export function createApp(deps: AppDeps): App {
   });
   // the scheduler is created below. the tools call replan only after the start.
   const replan = () => scheduler.replan();
+  const builtIn = [
+    nowTool,
+    ...createGoalTools({ db, replan }),
+    ...createAutomationTools({ db, replan }),
+    ...createHeartbeatTools({ db }),
+    ...createMemoryTools({ db, memoryDir }),
+    ...createConsolidationTools({ db, memoryDir }),
+    createMessageOwnerTool(owner),
+    ...createSkillTools({ skillsDir: config.paths.skills }),
+    createResultReadTool({ db, blobs }),
+  ];
+  const registered = new Set(builtIn.map((tool) => tool.name));
   const tools = createToolRegistry(
     [
-      nowTool,
-      ...createGoalTools({ db, replan }),
-      ...createAutomationTools({ db, replan }),
-      ...createHeartbeatTools({ db }),
-      ...createMemoryTools({ db, memoryDir }),
-      ...createConsolidationTools({ db, memoryDir }),
-      createMessageOwnerTool(owner),
-      ...createSkillTools({ skillsDir: config.paths.skills }),
-      createResultReadTool({ db, blobs }),
+      ...builtIn,
+      createDelegateTool({
+        db,
+        clock,
+        queue,
+        newId: deps.newId ?? randomUUID,
+        toolsOf: (profile) => withIntegrations(`sub:${profile}`, PROFILES[profile].tools.filter((name) => registered.has(name))),
+        // the child does not use agent(), because a child that stops reports to its parent, not to the owner.
+        runChild: (input) => runAgent(agentDeps, input),
+      }),
       ...integrations.tools,
     ],
     logger,
@@ -210,6 +226,8 @@ export function createApp(deps: AppDeps): App {
         ...(sessionKey.startsWith(CONSOLIDATION_PREFIX)
           ? { personaFiles: ['USER.md'], extraInstructions: CONSOLIDATION_INSTRUCTIONS }
           : {}),
+        // a sub-agent needs no persona and no facts about the owner for its task, so it gets none.
+        ...(sessionKey.startsWith('sub:') ? { personaFiles: [], extraInstructions: SUBAGENT_INSTRUCTIONS } : {}),
       }),
     contextLines: (now) => scheduleContext(db, now, config.timeZone),
     activeRuns,

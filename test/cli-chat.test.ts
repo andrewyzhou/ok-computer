@@ -61,6 +61,7 @@ describe('cli chat through the full loop', () => {
       'automations_delete',
       'automations_list',
       'automations_update',
+      'delegate',
       'goal_update',
       'goals_list',
       'goals_set',
