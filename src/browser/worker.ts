@@ -1,0 +1,530 @@
+import { randomUUID } from 'node:crypto';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { chromium, type BrowserContext, type Page } from 'playwright-core';
+import type { Db } from '../db/index.js';
+import type { BlobStore } from '../observability/blobs.js';
+import type { ByteStore } from '../observability/byte-blobs.js';
+import type { Logger } from '../observability/logger.js';
+import { redactedJson } from '../observability/redact.js';
+import type { Clock } from '../time.js';
+import { errorText } from '../tools/registry.js';
+import type { Egress } from '../web/egress.js';
+import { allowedBy, guardContext, guardTab, siteOf, type Blocked, type TabRules } from './gate.js';
+
+export interface BrowserDeps {
+  db: Db;
+  blobs: BlobStore;
+  bytes: ByteStore;
+  logger: Logger;
+  clock: Clock;
+  // data/browser: the profile, the downloads and the trace zips.
+  dir: string;
+  egress: Egress;
+  // false in npm run chat. one chrome can use the profile, and the background app owns it.
+  enabled: boolean;
+  // tests point the *.test names at the fixture site. the app gives none.
+  args?: string[];
+  newId?: () => string;
+  idleMs?: number;
+  timeouts?: Partial<Timeouts>;
+}
+
+interface Timeouts {
+  action: number;
+  navigation: number;
+  capture: number;
+}
+
+const TIMED_OUT = Symbol('timed out');
+
+// some calls have no timeout of their own, for example page.title() and tracing.stop(), and a hung page holds them for
+// ever. the work goes on, but the step does not wait for it.
+async function within<T>(work: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<typeof TIMED_OUT>((resolve) => (timer = setTimeout(() => resolve(TIMED_OUT), ms)));
+  work.catch(() => undefined);
+  try {
+    return await Promise.race([work, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const TIMEOUTS: Timeouts ={ action: 10_000, navigation: 30_000, capture: 5_000 };
+const IDLE_MS = 10 * 60_000;
+
+// a step is one action in a tab. its row keeps what the page looked like after the action.
+export interface StepInput {
+  sessionKey: string;
+  runId: string;
+  toolCallId?: string;
+  action: string;
+  target?: string;
+}
+
+export interface StepResult {
+  ok: boolean;
+  // what the action says, for example an error or "typed 5 characters".
+  note: string;
+  url: string;
+  title: string;
+  snapshot?: string;
+  blocked: Blocked[];
+  stepId?: number;
+  taskId: string;
+}
+
+// a failure before any action, for example no chrome or no open task. effect none: nothing happened in a page.
+export interface BrowserRefusal {
+  refused: string;
+}
+
+interface Tab {
+  id: string;
+  kind: 'task' | 'search';
+  sessionKey: string;
+  page: Page;
+  allowlist: Set<string>;
+  submit: boolean;
+  blocked: Blocked[];
+  console: string[];
+  lastUsed: number;
+  queue: Promise<unknown>;
+  crashed?: string;
+  rules: TabRules;
+}
+
+export interface BrowserWorker {
+  // open starts the task of the session at its first call, and the host of the address joins its allowlist.
+  open(step: StepInput, url: string): Promise<StepResult | BrowserRefusal>;
+  // act runs one action in the open task of the session, one action at a time, and records the step.
+  act(step: StepInput, action: (page: Page, tab: { allowlist: ReadonlySet<string>; setSubmit(on: boolean): void }) => Promise<string | void>): Promise<StepResult | BrowserRefusal>;
+  // search runs in a short tab of its own with the hosts of the engine, and records one step.
+  inTab<T>(step: StepInput, hosts: string[], work: (page: Page) => Promise<T>): Promise<{ value?: T; error?: string; result: StepResult } | BrowserRefusal>;
+  allowlistOf(sessionKey: string): string[] | undefined;
+  allow(sessionKey: string, domain: string): BrowserRefusal | { allowlist: string[] };
+  close(sessionKey: string, reason: string): Promise<boolean>;
+  // sweep closes the rows of tasks that no chrome of this process has, after a crash of the app.
+  sweep(): number;
+  stop(): Promise<void>;
+}
+
+// chrome keeps a file named lockfile open while it uses a profile, and windows refuses a second open (probe p4). this
+// is exact, also after a crash of the app, so the app needs no lock file of its own.
+export function profileBusy(profile: string): boolean {
+  const path = join(profile, 'lockfile');
+  if (!existsSync(path)) return false;
+  try {
+    closeSync(openSync(path, 'r+'));
+    return false;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EBUSY' || (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+type Json = Record<string, unknown>;
+const merge = (base: Json, add: Json): Json => {
+  const out: Json = { ...base };
+  for (const [key, value] of Object.entries(add)) {
+    const old = out[key];
+    out[key] = value && typeof value === 'object' && old && typeof old === 'object' ? merge(old as Json, value as Json) : value;
+  }
+  return out;
+};
+
+// chrome keeps these preferences when they exist before it starts (probe p5). they turn off password saving and
+// autofill, and send downloads to the folder of the app. a damaged file is replaced, because chrome would reset it.
+export function hardenProfile(profile: string, downloads: string): void {
+  const path = join(profile, 'Default', 'Preferences');
+  mkdirSync(join(profile, 'Default'), { recursive: true });
+  let current: Json = {};
+  try {
+    current = JSON.parse(readFileSync(path, 'utf8')) as Json;
+  } catch {
+    current = {};
+  }
+  const hardened = merge(current, {
+    credentials_enable_service: false,
+    profile: { password_manager_enabled: false },
+    autofill: { profile_enabled: false, credit_card_enabled: false },
+    download: { default_directory: downloads, prompt_for_download: false },
+  });
+  const temp = `${path}.${process.pid}.tmp`;
+  writeFileSync(temp, JSON.stringify(hardened));
+  renameSync(temp, path);
+}
+
+export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
+  const { db, logger, clock } = deps;
+  const t = { ...TIMEOUTS, ...deps.timeouts };
+  const idleMs = deps.idleMs ?? IDLE_MS;
+  const newId = deps.newId ?? (() => `bt_${randomUUID()}`);
+  const profile = join(deps.dir, 'profile');
+  const downloads = join(deps.dir, 'downloads');
+  const traces = join(deps.dir, 'traces');
+  const tabs = new Map<Page, Tab>();
+  const tasks = new Map<string, Tab>();
+  let context: BrowserContext | undefined;
+  let launching: Promise<BrowserContext> | undefined;
+  let closing = false;
+  let tracing: string | undefined;
+  let lastActivity = Date.now();
+
+  const now = () => clock().toISOString();
+
+  const endRow = (id: string, status: string, reason: string, trace: { path?: string; bytes?: number; error?: string } = {}) => {
+    try {
+      db.prepare(
+        "UPDATE browser_tasks SET status = ?, endReason = ?, endedAt = ?, tracePath = ?, traceBytes = ?, traceError = COALESCE(?, traceError) WHERE id = ? AND status = 'open'",
+      ).run(status, reason, now(), trace.path ?? null, trace.bytes ?? null, trace.error ?? null, id);
+    } catch (err) {
+      logger.error('browser task row update failed', { taskId: id, err });
+    }
+  };
+
+  // chrome stopped: every tab is gone, and a trace that was not saved is lost. the steps are already in the store.
+  const onContextClosed = () => {
+    context = undefined;
+    if (closing) return;
+    logger.warn('the browser stopped', { tasks: [...tasks.keys()] });
+    for (const tab of tabs.values()) endRow(tab.id, 'crashed', 'the browser stopped', tab.id === tracing ? { error: 'the browser stopped before the trace was saved' } : {});
+    tabs.clear();
+    tasks.clear();
+    tracing = undefined;
+  };
+
+  const ownTask = () => [...tasks.values()][0];
+
+  async function launch(): Promise<BrowserContext> {
+    if (profileBusy(profile)) throw new Error('profile busy');
+    mkdirSync(downloads, { recursive: true });
+    hardenProfile(profile, downloads);
+    // no other chrome holds the profile, so no task row that is open can be live. the app crashed while it ran.
+    sweep();
+    const ctx = await chromium.launchPersistentContext(profile, {
+      channel: 'chrome',
+      headless: true,
+      serviceWorkers: 'block',
+      acceptDownloads: true,
+      downloadsPath: downloads,
+      viewport: { width: 1280, height: 800 },
+      args: deps.args ?? [],
+    });
+    ctx.on('close', onContextClosed);
+    await guardContext(
+      ctx,
+      deps.egress,
+      (page) => tabs.get(page)?.rules,
+      (url) => {
+        // a popup belongs to no tab. it is refused, and the open task records it.
+        const task = ownTask();
+        if (task) task.blocked.push({ url, reason: 'a new tab or window is refused. Use browser_open with its address' });
+      },
+    );
+    // a page that the app did not open is a popup. the route refuses its requests at once, and it closes here. the
+    // event can come before newPage gives the app its own page, so the test waits a moment.
+    for (const page of ctx.pages()) owned.add(page);
+    ctx.on('page', (page) => void setTimeout(() => !owned.has(page) && void page.close().catch(() => undefined), 1000));
+    return ctx;
+  }
+
+  const owned = new WeakSet<Page>();
+  async function contextOrRefusal(): Promise<BrowserContext | BrowserRefusal> {
+    if (!deps.enabled) return { refused: 'The browser runs only in the background app, not in this chat process.' };
+    if (context) return context;
+    launching ??= launch().finally(() => (launching = undefined));
+    try {
+      context = await launching;
+      return context;
+    } catch (err) {
+      // a second chrome on the profile fails with "target page, context or browser has been closed" (probe p3), so
+      // the lock file tells the real reason.
+      if (profileBusy(profile)) {
+        return { refused: 'The agent browser profile is in use by another Chrome window, for example okc browser login. Try again after it closes.' };
+      }
+      logger.error('the browser did not start', { err });
+      return { refused: `The browser did not start: ${errorText(err).split('\n')[0]}` };
+    }
+  }
+
+  async function newTab(ctx: BrowserContext, kind: Tab['kind'], step: StepInput, allowlist: string[]): Promise<Tab> {
+    const page = await ctx.newPage();
+    owned.add(page);
+    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), submit: false, blocked: [], console: [], lastUsed: Date.now(), queue: Promise.resolve() } as unknown as Tab;
+    tab.rules = {
+      allows: (host) => allowedBy(tab.allowlist, host),
+      submitting: () => tab.submit,
+      onBlocked: (blocked) => void tab.blocked.push(blocked),
+    };
+    page.setDefaultTimeout(t.action);
+    page.setDefaultNavigationTimeout(t.navigation);
+    page.on('crash', () => (tab.crashed = 'the page crashed'));
+    page.on('console', (message) => message.type() === 'error' && tab.console.length < 20 && tab.console.push(message.text().slice(0, 300)));
+    page.on('pageerror', (error) => tab.console.length < 20 && tab.console.push(error.message.slice(0, 300)));
+    // the tab gets no address before both layers of the gate are in place.
+    try {
+      await guardTab(await ctx.newCDPSession(page), deps.egress, tab.rules);
+    } catch (err) {
+      await page.close().catch(() => undefined);
+      throw err;
+    }
+    tabs.set(page, tab);
+    db.prepare('INSERT INTO browser_tasks (id, kind, sessionKey, runId, allowlist, status, startedAt) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      tab.id,
+      kind,
+      step.sessionKey,
+      step.runId,
+      JSON.stringify([...tab.allowlist]),
+      'open',
+      now(),
+    );
+    if (kind === 'task') {
+      // the trace belongs to the context, so one task at a time has it. the row says why a task has no trace.
+      try {
+        if (tracing) throw new Error(`task ${tracing} still has the trace`);
+        await ctx.tracing.start({ screenshots: true, snapshots: true, title: tab.id });
+        tracing = tab.id;
+      } catch (err) {
+        logger.warn('the browser trace did not start', { taskId: tab.id, err });
+        db.prepare('UPDATE browser_tasks SET traceError = ? WHERE id = ?').run(`the trace did not start: ${errorText(err).split('\n')[0]}`, tab.id);
+      }
+    }
+    return tab;
+  }
+
+  async function endTab(tab: Tab, status: 'closed' | 'crashed', reason: string): Promise<void> {
+    tabs.delete(tab.page);
+    if (tasks.get(tab.sessionKey) === tab) tasks.delete(tab.sessionKey);
+    // the tab closes first. a hung page held the trace stop for ever, and a closed page does not.
+    await within(tab.page.close({ runBeforeUnload: false }), t.capture);
+    let trace: { path?: string; bytes?: number; error?: string } = {};
+    if (tracing === tab.id && context) {
+      tracing = undefined;
+      mkdirSync(traces, { recursive: true });
+      const path = join(traces, `${tab.id}.zip`);
+      try {
+        const stopped = await within(context.tracing.stop({ path: `${path}.tmp` }), t.navigation);
+        if (stopped === TIMED_OUT) throw new Error(`no answer within ${t.navigation / 1000} s`);
+        renameSync(`${path}.tmp`, path);
+        trace = { path: `traces/${tab.id}.zip`, bytes: statSync(path).size };
+      } catch (err) {
+        rmSync(`${path}.tmp`, { force: true });
+        trace = { error: `the trace was not saved: ${errorText(err).split('\n')[0]}` };
+      }
+    }
+    endRow(tab.id, status, reason, trace);
+  }
+
+  async function capture(tab: Tab): Promise<{ snapshot?: string; png?: Buffer; errors: string[] }> {
+    const errors: string[] = [];
+    let snapshot: string | undefined;
+    let png: Buffer | undefined;
+    try {
+      snapshot = await tab.page.ariaSnapshot({ mode: 'ai', timeout: t.capture });
+    } catch (err) {
+      errors.push(`snapshot: ${errorText(err).split('\n')[0]}`);
+    }
+    try {
+      png = await tab.page.screenshot({ timeout: t.capture, type: 'png' });
+    } catch (err) {
+      errors.push(`screenshot: ${errorText(err).split('\n')[0]}`);
+    }
+    return { snapshot, png, errors };
+  }
+
+  // the record is written after the action. it fails open: a lost row is better than a second action.
+  function record(tab: Tab, step: StepInput, data: { urlBefore: string; urlAfter: string; snapshot?: string; png?: Buffer; error?: string; started: number }): number | undefined {
+    let snapshotBlob: string | null = null;
+    let screenshotBlob: string | null = null;
+    try {
+      if (data.snapshot !== undefined) snapshotBlob = deps.blobs.put(data.snapshot);
+    } catch (err) {
+      logger.error('browser snapshot blob write failed', { taskId: tab.id, err });
+    }
+    try {
+      if (data.png) screenshotBlob = deps.bytes.put(data.png, 'image/png');
+    } catch (err) {
+      logger.error('browser screenshot blob write failed', { taskId: tab.id, err });
+    }
+    try {
+      const row = db
+        .prepare(
+          `INSERT INTO browser_steps (taskId, runId, toolCallId, action, target, urlBefore, urlAfter, snapshotBlob, screenshotBlob,
+             consoleErrors, blockedRequests, error, durationMs, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        )
+        .get(
+          tab.id,
+          step.runId,
+          step.toolCallId ?? null,
+          step.action,
+          step.target === undefined ? null : redactedJson(step.target),
+          data.urlBefore,
+          data.urlAfter,
+          snapshotBlob,
+          screenshotBlob,
+          tab.console.length ? redactedJson(tab.console) : null,
+          tab.blocked.length ? redactedJson(tab.blocked) : null,
+          data.error ?? null,
+          Math.round(performance.now() - data.started),
+          now(),
+        );
+      return Number(row!.id);
+    } catch (err) {
+      logger.error('browser step write failed', { taskId: tab.id, err });
+      return undefined;
+    }
+  }
+
+  // one action at a time in a tab. the model can ask for several calls in one turn, and two actions in one page at
+  // the same moment give a step record that belongs to neither.
+  function serial<T>(tab: Tab, work: () => Promise<T>): Promise<T> {
+    const next = tab.queue.then(work, work);
+    tab.queue = next.catch(() => undefined);
+    return next;
+  }
+
+  async function step(tab: Tab, input: StepInput, action: (page: Page) => Promise<string | void>): Promise<StepResult | BrowserRefusal> {
+    return serial(tab, async () => {
+      if (tab.crashed || tab.page.isClosed()) {
+        const reason = tab.crashed ?? 'the tab closed';
+        await endTab(tab, 'crashed', reason);
+        return { refused: `The browser tab of this task stopped (${reason}). Its task ended. Use browser_open to start again.` };
+      }
+      const started = performance.now();
+      tab.lastUsed = Date.now();
+      lastActivity = Date.now();
+      tab.blocked = [];
+      tab.console = [];
+      const urlBefore = tab.page.url();
+      let note = '';
+      let error: string | undefined;
+      try {
+        note = (await action(tab.page)) ?? '';
+      } catch (err) {
+        error = errorText(err).split('\n')[0]!;
+      }
+      // a navigation can still run. the snapshot waits for the document, with the capture limit.
+      await tab.page.waitForLoadState('domcontentloaded', { timeout: t.capture }).catch(() => undefined);
+      const shot = await capture(tab);
+      const urlAfter = tab.page.url();
+      const stepId = record(tab, input, { urlBefore, urlAfter, snapshot: shot.snapshot, png: shot.png, started, ...(error || shot.errors.length ? { error: [error, ...shot.errors].filter(Boolean).join('; ') } : {}) });
+      const base = { url: urlAfter, blocked: [...tab.blocked], taskId: tab.id, ...(shot.snapshot !== undefined ? { snapshot: shot.snapshot } : {}), ...(stepId ? { stepId } : {}) };
+      // a page that answers neither capture is hung, for example by a loop in its script. closing the tab is the only
+      // way back (probe p5), and the next browser_open starts a new task.
+      if (shot.errors.length === 2 && /Timeout/.test(shot.errors.join(' '))) {
+        await endTab(tab, 'crashed', 'the page stopped responding');
+        return { ...base, ok: false, title: '', note: `${error ? `${error}. ` : ''}The page stopped responding, so its tab closed and the task ended.` };
+      }
+      const title = await within(tab.page.title(), t.capture).catch(() => '');
+      return { ...base, ok: !error, note: error ?? note, title: typeof title === 'string' ? title : '' };
+    });
+  }
+
+  function sweep(): number {
+    if (!deps.enabled) return 0;
+    const live = new Set([...tabs.values()].map((tab) => tab.id));
+    const open = db.prepare("SELECT id FROM browser_tasks WHERE status = 'open'").all().map((row) => String(row.id));
+    let closed = 0;
+    for (const id of open.filter((each) => !live.has(each))) {
+      endRow(id, 'interrupted', 'the app stopped while the task was open', { error: 'the app stopped before the trace was saved' });
+      closed++;
+    }
+    return closed;
+  }
+
+  // a task that waits long frees the browser for other sessions, and chrome closes when nothing uses it, so the owner
+  // can open the profile with okc browser login.
+  const timer = setInterval(() => {
+    for (const tab of tasks.values()) if (Date.now() - tab.lastUsed > idleMs) void serial(tab, () => endTab(tab, 'closed', 'no browser action for a while'));
+    if (context && !tabs.size && Date.now() - lastActivity > idleMs) {
+      closing = true;
+      const ctx = context;
+      context = undefined;
+      void ctx.close().finally(() => (closing = false));
+    }
+  }, Math.min(60_000, idleMs));
+  timer.unref();
+
+  return {
+    async open(input, url) {
+      let host: string;
+      try {
+        host = new URL(url).hostname;
+      } catch {
+        return { refused: `${JSON.stringify(url)} is not a full web address.` };
+      }
+      let tab = tasks.get(input.sessionKey);
+      if (tab && !allowedBy(tab.allowlist, host)) {
+        return { refused: `${host} is not on the allowlist of this task (${[...tab.allowlist].join(', ')}). Use browser_allow_domain to ask the owner, or browser_close and start a new task.` };
+      }
+      if (!tab) {
+        const other = ownTask();
+        if (other) {
+          if (Date.now() - other.lastUsed < 60_000) return { refused: 'The browser is busy with a task of another session. Try again in a minute.' };
+          await serial(other, () => endTab(other, 'closed', 'another session needed the browser'));
+        }
+        const ctx = await contextOrRefusal();
+        if ('refused' in ctx) return ctx;
+        tab = await newTab(ctx, 'task', input, [siteOf(host)]);
+        tasks.set(input.sessionKey, tab);
+      }
+      return step(tab, { ...input, target: url }, async (page) => {
+        const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
+        return response && response.status() >= 400 ? `the page answered with status ${response.status()}` : undefined;
+      });
+    },
+    async act(input, action) {
+      const tab = tasks.get(input.sessionKey);
+      if (!tab) return { refused: 'No page is open in this session. Use browser_open first.' };
+      return step(tab, input, (page) => action(page, { allowlist: tab.allowlist, setSubmit: (on) => void (tab.submit = on) }));
+    },
+    async inTab(input, hosts, work) {
+      const ctx = await contextOrRefusal();
+      if ('refused' in ctx) return ctx;
+      const tab = await newTab(ctx, 'search', input, hosts.map(siteOf));
+      let value: Awaited<ReturnType<typeof work>> | undefined;
+      let error: string | undefined;
+      const result = await step(tab, input, async (page) => {
+        try {
+          value = await work(page);
+        } catch (err) {
+          error = errorText(err).split('\n')[0];
+          throw err;
+        }
+      });
+      if (tabs.has(tab.page)) await endTab(tab, 'closed', 'the search ended');
+      if ('refused' in result) return result;
+      return { ...(value !== undefined ? { value } : {}), ...(error ? { error } : {}), result };
+    },
+    allowlistOf: (sessionKey) => {
+      const tab = tasks.get(sessionKey);
+      return tab ? [...tab.allowlist] : undefined;
+    },
+    allow(sessionKey, domain) {
+      const tab = tasks.get(sessionKey);
+      if (!tab) return { refused: 'No browser task is open in this session, so there is no allowlist to change. The domain was not added.' };
+      tab.allowlist.add(siteOf(domain));
+      try {
+        db.prepare('UPDATE browser_tasks SET allowlist = ? WHERE id = ?').run(JSON.stringify([...tab.allowlist]), tab.id);
+      } catch (err) {
+        logger.error('browser allowlist write failed', { taskId: tab.id, err });
+      }
+      return { allowlist: [...tab.allowlist] };
+    },
+    async close(sessionKey, reason) {
+      const tab = tasks.get(sessionKey);
+      if (!tab) return false;
+      await serial(tab, () => endTab(tab, 'closed', reason));
+      return true;
+    },
+    sweep,
+    async stop() {
+      clearInterval(timer);
+      for (const tab of [...tabs.values()]) await endTab(tab, 'closed', 'the app stopped').catch(() => undefined);
+      closing = true;
+      await context?.close().catch(() => undefined);
+      context = undefined;
+    },
+  };
+}
