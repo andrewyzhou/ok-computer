@@ -50,6 +50,8 @@ cmdkey /generic:notes-token.ok-computer /user:notes-token /pass:THE_SECRET
 
 The target is `<secretRef>.ok-computer`. The app never writes these values to its database, log or trace. OAuth tokens are stored there by the app itself.
 
+A pre-registered OAuth client (`auth.clientRef`) is JSON, and a terminal removes its quotes on the way to `cmdkey`. Store it in the **OAuth app** panel of the integration's page instead, as [slack.md](slack.md) step 3 shows.
+
 ## 3. Restart and connect
 
 Run `okc restart`, then open the dashboard (`okc open`) and go to **Integrations**.

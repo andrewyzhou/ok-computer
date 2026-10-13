@@ -131,6 +131,7 @@ export interface IntegrationSummary {
   lastError: string | null;
   lastErrorAt: string | null;
   authUrl?: string;
+  oauthApp?: { redirectUrl: string; callback: 'loopback' | 'paste'; clientRef?: string };
   catalogHash?: string;
   catalogStored?: boolean;
   tools: IntegrationToolRow[];

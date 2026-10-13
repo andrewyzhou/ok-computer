@@ -25,7 +25,9 @@ import { createMemoryTools } from './memory/tools.js';
 import type { IntegrationEntry } from './integrations/config.js';
 import { createIntegrations, type Integrations, type IntegrationsDeps } from './integrations/integrations.js';
 import { createOAuth } from './integrations/oauth.js';
+import { syncPolls } from './integrations/polls.js';
 import { createMemorySecretStore, type SecretStore } from './integrations/secrets.js';
+import { createSlackDmPoll } from './integrations/slack-dms.js';
 import { createSlotRunner } from './models/slots.js';
 import type { ModelClient, ModelRequest } from './models/types.js';
 import { createBlobStore } from './observability/blobs.js';
@@ -223,6 +225,12 @@ export function createApp(deps: AppDeps): App {
   };
 
   const heartbeat = createHeartbeat({ db, clock, logger, config, queue, owner, agent, signal: shutdown.signal, ...ids });
+  // only the process that connects polls. in npm run chat a due poll is skipped, and the service polls at its next turn.
+  const slackDms = createSlackDmPoll({ db, blobs, logger, clock, connection: integrations.connection });
+  const polls =
+    deps.connectIntegrations === false
+      ? undefined
+      : new Map(entries.filter((entry) => entry.kind === 'mcp-http' && entry.poll === 'slack-dms').map((entry) => [entry.id, () => slackDms(entry.id)]));
   const runJob = createJobRunner({
     db,
     clock,
@@ -233,6 +241,7 @@ export function createApp(deps: AppDeps): App {
     agent,
     heartbeat,
     consolidation: createConsolidation({ db, clock, config, memoryDir, queue, agent, signal: shutdown.signal, ...ids }),
+    ...(polls ? { polls } : {}),
     signal: shutdown.signal,
     ...ids,
   });
@@ -326,6 +335,7 @@ export function createApp(deps: AppDeps): App {
       if (installRoutine(db, config, clock())) logger.info('goals routine installed');
       if (installConsolidation(db, config, clock())) logger.info('memory consolidation installed');
       syncHeartbeat(db, config, clock());
+      syncPolls(db, entries, clock(), config.timeZone);
       // missed jobs can take minutes, so the start does not wait for them.
       void scheduler.start().catch((err: unknown) => logger.error('scheduler start failed', { err }));
       // a server can need many seconds to start, so the start does not wait. tool_search reads the stored catalog.

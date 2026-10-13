@@ -7,6 +7,7 @@ import { redact, registerSecret } from '../observability/redact.js';
 import type { Clock } from '../time.js';
 import { errorText } from '../tools/registry.js';
 import type { HttpEntry } from './config.js';
+import { normalizeTokenErrors } from './oauth-errors.js';
 import { CredentialStoreError, type SecretStore } from './secrets.js';
 
 export const CALLBACK_PORT = 4318;
@@ -44,6 +45,8 @@ export interface OAuthDeps {
 
 export interface OAuth {
   provider(entry: HttpEntry): OAuthClientProvider;
+  // the redirect url of an integration, which the owner gives the oauth app of a pre-registered client.
+  redirectUrl(entry: HttpEntry): string;
   // fetchFor gives the fetch of the http transport of one integration. it logs each sign-in step, and two refreshes
   // with the same refresh token become one request.
   fetchFor(entry: HttpEntry): typeof fetch;
@@ -69,7 +72,10 @@ const clientRef = (id: string) => `${id}:oauth-client`;
 export function createOAuth(deps: OAuthDeps): OAuth {
   const { db, clock, logger, secrets } = deps;
   const port = deps.port ?? CALLBACK_PORT;
-  const redirectUrl = `http://127.0.0.1:${port}${CALLBACK_PATH}`;
+  // with paste nothing answers with tls on the address. the browser shows an error page, and the owner pastes its
+  // address on the dashboard.
+  const redirectFor = (entry: HttpEntry) =>
+    `${entry.auth?.type === 'oauth' && entry.auth.callback === 'paste' ? 'https' : 'http'}://127.0.0.1:${port}${CALLBACK_PATH}`;
   const flows = new Map<string, Flow>();
   const drafts = new Map<string, Draft>();
   // the flow that finishAuth works on. the callback sets it just before the call.
@@ -91,8 +97,18 @@ export function createOAuth(deps: OAuthDeps): OAuth {
   };
   const readJson = async <T>(ref: string): Promise<T | undefined> => {
     const text = await vault(() => secrets.get(ref));
-    return text === undefined ? undefined : (JSON.parse(text) as T);
+    if (text === undefined) return undefined;
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      // the message of JSON.parse can quote the value, and the value is a secret. a terminal also drops the quotes of
+      // json that it gives to cmdkey, so this is the usual result of a client that the owner stored with cmdkey.
+      throw new CredentialStoreError(`the secret ${ref} in the credential manager is not valid json`);
+    }
   };
+  // the issuer that the sdk adds to a pre-registered client. the client itself is never copied, so a new client that
+  // the owner stores under clientRef takes effect at the next sign-in.
+  const issuers = new Map<string, { clientId: string; issuer: string }>();
   // new tokens that the credential manager did not take. a server with rotation already spent the old refresh token,
   // so a lost new set would end the sign-in at the next refresh. the provider uses this copy and saves it again at
   // each read, until a save works. a restart before that loses it.
@@ -118,6 +134,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
     const id = entry.id;
     const draft = () => drafts.get(id) ?? (drafts.set(id, {}), drafts.get(id)!);
     const auth = entry.auth?.type === 'oauth' ? entry.auth : undefined;
+    const redirectUrl = redirectFor(entry);
     const metadata: OAuthClientMetadata = {
       client_name: 'OK Computer',
       redirect_uris: [redirectUrl],
@@ -139,10 +156,21 @@ export function createOAuth(deps: OAuthDeps): OAuth {
         return state;
       },
       async clientInformation() {
-        // a pre-registered client (for example one slack app per workspace) is a secret that the owner stores once.
-        return (await readJson<StoredOAuthClientInformation>(clientRef(id))) ?? (auth?.clientRef ? await readJson(auth.clientRef) : undefined);
+        if (!auth?.clientRef) return readJson<StoredOAuthClientInformation>(clientRef(id));
+        // a pre-registered client (for example one slack app per workspace) is a secret that the owner stores.
+        const client = await readJson<StoredOAuthClientInformation>(auth.clientRef);
+        // the secret goes in each token request, and a server can quote it in an error.
+        registerSecret(client?.client_secret, `${auth.clientRef}#secret`);
+        const stamp = issuers.get(id);
+        return client && stamp?.clientId === client.client_id ? { ...client, issuer: stamp.issuer } : client;
       },
       async saveClientInformation(info) {
+        // the sdk saves a pre-registered client again only to add the issuer. a copy under another name would hide a
+        // new client that the owner stores later.
+        if (auth?.clientRef) {
+          if (info.issuer) issuers.set(id, { clientId: info.client_id, issuer: info.issuer });
+          return;
+        }
         await vault(() => secrets.set(clientRef(id), JSON.stringify(info)));
       },
       async tokens() {
@@ -151,6 +179,15 @@ export function createOAuth(deps: OAuthDeps): OAuth {
         // each token is a secret on its own. the redaction of the whole json text would miss a token in a header.
         registerSecret(tokens?.access_token, `${tokensRef(id)}#access`);
         registerSecret(tokens?.refresh_token, `${tokensRef(id)}#refresh`);
+        // the owner can add a scope to the config after a sign-in. a token that never expires would then hold the old
+        // scopes for ever, so a token that does not name each configured scope makes the sdk start a new sign-in. a
+        // token without a scope, as after some refreshes, is kept, because the app cannot know what it holds.
+        const granted = tokens?.scope ? new Set(tokens.scope.split(/[\s,]+/)) : undefined;
+        const missing = auth?.scopes?.filter((scope) => !granted?.has(scope)) ?? [];
+        if (granted && missing.length) {
+          logger.warn('oauth token lacks a configured scope, so a new sign-in starts', { integration: id, missing });
+          return undefined;
+        }
         return tokens;
       },
       async saveTokens(tokens) {
@@ -191,6 +228,9 @@ export function createOAuth(deps: OAuthDeps): OAuth {
           logger.error('oauth flow without its state or verifier', { integration: id });
           return;
         }
+        // the sdk asks for every scope that the metadata of the server offers. the configured scopes win, so the app
+        // gets only the access that the owner names, and an app that lacks one of the offered scopes still works.
+        if (auth?.scopes) url.searchParams.set('scope', auth.scopes.join(' '));
         prune();
         for (const [key, flow] of flows) if (flow.integrationId === id) flows.delete(key);
         flows.set(state, {
@@ -223,7 +263,10 @@ export function createOAuth(deps: OAuthDeps): OAuth {
           unsaved.delete(id);
           await vault(() => secrets.delete(tokensRef(id)));
         }
-        if (scope === 'all' || scope === 'client') await vault(() => secrets.delete(clientRef(id)));
+        if (scope === 'all' || scope === 'client') {
+          issuers.delete(id);
+          await vault(() => secrets.delete(clientRef(id)));
+        }
         if (scope === 'all' || scope === 'verifier') drafts.delete(id);
       },
     };
@@ -236,7 +279,10 @@ export function createOAuth(deps: OAuthDeps): OAuth {
     (base: typeof fetch): typeof fetch =>
     async (input, init) => {
       const body = init?.body;
-      const params = body instanceof URLSearchParams ? body : typeof body === 'string' ? new URLSearchParams(body) : undefined;
+      // only a form body can be a refresh. a json-rpc call to the mcp endpoint is a string too, and the arguments of a
+      // tool call can hold any text, also text that reads as a refresh.
+      const form = /application\/x-www-form-urlencoded/i.test(new Headers(init?.headers).get('content-type') ?? '');
+      const params = body instanceof URLSearchParams ? body : typeof body === 'string' && form ? new URLSearchParams(body) : undefined;
       const token = params?.get('grant_type') === 'refresh_token' ? params.get('refresh_token') : null;
       if (init?.method !== 'POST' || !token) return base(input, init);
       const now = clock().getTime();
@@ -271,7 +317,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
       const started = performance.now();
       let response: Response;
       try {
-        response = await fetch(input, init);
+        response = await normalizeTokenErrors(fetch)(input, init);
       } catch (err) {
         outages.set(entry.id, `${url.pathname}: ${errorText(err)}`);
         logger.warn('oauth step failed', { ...fields, err });
@@ -360,6 +406,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
 
   return {
     provider: providerFor,
+    redirectUrl: redirectFor,
     fetchFor: (entry) => singleFlight(observed(entry)),
     serverError: (id) => serverErrors.get(id),
     signInOutage: (id) => outages.get(id),

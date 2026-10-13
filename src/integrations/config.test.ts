@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -18,7 +18,33 @@ const slack = {
 describe('integration registry', () => {
   it('fills the safe defaults', () => {
     const parsed = parseIntegrations({ integrations: [slack] });
-    expect(parsed.ok && parsed.value[0]).toMatchObject({ untrustedOutput: true, sessions: ['main'] });
+    expect(parsed.ok && parsed.value[0]).toMatchObject({ untrustedOutput: true, sessions: ['main'], auth: { callback: 'loopback' } });
+  });
+
+  it('polls slack dms only on an http entry that allows the two tools of the poll', () => {
+    const polled = { ...slack, tools: { allow: ['slack_search_public_and_private', 'slack_read_user_profile'] }, risk: {}, poll: 'slack-dms' };
+    expect(parseIntegrations({ integrations: [polled] })).toMatchObject({ ok: true });
+    for (const allow of [['slack_search_public_and_private'], ['slack_read_user_profile']]) {
+      expect(parseIntegrations({ integrations: [{ ...polled, tools: { allow } }] })).toMatchObject({ ok: false, error: expect.stringContaining('needs slack_search_public_and_private and slack_read_user_profile') });
+    }
+    expect(parseIntegrations({ integrations: [{ ...polled, poll: 'slack-channels' }] })).toMatchObject({ ok: false });
+    const stdio = { id: 'slack-home', kind: 'mcp-stdio', command: 'npx', args: ['-y', 'slack-mcp-server@1.3.0'], tools: polled.tools, poll: 'slack-dms' };
+    expect(parseIntegrations({ integrations: [stdio] })).toMatchObject({ ok: false });
+  });
+
+  it('loads both json examples of the slack guide', () => {
+    // a checkout on windows can turn the guide into crlf text.
+    const guide = readFileSync(join(import.meta.dirname, '../../docs/setup/slack.md'), 'utf8');
+    const examples = [...guide.matchAll(/```json\r?\n([\s\S]*?)```/g)].map((match) => JSON.parse(match[1]!) as Record<string, unknown>);
+    expect(examples).toHaveLength(2);
+    const [official, fallback] = examples.map((example) => parseIntegrations('integrations' in example ? example : { integrations: [example] }));
+    expect(official).toMatchObject({ ok: true, value: [{ id: 'slack-work', poll: 'slack-dms', auth: { callback: 'paste' }, risk: { slack_send_message: 'external' } }] });
+    expect(fallback).toMatchObject({ ok: true, value: [{ id: 'slack-work', kind: 'mcp-stdio' }] });
+  });
+
+  it('takes the paste callback for an oauth entry and refuses another word', () => {
+    expect(parseIntegrations({ integrations: [{ ...slack, auth: { ...slack.auth, callback: 'paste' } }] })).toMatchObject({ ok: true });
+    expect(parseIntegrations({ integrations: [{ ...slack, auth: { ...slack.auth, callback: 'https' } }] })).toMatchObject({ ok: false });
   });
 
   it('accepts a pinned stdio server with a secret in its env', () => {

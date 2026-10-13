@@ -39,10 +39,20 @@ const stdioEntry = z
   .strict();
 
 const httpAuth = z.discriminatedUnion('type', [
-  // without clientRef the client registers itself, when the server allows it.
-  z.object({ type: z.literal('oauth'), clientRef: secretRef.optional(), scopes: z.array(z.string()).optional() }).strict(),
+  // without clientRef the client registers itself, when the server allows it. paste is for a server that accepts only
+  // an https redirect, such as slack. the owner then pastes the address of the failed callback page on the dashboard.
+  z
+    .object({
+      type: z.literal('oauth'),
+      clientRef: secretRef.optional(),
+      scopes: z.array(z.string()).optional(),
+      callback: z.enum(['loopback', 'paste']).default('loopback'),
+    })
+    .strict(),
   z.object({ type: z.literal('bearer'), secretRef }).strict(),
 ]);
+
+export const SLACK_POLL_TOOLS = ['slack_search_public_and_private', 'slack_read_user_profile'] as const;
 
 const httpEntry = z
   .object({
@@ -50,8 +60,15 @@ const httpEntry = z
     kind: z.literal('mcp-http'),
     url: z.url({ protocol: /^https?$/ }),
     auth: httpAuth.optional(),
+    // slack-dms polls the direct messages of a workspace on the official slack server into integration_events.
+    poll: z.literal('slack-dms').optional(),
   })
-  .strict();
+  .strict()
+  // the poll calls the connection directly, and the connection does not check tools.allow. so the owner must allow
+  // each tool that the poll calls.
+  .refine((each) => each.poll !== 'slack-dms' || SLACK_POLL_TOOLS.every((tool) => each.tools.allow.includes(tool)), {
+    message: `poll "slack-dms" needs ${SLACK_POLL_TOOLS.join(' and ')} in tools.allow`,
+  });
 
 const entry = z
   .discriminatedUnion('kind', [stdioEntry, httpEntry])

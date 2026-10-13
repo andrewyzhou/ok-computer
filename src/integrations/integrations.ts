@@ -5,8 +5,8 @@ import type { BlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
 import type { SetTimer } from '../scheduler/scheduler.js';
 import { localTime, type Clock } from '../time.js';
-import { TOOL_CALL, type Explanation, type Tool } from '../tools/registry.js';
-import { redact, redactValue } from '../observability/redact.js';
+import { errorText, TOOL_CALL, type Explanation, type Tool } from '../tools/registry.js';
+import { redact, redactValue, registerSecret } from '../observability/redact.js';
 import type { Risk } from '../policy/policy.js';
 import { createCatalogStore, riskFrom, riskOf, type Catalog, type CatalogTool } from './catalog.js';
 import { sessionProfile, type IntegrationEntry } from './config.js';
@@ -52,6 +52,9 @@ export interface IntegrationStatus {
   lastErrorAt: string | null;
   // the sign-in link that waits for the owner.
   authUrl?: string;
+  // the redirect url that the owner gives the oauth app, and the credential name of a pre-registered client. paste
+  // means that the owner finishes the sign-in with the address of the failed callback page.
+  oauthApp?: { redirectUrl: string; callback: 'loopback' | 'paste'; clientRef?: string };
   catalogHash?: string;
   // stored means that the tool list is the one from the database, and the server has not answered since the start.
   catalogStored?: boolean;
@@ -85,6 +88,12 @@ export interface Integrations {
   connect(id: string): Promise<{ connected: true } | { url: string } | { error: string }>;
   // a paused integration stays stopped over a restart. its tools stay in the catalog, and a call says that it is paused.
   setPaused(id: string, paused: boolean): Promise<boolean>;
+  // finishSignIn takes the address of the callback page that the owner pasted, for a server that accepts only an https
+  // redirect. the state in the address selects the flow, as in the loopback callback.
+  finishSignIn(pasted: string): Promise<{ ok: boolean; text: string }>;
+  // storeClient saves a pre-registered oauth client (for example a slack app) under the clientRef of its entry. the app
+  // writes the json itself, because a terminal drops the quotes of json that it gives to cmdkey.
+  storeClient(id: string, client: { client_id: string; client_secret?: string }): Promise<{ stored: true } | { error: string }>;
 }
 
 export function createIntegrations(deps: IntegrationsDeps): Integrations {
@@ -189,6 +198,15 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
     }
     parked.delete(entry.id);
     await connection.start();
+  };
+
+  const transportOf = (integrationId: string) => connections.get(integrationId)?.transport();
+  // the owner can pause the integration while the sign-in page is open. the tokens stay, and the connection starts when
+  // the owner resumes it.
+  const signedIn = (integrationId: string) => {
+    if (paused.has(integrationId)) return;
+    const done = connections.get(integrationId);
+    void done?.stop().then(() => done.start()).catch((err: unknown) => logger.error('mcp restart after sign-in failed', { integration: integrationId, err }));
   };
 
   for (const entry of entries) {
@@ -333,6 +351,15 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
           lastError: text('lastError'),
           lastErrorAt: text('lastErrorAt'),
           ...(authUrl ? { authUrl } : {}),
+          ...(entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' && deps.oauth
+            ? {
+                oauthApp: {
+                  redirectUrl: deps.oauth.redirectUrl(entry),
+                  callback: entry.auth.callback,
+                  ...(entry.auth.clientRef ? { clientRef: entry.auth.clientRef } : {}),
+                },
+              }
+            : {}),
           ...(catalog ? { catalogHash: catalog.hash, catalogStored: catalog.stored } : {}),
           // the live catalog is the text of the server, and a server can quote its key in a description. the stored
           // copy is redacted, and the page gets the same.
@@ -365,6 +392,39 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       return true;
     },
     connection: (id) => connections.get(id),
+    async finishSignIn(pasted) {
+      let url: URL;
+      try {
+        url = new URL(pasted.trim());
+      } catch {
+        return { ok: false, text: 'That is not an address. Copy the whole address of the page that the sign-in opened.' };
+      }
+      if (!deps.oauth) return { ok: false, text: 'No integration signs in with OAuth.' };
+      const done = await deps.oauth.callback(url, transportOf);
+      if (done.status === 200 && done.integrationId) signedIn(done.integrationId);
+      void deps.oauth.closeIfIdle();
+      return { ok: done.status === 200, text: done.text };
+    },
+    async storeClient(id, client) {
+      const entry = byId.get(id);
+      const ref = entry?.kind === 'mcp-http' && entry.auth?.type === 'oauth' ? entry.auth.clientRef : undefined;
+      if (!ref) return { error: `${id} has no auth.clientRef in okc.integrations.json, so it has no place for a client.` };
+      registerSecret(client.client_secret, `${ref}#secret`);
+      try {
+        // the page never shows the stored secret. so an id without a secret keeps the stored secret of the same id, or
+        // the owner who enters the id again deletes the secret, and the next sign-in fails.
+        if (client.client_secret === undefined) {
+          const kept = keptSecret(await deps.secrets.get(ref), client.client_id);
+          if (kept === null) return { error: `the stored client of ${id} is not valid json, so its secret cannot be kept. Enter the client secret too.` };
+          if (kept !== undefined) client = { ...client, client_secret: kept };
+        }
+        await deps.secrets.set(ref, JSON.stringify(client));
+      } catch (err) {
+        return { error: `the credential manager did not take the client: ${redact(errorText(err))}` };
+      }
+      logger.info('oauth client stored', { integration: id, clientRef: ref });
+      return { stored: true };
+    },
     connect(id) {
       // a second press of Connect while the first one runs joins it. a second attempt would stop the first one before
       // its sign-in link exists.
@@ -381,18 +441,16 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
     const connection = connections.get(id);
     if (!entry || !connection) return { error: `no integration has the id ${id}` };
     const oauth = entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' ? deps.oauth : undefined;
+    // without its pre-registered client the sdk fails later, with words about dynamic registration that do not say what
+    // the owner must do. a failure of the credential manager is not a missing client, so the attempt goes on and shows
+    // its own error.
+    const clientRef = entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' ? entry.auth.clientRef : undefined;
+    if (oauth && clientRef && (await deps.secrets.get(clientRef).catch(() => 'unknown')) === undefined) {
+      return { error: `the OAuth client of ${id} is not stored yet. Enter the client id and the client secret of its app on this page, then press Connect.` };
+    }
     if (oauth) {
       try {
-        await oauth.listen(
-          (integrationId) => connections.get(integrationId)?.transport(),
-          (integrationId) => {
-            // the owner can pause the integration while the sign-in page is open. the tokens stay, and the connection
-            // starts when the owner resumes it.
-            if (paused.has(integrationId)) return;
-            const done = connections.get(integrationId);
-            void done?.stop().then(() => done.start()).catch((err: unknown) => logger.error('mcp restart after sign-in failed', { integration: integrationId, err }));
-          },
-        );
+        await oauth.listen(transportOf, signedIn);
       } catch (err) {
         // another process, for example a second copy of the app, can hold the port.
         return { error: `the sign-in callback cannot listen: ${(err as Error).message}` };
@@ -417,4 +475,17 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
     if (connection.state().status === 'connected') return { connected: true };
     return url ? { url } : { error: connection.state().error ?? 'the connection did not start' };
   }
+}
+
+// keptSecret gives the secret of a stored client with the same id, undefined when there is none, and null when the
+// stored value is not json, for example a client that the owner stored with cmdkey.
+function keptSecret(stored: string | undefined, clientId: string): string | undefined | null {
+  if (stored === undefined) return undefined;
+  let old: { client_id?: unknown; client_secret?: unknown };
+  try {
+    old = JSON.parse(stored) as typeof old;
+  } catch {
+    return null;
+  }
+  return old?.client_id === clientId && typeof old.client_secret === 'string' ? old.client_secret : undefined;
 }

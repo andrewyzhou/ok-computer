@@ -59,6 +59,9 @@ const enabledBody = z.object({ enabled: z.boolean() });
 const checklistBody = z.object({ checklist: z.string().max(10_000) });
 const decisionBody = z.object({ decision: z.enum(['approve', 'deny']) });
 const pausedBody = z.object({ paused: z.boolean() });
+const callbackBody = z.object({ url: z.string().max(8_000) }).strict();
+// a client id and a secret are one word each. the limits only keep a wrong paste out.
+const clientBody = z.object({ client_id: z.string().regex(/^\S{1,200}$/), client_secret: z.string().regex(/^\S{1,500}$/).optional() }).strict();
 
 export function createDashboard(deps: DashboardDeps): Hono {
   const { db, config, clock, logger, app } = deps;
@@ -208,6 +211,22 @@ export function createDashboard(deps: DashboardDeps): Hono {
     const input = await body(c, pausedBody);
     if (!input) return c.json({ error: 'give paused as true or false' }, 400);
     return (await app.integrations.setPaused(c.req.param('id'), input.paused)) ? c.json({ paused: input.paused }) : notFound(c, 'integration');
+  });
+  // the answer never holds the client. the page shows only that it is stored.
+  server.post('/api/integrations/:id/client', async (c) => {
+    if (!integration(c.req.param('id'))) return notFound(c, 'integration');
+    const input = await body(c, clientBody);
+    if (!input) return c.json({ error: 'give client_id, and client_secret for a confidential client, each without spaces' }, 400);
+    const result = await app.integrations.storeClient(c.req.param('id'), input);
+    return 'error' in result ? c.json(result, 400) : c.json(result);
+  });
+  // a server that accepts only an https redirect sends the browser to a page that does not load. the owner pastes its
+  // address here, and the state in it selects the flow.
+  server.post('/api/integrations/callback', async (c) => {
+    const input = await body(c, callbackBody);
+    if (!input) return c.json({ error: 'give the address as url' }, 400);
+    const done = await app.integrations.finishSignIn(input.url);
+    return done.ok ? c.json({ text: done.text }) : c.json({ error: done.text }, 400);
   });
   server.get('/api/mcp-messages/:id', (c) => {
     const row = db.prepare('SELECT * FROM mcp_messages WHERE id = ?').get(Number(c.req.param('id')));

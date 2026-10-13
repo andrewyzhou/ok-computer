@@ -10,7 +10,7 @@ import { openDb } from '../db/index.js';
 import { createBlobStore } from '../observability/blobs.js';
 import { createLogger, silentLogger } from '../observability/logger.js';
 import { redact } from '../observability/redact.js';
-import { parseIntegrations, type IntegrationEntry } from './config.js';
+import { parseIntegrations, type HttpEntry, type IntegrationEntry } from './config.js';
 import { createIntegrations, type Integrations } from './integrations.js';
 import { createOAuth, FLOW_TTL_MS } from './oauth.js';
 import { createMemorySecretStore } from './secrets.js';
@@ -382,6 +382,34 @@ describe('oauth', () => {
     expect(await echo(integrations, 'b')).toMatchObject({ kind: 'result' });
     expect(as.stats).toMatchObject({ refreshGrants: 2, reuse: 0 });
     expect(needsAuth).toEqual([]);
+  });
+
+  // the single flight of a refresh read every post body as a form. a tool call whose arguments held refresh-like text
+  // was then never sent, and it got the answer of the call before it.
+  it('sends each tool call whose arguments read as a refresh form', async () => {
+    const url = 'https://mcp.example.test/mcp';
+    const parsed = parseIntegrations({ integrations: [{ id: 'remote', kind: 'mcp-http', url, auth: { type: 'oauth', callback: 'paste' }, tools: { allow: ['send'] } }] });
+    if (!parsed.ok) throw new Error(parsed.error);
+    const sent: number[] = [];
+    vi.stubGlobal('fetch', async (_input: unknown, init?: RequestInit) => {
+      const id = (JSON.parse(String(init?.body)) as { id: number }).id;
+      sent.push(id);
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [] } }), { headers: { 'content-type': 'application/json' } });
+    });
+    cleanup.push(async () => void vi.unstubAllGlobals());
+    const fetchFor = createOAuth({ db: openDb(':memory:'), clock: () => new Date(), logger: silentLogger, secrets: createMemorySecretStore() }).fetchFor(
+      parsed.value[0] as HttpEntry,
+    );
+    const text = 'a=1&grant_type=refresh_token&refresh_token=abc&b=2';
+    const init = (id: number): RequestInit => ({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'send', arguments: { text } } }),
+    });
+    await fetchFor(url, init(1));
+    const second = (await (await fetchFor(url, init(2))).json()) as { id: number };
+    expect(sent).toEqual([1, 2]);
+    expect(second.id).toBe(2);
   });
 
   // a sign-in that stops in a call makes a flow, but the callback does not listen then. the page showed its link, and
