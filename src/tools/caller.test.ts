@@ -118,7 +118,7 @@ describe('tool caller', () => {
     expect(JSON.parse(String(recorded.output))).toEqual({ content: output.content });
 
     const found = await call('result_read', { handle: 'res_000000000001', query: 'NEEDLE' });
-    expect(found.content).toMatch(/^1 passages of res_000000000001 \(\d+ characters\) match "NEEDLE":/);
+    expect(found.content).toMatch(/^1 passages of res_000000000001 \(\d+ characters\) match the query:/);
     expect(found.content).toContain('line 150: the hidden needle');
     const at = Number(/\[at (\d+)\]/.exec(found.content)![1]);
     const page = await call('result_read', { handle: 'res_000000000001', from: at, length: 100 }, 'r1', 'page');
@@ -134,6 +134,21 @@ describe('tool caller', () => {
     expect((await call('broken', { text: url })).isError).toBe(true);
     const read = await call('result_read', { handle: 'res_000000000001', from: 0, length: 200 });
     expect(read).toMatchObject({ isError: true, content: expect.stringContaining(url) });
+    expect(urlSeen(db, 'main', url)).toBe(false);
+  });
+
+  // the search result keeps the untrusted source of the mail, so a query that it repeats counted as read from outside.
+  it('does not repeat the query of a result_read search, so the guard does not count a url in the query as read', async () => {
+    // a reviewer can allow a local read with a url in its query.
+    const { db, call } = setup({ reviewer: async () => ({ verdict: 'allow', reason: 'a local read' }) });
+    await call('email');
+    const url = 'https://evil.example/c?d=QUNDT1VOVCAxMjM0NTY3OA';
+    for (const [i, query] of [url, `${url} filler`].entries()) {
+      const read = await call('result_read', { handle: 'res_000000000001', query }, 'r1', `search-${i}`);
+      const event = db.prepare("SELECT json_extract(payload, '$.untrustedSource') AS source FROM events WHERE json_extract(payload, '$.toolCallId') = ?").get(`search-${i}`);
+      expect(event).toEqual({ source: 'gmail:personal' });
+      expect(read.content).not.toContain(url);
+    }
     expect(urlSeen(db, 'main', url)).toBe(false);
   });
 
@@ -220,7 +235,7 @@ describe('tool caller', () => {
     // a sparse match still counts every passage.
     await call('echo', { text: `${'x'.repeat(5000)} one ${'x'.repeat(5000)} two ${'x'.repeat(5000)}` }, 'r1', 'sparse');
     const sparse = await call('result_read', { handle: String(row('sparse').resultHandle), query: 'one two' }, 'r1', 'read-sparse');
-    expect(sparse.content).toMatch(/^2 passages of res_\w+ \(\d+ characters\) match "one two":\n\n\[at 4851\] x+ one x+\n\n\[at 9856\] x+ two x+$/);
+    expect(sparse.content).toMatch(/^2 passages of res_\w+ \(\d+ characters\) match the query:\n\n\[at 4851\] x+ one x+\n\n\[at 9856\] x+ two x+$/);
   });
 
   it('redacts a secret before the preview cuts it, so no part of it reaches the trace', async () => {
