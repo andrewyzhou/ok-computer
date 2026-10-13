@@ -45,7 +45,9 @@ export interface SlackMessage {
   text: string;
 }
 
-export type SlackPage = { ok: true; messages: SlackMessage[] } | { ok: false; reason: string };
+// onlyFirst is true when the text of a message holds a line in the form of a result heading. then only the first
+// message is certainly the server's, and messages holds only that one.
+export type SlackPage = { ok: true; messages: SlackMessage[]; onlyFirst?: true } | { ok: false; reason: string };
 
 export interface SlackDmPollDeps {
   db: Db;
@@ -152,7 +154,9 @@ export function createSlackDmPoll(deps: SlackDmPollDeps): (integrationId: string
       const answer = readSearchPage(step.result);
       if (!answer.ok) return unreadable(id, step, answer.reason);
       const { messages } = answer;
-      const full = messages.length >= PAGE_SIZE;
+      // a page with a false result heading gives only its first message, so the rest of the page is not read yet.
+      const onlyFirst = answer.onlyFirst === true;
+      const full = onlyFirst || messages.length >= PAGE_SIZE;
       // a full page that is not sorted from old to new can skip the older messages between two pages.
       if (full && !ascending(messages)) return unreadable(id, step, 'a full page is not sorted from old to new, so the next page could skip older messages');
       state = { ...state, position: newest(state.position, messages), complete: !full };
@@ -163,6 +167,13 @@ export function createSlackDmPoll(deps: SlackDmPollDeps): (integrationId: string
       }
       read += messages.length;
       if (!full) break;
+      if (onlyFirst) {
+        // the next page starts in the second after the first message, because a page from its own second gives the
+        // same first message again. a later dm in that same second is skipped, and the log says so.
+        logger.warn('slack poll read only the first result of a page with a false result heading', { integration: id, after });
+        after = Math.max(after, Math.floor(Number(messages[0]!.ts))) + 1;
+        continue;
+      }
       // keyset paging: the next page starts in the second of the newest message of this page. more than a full page in
       // one second moves on to the next second, and the log says so.
       const next = Math.floor(Number(newest(null, messages) ?? after));
@@ -261,8 +272,11 @@ function messagesInJson(value: unknown): SlackPage | undefined {
 // a markdown result is a block after a numbered heading of the server, for example "### Result 3 of 20". the text of a
 // dm is in the answer too, and it can hold headings, rules and lines that look like a result. so the first heading
 // before any ts gives the form of the server, and only a line of that form with the next number starts a block. each
-// other line is text of the block before it. thus a dm cannot cut a block or add one at a wrong place. a dm that
-// guesses the next number can put a false block in place of the next real result, whose text then stays in that block.
+// other line is text of the block before it. thus a dm cannot cut a block or add one at a wrong place.
+// a dm can hold a line of that form too, and then the reader cannot tell its false blocks from the real ones. only the
+// first block is certainly the server's, because its heading comes before the text of any dm. so a page with more lines
+// of that form than blocks, or with a later block that is not whole, gives only its first message. the poll then reads
+// on from the second after that message, so a false block can neither stop the poll nor move its position.
 function messagesInMarkdown(text: string): SlackPage {
   if (!HAS_TS.test(text)) return NOTHING.test(text) ? { ok: true, messages: [] } : { ok: false, reason: 'it has no message that the reader knows' };
   const lines = text.split(/\r?\n/);
@@ -270,30 +284,44 @@ function messagesInMarkdown(text: string): SlackPage {
   const numberOf = first < 0 || HAS_TS.test(lines.slice(0, first).join('\n')) ? undefined : headingForm(lines[first]!);
   if (!numberOf) return { ok: false, reason: 'it has no numbered heading before its first message' };
   // a count before the first heading, as in "Found 3 results.", is the number of blocks. a block after the last one is
-  // text of a dm, and a wrong count means that the reader does not know this form.
+  // text of a dm, and a wrong count means that the reader does not know this form. without a count, a page has at most
+  // the blocks that the poll asks for.
   const count = /\b(\d+) (?:results|messages|matches)\b/i.exec(lines.slice(0, first).join('\n'));
-  const total = count ? Number(count[1]) : Infinity;
+  const total = count ? Number(count[1]) : PAGE_SIZE;
   const blocks: string[][] = [];
+  let headings = 0;
   for (const line of lines.slice(first)) {
-    if (blocks.length < total && numberOf(line) === blocks.length + 1) blocks.push([]);
+    const number = numberOf(line);
+    if (number !== undefined) headings++;
+    if (blocks.length < total && number === blocks.length + 1) blocks.push([]);
     else blocks.at(-1)!.push(line);
   }
   if (count && blocks.length !== total) return { ok: false, reason: 'its number of results is not the number of blocks' };
-  const messages: SlackMessage[] = [];
-  for (const lines of blocks) {
-    // the fields of the server come before the text of the dm, so the first match of a field is the one of the server.
-    // a heading before the ts is not text of a dm. it shows that the first heading was not the form of a result.
-    const at = lines.findIndex((line) => LABELED_TS.test(line));
-    if (at < 0) return { ok: false, reason: 'a message has no labeled ts' };
-    if (lines.slice(0, at).some((line) => HEADING.test(line))) return { ok: false, reason: 'a message has a heading before its ts' };
-    const block = lines.join('\n');
-    const ts = LABELED_TS.exec(lines[at]!)![1]!;
-    const channel = CHANNEL_LINE.exec(block)?.[1] ?? CHANNEL.exec(block)?.[1];
-    if (!channel) return { ok: false, reason: 'a message has no channel id' };
-    const user = USER_LINE.exec(block)?.[1] ?? USER.exec(block)?.[1];
-    messages.push({ channel, ts, ...(user ? { user } : {}), text: block.trim() });
+  // the first block is the server's, so a fault in it means that the reader does not know this form.
+  const head = messageInBlock(blocks[0]!);
+  if (typeof head === 'string') return { ok: false, reason: head };
+  const messages = [head];
+  for (const block of blocks.slice(1)) {
+    const message = messageInBlock(block);
+    if (typeof message === 'string') return { ok: true, messages: [head], onlyFirst: true };
+    messages.push(message);
   }
-  return { ok: true, messages };
+  return headings > blocks.length ? { ok: true, messages: [head], onlyFirst: true } : { ok: true, messages };
+}
+
+// messageInBlock reads one block, or gives the reason why it cannot. the fields of the server come before the text of
+// the dm, so the first match of a field is the one of the server. a heading before the ts is not text of a dm. it shows
+// that the first heading was not the form of a result.
+function messageInBlock(lines: string[]): SlackMessage | string {
+  const at = lines.findIndex((line) => LABELED_TS.test(line));
+  if (at < 0) return 'a message has no labeled ts';
+  if (lines.slice(0, at).some((line) => HEADING.test(line))) return 'a message has a heading before its ts';
+  const block = lines.join('\n');
+  const ts = LABELED_TS.exec(lines[at]!)![1]!;
+  const channel = CHANNEL_LINE.exec(block)?.[1] ?? CHANNEL.exec(block)?.[1];
+  if (!channel) return 'a message has no channel id';
+  const user = USER_LINE.exec(block)?.[1] ?? USER.exec(block)?.[1];
+  return { channel, ts, ...(user ? { user } : {}), text: block.trim() };
 }
 
 // headingForm reads the form of the first heading, whose first number must be 1. it gives a function that returns the
