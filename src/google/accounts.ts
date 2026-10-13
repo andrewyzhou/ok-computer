@@ -8,8 +8,8 @@ import type { SecretStore } from '../integrations/secrets.js';
 import type { Logger } from '../observability/logger.js';
 import { registerSecret } from '../observability/redact.js';
 import type { Clock } from '../time.js';
-import { requiredScopes, type GoogleConfig } from './config.js';
-import { fromSdk, GoogleError, toGoogleError } from './errors.js';
+import { requiredScopes, scopeWords, type GoogleConfig } from './config.js';
+import { CLIENT_REFUSED, fromSdk, GoogleError, toGoogleError } from './errors.js';
 
 export interface GoogleApis {
   gmail: gmail_v1.Gmail;
@@ -79,7 +79,7 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
   const { db, clock, logger, secrets, config } = deps;
   const endpoints = deps.endpoints ?? {};
   const aliases = config.accounts.map((each) => each.alias);
-  const cached = new Map<string, { auth: OAuth2Client; apis: GoogleApis; refresh: string }>();
+  const cached = new Map<string, { auth: OAuth2Client; apis: GoogleApis }>();
   const flows = new Map<string, Flow>();
   let server: Server | undefined;
   let serverUrl: Promise<string> | undefined;
@@ -90,27 +90,28 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
   }
   const row = (alias: string) => db.prepare('SELECT * FROM google_accounts WHERE alias = ?').get(alias) as Record<string, string | null> | undefined;
 
-  const clientSecrets = async (): Promise<{ client_id: string; client_secret: string }> => {
-    const text = await secrets.get(CLIENT_REF);
-    if (!text) throw new GoogleError('auth', `the google oauth client is not stored. store it under ${CLIENT_REF} (see docs/setup/google.md).`, undefined, false);
-    const parsed = JSON.parse(text) as { client_id: string; client_secret: string };
-    registerSecret(parsed.client_secret, `${CLIENT_REF}.secret`);
-    return parsed;
+  const clientSecret = async (): Promise<string> => {
+    const secret = await secrets.get(CLIENT_REF);
+    if (!secret) throw new GoogleError('client', 'the client secret of the google oauth client is not stored. Upload the client file on the Google page.', undefined, false);
+    registerSecret(secret, CLIENT_REF);
+    return secret;
   };
 
-  const oauthClient = async (redirectUri?: string) => {
-    const { client_id, client_secret } = await clientSecrets();
-    return new OAuth2Client({
-      clientId: client_id,
-      clientSecret: client_secret,
+  const oauthClient = async (redirectUri?: string) =>
+    new OAuth2Client({
+      clientId: config.clientId,
+      clientSecret: await clientSecret(),
       ...(redirectUri ? { redirectUri } : {}),
+      // a 401 alone does not prove a dead sign-in: an access token can end early. with this flag the library gets a
+      // new token and tries once more, so the answer of the token endpoint decides. invalid_grant is a dead sign-in,
+      // and a 5xx is an outage.
+      forceRefreshOnFailure: true,
       endpoints: {
         ...(endpoints.tokenUrl ? { oauth2TokenUrl: endpoints.tokenUrl } : {}),
         ...(endpoints.authUrl ? { oauth2AuthBaseUrl: endpoints.authUrl } : {}),
         ...(endpoints.revokeUrl ? { oauth2RevokeUrl: endpoints.revokeUrl } : {}),
       },
     });
-  };
 
   // the sdk retries a get three times on a 5xx by default. the poll owns its retries, so the sdk does not.
   const apisFor = (auth: OAuth2Client): GoogleApis => {
@@ -142,12 +143,22 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
         void secrets.set(tokenRef(alias), tokens.refresh_token).catch((err: unknown) => logger.error('a rotated google token was not stored', { alias, err }));
       }
     });
-    const client = { auth, apis: apisFor(auth), refresh };
+    const client = { auth, apis: apisFor(auth) };
     cached.set(alias, client);
     return client;
   };
 
+  // a refused client stops every account, so the owner gets one message that names the client.
+  const parkAll = (err: GoogleError) => {
+    cached.clear();
+    db.prepare("UPDATE google_accounts SET status = 'needs_auth', lastError = ?, lastErrorAt = ?, updatedAt = ? WHERE status = 'ok'").run(err.message, now(), now());
+    const claimed = db.prepare('UPDATE google_accounts SET alertedAt = ? WHERE alertedAt IS NULL AND authorizedAt IS NOT NULL').run(now());
+    if (Number(claimed.changes) === 0) return;
+    deps.onNeedsAuth('', `Google refused the OAuth client of OK Computer (${err.message}), so no Google account is checked. Check clientId in okc.config.json, then upload the client file again on the Google page.`);
+  };
+
   const park = (alias: string, err: GoogleError) => {
+    if (err.kind === 'client') return parkAll(err);
     cached.delete(alias);
     const before = row(alias);
     db.prepare("UPDATE google_accounts SET status = 'needs_auth', lastError = ?, lastErrorAt = ?, updatedAt = ? WHERE alias = ?").run(err.message, now(), now(), alias);
@@ -229,7 +240,7 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
       const revoke = () => auth.revokeToken(tokens.refresh_token!).catch((err: unknown) => logger.warn('google token revoke failed', { alias: flow.alias, err: toGoogleError(err) }));
       if (missing.length) {
         await revoke();
-        return { error: `the sign-in did not grant ${missing.map((scope) => scope.split('/').pop()).join(', ')}. Connect again and tick every box.` };
+        return { error: `Google did not grant: ${scopeWords(missing)}. Nothing was saved. Press Connect again and keep every box checked.` };
       }
       auth.setCredentials(tokens);
       const profile = await apisFor(auth).gmail.users.getProfile({ userId: 'me' });
@@ -238,7 +249,7 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
       if (expected && email !== expected) {
         // the owner signed in with another account in the browser. the token must not stay valid at google either.
         await revoke();
-        return { error: `the ${flow.alias} account must be ${expected}, but the sign-in was for ${email}.` };
+        return { error: `You signed in as ${email}, but ${flow.alias} is ${expected} in the config. Nothing was saved. Press Connect again and pick ${expected}.` };
       }
       const before = row(flow.alias)?.email;
       await secrets.set(tokenRef(flow.alias), tokens.refresh_token);
@@ -271,26 +282,14 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
       } catch (err) {
         throw toGoogleError(err);
       }
-      let error: GoogleError;
       try {
         return await fn(client.apis);
       } catch (err) {
         if (!fromSdk(err)) throw err;
-        error = toGoogleError(err);
+        const error = toGoogleError(err);
+        if (error.kind === 'auth' || error.kind === 'client') park(alias, error);
+        throw error;
       }
-      // a 401 on an api call means that the access token died early, for example after a password change. one new
-      // token decides. a 401 means that google did not act, so the retry is safe.
-      if (error.kind === 'auth' && error.status === 401) {
-        client.auth.setCredentials({ refresh_token: client.refresh });
-        try {
-          return await fn(client.apis);
-        } catch (err) {
-          if (!fromSdk(err)) throw err;
-          error = toGoogleError(err);
-        }
-      }
-      if (error.kind === 'auth') park(alias, error);
-      throw error;
     },
     async saveClient(file) {
       // a web client needs a registered redirect url, and the loopback flow with any port works only for a desktop
@@ -300,14 +299,17 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
         return { error: (file as { web?: unknown } | null)?.web ? 'this is a web client. Create an OAuth client of type "Desktop app" instead.' : 'the file has no "installed" client. Upload the JSON file of a "Desktop app" OAuth client.' };
       }
       if (typeof installed.client_id !== 'string' || typeof installed.client_secret !== 'string') return { error: 'the client has no client_id or client_secret.' };
-      registerSecret(installed.client_secret, `${CLIENT_REF}.secret`);
+      if (installed.client_id !== config.clientId) return { error: `the file is for the client ${installed.client_id}, but clientId in okc.config.json is ${config.clientId}.` };
+      registerSecret(installed.client_secret, CLIENT_REF);
       try {
-        await secrets.set(CLIENT_REF, JSON.stringify({ client_id: installed.client_id, client_secret: installed.client_secret }));
+        await secrets.set(CLIENT_REF, installed.client_secret);
       } catch (err) {
         logger.error('the google client was not stored', { err });
         return { error: 'the credential manager did not take the client.' };
       }
       cached.clear();
+      // the accounts that the refused client stopped work again. their refresh tokens are still valid.
+      db.prepare("UPDATE google_accounts SET status = 'ok', alertedAt = NULL, lastError = NULL, updatedAt = ? WHERE status = 'needs_auth' AND lastError LIKE ?").run(now(), `${CLIENT_REFUSED}%`);
       return { saved: true };
     },
     async beginSignIn(alias) {

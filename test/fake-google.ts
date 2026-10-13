@@ -66,6 +66,7 @@ export interface FakeGoogle {
   deliver(alias: string, message: FakeMessage): void;
   upsertEvent(alias: string, event: FakeEvent): void;
   fault(fault: Fault): void;
+  clearFaults(): void;
   // the scopes that the next code exchange grants.
   grant: string[];
   // the account of the next code exchange.
@@ -318,6 +319,7 @@ export async function startFakeGoogle(): Promise<FakeGoogle> {
       box.events.set(event.id, { status: 'confirmed', updated: new Date(Date.UTC(2026, 9, 13, 0, 0, box.calendarVersion)).toISOString(), ...event, version: box.calendarVersion });
     },
     fault: (fault) => void faults.push(fault),
+    clearFaults: () => void faults.splice(0),
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
   return fake;

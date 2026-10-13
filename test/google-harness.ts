@@ -10,6 +10,7 @@ import { createBlobStore, type BlobStore } from '../src/observability/blobs.js';
 import { createLogger, type Logger } from '../src/observability/logger.js';
 import { startFakeGoogle, type FakeGoogle } from './fake-google.js';
 
+export const CLIENT_ID = 'fake-client.apps.googleusercontent.com';
 export const CLIENT_SECRET = 'GOCSPX-fake-client-secret-0123456789';
 export const refreshOf = (alias: string) => `1//fake-refresh-${alias}-${'r'.repeat(24)}`;
 
@@ -43,9 +44,9 @@ export async function createGoogleHarness(options: { accounts?: string[]; config
   const clock = () => now.value;
   const blobs = createBlobStore(db, join(dir, 'blobs'), clock);
   const logger = createLogger({ dir: join(dir, 'logs'), consoleLevel: 'off', clock });
-  const config = googleConfigSchema.parse({ accounts: aliases.map((alias) => ({ alias, email: `${alias}@example.com` })), ...options.config });
+  const config = googleConfigSchema.parse({ clientId: CLIENT_ID, accounts: aliases.map((alias) => ({ alias, email: `${alias}@example.com` })), ...options.config });
   const secrets = createMemorySecretStore({
-    'google.client': JSON.stringify({ client_id: 'fake-client.apps.googleusercontent.com', client_secret: CLIENT_SECRET }),
+    'google.client': CLIENT_SECRET,
     ...Object.fromEntries(aliases.map((alias) => [`google.${alias}`, refreshOf(alias)])),
   });
   for (const alias of aliases) fake.addAccount(alias, `${alias}@example.com`, refreshOf(alias));

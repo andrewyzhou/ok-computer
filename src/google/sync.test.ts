@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createGoogleHarness, refreshOf, type GoogleHarness } from '../../test/google-harness.js';
+import { CLIENT_ID, CLIENT_SECRET, createGoogleHarness, refreshOf, type GoogleHarness } from '../../test/google-harness.js';
 import { createSync } from './sync.js';
 
 let h: GoogleHarness;
@@ -221,6 +221,72 @@ describe('token health', () => {
     expect(report).toMatchObject({ ok: true });
     expect(h.fake.requests.filter((each) => each.path === '/token').length).toBe(tokens + 1);
     expect(h.alerts).toEqual([]);
+  });
+});
+
+describe('token health against the token endpoint', () => {
+  const tokenRequests = () => h.fake.requests.filter((each) => each.path === '/token').length;
+
+  // a 401 alone proves nothing. the library gets a new token, and the token endpoint answers 503: an outage.
+  it('keeps the account and its token when a 401 meets an outage of the token endpoint', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    await poll();
+    h.fake.fault({ route: 'GET /gmail/v1/users/me/history', status: 401, times: 1, body: { error: { code: 401, message: 'Invalid Credentials' } } });
+    h.fake.fault({ route: 'POST /token', status: 503, times: 4 });
+    const [report] = await poll();
+    expect(report).toMatchObject({ ok: false, error: expect.stringContaining('the token request failed with 503') });
+    expect(h.alerts).toEqual([]);
+    expect(h.rows('SELECT status FROM google_accounts')).toEqual([{ status: 'ok' }]);
+    expect(h.secrets.values.get('google.personal')).toBe(refreshOf('personal'));
+    await poll();
+    expect(h.rows('SELECT failures FROM google_accounts')).toEqual([{ failures: 0 }]);
+  });
+
+  it('sends one message for a dead sign-in, then makes no token request, and works again after a new sign-in', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    h.fake.revoke(refreshOf('personal'));
+    await poll();
+    expect(h.alerts).toHaveLength(1);
+    const before = tokenRequests();
+    await poll();
+    await poll();
+    expect(tokenRequests()).toBe(before);
+    // the tokens stay in the credential manager. only the owner's connect replaces them.
+    expect(h.secrets.values.get('google.personal')).toBe(refreshOf('personal'));
+
+    h.fake.nextSignIn = { alias: 'personal', refreshToken: '1//new-sign-in-after-revoke-0123456789' };
+    const begun = await h.accounts.beginSignIn('personal');
+    const url = new URL((begun as { url: string }).url);
+    await fetch(`${url.searchParams.get('redirect_uri')}?code=good-code&state=${url.searchParams.get('state')}`).then((res) => res.text());
+    h.fake.deliver('personal', mail('back', 'after the new sign-in'));
+    const [report] = await poll();
+    expect(report).toMatchObject({ ok: true });
+    expect(signals().map((each) => each.externalId)).toEqual(['back']);
+  });
+
+  // a mistyped client secret must not look like eight dead sign-ins.
+  it('parks every account with one message when google refuses the client, and a new client file lifts it', async () => {
+    h = await createGoogleHarness({ accounts: ['personal', 'school'] });
+    h.signedIn('personal');
+    h.signedIn('school');
+    h.fake.fault({ route: 'POST /token', status: 401, body: { error: 'invalid_client', error_description: 'The OAuth client was not found.' } });
+    await poll();
+    expect(h.alerts).toHaveLength(1);
+    expect(h.alerts[0]!.text).toContain('Google refused the OAuth client of OK Computer');
+    expect(h.rows('SELECT status FROM google_accounts ORDER BY alias')).toEqual([{ status: 'needs_auth' }, { status: 'needs_auth' }]);
+    const before = tokenRequests();
+    await poll();
+    expect(tokenRequests()).toBe(before);
+
+    h.fake.clearFaults();
+    expect(await h.accounts.saveClient({ installed: { client_id: CLIENT_ID, client_secret: CLIENT_SECRET } })).toEqual({ saved: true });
+    expect(h.rows('SELECT status, alertedAt FROM google_accounts ORDER BY alias')).toEqual([
+      { status: 'ok', alertedAt: null },
+      { status: 'ok', alertedAt: null },
+    ]);
+    expect((await poll()).every((each) => each.ok)).toBe(true);
   });
 });
 

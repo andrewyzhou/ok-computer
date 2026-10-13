@@ -1,6 +1,6 @@
 import { request } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createGoogleHarness, type GoogleHarness } from '../../test/google-harness.js';
+import { CLIENT_ID, createGoogleHarness, type GoogleHarness } from '../../test/google-harness.js';
 import { SCOPES } from './config.js';
 
 let h: GoogleHarness;
@@ -53,7 +53,7 @@ describe('google sign-in', () => {
     h.fake.grant = [SCOPES.readonly, SCOPES.events, SCOPES.calendarRead];
     h.fake.nextSignIn = { alias: 'personal', refreshToken: NEW_REFRESH };
     const { state, callback } = await begin('personal');
-    expect(await visit(callback, `code=good-code&state=${state}`)).toContain('did not grant gmail.modify');
+    expect(await visit(callback, `code=good-code&state=${state}`)).toContain('Google did not grant: label and archive mail. Nothing was saved.');
     expect(h.fake.requests.some((each) => each.path.startsWith('/revoke'))).toBe(true);
     expect(h.secrets.values.get('google.personal')).not.toBe(NEW_REFRESH);
     expect(h.rows('SELECT status FROM google_accounts')).toEqual([{ status: 'signed_out' }]);
@@ -64,7 +64,7 @@ describe('google sign-in', () => {
     // the owner was still signed in to the school account in the browser.
     h.fake.nextSignIn = { alias: 'school', refreshToken: NEW_REFRESH };
     const { state, callback } = await begin('personal');
-    expect(await visit(callback, `code=good-code&state=${state}`)).toContain('must be personal@example.com, but the sign-in was for school@example.com');
+    expect(await visit(callback, `code=good-code&state=${state}`)).toContain('You signed in as school@example.com, but personal is personal@example.com in the config. Nothing was saved.');
     expect(h.secrets.values.get('google.personal')).not.toBe(NEW_REFRESH);
   });
 
@@ -81,11 +81,14 @@ describe('google sign-in', () => {
     expect(await visit(callback, `code=good-code&state=${state}`)).toContain('unknown or expired');
   });
 
-  it('stores a desktop client from its json file and refuses a web client', async () => {
+  it('stores the secret of the configured desktop client from its json file, and refuses a web client or another client', async () => {
     h = await createGoogleHarness({ accounts: ['personal'] });
-    expect(await h.accounts.saveClient({ web: { client_id: 'w', client_secret: 'web-secret-123456' } })).toEqual({ error: expect.stringContaining('web client') });
-    expect(await h.accounts.saveClient({ installed: { client_id: 'd.apps.googleusercontent.com', client_secret: 'GOCSPX-desktop-secret', redirect_uris: ['http://localhost'] } })).toEqual({ saved: true });
-    expect(JSON.parse(h.secrets.values.get('google.client')!)).toEqual({ client_id: 'd.apps.googleusercontent.com', client_secret: 'GOCSPX-desktop-secret' });
+    expect(await h.accounts.saveClient({ web: { client_id: CLIENT_ID, client_secret: 'web-secret-123456' } })).toEqual({ error: expect.stringContaining('web client') });
+    expect(await h.accounts.saveClient({ installed: { client_id: 'other.apps.googleusercontent.com', client_secret: 'GOCSPX-other' } })).toEqual({
+      error: expect.stringContaining('but clientId in okc.config.json is fake-client.apps.googleusercontent.com'),
+    });
+    expect(await h.accounts.saveClient({ installed: { client_id: CLIENT_ID, client_secret: 'GOCSPX-desktop-secret', redirect_uris: ['http://localhost'] } })).toEqual({ saved: true });
+    expect(h.secrets.values.get('google.client')).toBe('GOCSPX-desktop-secret');
   });
 
   it('clears the needs_auth state and the alert mark after a new sign-in', async () => {

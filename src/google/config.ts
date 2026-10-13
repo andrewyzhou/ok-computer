@@ -5,6 +5,9 @@ const alias = z.string().regex(/^[a-z][a-z0-9-]{0,15}$/, 'use at most 16 lower-c
 
 export const googleConfigSchema = z
   .object({
+    // the client id of the "desktop app" oauth client. it is not a secret. the client secret is in the credential
+    // manager.
+    clientId: z.string().regex(/\.apps\.googleusercontent\.com$/, 'use the client id of the desktop app client, which ends in .apps.googleusercontent.com'),
     // the email is optional. when it is set, a sign-in with another google account is refused, so the alias can never
     // read the wrong mailbox.
     accounts: z.array(z.object({ alias, email: z.email().optional() }).strict()).min(1),
@@ -27,6 +30,17 @@ export const SCOPES = {
   events: 'https://www.googleapis.com/auth/calendar.events',
   calendarRead: 'https://www.googleapis.com/auth/calendar.readonly',
 } as const;
+
+// the owner reads a missing scope in words on the sign-in page.
+const SCOPE_WORDS: Record<string, string> = {
+  [SCOPES.readonly]: 'read mail',
+  [SCOPES.modify]: 'label and archive mail',
+  [SCOPES.send]: 'send mail',
+  [SCOPES.events]: 'change calendar events',
+  [SCOPES.calendarRead]: 'read the calendar',
+};
+
+export const scopeWords = (scopes: string[]) => scopes.map((scope) => SCOPE_WORDS[scope] ?? scope).join(', ');
 
 // a sign-in without these scopes is refused. google lets the owner untick each scope on the consent page, and a
 // token without them fails at each poll.

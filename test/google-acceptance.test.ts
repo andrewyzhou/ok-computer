@@ -10,7 +10,7 @@ import { createLogger } from '../src/observability/logger.js';
 import { sessionTaint } from '../src/policy/store.js';
 import { createTestApp } from './app-harness.js';
 import { startFakeGoogle, type FakeGoogle } from './fake-google.js';
-import { CLIENT_SECRET, refreshOf } from './google-harness.js';
+import { CLIENT_ID, CLIENT_SECRET, refreshOf } from './google-harness.js';
 
 const pdt = (time: string, day = '2026-10-13') => new Date(`${day}T${time}:00-07:00`).toISOString();
 
@@ -50,7 +50,7 @@ describe('google acceptance', () => {
     for (const alias of ['personal', 'school']) fake.addAccount(alias, `${alias}@example.com`, refreshOf(alias));
     fake.upsertEvent('personal', { id: 'd1', summary: 'Dentist', start: { dateTime: '2026-10-20T16:00:00Z' }, end: { dateTime: '2026-10-20T17:00:00Z' }, organizer: { self: true } });
     const secrets = createMemorySecretStore({
-      'google.client': JSON.stringify({ client_id: 'fake-client', client_secret: CLIENT_SECRET }),
+      'google.client': CLIENT_SECRET,
       'google.personal': refreshOf('personal'),
       'google.school': refreshOf('school'),
     });
@@ -68,7 +68,7 @@ describe('google acceptance', () => {
       config: {
         slots: { main: { chain: ['fake/m'] }, heartbeat: { chain: ['fake/m'] }, utility: { chain: ['fake/m'] } },
         heartbeat: { every: '1h' },
-        google: { accounts: [{ alias: 'personal', email: 'personal@example.com' }, { alias: 'school' }] },
+        google: { clientId: CLIENT_ID, accounts: [{ alias: 'personal', email: 'personal@example.com' }, { alias: 'school' }] },
       },
       deps: {
         secrets,
