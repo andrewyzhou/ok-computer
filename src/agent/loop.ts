@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Config, Slot } from '../config/schema.js';
 import type { ContextStrategy } from '../context/strategy.js';
 import type { Db } from '../db/index.js';
-import { appendEvent, listEvents, type NewEvent } from '../events/log.js';
+import { appendEvent, listEvents, type EventInput } from '../events/log.js';
 import type { SlotRunner } from '../models/slots.js';
 import type { ToolCall } from '../models/types.js';
 import type { Logger } from '../observability/logger.js';
@@ -33,7 +33,7 @@ export interface RunInput {
   channel: string;
   allowedTools: readonly string[];
   // events that start the run, for example the owner's message. they get the run id.
-  events: Array<Omit<NewEvent, 'sessionKey' | 'runId'>>;
+  events: EventInput[];
   signal?: AbortSignal;
 }
 
@@ -76,8 +76,7 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
     logger.info('run ended', { status, error });
     return { runId, status, text, ...(error ? { error } : {}) };
   };
-  const append = (event: Omit<NewEvent, 'sessionKey' | 'runId'>) =>
-    appendEvent(db, { ...event, sessionKey: input.sessionKey, runId } as NewEvent, clock());
+  const append = (event: EventInput) => appendEvent(db, { ...event, sessionKey: input.sessionKey, runId }, clock());
 
   try {
     for (const event of input.events) append(event);

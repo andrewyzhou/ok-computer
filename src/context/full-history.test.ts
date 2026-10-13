@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/index.js';
-import { appendEvent, listEvents, type NewEvent } from '../events/log.js';
+import { appendEvent, listEvents, type EventInput } from '../events/log.js';
 import { toAnthropicParams } from '../models/anthropic.js';
 import type { AssistantTurn, ToolSpec } from '../models/types.js';
 import { fullHistory } from './full-history.js';
@@ -28,10 +28,9 @@ const answerTurn: AssistantTurn = {
   stopReason: 'end_turn',
 };
 
-function session(events: Array<Omit<NewEvent, 'sessionKey' | 'runId'>>) {
+function session(events: EventInput[]) {
   const db = openDb(':memory:');
-  const add = (list: typeof events) =>
-    list.forEach((e) => appendEvent(db, { sessionKey: 'main', runId: 'r', ...e } as NewEvent));
+  const add = (list: EventInput[]) => list.forEach((e) => appendEvent(db, { sessionKey: 'main', runId: 'r', ...e }));
   add(events);
   const render = async () =>
     toAnthropicParams({

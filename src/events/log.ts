@@ -26,15 +26,12 @@ export type StoredEvent = {
   };
 }[EventType];
 
-export type NewEvent<T extends EventType = EventType> = {
-  sessionKey: string;
-  runId: string | null;
-  type: T;
-  payload: EventPayloads[T];
-};
+export type EventInput = { [T in EventType]: { type: T; payload: EventPayloads[T] } }[EventType];
+
+export type NewEvent = EventInput & { sessionKey: string; runId: string | null };
 
 // the log has no update or delete function. triggers in the database also stop both operations.
-export function appendEvent<T extends EventType>(db: Db, event: NewEvent<T>, now = new Date()): StoredEvent {
+export function appendEvent(db: Db, event: NewEvent, now = new Date()): StoredEvent {
   const row = db
     .prepare(
       `INSERT INTO events (sessionKey, runId, seq, type, payload, createdAt)
