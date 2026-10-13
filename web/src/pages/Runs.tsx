@@ -4,7 +4,7 @@ import { useApi } from '../api';
 import { Empty, Load, Page, Status } from '../components';
 import { duration, time, usd } from '../format';
 
-const TRIGGERS = ['message', 'automation', 'heartbeat', 'consolidation', 'system'];
+const TRIGGERS = ['message', 'automation', 'heartbeat', 'consolidation', 'system', 'subagent'];
 const SLOTS = ['main', 'heartbeat', 'utility', 'batch', 'consolidation', 'compaction'];
 const STATUSES = ['running', 'completed', 'failed', 'aborted'];
 
