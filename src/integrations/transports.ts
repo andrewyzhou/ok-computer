@@ -109,10 +109,13 @@ export async function descendants(root: number): Promise<number[]> {
 export async function httpTransport(
   entry: HttpEntry,
   secrets: SecretStore,
-  oauth: (entry: HttpEntry) => OAuthClientProvider,
+  oauth?: { provider: (entry: HttpEntry) => OAuthClientProvider; fetch: typeof fetch },
 ): Promise<Transport> {
   const url = new URL(entry.url);
-  if (entry.auth?.type === 'oauth') return new StreamableHTTPClientTransport(url, { authProvider: oauth(entry) });
+  if (entry.auth?.type === 'oauth') {
+    if (!oauth) throw new Error('oauth is not set up in this process');
+    return new StreamableHTTPClientTransport(url, { authProvider: oauth.provider(entry), fetch: oauth.fetch });
+  }
   if (entry.auth?.type === 'bearer') {
     const token = await secrets.get(entry.auth.secretRef);
     if (token === undefined) throw new Error(`the secret ${entry.auth.secretRef} is not in the credential manager`);

@@ -1,0 +1,159 @@
+import { mkdtempSync } from 'node:fs';
+import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { startOAuthServer, type OAuthTestServer } from '../../test/oauth-server.js';
+import { openDb } from '../db/index.js';
+import { createBlobStore } from '../observability/blobs.js';
+import { silentLogger } from '../observability/logger.js';
+import { redact } from '../observability/redact.js';
+import { parseIntegrations, type IntegrationEntry } from './config.js';
+import { createIntegrations, type Integrations } from './integrations.js';
+import { createOAuth, FLOW_TTL_MS } from './oauth.js';
+import { createMemorySecretStore } from './secrets.js';
+
+async function freePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+const cleanup: Array<() => Promise<void>> = [];
+afterEach(async () => {
+  for (const each of cleanup.splice(0).reverse()) await each();
+});
+
+async function setup() {
+  const as = await startOAuthServer();
+  cleanup.push(() => as.close());
+  const db = openDb(':memory:');
+  db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r1', 'main', 'message', 'main', 'running', 'x')").run();
+  let now = new Date('2026-10-13T10:00:00Z').getTime();
+  const clock = () => new Date(now);
+  const secrets = createMemorySecretStore({ 'remote-app': JSON.stringify({ client_id: as.clientId }) });
+  const port = await freePort();
+  const oauth = createOAuth({ db, clock, logger: silentLogger, secrets, port });
+  cleanup.push(() => oauth.close());
+  const parsed = parseIntegrations({
+    integrations: [{ id: 'remote', kind: 'mcp-http', url: `${as.base}/mcp`, auth: { type: 'oauth', clientRef: 'remote-app' }, tools: { allow: ['echo'] }, risk: { echo: 'read' } }],
+  });
+  if (!parsed.ok) throw new Error(parsed.error);
+  const needsAuth: string[] = [];
+  const integrations = createIntegrations({
+    db,
+    blobs: createBlobStore(db, mkdtempSync(join(tmpdir(), 'okc-oauth-')), clock),
+    logger: silentLogger,
+    clock,
+    entries: parsed.value as IntegrationEntry[],
+    secrets,
+    oauth,
+    onNeedsAuth: (id) => needsAuth.push(id),
+  });
+  cleanup.push(() => integrations.stop());
+  return { as, db, secrets, oauth, integrations, needsAuth, advance: (ms: number) => (now += ms) };
+}
+
+// the owner's browser: it opens the link, and the server sends it to the loopback callback.
+async function consent(url: string): Promise<{ callback: string; response: Response }> {
+  const redirect = await fetch(url, { redirect: 'manual' });
+  const callback = redirect.headers.get('location')!;
+  return { callback, response: await fetch(callback) };
+}
+
+async function connect(integrations: Integrations) {
+  const started = await integrations.authorize('remote');
+  if (!('url' in started)) throw new Error(`expected a link, got ${JSON.stringify(started)}`);
+  const { response, callback } = await consent(started.url);
+  expect(response.status).toBe(200);
+  expect(await response.text()).toBe('Connected. You can close this tab.');
+  await expect.poll(() => integrations.connection('remote')!.state().status).toBe('connected');
+  return callback;
+}
+
+const echo = (integrations: Integrations, id = 'c1') => integrations.connection('remote')!.callTool('echo', { text: 'hi' }, { runId: 'r1', toolCallId: id });
+
+describe('oauth', () => {
+  it('waits for the owner, signs in through the loopback callback, and keeps every token out of the logs', async () => {
+    const { as, db, secrets, integrations, needsAuth } = await setup();
+    await integrations.start();
+    // without tokens the server needs the owner. no browser opens, and the app does not retry by itself.
+    expect(integrations.connection('remote')!.state().status).toBe('needs_auth');
+    expect(needsAuth).toEqual(['remote']);
+    expect(as.stats.authorizations).toBe(0);
+
+    await connect(integrations);
+    expect(await echo(integrations)).toMatchObject({ kind: 'result' });
+    const tokens = JSON.parse((await secrets.get('remote:oauth-tokens'))!) as { access_token: string; refresh_token: string };
+    expect(redact(`Bearer ${tokens.access_token}`)).toBe('Bearer [redacted]');
+    expect(redact(tokens.refresh_token)).toBe('[redacted]');
+    expect(db.prepare("SELECT tokenExpiresAt FROM integration_state WHERE integrationId = 'remote'").get()).toEqual({
+      tokenExpiresAt: '2026-10-13T11:00:00.000Z',
+    });
+    const traced = db.prepare('SELECT payload FROM mcp_messages').all().map((row) => String(row.payload)).join('\n');
+    expect(traced).not.toContain(tokens.access_token);
+  });
+
+  it('refuses an unknown state, a second use of the same link, and an expired flow', async () => {
+    const { oauth, integrations, advance } = await setup();
+    await integrations.start();
+    const finish = (id: string) => integrations.connection(id)!.transport();
+
+    expect(await oauth.callback(new URL('http://127.0.0.1/oauth/callback?code=x&state=forged'), finish)).toMatchObject({ status: 400 });
+
+    const callback = await connect(integrations);
+    expect(await oauth.callback(new URL(callback), finish)).toMatchObject({ status: 400 });
+
+    // with working tokens a new sign-in is not needed.
+    expect(await integrations.authorize('remote')).toEqual({ connected: true });
+  });
+
+  it('refuses a flow that the owner finishes after the time limit', async () => {
+    const { oauth, integrations, advance } = await setup();
+    await integrations.start();
+    const started = await integrations.authorize('remote');
+    if (!('url' in started)) throw new Error('expected a link');
+    advance(FLOW_TTL_MS + 1);
+    const { response } = await consent(started.url);
+    expect(response.status).toBe(400);
+    expect(oauth.pendingUrl('remote')).toBeUndefined();
+    expect(integrations.connection('remote')!.state().status).toBe('needs_auth');
+  });
+
+  it('refreshes one time when two calls find an expired token at once, so rotation never sees a reused token', async () => {
+    const { as, integrations } = await setup();
+    await integrations.start();
+    await connect(integrations);
+    as.expire();
+    const results = await Promise.all([echo(integrations, 'a'), echo(integrations, 'b'), echo(integrations, 'c')]);
+    expect(results.map((each) => each.kind)).toEqual(['result', 'result', 'result']);
+    expect(as.stats).toMatchObject({ refreshGrants: 1, reuse: 0 });
+  });
+
+  it('asks the owner once when the refresh token was revoked, and does not retry by itself', async () => {
+    const { as, integrations, needsAuth } = await setup();
+    await integrations.start();
+    await connect(integrations);
+    needsAuth.length = 0;
+    as.revoke();
+    expect(await echo(integrations)).toMatchObject({ kind: 'not_sent', reason: expect.stringContaining('sign-in') });
+    expect(integrations.connection('remote')!.state().status).toBe('needs_auth');
+    expect(await echo(integrations, 'again')).toMatchObject({ kind: 'not_sent' });
+    expect(needsAuth).toEqual(['remote']);
+    const requests = as.stats.mcpRequests;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(as.stats.mcpRequests).toBe(requests);
+  });
+
+  it('says so when another process holds the callback port', async () => {
+    const { oauth, integrations } = await setup();
+    const blocker = createOAuth({ db: openDb(':memory:'), clock: () => new Date(), logger: silentLogger, secrets: createMemorySecretStore(), port: Number(new URL(oauth.provider({ id: 'remote', kind: 'mcp-http', url: 'http://x', tools: { allow: ['x'] }, risk: {}, untrustedOutput: true, sessions: ['main'] }).redirectUrl as string).port) });
+    await blocker.listen(() => undefined, () => {});
+    cleanup.push(() => blocker.close());
+    expect(await integrations.authorize('remote')).toMatchObject({ error: expect.stringContaining('EADDRINUSE') });
+  });
+});
+
+export type { OAuthTestServer };

@@ -24,6 +24,7 @@ import { appendToDailyNote, sessionExcerpt } from './memory/daily.js';
 import { createMemoryTools } from './memory/tools.js';
 import type { IntegrationEntry } from './integrations/config.js';
 import { createIntegrations, type Integrations, type IntegrationsDeps } from './integrations/integrations.js';
+import { createOAuth } from './integrations/oauth.js';
 import { createMemorySecretStore, type SecretStore } from './integrations/secrets.js';
 import { createSlotRunner } from './models/slots.js';
 import type { ModelClient, ModelRequest } from './models/types.js';
@@ -71,6 +72,8 @@ export interface AppDeps {
   secrets?: SecretStore;
   // tests connect in-memory servers. the app starts stdio processes and http connections.
   mcpTransport?: IntegrationsDeps['transport'];
+  // false in npm run chat. see start().
+  connectIntegrations?: boolean;
 }
 
 export interface App {
@@ -110,13 +113,23 @@ export function createApp(deps: AppDeps): App {
   const owner = createOwnerMessenger({ db, channels, logger, clock, ...(preferred ? { preferred } : {}) });
   const ids = deps.newId ? { newId: deps.newId } : {};
   const blobs = createBlobStore(db, join(config.paths.data, 'blobs'), clock);
+  const entries = deps.integrations ?? [];
+  const secrets = deps.secrets ?? createMemorySecretStore();
+  const oauth = entries.some((entry) => entry.kind === 'mcp-http' && entry.auth?.type === 'oauth')
+    ? createOAuth({ db, clock, logger, secrets })
+    : undefined;
   const integrations = createIntegrations({
     db,
     blobs,
     logger,
     clock,
-    entries: deps.integrations ?? [],
-    secrets: deps.secrets ?? createMemorySecretStore(),
+    entries,
+    secrets,
+    ...(oauth ? { oauth } : {}),
+    onNeedsAuth: (id) =>
+      void owner
+        .send(`The ${id} integration needs you to sign in again. Open the dashboard on the PC, go to Integrations, and press Connect.`)
+        .catch((err: unknown) => logger.error('needs-auth message failed', { integration: id, err })),
     ...(deps.mcpTransport ? { transport: deps.mcpTransport } : {}),
     ...(deps.setTimer ? { setTimer: deps.setTimer } : {}),
   });
@@ -311,7 +324,11 @@ export function createApp(deps: AppDeps): App {
       // missed jobs can take minutes, so the start does not wait for them.
       void scheduler.start().catch((err: unknown) => logger.error('scheduler start failed', { err }));
       // a server can need many seconds to start. a call waits for its server, and tool_search reads the stored catalog.
-      void integrations.start().catch((err: unknown) => logger.error('integrations start failed', { err }));
+      // a second process (npm run chat) keeps the same tools and catalogs but does not connect: two processes would
+      // start each server twice and could refresh the same oauth token at once, which a server with rotation punishes.
+      if (deps.connectIntegrations !== false) {
+        void integrations.start().catch((err: unknown) => logger.error('integrations start failed', { err }));
+      }
     },
     idle: () => queue.drain(),
     async stop() {
@@ -320,6 +337,7 @@ export function createApp(deps: AppDeps): App {
       shutdown.abort();
       await queue.drain();
       await integrations.stop();
+      await oauth?.close();
     },
     integrations,
     // without compaction hooks the strategy only renders. it does not call a model or append an event.

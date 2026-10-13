@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   Client,
+  OAuthError,
   ProtocolError,
   SdkError,
   SdkErrorCode,
@@ -298,8 +299,9 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
     } catch (err) {
       await attempt.close().catch(() => {});
       if (mine !== generation || stopped) return;
-      // a server that needs the owner's authorization waits for the owner. a retry loop would ask again and again.
-      if (err instanceof UnauthorizedError) {
+      // a server that needs the owner's authorization waits for the owner. a retry loop would ask again and again, and a
+      // revoked refresh token would hit the token endpoint at each attempt.
+      if (isAuthError(err)) {
         setState({ status: 'needs_auth', error: 'the server needs authorization. connect it from the dashboard.' });
         logger.warn('mcp server needs authorization', { integration: id });
         return;
@@ -358,6 +360,15 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
         );
         return { kind: 'result', result: result as CallToolResult };
       } catch (err) {
+        if (isAuthError(err) && client === connected) {
+          // the server refused the token before it acted, and the refresh failed too. the owner must sign in again.
+          client = undefined;
+          generation++;
+          clearTimer();
+          await connected.close().catch(() => {});
+          setState({ status: 'needs_auth', error: 'the sign-in expired or was revoked. connect it again from the dashboard.' });
+          logger.warn('mcp server needs authorization again', { integration: id });
+        }
         return classify(err);
       }
     },
@@ -365,8 +376,12 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
 }
 
 // the sdk gives a typed error for each way that a request can fail. the kind decides what the model may assume.
+// a 401 that the sdk could not repair with a refresh. the http transport throws it before the server acts.
+const isAuthError = (err: unknown) => err instanceof UnauthorizedError || err instanceof OAuthError;
+
 export function classify(err: unknown): CallOutcome {
   if (err instanceof ProtocolError) return { kind: 'refused', code: err.code, message: err.message };
+  if (isAuthError(err)) return { kind: 'not_sent', reason: `the server refused the sign-in: ${errorText(err)}` };
   if (err instanceof SdkError && (err.code === SdkErrorCode.NotConnected || err.code === SdkErrorCode.SendFailed)) {
     return { kind: 'not_sent', reason: err.message };
   }

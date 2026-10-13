@@ -21,7 +21,7 @@ export function createTestApp(steps: FakeStep[], options: { start: string; confi
     ...options.config,
   });
   if (!parsed.ok) throw new Error(parsed.error);
-  const db = openDb(':memory:');
+  const db = options.deps?.db ?? openDb(':memory:');
   const model = createFakeClient(steps);
   const input = new PassThrough();
   const output = new PassThrough();

@@ -7,6 +7,8 @@ import type { ChannelAdapter } from './channels/types.js';
 import { loadConfig, loadDotEnv, loadSecrets } from './config/load.js';
 import { openDb } from './db/index.js';
 import { startDashboard, type RunningDashboard } from './dashboard/server.js';
+import { loadIntegrations } from './integrations/config.js';
+import { createKeyringStore } from './integrations/secrets.js';
 import { createClients } from './models/clients.js';
 import { createLogger } from './observability/logger.js';
 import { registerSecret } from './observability/redact.js';
@@ -27,6 +29,11 @@ async function main(): Promise<void> {
   const rules = loadPolicy();
   if (!rules.ok) {
     console.error(rules.error);
+    process.exit(1);
+  }
+  const integrations = loadIntegrations();
+  if (!integrations.ok) {
+    console.error(integrations.error);
     process.exit(1);
   }
   const { telegramOwnerId, ...secrets } = loadSecrets();
@@ -68,7 +75,19 @@ async function main(): Promise<void> {
     const onClose = () => (telegram ? logger.info('cli input ended') : void app.idle().then(() => stop('cli input ended')));
     channels.push(createCliChannel({ onClose }));
   }
-  const app = createApp({ config, db, logger, clients: clients.value, channels, ownerIds, clock: systemClock, rules: rules.value });
+  const app = createApp({
+    config,
+    db,
+    logger,
+    clients: clients.value,
+    channels,
+    ownerIds,
+    clock: systemClock,
+    rules: rules.value,
+    integrations: integrations.value,
+    ...(integrations.value.length ? { secrets: createKeyringStore() } : {}),
+    connectIntegrations: !chatMode,
+  });
   process.on('SIGINT', () => void stop('SIGINT'));
   process.on('SIGTERM', () => void stop('SIGTERM'));
 

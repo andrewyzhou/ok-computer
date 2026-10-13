@@ -2,7 +2,10 @@ import { join } from 'node:path';
 import { InMemoryTransport, type Transport } from '@modelcontextprotocol/client';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { afterEach, describe, expect, it } from 'vitest';
+import { createDashboard } from '../src/dashboard/server.js';
 import { openDb } from '../src/db/index.js';
+import type { IntegrationStatus } from '../src/integrations/integrations.js';
+import { silentLogger } from '../src/observability/logger.js';
 import { listEvents } from '../src/events/log.js';
 import { parseIntegrations, type IntegrationEntry } from '../src/integrations/config.js';
 import { textStep, toolStep } from '../src/models/fake.js';
@@ -196,6 +199,67 @@ describe('mcp acceptance', () => {
     expect(results[2]).toContain('unknown integration tool: now');
     expect(t.rows("SELECT count(*) AS n FROM mcp_messages WHERE method = 'tools/call'")).toEqual([{ n: 0 }]);
     expect(t.rows('SELECT count(*) AS n FROM policy_decisions')).toEqual([{ n: 0 }]);
+  });
+
+  it('changes nothing for an app without integrations, so an upgrade keeps the cached prefix', async () => {
+    const t = createTestApp([textStep('hi')], { start });
+    apps.push(t);
+    await t.app.start();
+    await t.say('hello');
+    const names = t.model.calls[0]!.tools.map((tool) => tool.name);
+    expect(names).not.toContain('tool_search');
+    expect(names).not.toContain('tool_call');
+  });
+
+  it('gives a second process the same tools, but it never connects', async () => {
+    const db = openDb(':memory:');
+    const first = memoryServers();
+    const service = createTestApp([textStep('hi')], { start, deps: { db, integrations: [notesEntry()], mcpTransport: first.transport } });
+    apps.push(service);
+    await service.app.start();
+    await expect.poll(() => service.app.integrations.status()[0]!.state.status).toBe('connected');
+    await service.say('hello');
+
+    const second = memoryServers();
+    let chatRuns = 0;
+    const chat = createTestApp([call('c1', 'notes__echo', { text: 'x' }), textStep('ok')], {
+      start,
+      deps: { db, integrations: [notesEntry()], mcpTransport: second.transport, connectIntegrations: false, newId: () => `chat-${++chatRuns}` },
+    });
+    apps.push(chat);
+    await chat.app.start();
+    await chat.say('echo from the chat process');
+    expect(JSON.stringify(chat.model.calls[0]!.tools)).toBe(JSON.stringify(service.model.calls[0]!.tools));
+    expect(second.servers).toHaveLength(0);
+    expect(db.prepare("SELECT output FROM tool_calls WHERE toolCallId = 'c1'").all()).toEqual([{ output: expect.stringContaining('did not run: notes is stopped') }]);
+  });
+
+  it('shows each integration on the dashboard api, and a pause stays over a restart', async () => {
+    const db = openDb(':memory:');
+    const { transport } = memoryServers();
+    const t = createTestApp([], { start, deps: { db, integrations: [notesEntry()], mcpTransport: transport } });
+    apps.push(t);
+    await t.app.start();
+    await expect.poll(() => t.app.integrations.status()[0]!.state.status).toBe('connected');
+    const dashboard = createDashboard({ db, config: t.config, clock: t.clock, logger: silentLogger, app: t.app });
+    const status = (await (await dashboard.request('/api/integrations')).json()) as IntegrationStatus[];
+    expect(status[0]).toMatchObject({ id: 'notes', state: { status: 'connected' }, paused: false, rejected: [{ mcpName: 'calendar_lookup' }] });
+    expect(status[0]!.tools.map((tool) => tool.name)).toContain('notes__echo');
+
+    const json = (body: unknown) => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    expect((await dashboard.request('/api/integrations/notes/pause', json({ paused: true }))).status).toBe(200);
+    expect(t.app.integrations.status()[0]).toMatchObject({ paused: true, state: { status: 'stopped' } });
+    expect((await dashboard.request('/api/integrations/nope/pause', json({ paused: true }))).status).toBe(404);
+    expect(await (await dashboard.request('/api/integrations/notes/connect', json({}))).json()).toEqual({ error: 'notes does not use oauth' });
+
+    const again = memoryServers();
+    const restarted = createTestApp([], { start, deps: { db, integrations: [notesEntry()], mcpTransport: again.transport } });
+    apps.push(restarted);
+    await restarted.app.start();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(again.servers).toHaveLength(0);
+    const history = (await (await createDashboard({ db, config: t.config, clock: t.clock, logger: silentLogger, app: restarted.app }).request('/api/integrations/notes/catalogs')).json()) as unknown[];
+    expect(history).toHaveLength(1);
   });
 
   it('works with a real stdio server', async () => {

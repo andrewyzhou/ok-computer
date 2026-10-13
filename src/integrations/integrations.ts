@@ -1,4 +1,4 @@
-import type { OAuthClientProvider, Transport } from '@modelcontextprotocol/client';
+import type { Transport } from '@modelcontextprotocol/client';
 import { z } from 'zod';
 import type { Db } from '../db/index.js';
 import type { BlobStore } from '../observability/blobs.js';
@@ -7,7 +7,8 @@ import type { SetTimer } from '../scheduler/scheduler.js';
 import type { Clock } from '../time.js';
 import { TOOL_CALL, type Tool } from '../tools/registry.js';
 import { createCatalogStore, riskOf, type Catalog, type CatalogTool } from './catalog.js';
-import { sessionProfile, type HttpEntry, type IntegrationEntry } from './config.js';
+import { sessionProfile, type IntegrationEntry } from './config.js';
+import type { OAuth } from './oauth.js';
 import { createDiscoveryTools, outcomeOutput, TOOL_SEARCH, type Discoverable } from './discovery.js';
 import { createMcpConnection, type ConnectionState, type McpConnection } from './mcp.js';
 import { toolName } from './names.js';
@@ -26,7 +27,9 @@ export interface IntegrationsDeps {
   secrets: SecretStore;
   // tests give an in-memory transport. the app uses stdio and http.
   transport?: (entry: IntegrationEntry) => Promise<Transport>;
-  oauth?: (entry: HttpEntry) => OAuthClientProvider;
+  oauth?: OAuth;
+  // the owner gets a message when a server needs a new sign-in, for example after a failed refresh.
+  onNeedsAuth?: (integrationId: string) => void;
   setTimer?: SetTimer;
   readyWaitMs?: number;
 }
@@ -39,6 +42,12 @@ export interface IntegrationStatus {
   catalogStored?: boolean;
   tools: Array<{ name: string; mcpName: string; risk: string }>;
   rejected: Array<{ mcpName: string; reason: string }>;
+  paused: boolean;
+  tokenExpiresAt: string | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  // the sign-in link that waits for the owner.
+  authUrl?: string;
 }
 
 export interface Integrations {
@@ -53,6 +62,11 @@ export interface Integrations {
   stop(): Promise<void>;
   status(): IntegrationStatus[];
   connection(id: string): McpConnection | undefined;
+  // authorize starts a sign-in from the dashboard. it gives the link for the owner, or connected when the stored
+  // tokens still work.
+  authorize(id: string): Promise<{ connected: true } | { url: string } | { error: string }>;
+  // a paused integration stays stopped over a restart. its tools stay in the catalog, and a call says that it is paused.
+  setPaused(id: string, paused: boolean): Promise<boolean>;
 }
 
 export function createIntegrations(deps: IntegrationsDeps): Integrations {
@@ -67,12 +81,14 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
   const transportFor = async (entry: IntegrationEntry): Promise<Transport> => {
     if (deps.transport) return deps.transport(entry);
     if (entry.kind === 'mcp-stdio') return stdioTransport(entry, deps.secrets, logger);
-    if (!deps.oauth && entry.auth?.type === 'oauth') throw new Error('oauth is not set up in this process');
-    return httpTransport(entry, deps.secrets, deps.oauth ?? (() => { throw new Error('no oauth provider'); }));
+    return httpTransport(entry, deps.secrets, deps.oauth);
   };
 
   const saveState = (id: string, state: ConnectionState) => {
+    const before = states.get(id)?.status;
     states.set(id, state);
+    // the owner hears once when a server needs a new sign-in, not at each failed attempt.
+    if (state.status === 'needs_auth' && before !== 'needs_auth') deps.onNeedsAuth?.(id);
     if (state.status !== 'error' && state.status !== 'needs_auth') return;
     try {
       deps.db
@@ -198,6 +214,8 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
     status() {
       return entries.map((entry) => {
         const catalog = catalogs.get(entry.id);
+        const row = deps.db.prepare('SELECT paused, tokenExpiresAt, lastError, lastErrorAt FROM integration_state WHERE integrationId = ?').get(entry.id);
+        const authUrl = deps.oauth?.pendingUrl(entry.id);
         return {
           id: entry.id,
           kind: entry.kind,
@@ -205,9 +223,54 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
           ...(catalog ? { catalogHash: catalog.hash, catalogStored: catalog.stored } : {}),
           tools: (catalog?.snapshot.tools ?? []).map((tool) => ({ name: tool.name, mcpName: tool.mcpName, risk: riskOf(entry, tool) })),
           rejected: catalog?.snapshot.rejected ?? [],
+          paused: row?.paused === 1,
+          tokenExpiresAt: (row?.tokenExpiresAt as string | null | undefined) ?? null,
+          lastError: (row?.lastError as string | null | undefined) ?? null,
+          lastErrorAt: (row?.lastErrorAt as string | null | undefined) ?? null,
+          ...(authUrl ? { authUrl } : {}),
         };
       });
     },
+    async setPaused(id, paused) {
+      const connection = connections.get(id);
+      if (!connection) return false;
+      const now = deps.clock().toISOString();
+      deps.db
+        .prepare(
+          `INSERT INTO integration_state (integrationId, paused, updatedAt) VALUES (?, ?, ?)
+           ON CONFLICT (integrationId) DO UPDATE SET paused = excluded.paused, updatedAt = excluded.updatedAt`,
+        )
+        .run(id, paused ? 1 : 0, now);
+      if (paused) await connection.stop();
+      else await connection.start();
+      return true;
+    },
     connection: (id) => connections.get(id),
+    async authorize(id) {
+      const entry = byId.get(id);
+      const connection = connections.get(id);
+      if (!entry || entry.kind !== 'mcp-http' || entry.auth?.type !== 'oauth' || !connection || !deps.oauth) {
+        return { error: `${id} does not use oauth` };
+      }
+      const oauth = deps.oauth;
+      try {
+        await oauth.listen(
+          (integrationId) => connections.get(integrationId)?.transport(),
+          (integrationId) => {
+            const done = connections.get(integrationId);
+            void done?.stop().then(() => done.start()).catch((err: unknown) => logger.error('mcp restart after sign-in failed', { integration: integrationId, err }));
+          },
+        );
+      } catch (err) {
+        // another process, for example a second copy of the app, can hold the port.
+        return { error: `the sign-in callback cannot listen: ${(err as Error).message}` };
+      }
+      // a new attempt makes the sdk create a new flow, or connect with the stored tokens.
+      await connection.stop();
+      await connection.start();
+      if (connection.state().status === 'connected') return { connected: true };
+      const url = oauth.pendingUrl(id);
+      return url ? { url } : { error: connection.state().error ?? 'no sign-in link was made' };
+    },
   };
 }

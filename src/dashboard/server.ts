@@ -41,7 +41,7 @@ export interface DashboardDeps {
   config: Config;
   clock: Clock;
   logger: Logger;
-  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler'>;
+  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations'>;
   // with a token, every api request must give it. the browser gives it in the query, because EventSource has no
   // headers.
   token?: string;
@@ -55,6 +55,7 @@ const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const enabledBody = z.object({ enabled: z.boolean() });
 const checklistBody = z.object({ checklist: z.string().max(10_000) });
 const decisionBody = z.object({ decision: z.enum(['approve', 'deny']) });
+const pausedBody = z.object({ paused: z.boolean() });
 
 export function createDashboard(deps: DashboardDeps): Hono {
   const { db, config, clock, logger, app } = deps;
@@ -185,6 +186,19 @@ export function createDashboard(deps: DashboardDeps): Hono {
     if (!input) return c.json({ error: 'give decision as approve or deny' }, 400);
     const message = await app.resolveApproval(Number(c.req.param('id')), input.decision, 'dashboard');
     return c.json({ message });
+  });
+
+  // the integrations page reads the live state of each server. the sign-in link opens on this pc only, because the
+  // callback listens on loopback.
+  server.get('/api/integrations', (c) => c.json(app.integrations.status()));
+  server.get('/api/integrations/:id/catalogs', (c) =>
+    c.json(db.prepare('SELECT hash, createdAt FROM integration_catalogs WHERE integrationId = ? ORDER BY id DESC LIMIT 50').all(c.req.param('id'))),
+  );
+  server.post('/api/integrations/:id/connect', async (c) => c.json(await app.integrations.authorize(c.req.param('id'))));
+  server.post('/api/integrations/:id/pause', async (c) => {
+    const input = await body(c, pausedBody);
+    if (!input) return c.json({ error: 'give paused as true or false' }, 400);
+    return (await app.integrations.setPaused(c.req.param('id'), input.paused)) ? c.json({ paused: input.paused }) : notFound(c, 'integration');
   });
 
   server.get('/api/cost', (c) => c.json(costPage(db, clock(), tz)));
