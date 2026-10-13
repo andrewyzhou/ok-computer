@@ -126,4 +126,20 @@ describe('splitMarkdown', () => {
       for (const part of splitMarkdown(lines.join('\n'), 100)) expect(part.length).toBeLessThanOrEqual(100);
     }
   });
+
+  // the first piece of a cut line that opens a fence was carried into each later part. the parts then filled with it,
+  // and the split never ended. a model reply with a long one-line code span did this.
+  it('ends on a long line that opens a fence, and keeps each part within the limit', () => {
+    for (const limit of [100, 2000, 30_000]) {
+      for (const length of [limit - 9, limit - 8, limit - 1, limit, 2 * limit]) {
+        const long = 'x'.repeat(length);
+        const texts = [`\`\`\`${long}\`\`\``, `intro\n\n\`\`\`${long}\nmore\n\nend`, `\`\`\`ts ${long}\ncode\n\`\`\``, `${'`'.repeat(length)}\ncode`];
+        for (const text of texts) {
+          const parts = splitMarkdown(text, limit);
+          for (const part of parts) expect(part.length).toBeLessThanOrEqual(limit);
+          expect(parts.join('').length).toBeLessThan(text.length + parts.length * 20);
+        }
+      }
+    }
+  });
 });

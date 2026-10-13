@@ -90,13 +90,17 @@ export function splitMarkdown(text: string, limit: number): string[] {
   let lastBreak = -1;
   // the count of lines at the start of the part that open a fence again: 0 or 1.
   let carried = 0;
+  // the line that opens a fence again must be short. a long line, for example the first piece of a cut line, fills
+  // each later part, and then the split never ends. so a long line is replaced by its marker. a long marker is not
+  // carried, and the rest of that code shows as text.
   const take = (count: number) => {
     const part = lines.slice(0, count);
     const open = fenceAfter(part);
+    const carry = open ? [open.line, open.marker].find((each) => each.length <= room / 4) : undefined;
     const body = part.join('\n').trim();
-    if (body) parts.push(open ? `${body}\n${open.marker}` : body);
-    lines = open ? [open.line, ...lines.slice(count)] : lines.slice(count);
-    carried = open ? 1 : 0;
+    if (body) parts.push(open && carry ? `${body}\n${open.marker}` : body);
+    lines = carry ? [carry, ...lines.slice(count)] : lines.slice(count);
+    carried = carry ? 1 : 0;
     size = lines.reduce((sum, line) => sum + line.length + 1, 0);
     lastBreak = -1;
   };
@@ -105,8 +109,8 @@ export function splitMarkdown(text: string, limit: number): string[] {
     // the lines after the blank line stay in the part, so with this line the part can still be too long. a part
     // that holds only the line that opens a fence again cannot get shorter.
     if (size + line.length + 1 > room && lines.length > carried) take(lines.length);
-    // a line that still does not fit is cut. the line that opens a fence again takes room in each part, and the cut
-    // keeps at least half the room, so a very long fence line makes a part too long but never stops the split.
+    // a line that still does not fit is cut. after a cut, the part holds at most a carried line of a quarter of the
+    // room, so each cut takes at least half the room from the line, and the split always ends.
     while (size + line.length + 1 > room) {
       const space = Math.max(room - size - 1, Math.floor(room / 2));
       const cut = /[\uD800-\uDBFF]/.test(line[space - 1]!) ? space - 1 : space;
