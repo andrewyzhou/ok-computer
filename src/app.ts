@@ -13,6 +13,13 @@ import { createSlotRunner } from './models/slots.js';
 import type { ModelClient } from './models/types.js';
 import type { Logger } from './observability/logger.js';
 import { scheduleContext } from './scheduler/context.js';
+import {
+  createHeartbeat,
+  createHeartbeatTools,
+  HEARTBEAT_INSTRUCTIONS,
+  HEARTBEAT_PREFIX,
+  syncHeartbeat,
+} from './scheduler/heartbeat.js';
 import { createJobRunner } from './scheduler/jobs.js';
 import { createScheduler, type Scheduler, type SetTimer } from './scheduler/scheduler.js';
 import { createAutomationTools } from './scheduler/tools.js';
@@ -52,6 +59,7 @@ export function createApp(deps: AppDeps): App {
   const memoryPath = join(config.paths.data, 'memory', 'MEMORY.md');
   const channels = new Map(deps.channels.map((channel) => [channel.id, channel]));
   const owner = createOwnerMessenger({ db, channels, logger, clock });
+  const ids = deps.newId ? { newId: deps.newId } : {};
 
   const approvals = createApprovalFlow({
     db,
@@ -70,6 +78,7 @@ export function createApp(deps: AppDeps): App {
       nowTool,
       ...createGoalTools({ db, replan }),
       ...createAutomationTools({ db, replan }),
+      ...createHeartbeatTools({ db }),
       createMessageOwnerTool(owner),
     ],
     { gate: approvals.gate },
@@ -88,12 +97,17 @@ export function createApp(deps: AppDeps): App {
         workspaceDir: config.paths.workspace,
         timeZone: config.timeZone,
         ...(sessionKey === MAIN_SESSION ? { memoryPath } : {}),
+        // the heartbeat runs often on a small model, so it gets a light prompt.
+        ...(sessionKey.startsWith(HEARTBEAT_PREFIX)
+          ? { personaFiles: ['USER.md'], extraInstructions: HEARTBEAT_INSTRUCTIONS }
+          : {}),
       }),
     contextLines: (now) => scheduleContext(db, now, config.timeZone),
-    ...(deps.newId ? { newId: deps.newId } : {}),
+    ...ids,
   };
   const agent = (input: Parameters<typeof runAgent>[1]) => runAgent(agentDeps, input);
 
+  const heartbeat = createHeartbeat({ db, clock, logger, config, queue, owner, agent, signal: shutdown.signal, ...ids });
   const runJob = createJobRunner({
     db,
     clock,
@@ -102,9 +116,9 @@ export function createApp(deps: AppDeps): App {
     queue,
     owner,
     agent,
-    heartbeat: async () => ({ status: 'skipped', error: 'the heartbeat is not available' }),
+    heartbeat,
     signal: shutdown.signal,
-    ...(deps.newId ? { newId: deps.newId } : {}),
+    ...ids,
   });
   const scheduler = createScheduler({
     db,
@@ -139,6 +153,7 @@ export function createApp(deps: AppDeps): App {
         logger.info('channel started', { channel: channel.id });
       }
       if (installRoutine(db, config, clock())) logger.info('goals routine installed');
+      syncHeartbeat(db, config, clock());
       // missed jobs can take minutes, so the start does not wait for them.
       void scheduler.start();
     },

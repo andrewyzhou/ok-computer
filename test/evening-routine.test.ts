@@ -30,7 +30,7 @@ describe('the evening goals routine', () => {
       { start: pdt('18:00') },
     );
     await t.app.start();
-    expect(t.rows('SELECT name FROM automations ORDER BY name').map((r) => r.name)).toEqual([
+    expect(t.rows("SELECT name FROM automations WHERE name LIKE 'goals: %' ORDER BY name").map((r) => r.name)).toEqual([
       'goals: ask',
       'goals: reminder 20:00',
       'goals: reminder 21:00',
@@ -127,7 +127,7 @@ describe('the evening goals routine', () => {
     t.db.prepare("DELETE FROM automations WHERE name = 'goals: reminder 22:00'").run();
     await t.app.stop();
     await t.app.start();
-    expect(t.rows('SELECT COUNT(*) AS n FROM automations')).toEqual([{ n: 4 }]);
+    expect(t.rows("SELECT COUNT(*) AS n FROM automations WHERE name LIKE 'goals: %'")).toEqual([{ n: 4 }]);
     await t.app.stop();
   });
 });

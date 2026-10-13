@@ -55,12 +55,23 @@ export function createTestApp(steps: FakeStep[], options: { start: string; confi
       input.write(line + '\n');
       await settle();
     },
+    // type sends a line and does not wait for the run to end.
+    async type(line: string) {
+      input.write(line + '\n');
+      await new Promise((resolve) => setImmediate(resolve));
+    },
     // at moves the clock and runs every automation that is due.
     async at(iso: string) {
       now = new Date(iso);
       await app.scheduler.tick();
       await settle();
     },
+    // tick moves the clock and runs the due automations, but it does not wait for the queued runs.
+    async tick(iso: string) {
+      now = new Date(iso);
+      await app.scheduler.tick();
+    },
+    settle,
     rows: (sql: string, ...params: Array<string | number>) => db.prepare(sql).all(...params),
   };
 }

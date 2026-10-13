@@ -65,6 +65,7 @@ describe('cli chat through the full loop', () => {
       'goals_list',
       'goals_set',
       'goals_stats',
+      'heartbeat_checklist_set',
       'now',
     ]);
 
