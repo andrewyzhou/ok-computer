@@ -52,14 +52,23 @@ const httpAuth = z.discriminatedUnion('type', [
   z.object({ type: z.literal('bearer'), secretRef }).strict(),
 ]);
 
+export const SLACK_POLL_TOOLS = ['slack_search_public_and_private', 'slack_read_user_profile'] as const;
+
 const httpEntry = z
   .object({
     ...common,
     kind: z.literal('mcp-http'),
     url: z.url({ protocol: /^https?$/ }),
     auth: httpAuth.optional(),
+    // slack-dms polls the direct messages of a workspace on the official slack server into integration_events.
+    poll: z.literal('slack-dms').optional(),
   })
-  .strict();
+  .strict()
+  // the poll calls the connection directly, and the connection does not check tools.allow. so the owner must allow
+  // each tool that the poll calls.
+  .refine((each) => each.poll !== 'slack-dms' || SLACK_POLL_TOOLS.every((tool) => each.tools.allow.includes(tool)), {
+    message: `poll "slack-dms" needs ${SLACK_POLL_TOOLS.join(' and ')} in tools.allow`,
+  });
 
 const entry = z
   .discriminatedUnion('kind', [stdioEntry, httpEntry])

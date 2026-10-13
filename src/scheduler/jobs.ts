@@ -44,6 +44,9 @@ export interface JobDeps {
   agent: (input: RunInput) => Promise<RunResult>;
   heartbeat: (automation: Automation) => Promise<JobResult>;
   consolidation: (automation: Automation) => Promise<JobResult>;
+  // the poll of each integration, by its id. a poll reads new items in code, without a model call. only the process
+  // that connects the integrations has polls.
+  polls?: ReadonlyMap<string, () => Promise<JobResult>>;
   signal: AbortSignal;
   newId?: () => string;
 }
@@ -144,6 +147,10 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
         return deps.heartbeat(automation);
       case 'consolidation':
         return deps.consolidation(automation);
+      case 'integration_poll': {
+        const poll = deps.polls?.get(payload.integration);
+        return poll ? poll() : { status: 'skipped', error: deps.polls ? `${payload.integration} has no poll` : 'the chat process does not poll' };
+      }
     }
   };
 }

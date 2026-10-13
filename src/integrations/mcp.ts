@@ -29,7 +29,8 @@ export type { McpTool };
 export const INLINE_LIMIT = 8 * 1024;
 
 export interface CallTrace {
-  runId: string;
+  // null for a call of the app's own code, for example a poll, which has no run.
+  runId: string | null;
   toolCallId: string;
 }
 

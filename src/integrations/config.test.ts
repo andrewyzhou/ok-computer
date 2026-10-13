@@ -21,6 +21,17 @@ describe('integration registry', () => {
     expect(parsed.ok && parsed.value[0]).toMatchObject({ untrustedOutput: true, sessions: ['main'], auth: { callback: 'loopback' } });
   });
 
+  it('polls slack dms only on an http entry that allows the two tools of the poll', () => {
+    const polled = { ...slack, tools: { allow: ['slack_search_public_and_private', 'slack_read_user_profile'] }, risk: {}, poll: 'slack-dms' };
+    expect(parseIntegrations({ integrations: [polled] })).toMatchObject({ ok: true });
+    for (const allow of [['slack_search_public_and_private'], ['slack_read_user_profile']]) {
+      expect(parseIntegrations({ integrations: [{ ...polled, tools: { allow } }] })).toMatchObject({ ok: false, error: expect.stringContaining('needs slack_search_public_and_private and slack_read_user_profile') });
+    }
+    expect(parseIntegrations({ integrations: [{ ...polled, poll: 'slack-channels' }] })).toMatchObject({ ok: false });
+    const stdio = { id: 'slack-home', kind: 'mcp-stdio', command: 'npx', args: ['-y', 'slack-mcp-server@1.3.0'], tools: polled.tools, poll: 'slack-dms' };
+    expect(parseIntegrations({ integrations: [stdio] })).toMatchObject({ ok: false });
+  });
+
   it('takes the paste callback for an oauth entry and refuses another word', () => {
     expect(parseIntegrations({ integrations: [{ ...slack, auth: { ...slack.auth, callback: 'paste' } }] })).toMatchObject({ ok: true });
     expect(parseIntegrations({ integrations: [{ ...slack, auth: { ...slack.auth, callback: 'https' } }] })).toMatchObject({ ok: false });
