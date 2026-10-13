@@ -44,8 +44,8 @@ interface Trace {
   tainted?: boolean;
 }
 
-// every tool call goes through the policy here, and every call leaves a tool_calls row with the raw result, the
-// model view, and the decision.
+// every tool call goes through the policy here, and every call leaves a tool_calls row with the model view, the raw
+// result, and the decision.
 export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
   const { db, blobs, tools, clock } = deps;
 
@@ -54,8 +54,8 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
     const result = { content: view.content, ...(output.isError ? { isError: true } : {}) };
     db.prepare(
       `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, riskLevel,
-         policyDecisionId, tainted, untrustedSource, rawResultBlob, modelViewBlob, truncated, resultHandle)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         policyDecisionId, tainted, untrustedSource, rawResultBlob, truncated, resultHandle)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       runId,
       call.id,
@@ -69,8 +69,8 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       trace.decisionId ?? null,
       trace.tainted ? 1 : 0,
       output.untrustedSource ?? null,
-      blobs.put(output.content),
-      blobs.put(view.content),
+      // the raw text needs a blob only when the model saw other text: a preview, or a wrapped text.
+      view.content === output.content ? null : blobs.put(output.content),
       view.truncated ? 1 : 0,
       view.handle ?? null,
     );

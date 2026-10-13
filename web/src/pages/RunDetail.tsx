@@ -113,6 +113,7 @@ function ResultView({ call }: { call: ToolCallRow }) {
       {call.untrustedSource ? (
         <p className="muted">The result came from {call.untrustedSource}, so the model got it inside an untrusted wrapper.</p>
       ) : null}
+      {call.rawResultBlob ? null : <p className="muted">The model saw the raw result unchanged.</p>}
       <div className="split">
         <div>
           <h3>Raw result</h3>

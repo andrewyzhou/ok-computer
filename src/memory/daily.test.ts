@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { runTool } from '../../test/run-tool.js';
 import { openDb } from '../db/index.js';
 import type { StoredEvent } from '../events/log.js';
 import { createToolRegistry } from '../tools/registry.js';
@@ -62,10 +63,10 @@ describe('daily notes', () => {
       clock: () => new Date('2026-10-13T03:15:00Z'),
       signal: new AbortController().signal,
     };
-    const out = await registry.run({ id: 't', name: 'memory_write', input: { text: 'Prefers short answers.' } }, ['memory_write'], ctx);
+    const out = await runTool(registry, { id: 't', name: 'memory_write', input: { text: 'Prefers short answers.' } }, ['memory_write'], ctx);
     expect(out.content).toBe(`saved to daily/${DAY}.md under ## notes`);
     expect(read(memoryDir)).toContain('## notes\n\nPrefers short answers.');
-    const bad = await registry.run({ id: 't', name: 'memory_write', input: { text: 'x', section: 'other' } }, ['memory_write'], ctx);
+    const bad = await runTool(registry, { id: 't', name: 'memory_write', input: { text: 'x', section: 'other' } }, ['memory_write'], ctx);
     expect(bad.isError).toBe(true);
   });
 

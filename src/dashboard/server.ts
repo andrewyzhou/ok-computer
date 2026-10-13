@@ -116,8 +116,13 @@ export function createDashboard(deps: DashboardDeps): Hono {
   });
 
   server.get('/api/blobs/:hash', (c) => {
-    const blob = getBlob(db, blobs.read, c.req.param('hash'));
-    return blob ? c.json(blob) : notFound(c, 'blob');
+    try {
+      const blob = getBlob(db, blobs.read, c.req.param('hash'));
+      return blob ? c.json(blob) : notFound(c, 'blob');
+    } catch (err) {
+      // a damaged file is an error that the page shows. it never shows text that does not match the hash.
+      return c.json({ error: (err as Error).message }, 500);
+    }
   });
   server.get('/api/tool-catalogs/:hash', (c) => {
     const catalog = getToolCatalog(db, c.req.param('hash'));

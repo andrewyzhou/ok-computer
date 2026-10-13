@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { runTool } from '../../test/run-tool.js';
 import { openDb } from '../db/index.js';
 import { listAutomations } from '../scheduler/store.js';
 import { createToolRegistry } from '../tools/registry.js';
@@ -14,7 +15,7 @@ function setup() {
   let replans = 0;
   const registry = createToolRegistry(createGoalTools({ db, replan: () => replans++ }));
   const call = (name: string, input: unknown) =>
-    registry.run({ id: 't', name, input }, NAMES, {
+    runTool(registry, { id: 't', name, input }, NAMES, {
       runId: 'r',
       sessionKey: 'main',
       timeZone: TZ,

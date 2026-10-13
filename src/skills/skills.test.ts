@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { runTool } from '../../test/run-tool.js';
 import { createToolRegistry } from '../tools/registry.js';
 import { createSkillTools, loadSkills, skillsIndex } from './skills.js';
 
@@ -34,7 +35,7 @@ describe('skills', () => {
     const dir = skillsDir({ weekly });
     const registry = createToolRegistry(createSkillTools({ skillsDir: dir }));
     const ctx = { runId: 'r', sessionKey: 'main', timeZone: 'UTC', clock: () => new Date(), signal: new AbortController().signal };
-    const read = (name: string) => registry.run({ id: 't', name: 'skill_read', input: { name } }, ['skill_read'], ctx);
+    const read = (name: string) => runTool(registry, { id: 't', name: 'skill_read', input: { name } }, ['skill_read'], ctx);
     expect((await read('weekly-review')).content).toBe(weekly);
     expect(await read('../USER.md')).toEqual({ content: 'no skill has the name ../USER.md', isError: true });
   });

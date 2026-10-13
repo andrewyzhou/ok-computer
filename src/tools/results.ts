@@ -8,7 +8,9 @@ export const HANDLE_OVER = 4000;
 export const PREVIEW_HEAD = 1500;
 export const PREVIEW_TAIL = 1500;
 
-const HANDLE_NOTE = /the full result is (res_[0-9a-f]{12})\b/;
+// the real note is the last line, outside the untrusted wrapper. an untrusted page can contain a copy of the note,
+// but the copy is never at the end, so the pattern looks only at the end.
+const HANDLE_NOTE = /the full result is (res_[0-9a-f]{12})\. use result_read with this handle to search or page through it\.\]$/;
 
 export const newHandle = () => `res_${randomBytes(6).toString('hex')}`;
 

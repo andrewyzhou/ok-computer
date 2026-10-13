@@ -74,8 +74,8 @@ export interface ToolCallRow {
   untrustedSource: string | null;
   truncated: boolean;
   resultHandle: string | null;
+  // the raw result is rawResultBlob ?? output.content. the blob exists only when the model saw other text.
   rawResultBlob: string | null;
-  modelViewBlob: string | null;
   policy: PolicyDecisionRow | null;
 }
 

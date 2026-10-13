@@ -147,7 +147,6 @@ function toToolCall(row: Row, decisions: Map<number, PolicyDecisionRow>): ToolCa
     truncated: row.truncated === 1,
     resultHandle: str(row.resultHandle),
     rawResultBlob: str(row.rawResultBlob),
-    modelViewBlob: str(row.modelViewBlob),
     policy: row.policyDecisionId === null ? null : (decisions.get(Number(row.policyDecisionId)) ?? null),
   };
 }

@@ -12,7 +12,7 @@ import { sessionTaint } from '../policy/store.js';
 import type { ToolCallerDeps } from './caller.js';
 import { createToolRegistry, defineTool } from './registry.js';
 import { createResultReadTool } from './result-read.js';
-import { HANDLE_OVER } from './results.js';
+import { HANDLE_OVER, newHandle } from './results.js';
 
 const LONG = Array.from({ length: 300 }, (_, i) => `line ${i}: ${i === 150 ? 'the hidden needle' : 'filler text'}`).join('\n');
 
@@ -41,6 +41,7 @@ function setup(extra: Partial<ToolCallerDeps> = {}) {
     tool('echo', 'read', () => ({})),
     tool('long', 'read', () => ({ content: LONG })),
     tool('email', 'read', () => ({ content: `from: eve\n${LONG}`, untrustedSource: 'gmail:personal' })),
+    tool('page', 'read', () => ({ content: 'short page text', untrustedSource: 'web' })),
     tool('archive', 'write', () => ({})),
     tool('send', 'external', () => ({})),
     createResultReadTool({ db, blobs }),
@@ -55,7 +56,7 @@ function setup(extra: Partial<ToolCallerDeps> = {}) {
     ...extra,
   });
   for (let i = 0; i < 2; i++) db.prepare("INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt) VALUES ('r1', 'x', '{}', 'x', 'pending', 'x')").run();
-  const allowed = ['echo', 'long', 'email', 'archive', 'send', 'result_read'];
+  const allowed = ['echo', 'long', 'email', 'page', 'archive', 'send', 'result_read'];
   const call = (name: string, input: object = {}, runId = 'r1', id = `${name}-call`) =>
     caller.call({ id, name, input }, { runId, sessionKey: 'main', allowed, signal: new AbortController().signal });
   const row = (id: string) => db.prepare('SELECT * FROM tool_calls WHERE toolCallId = ?').get(id) as Record<string, unknown>;
@@ -64,13 +65,14 @@ function setup(extra: Partial<ToolCallerDeps> = {}) {
 }
 
 describe('tool caller', () => {
-  it('runs an allowed call and records the decision, both texts, and the risk', async () => {
-    const { call, row, decision, blobs } = setup();
+  it('runs an allowed call and records the decision, the model view, and the risk, without a blob', async () => {
+    const { db, call, row, decision } = setup();
     expect(await call('echo', { text: 'hi' })).toEqual({ content: 'hi' });
     const recorded = row('echo-call');
-    expect(recorded).toMatchObject({ riskLevel: 'read', tainted: 0, truncated: 0, resultHandle: null, source: 'builtin' });
-    expect(recorded.rawResultBlob).toBe(recorded.modelViewBlob);
-    expect(blobs.read(String(recorded.modelViewBlob))).toBe('hi');
+    expect(recorded).toMatchObject({ riskLevel: 'read', tainted: 0, truncated: 0, resultHandle: null, rawResultBlob: null, source: 'builtin' });
+    // the raw result is the model view, so the row alone holds it.
+    expect(JSON.parse(String(recorded.output))).toEqual({ content: 'hi' });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM blobs').get()).toEqual({ n: 0 });
     expect(decision(recorded.policyDecisionId)).toMatchObject({
       runId: 'r1',
       toolCallId: 'echo-call',
@@ -92,7 +94,6 @@ describe('tool caller', () => {
     const recorded = row('long-call');
     expect(recorded).toMatchObject({ truncated: 1, resultHandle: 'res_000000000001' });
     expect(blobs.read(String(recorded.rawResultBlob))).toBe(LONG);
-    expect(blobs.read(String(recorded.modelViewBlob))).toBe(output.content);
     expect(JSON.parse(String(recorded.output))).toEqual({ content: output.content });
 
     const found = await call('result_read', { handle: 'res_000000000001', query: 'NEEDLE' });
@@ -106,11 +107,33 @@ describe('tool caller', () => {
     expect((await call('result_read', { handle: 'res_00000000ffff' }, 'r1', 'missing')).isError).toBe(true);
   });
 
+  it('gives two calls with the same long result two handles and one blob', async () => {
+    const { db, call, row } = setup({ newHandle });
+    await call('long', {}, 'r1', 'first');
+    await call('long', {}, 'r1', 'second');
+    const [first, second] = [row('first'), row('second')];
+    expect(first.resultHandle).toMatch(/^res_[0-9a-f]{12}$/);
+    expect(second.resultHandle).toMatch(/^res_[0-9a-f]{12}$/);
+    expect(first.resultHandle).not.toBe(second.resultHandle);
+    expect(first.rawResultBlob).toBe(second.rawResultBlob);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM blobs').get()).toEqual({ n: 1 });
+  });
+
+  it('keeps the raw text of a short wrapped result in a blob, so rawResultBlob ?? output gives the raw text', async () => {
+    const { call, row, blobs } = setup();
+    const view = await call('page', {}, 'r1', 'short-page');
+    expect(view.content).toBe('<untrusted source="web">\nshort page text\n</untrusted>');
+    const recorded = row('short-page');
+    expect(recorded).toMatchObject({ truncated: 0, resultHandle: null });
+    expect(blobs.read(String(recorded.rawResultBlob))).toBe('short page text');
+  });
+
   it('wraps untrusted text for the model, keeps the raw text, and taints the session until a reset', async () => {
     const { db, call, row, blobs, approvals, ran } = setup({
       rules: [...BUILTIN_RULES, { id: 'send-ok', tool: 'send', effect: 'allow' } satisfies Rule],
     });
     expect(await call('send', {}, 'r1', 'send-before')).toEqual({ content: '' });
+    expect(row('send-before').rawResultBlob).toBeNull();
     const email = await call('email');
     expect(email.content).toMatch(/^<untrusted source="gmail:personal">\nfrom: eve/);
     expect(email.content).toContain('</untrusted>\n[this result has');

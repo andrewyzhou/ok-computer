@@ -36,11 +36,9 @@ export interface ToolRegistry {
   specs(allowed: readonly string[]): ToolSpec[];
   // resolve finds the tool and checks its input. the error output goes back to the model.
   resolve(call: ToolCall, allowed: readonly string[]): Resolved;
-  // execute runs a resolved tool. a tool that throws gives an error output.
+  // execute runs a resolved tool. a tool that throws gives an error output. only the tool caller calls it, so every
+  // call goes through the policy.
   execute(tool: Tool, input: unknown, ctx: ToolContext): Promise<ToolOutput>;
-  // run skips the policy, so it refuses a tool that needs approval. tests use it to drive one tool. the agent uses
-  // the tool caller.
-  run(call: ToolCall, allowed: readonly string[], ctx: ToolContext): Promise<ToolOutput>;
 }
 
 export function defineTool<I>(tool: Tool<I>): Tool<unknown> {
@@ -53,7 +51,7 @@ export function createToolRegistry(tools: Tool[]): ToolRegistry {
   const sorted = [...tools].sort((a, b) => a.name.localeCompare(b.name));
   const specs = new Map(sorted.map((tool) => [tool.name, toSpec(tool)]));
 
-  const registry: ToolRegistry = {
+  return {
     specs(allowed) {
       return sorted.filter((tool) => allowed.includes(tool.name)).map((tool) => specs.get(tool.name)!);
     },
@@ -74,16 +72,7 @@ export function createToolRegistry(tools: Tool[]): ToolRegistry {
         return { content: `${tool.name} failed: ${(err as Error).message}`, isError: true };
       }
     },
-    async run(call, allowed, ctx) {
-      const resolved = registry.resolve(call, allowed);
-      if (!resolved.ok) return resolved.output;
-      if (resolved.tool.risk === 'external' || resolved.tool.needsApproval) {
-        return { content: `${call.name} needs approval, so it runs only through the tool caller`, isError: true };
-      }
-      return registry.execute(resolved.tool, resolved.input, ctx);
-    },
   };
-  return registry;
 }
 
 function toSpec(tool: Tool): ToolSpec {

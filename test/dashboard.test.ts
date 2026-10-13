@@ -18,6 +18,7 @@ import type {
 } from '../src/dashboard/types.js';
 import { startDashboard } from '../src/dashboard/server.js';
 import { appendEvent } from '../src/events/log.js';
+import type { ModelCall } from '../src/models/types.js';
 import { silentLogger } from '../src/observability/logger.js';
 import { seedDashboard, SUMMARY, WEEKLY } from './seed.js';
 
@@ -122,8 +123,14 @@ describe('the dashboard api on a seeded database', () => {
     expect(raw.text).toBe(`weekly/2026-W42.md lines 1-154 of 154:
 ${WEEKLY}`);
     expect(raw.size).toBe(raw.text.length);
-    const view = await get<BlobBody>(dashboard, `/api/blobs/${week!.modelViewBlob}`);
-    expect(view.text).toBe(week!.output.content);
+
+    // the model view in the row is, byte for byte, the tool result in the next request that the model got.
+    const next = detail.timeline[1]!;
+    const body = await get<ModelCallBody>(dashboard, `/api/model-calls/${next.call.id}`);
+    const sent = (body.request as ModelCall).messages
+      .flatMap((message) => (message.role === 'user' ? message.content : []))
+      .find((block) => block.type === 'tool_result' && block.toolCallId === week!.toolCallId);
+    expect(sent).toMatchObject({ type: 'tool_result', content: week!.output.content });
 
     expect(read).toMatchObject({ input: { handle: week!.resultHandle, query: 'sleep' }, truncated: false, resultHandle: null });
     expect(read!.output.content).toContain('late nights hurt sleep and the next morning');

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
+import { runTool } from '../../test/run-tool.js';
 import { nowTool } from './now.js';
 import { createToolRegistry, defineTool, type ToolContext } from './registry.js';
 
@@ -43,42 +44,23 @@ describe('tool registry', () => {
   });
 
   it('runs a tool with valid input', async () => {
-    expect(await registry.run({ id: '1', name: 'echo', input: { text: 'hi' } }, allowed, ctx)).toEqual({ content: 'hi' });
+    expect(await runTool(registry, { id: '1', name: 'echo', input: { text: 'hi' } }, allowed, ctx)).toEqual({ content: 'hi' });
   });
 
   it('returns error results instead of throwing', async () => {
-    const invalid = await registry.run({ id: '1', name: 'echo', input: { text: 5 } }, allowed, ctx);
+    const invalid = await runTool(registry, { id: '1', name: 'echo', input: { text: 5 } }, allowed, ctx);
     expect(invalid.isError).toBe(true);
-    const failed = await registry.run({ id: '1', name: 'echo', input: { text: 'boom' } }, allowed, ctx);
+    const failed = await runTool(registry, { id: '1', name: 'echo', input: { text: 'boom' } }, allowed, ctx);
     expect(failed).toEqual({ content: 'echo failed: exploded', isError: true });
   });
 
   it('treats a tool outside the allowlist as unknown', async () => {
-    const result = await registry.run({ id: '1', name: 'echo', input: { text: 'hi' } }, ['now'], ctx);
+    const result = await runTool(registry, { id: '1', name: 'echo', input: { text: 'hi' } }, ['now'], ctx);
     expect(result).toEqual({ content: 'unknown tool: echo', isError: true });
   });
 
-  it('refuses to run a tool that needs approval, because only the tool caller asks the owner', async () => {
-    let ran = 0;
-    const send = defineTool({
-      name: 'send',
-      description: 'Send.',
-      input: z.object({ to: z.string() }),
-      risk: 'external',
-      async run({ to }) {
-        ran++;
-        return { content: `sent to ${to}` };
-      },
-    });
-    const withSend = createToolRegistry([send]);
-    expect((await withSend.run({ id: '1', name: 'send', input: { to: 'bob' } }, ['send'], ctx)).isError).toBe(true);
-    expect(ran).toBe(0);
-    const resolved = withSend.resolve({ id: '1', name: 'send', input: { to: 'bob' } }, ['send']);
-    expect(resolved.ok && (await withSend.execute(resolved.tool, resolved.input, ctx))).toEqual({ content: 'sent to bob' });
-  });
-
   it('gives the time in the owner time zone', async () => {
-    const result = await registry.run({ id: '1', name: 'now', input: {} }, allowed, ctx);
+    const result = await runTool(registry, { id: '1', name: 'now', input: {} }, allowed, ctx);
     expect(result.content).toBe('Monday, October 12, 2026 at 20:15 PDT (2026-10-13T03:15:00.000Z)');
   });
 });

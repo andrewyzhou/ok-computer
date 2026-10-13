@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { runTool } from '../../test/run-tool.js';
 import { openDb } from '../db/index.js';
 import { createToolRegistry } from '../tools/registry.js';
 import { chunkMarkdown, resolveMemoryPath, searchMemory, syncMemoryIndex, toMatchQuery } from './search.js';
@@ -16,7 +17,7 @@ function setup() {
   const db = openDb(':memory:');
   const registry = createToolRegistry(createMemoryTools({ db, memoryDir }));
   const call = (name: string, input: unknown) =>
-    registry.run({ id: 't', name, input }, ['memory_search', 'memory_get'], {
+    runTool(registry, { id: 't', name, input }, ['memory_search', 'memory_get'], {
       runId: 'r',
       sessionKey: 'main',
       timeZone: 'UTC',
