@@ -96,7 +96,14 @@ export function createMessageRecorder(deps: { db: Db; blobs: BlobStore; clock: C
 //   machine without a trace. the request then fails before the server acts.
 // - a message in is delivered also when its record fails. the server already acted, and a lost answer would make the
 //   client wait and then report a failure for work that was done.
-export function recordingTransport(inner: Transport, record: MessageRecorder, onRecordError: (err: unknown) => void): Transport {
+// onError sees each error of the inner transport, for example a command that does not exist. the client then gives
+// only "connection closed", so the connection keeps the real error for the owner.
+export function recordingTransport(
+  inner: Transport,
+  record: MessageRecorder,
+  onRecordError: (err: unknown) => void,
+  onError?: (error: Error) => void,
+): Transport {
   const outer: Transport = {
     start: () => inner.start(),
     close: () => inner.close(),
@@ -127,7 +134,10 @@ export function recordingTransport(inner: Transport, record: MessageRecorder, on
     outer.onmessage?.(message, extra);
   };
   inner.onclose = () => outer.onclose?.();
-  inner.onerror = (error) => outer.onerror?.(error);
+  inner.onerror = (error) => {
+    onError?.(error);
+    outer.onerror?.(error);
+  };
   return outer;
 }
 
@@ -263,6 +273,8 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
       await attempt.close().catch(() => {});
       return true;
     };
+    let transportError: string | undefined;
+    const reason = (text: string) => (transportError && !text.includes(transportError) ? `${text}: ${transportError}` : text);
     try {
       const transport = await deps.transport();
       if (mine !== generation || stopped) {
@@ -271,7 +283,15 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
       }
       inner = transport;
       await attempt.connect(
-        recordingTransport(transport, record, (err) => logger.error('mcp message trace write failed', { integration: id, err })),
+        recordingTransport(
+          transport,
+          record,
+          (err) => logger.error('mcp message trace write failed', { integration: id, err }),
+          (error) => {
+            transportError = errorText(error);
+            logger.warn('mcp transport error', { integration: id, err: error });
+          },
+        ),
       );
       if (await stale()) return;
       const { tools } = await attempt.listTools();
@@ -288,7 +308,7 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
         client = undefined;
         if (connectedAt !== undefined && clock().getTime() - connectedAt >= HEALTHY_AFTER_MS) failures = 0;
         connectedAt = undefined;
-        if (!stopped && mine === generation) retry('the connection closed');
+        if (!stopped && mine === generation) retry(reason('the connection closed'));
       };
       cancelTimer = setTimer(() => void ping(attempt), PING_EVERY_MS);
     } catch (err) {
@@ -301,7 +321,7 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
         logger.warn('mcp server needs authorization', { integration: id });
         return;
       }
-      retry(errorText(err));
+      retry(reason(errorText(err)));
     }
   }
 

@@ -306,4 +306,14 @@ describe('stdio server', () => {
     fire(1_000);
     await expect.poll(() => connection.state().status, { timeout: 10_000 }).toBe('connected');
   }, 20_000);
+
+  it('names the transport error of a command that does not exist', async () => {
+    const parsed = parseIntegrations({ integrations: [{ id: 'notes', kind: 'mcp-stdio', command: 'okc-no-such-server', tools: { allow: ['echo'] } }] });
+    if (!parsed.ok) throw new Error(parsed.error);
+    const entry = parsed.value[0] as StdioEntry;
+    const { connection } = setup(() => stdioTransport(entry, createMemorySecretStore(), silentLogger));
+    await connection.start();
+    // the client alone says only "connection closed". the error of the transport says why.
+    expect(connection.state()).toMatchObject({ status: 'error', error: expect.stringContaining('spawn okc-no-such-server ENOENT') });
+  }, 20_000);
 });
