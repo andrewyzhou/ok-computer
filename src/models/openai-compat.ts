@@ -9,6 +9,7 @@ import {
   type StopReason,
   type ToolCall,
 } from './types.js';
+import { normalizeSchema } from './schema.js';
 
 export const OPENAI_COMPAT = 'openai-compat';
 
@@ -47,7 +48,7 @@ export function toOpenAiParams(call: ModelCall): OpenAI.Chat.ChatCompletionCreat
       ? {
           tools: call.tools.map((tool) => ({
             type: 'function' as const,
-            function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },
+            function: { name: tool.name, description: tool.description, parameters: normalizeSchema(tool.inputSchema, 'openai-compat') },
           })),
         }
       : {}),
