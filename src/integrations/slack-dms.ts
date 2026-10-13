@@ -102,7 +102,7 @@ export function createSlackDmPoll(deps: SlackDmPollDeps): (integrationId: string
     const now = clock();
     const blobs = messages.map((message) => deps.blobs.put(message.text, 'text/plain; charset=utf-8'));
     const insert = db.prepare(
-      `INSERT INTO integration_events (source, account, externalId, kind, summary, payloadBlob, untrustedSource, occurredAt, seenAt)
+      `INSERT INTO integration_events (source, account, externalId, kind, summary, payloadBlob, untrustedSource, occursAt, seenAt)
        VALUES ('slack', ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (source, account, externalId) DO NOTHING`,
     );
     let added = 0;
@@ -112,8 +112,8 @@ export function createSlackDmPoll(deps: SlackDmPollDeps): (integrationId: string
         const kind = state.selfId !== null && message.user === state.selfId ? 'dm_reply' : 'dm';
         // the redaction comes before the cut, so a secret on the cut is never stored in part.
         const summary = headOf(redact(`${message.user ?? 'unknown user'} in ${message.channel}: ${message.text.replace(/\s+/g, ' ').trim()}`), SUMMARY_LIMIT);
-        const occurredAt = new Date(Number(message.ts) * 1000).toISOString();
-        added += Number(insert.run(id, `${message.channel}:${message.ts}`, kind, summary, blobs[i]!, `mcp:${id}`, occurredAt, now.toISOString()).changes);
+        const occursAt = new Date(Number(message.ts) * 1000).toISOString();
+        added += Number(insert.run(id, `${message.channel}:${message.ts}`, kind, summary, blobs[i]!, `mcp:${id}`, occursAt, now.toISOString()).changes);
       });
       setSetting(db, pollStateKey(id), state, now);
       db.exec('COMMIT');

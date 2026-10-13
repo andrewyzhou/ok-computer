@@ -14,7 +14,8 @@ import {
 } from './types.js';
 
 export type SlotResult =
-  | { ok: true; response: ModelResponse; provider: string; model: string }
+  // modelCallId is the model_calls row of the answer, so a caller can link a label or a verdict to its call.
+  | { ok: true; response: ModelResponse; provider: string; model: string; modelCallId: number }
   | { ok: false; error: string; aborted: boolean };
 
 export interface SlotRunner {
@@ -68,14 +69,14 @@ export function createSlotRunner(deps: SlotRunnerDeps): SlotRunner {
           try {
             const response = await client.complete(call, signal, onText);
             const cost = costUsd(config.pricing, ref, response.usage);
-            record(db, { runId, slot, provider, model, call, response, cost, latencyMs: response.latencyMs }, clock());
+            const modelCallId = record(db, { runId, slot, provider, model, call, response, cost, latencyMs: response.latencyMs }, clock());
             if (response.warnings) logger.warn('provider changed the input', { slot, ref, runId, warnings: response.warnings });
             if (response.stopReason === 'refusal') {
               lastError = `${ref} refused the request`;
               logger.warn('model refused, trying the next model', { slot, ref, runId });
               break;
             }
-            return { ok: true, response, provider, model };
+            return { ok: true, response, provider, model, modelCallId };
           } catch (err) {
             if (!(err instanceof ModelError)) throw err;
             const latencyMs = Math.round(performance.now() - started);
@@ -126,9 +127,9 @@ export function recordToolCatalog(db: Db, tools: ToolSpec[], now: Date): string 
   return hash;
 }
 
-function record(db: Db, row: CallRecord, now: Date): void {
+function record(db: Db, row: CallRecord, now: Date): number {
   const usage = row.response?.usage;
-  db.prepare(
+  const result = db.prepare(
     `INSERT INTO model_calls (runId, slot, provider, model, inputTokens, outputTokens, cacheReadTokens,
        cacheWriteTokens, costUsd, latencyMs, stopReason, error, request, response, createdAt, toolCatalogHash)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -150,4 +151,5 @@ function record(db: Db, row: CallRecord, now: Date): void {
     now.toISOString(),
     recordToolCatalog(db, row.call.tools, now),
   );
+  return Number(result.lastInsertRowid);
 }

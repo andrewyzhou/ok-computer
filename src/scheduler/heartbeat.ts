@@ -9,6 +9,7 @@ import type { Logger } from '../observability/logger.js';
 import type { TaintSource } from '../policy/policy.js';
 import { sessionTaint } from '../policy/store.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
+import type { Digest } from '../signals/digest.js';
 import type { RunQueue } from '../sessions/queue.js';
 import { MAIN_SESSION } from '../sessions/router.js';
 import { localTime, type Clock } from '../time.js';
@@ -22,6 +23,8 @@ export const HEARTBEAT_PREFIX = 'heartbeat:';
 const CHECKLIST = 'heartbeat_checklist';
 const CHECKLIST_TAINT = 'heartbeat_checklist_taint';
 const SYNCED_EVERY = 'heartbeat_synced_every_ms';
+// the last heartbeat runs whose message to the owner failed. the list keeps as many runs as the recent notifications.
+const UNSENT_RUNS = 'heartbeat_unsent_runs';
 const RECENT_LIMIT = 5;
 
 export const HEARTBEAT_INSTRUCTIONS = `This is a heartbeat run. The owner does not see this session. Check the items of the heartbeat checklist against the context that you have. Then call heartbeat_respond one time. Use notify true with a short message only when something needs the owner's attention now. Use notify false in all other cases. Do not repeat a recent notification. After heartbeat_respond, reply NO_REPLY.`;
@@ -84,11 +87,15 @@ function responses(db: Db, sql: string, ...params: string[]): Respond[] {
     .map((row) => JSON.parse(String(row.input)) as Respond);
 }
 
+// a message that did not reach the owner is not a recent notification. the next heartbeat would see it as sent, and
+// it could then keep back the signal that the failed message was about.
 export function recentNotifications(db: Db): string[] {
   return responses(
     db,
     `SELECT input FROM tool_calls WHERE name = 'heartbeat_respond' AND isError = 0
-       AND json_extract(input, '$.notify') = 1 ORDER BY id DESC LIMIT ${RECENT_LIMIT}`,
+       AND json_extract(input, '$.notify') = 1 AND runId NOT IN (SELECT value FROM json_each(?))
+       ORDER BY id DESC LIMIT ${RECENT_LIMIT}`,
+    JSON.stringify(getSetting<string[]>(db, UNSENT_RUNS) ?? []),
   ).map((respond) => respond.text ?? '');
 }
 
@@ -131,6 +138,13 @@ export interface HeartbeatDeps {
   agent: (input: RunInput) => Promise<RunResult>;
   signal: AbortSignal;
   newId?: () => string;
+  // the signals of the integrations: a bounded digest of the unhandled ones, and the mark after a completed run.
+  signals?: {
+    digest(now: Date): Digest | undefined;
+    finish(digest: Digest, runId: string | null, notified: boolean, now: Date): void;
+    // a failed run that showed signals counts against each of them.
+    failed(digest: Digest): void;
+  };
 }
 
 export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) => Promise<JobResult> {
@@ -143,20 +157,34 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
       return { status: 'skipped', error: 'outside active hours' };
     }
     const checklist = getChecklist(db);
-    if (!checklist) return { status: 'skipped', error: 'the checklist is empty' };
     if (queue.busy(MAIN_SESSION)) return { status: 'skipped', error: 'the main session has a run in progress' };
+    // new signals are a reason to run without a checklist.
+    const digest = deps.signals?.digest(clock());
+    if (!checklist && !digest?.shown.length) {
+      // newsletters and noise need no model call. they are closed now, so they do not wait for ever.
+      if (digest) deps.signals!.finish(digest, null, false, clock());
+      return { status: 'skipped', error: 'the checklist is empty' };
+    }
 
     const recent = recentNotifications(db);
     const text = [
       'Heartbeat check.',
       '',
       'Checklist:',
-      checklist,
+      checklist || '- none',
+      ...(digest?.shown.length
+        ? [
+            '',
+            "New signals from the owner's accounts: the ones with a detector hit first, then the newest. Tell the owner about a signal only when it needs attention soon, for example a deadline that is not on the calendar. Each signal is shown one time.",
+            digest.text,
+          ]
+        : []),
       '',
       'Recent notifications to the owner:',
       ...(recent.length ? recent.map((line) => `- ${line}`) : ['- none']),
     ].join('\n');
-    const inherited = checklistTaint(db);
+    // the digest quotes outside text, so the run starts with its taint. the heartbeat has no external tools.
+    const inherited = [...checklistTaint(db), ...(digest?.taint ?? [])];
     const runId = newId();
     const sessionKey = `${HEARTBEAT_PREFIX}${runId}`;
     const result = await queue.enqueue(sessionKey, () =>
@@ -171,16 +199,35 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
         signal: deps.signal,
       }),
     );
-    if (result.status !== 'completed') return { status: 'failed', runId, error: result.error ?? result.status };
+    // a failed run leaves the signals unhandled, so the next heartbeat shows them again. a failure counts against the
+    // shown signals, so a signal whose text makes every run fail loses that text, and the scheduler does not turn the
+    // heartbeat off. an aborted run (a stop of the app) does not count.
+    if (result.status !== 'completed') {
+      if (result.status === 'failed' && digest?.shown.length) deps.signals!.failed(digest);
+      return { status: 'failed', runId, error: result.error ?? result.status };
+    }
 
     // the answer comes from the event log, because one failed trace write must not drop the owner's notification.
     const answer = succeededCalls(db, sessionKey, runId, 'heartbeat_respond').at(-1) as Respond | undefined;
-    if (answer?.notify && answer.text) {
-      await owner.send(answer.text, undefined, { markdown: true, runId });
+    const message = answer?.notify ? answer.text : undefined;
+    const notified = !!message && (await owner.send(message, undefined, { markdown: true, runId }));
+    if (message && !notified) {
+      const unsent = [runId, ...(getSetting<string[]>(db, UNSENT_RUNS) ?? [])].slice(0, RECENT_LIMIT);
+      setSetting(db, UNSENT_RUNS, unsent, clock());
+    }
+    // the mark comes after the send. a crash between the two shows the signals again, and the recent notifications
+    // tell the next heartbeat not to repeat itself. a lost deadline is worse than a repeated one. a run that gave no
+    // heartbeat_respond did not decide about the signals, and a message that did not reach the owner did not tell
+    // about them, so in both cases they stay open for the next heartbeat. the digest closes them as stale after some
+    // days, so a model that never answers or a channel that stays down cannot hold them for ever. the filtered signals
+    // need no decision.
+    if (digest) deps.signals!.finish(answer && !!message === notified ? digest : { ...digest, shown: [] }, runId, notified, clock());
+    if (message && !notified) return { status: 'completed', runId, error: 'the message to the owner failed, so the signals stay open' };
+    if (message && notified) {
       // the notification can repeat untrusted content that the heartbeat read, so it carries that taint, and its text
       // is wrapped.
       const taint = sessionTaint(db, sessionKey);
-      const text = `The heartbeat sent this message to the owner:\n${wrapIfTainted(taint, answer.text)}`;
+      const text = `The heartbeat sent this message to the owner:\n${wrapIfTainted(taint, message)}`;
       await queue.enqueue(MAIN_SESSION, async () => {
         appendEvent(
           db,

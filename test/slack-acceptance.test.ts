@@ -119,10 +119,13 @@ describe('slack acceptance', () => {
     expect(t.printed()).not.toMatch(/new look|widget/);
   });
 
-  it('skips the poll in the chat process, which never connects', async () => {
+  // a claim in the chat process would use up the slot of the service, which then skipped the poll.
+  it('leaves the poll to the service in the chat process, which never connects', async () => {
     const { t, fake, poll } = await slackApp([], { connect: false });
-    await t.at(poll().nextRunAt!);
-    expect(t.rows('SELECT status, error FROM automation_runs')).toEqual([{ status: 'skipped', error: 'the chat process does not poll' }]);
+    const due = poll().nextRunAt!;
+    await t.at(due);
+    expect(t.rows('SELECT status, error FROM automation_runs')).toEqual([]);
+    expect(poll().nextRunAt).toBe(due);
     expect(fake.calls).toEqual([]);
   });
 });

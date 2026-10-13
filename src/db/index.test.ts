@@ -75,7 +75,7 @@ describe('migrations 006 and 007', () => {
     expect(columns('blobs')).not.toContain('refCount');
     expect(columns('policy_decisions')).toContain('taint');
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name);
-    // 008 creates integration_events again, with the columns that a poll writes.
+    // 008 creates integration_events again for the slack poll, and 010 builds it again with the columns of the google sync.
     for (const dropped of ['browser_steps', 'sandbox_execs', 'subagent_runs']) expect(tables).not.toContain(dropped);
     expect(db.prepare('SELECT COUNT(*) AS n FROM mcp_messages').get()).toEqual({ n: 1 });
 
@@ -112,5 +112,37 @@ describe('openDb', () => {
       expect.arrayContaining(['events', 'runs', 'model_calls', 'tool_calls', 'migrations', 'blobs', 'policy_decisions']),
     );
     db.close();
+  });
+});
+
+describe('migration 010', () => {
+  it('builds integration_events again and keeps the rows of the slack poll', () => {
+    const real = join(import.meta.dirname, 'migrations');
+    const files = readdirSync(real).filter((file) => file.endsWith('.sql'));
+    const db = new DatabaseSync(':memory:');
+    migrate(db, migrationsDir(Object.fromEntries(files.filter((file) => file < '010').map((file) => [file, readFileSync(join(real, file), 'utf8')]))));
+    db.exec(`INSERT INTO integration_events (source, account, externalId, kind, summary, payloadBlob, untrustedSource, occurredAt, seenAt)
+      VALUES ('slack', 'work', 'D1:1.5', 'dm', 'ann in D1: hi', NULL, 'mcp:work', '2026-10-13T08:00:00.000Z', '2026-10-13T08:01:00.000Z')`);
+
+    migrate(db, real);
+    expect(db.prepare('SELECT source, account, externalId, kind, summary, untrustedSource, occursAt, state, labelAttempts FROM integration_events').all()).toEqual([
+      {
+        source: 'slack',
+        account: 'work',
+        externalId: 'D1:1.5',
+        kind: 'dm',
+        summary: 'ann in D1: hi',
+        untrustedSource: 'mcp:work',
+        occursAt: '2026-10-13T08:00:00.000Z',
+        state: 'new',
+        labelAttempts: 0,
+      },
+    ]);
+    // the unique key still makes a second insert of the same item a no-op.
+    const again = db
+      .prepare(`INSERT INTO integration_events (source, account, externalId, kind, seenAt) VALUES ('slack', 'work', 'D1:1.5', 'dm', 'x')
+        ON CONFLICT (source, account, externalId) DO NOTHING`)
+      .run();
+    expect(again.changes).toBe(0);
   });
 });

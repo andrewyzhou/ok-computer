@@ -83,16 +83,28 @@ describe('redact', () => {
 
   // an oauth refresh gives new tokens each hour. a list that only grew made each trace write slower for the life of
   // the process: 100 refreshes took one redaction of a tool list from 15 ms to 488 ms.
-  it('keeps only the newest value of a source, and every value without a source', () => {
+  // the value before the newest stays too: a request that left with the old token can still be open after a refresh,
+  // and its error can quote the authorization header.
+  it('keeps the two newest values of a source, and every value without a source', () => {
     registerSecret('fixed-secret-value-2026');
     for (let i = 0; i < 1_000; i++) registerSecret(`access-token-number-${i}`, 'mail:oauth-tokens#access');
     expect(redact('a access-token-number-999 b')).toBe('a [redacted] b');
-    expect(redact('a access-token-number-998 b')).toBe('a access-token-number-998 b');
+    expect(redact('a access-token-number-998 b')).toBe('a [redacted] b');
+    expect(redact('a access-token-number-997 b')).toBe('a access-token-number-997 b');
+    // the same value again does not push the value before it out.
+    registerSecret('access-token-number-999', 'mail:oauth-tokens#access');
+    expect(redact('a access-token-number-998 b')).toBe('a [redacted] b');
     expect(redact('a fixed-secret-value-2026 b')).toBe('a [redacted] b');
     // a value that two sources hold stays while one of them holds it.
     registerSecret('shared-secret-value-2026', 'one');
     registerSecret('shared-secret-value-2026', 'two');
     registerSecret('other-secret-value-2026', 'one');
     expect(redact('shared-secret-value-2026 other-secret-value-2026')).toBe('[redacted] [redacted]');
+  });
+
+  // a token endpoint that quotes its form body in an error showed a google refresh token as 1%2F%2F... in the log.
+  it('hides the percent-encoded form of a secret', () => {
+    registerSecret('1//refresh/token+value=2026', 'google.test');
+    expect(redact('refresh_token=1%2F%2Frefresh%2Ftoken%2Bvalue%3D2026&grant_type=refresh_token')).toBe('refresh_token=[redacted]&grant_type=refresh_token');
   });
 });

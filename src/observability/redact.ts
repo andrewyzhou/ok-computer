@@ -10,15 +10,16 @@ const PATTERNS = [/sk-ant-[A-Za-z0-9_-]{10,}/g, /(?<![0-9])\d{6,12}:[A-Za-z0-9_-
 let secrets: string[] = [];
 // a model request holds an event that holds a tool result that holds json. four levels cover this.
 const ESCAPE_LEVELS = 4;
-// the forms of each value. a value without a source stays for the life of the process. a value with a source
-// replaces the last value of that source: an oauth refresh gives new tokens each hour, and redact makes one pass for
-// each form, so a list that only grows made each trace write slower (100 refreshes: 15 ms to 488 ms for one list).
+// the forms of each value. a value without a source stays for the life of the process. a source keeps its two newest
+// values: an oauth refresh gives new tokens each hour, and redact makes one pass for each form, so a list that only
+// grows made each trace write slower (100 refreshes: 15 ms to 488 ms for one list).
 const fixed = new Set<string>();
-const bySource = new Map<string, string[]>();
+const bySource = new Map<string, Array<{ value: string; forms: string[] }>>();
+const KEPT_PER_SOURCE = 2;
 
-// source names the place that holds the value, for example the reference of a credential. only the newest value of a
-// source stays registered. an old token is not sent again, and it was never in a trace row, because a header is not
-// recorded.
+// source names the place that holds the value, for example the reference of a credential. the value before the
+// newest stays registered too: a request that left with it can still be open after a refresh, and a server can quote
+// its authorization header in an error. older values are not sent again.
 export function registerSecret(value: string | undefined, source?: string): void {
   // a very short value can match normal text, so the redactor ignores it.
   if (!value || value.length < 8) return;
@@ -33,9 +34,14 @@ export function registerSecret(value: string | undefined, source?: string): void
     if (escaped === form) break;
     form = escaped;
   }
+  // a form body or a query string holds the percent-encoded value. a server that quotes its request in an error
+  // (an oauth token endpoint, for example) puts that form in the message.
+  const encoded = encodeURIComponent(value);
+  if (encoded !== value) forms.push(encoded);
   if (source === undefined) forms.forEach((each) => fixed.add(each));
-  else bySource.set(source, forms);
-  secrets = [...new Set([...fixed, ...[...bySource.values()].flat()])].sort((a, b) => b.length - a.length);
+  else bySource.set(source, [{ value, forms }, ...(bySource.get(source) ?? []).filter((each) => each.value !== value)].slice(0, KEPT_PER_SOURCE));
+  const held = [...bySource.values()].flatMap((values) => values.flatMap((each) => each.forms));
+  secrets = [...new Set([...fixed, ...held])].sort((a, b) => b.length - a.length);
 }
 
 export function redact(text: string): string {

@@ -77,6 +77,7 @@ interface Trace {
   outcome?: 'abandoned';
   source?: string;
   serverId?: string;
+  account?: string;
 }
 
 const sourceOf = (tool: Attribution) => ({ ...(tool.source ? { source: tool.source } : {}), ...(tool.serverId ? { serverId: tool.serverId } : {}) });
@@ -148,8 +149,8 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       const row = db
         .prepare(
           `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, riskLevel,
-             policyDecisionId, tainted, untrustedSource, rawResultBlob, truncated, resultHandle, outcome, source, serverId)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+             policyDecisionId, tainted, untrustedSource, rawResultBlob, truncated, resultHandle, outcome, source, serverId, account)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
         )
         .get(
           runId,
@@ -170,6 +171,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
           trace.outcome ?? (raw.effect === 'none' ? 'unsent' : null),
           trace.source ?? 'builtin',
           trace.serverId ?? null,
+          trace.account ?? null,
         );
       return { ...result, rowId: Number(row!.id) };
     } catch (err) {
@@ -268,10 +270,13 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
   async function check(tool: Tool, input: unknown, call: ToolCall, ctx: CallContext, toolCtx: ToolContext) {
     const taint = sessionTaint(db, ctx.sessionKey);
     const sources = taint.map((each) => each.source);
-    const verdict = decide(
-      { tool: tool.name, risk: tool.risk, alwaysApprove: tool.needsApproval === true, input, sessionKey: ctx.sessionKey, taint: sources },
-      deps.rules,
-    );
+    // the risk of the call is computed one time, here, before the tool acts. the approved call reads it from the row.
+    const risk = tool.riskFor?.(input) ?? tool.risk;
+    const account = tool.accountOf?.(input);
+    // an input that makes a call external, for example an invitation, always asks the owner. an allow rule on the tool
+    // was written for its usual risk.
+    const alwaysApprove = tool.needsApproval === true || (tool.riskFor !== undefined && risk === 'external');
+    const verdict = decide({ tool: tool.name, risk, alwaysApprove, input, sessionKey: ctx.sessionKey, taint: sources }, deps.rules);
     let reason =
       verdict.decision === 'review' && !deps.reviewer ? `${verdict.reason}. there is no reviewer model yet, so the owner decides` : verdict.reason;
     const decisionId = recordDecision(
@@ -279,7 +284,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       { ...verdict, reason, taint, runId: ctx.runId, toolCallId: call.id, toolName: tool.name },
       clock(),
     );
-    const gate = { decisionId, taint };
+    const gate = { decisionId, taint, risk, ...(account ? { account } : {}) };
 
     const askOwner = async (): Promise<ToolOutput> => {
       try {
@@ -306,7 +311,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
     if (verdict.decision === 'review' && deps.reviewer) {
       let review: ReviewResult | typeof STOPPED;
       try {
-        const request = { runId: ctx.runId, sessionKey: ctx.sessionKey, tool: tool.name, input, risk: tool.risk, reason, taint: sources, signal: ctx.signal };
+        const request = { runId: ctx.runId, sessionKey: ctx.sessionKey, tool: tool.name, input, risk, reason, taint: sources, signal: ctx.signal };
         review = await untilStopped(deps.reviewer(request), ctx.signal, (err) =>
           logger.warn('reviewer failed after its run stopped', { runId: ctx.runId, toolCallId: call.id, tool: tool.name, err }),
         );
@@ -347,7 +352,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       // for tool_call this is the integration tool that it names, with the same id.
       const { tool, input, call } = resolved;
 
-      let gate: { decisionId: number; taint: TaintSource[]; held?: ToolOutput };
+      let gate: { decisionId: number; taint: TaintSource[]; risk: Risk; account?: string; held?: ToolOutput };
       try {
         gate = await check(tool, input, call, ctx, toolCtx);
       } catch (err) {
@@ -355,7 +360,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         const output = { content: `${tool.name} did not run, because its policy check failed: ${errorText(err)}`, isError: true };
         return strip(record(ctx.runId, call, output, started, { risk: tool.risk }));
       }
-      const trace = { risk: tool.risk, decisionId: gate.decisionId, tainted: gate.taint.length > 0, ...sourceOf(tool) };
+      const trace = { risk: gate.risk, decisionId: gate.decisionId, tainted: gate.taint.length > 0, ...sourceOf(tool), ...(gate.account ? { account: gate.account } : {}) };
       const finish = (output: ToolOutput, outcome?: 'abandoned') =>
         record(ctx.runId, call, output, started, { ...trace, ...(outcome ? { outcome } : {}) });
       if (gate.held) return strip(finish(gate.held));
@@ -395,7 +400,15 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
               : `approval #${approval.id} already ran, so it did not run again`,
           );
         }
-        trace = { decisionId: decisionOfApproval(db, approval.id), tainted: sessionTaint(db, approval.sessionKey).length > 0 };
+        const decisionId = decisionOfApproval(db, approval.id);
+        // the row of the call that asked keeps the risk and the account that the owner approved.
+        const asked = db.prepare('SELECT riskLevel, account FROM tool_calls WHERE policyDecisionId = ? ORDER BY id LIMIT 1').get(decisionId);
+        trace = {
+          decisionId,
+          tainted: sessionTaint(db, approval.sessionKey).length > 0,
+          ...(asked?.riskLevel ? { risk: asked.riskLevel as Risk } : {}),
+          ...(asked?.account ? { account: String(asked.account) } : {}),
+        };
       } catch (err) {
         logger.error('approved call failed before it ran', { runId: approval.runId, approvalId: approval.id, err });
         return skipped(`approval #${approval.id} did not run: ${errorText(err)}`);
@@ -411,7 +424,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       const finish = (output: ToolOutput, outcome?: 'abandoned') => {
         abandoned = outcome === 'abandoned';
         acted = output.effect !== 'none';
-        return record(approval.runId, call, output, started, { ...trace, risk: resolved.tool.risk, ...sourceOf(resolved.tool), ...(outcome ? { outcome } : {}) });
+        return record(approval.runId, call, output, started, { risk: resolved.tool.risk, ...trace, ...sourceOf(resolved.tool), ...(outcome ? { outcome } : {}) });
       };
       // no await comes between the check of the signal and this line, so the tool starts.
       const output = strip(await run(resolved.tool, resolved.input, toolCtx, call, finish, onLate));

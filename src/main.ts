@@ -89,7 +89,7 @@ async function main(): Promise<void> {
     rules: rules.value,
     policyPath: 'okc.policy.json',
     integrations: integrations.value,
-    ...(integrations.value.length ? { secrets: createKeyringStore() } : {}),
+    ...(integrations.value.length || config.google ? { secrets: createKeyringStore() } : {}),
     connectIntegrations: !chatMode,
     background: !chatMode,
     ...(loginCodes ? { loginCodes } : {}),

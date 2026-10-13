@@ -37,6 +37,7 @@ import {
   sessionEvents,
   toMcpMessage,
 } from './queries.js';
+import { googleRoutes } from './google.js';
 import { integrationDetail, summaryOf } from './integrations.js';
 import { createSessions, LOCAL_SESSION_MS, LOGIN_PAGE, REMOTE_SESSION_MS, type LoginCodes } from './login.js';
 import { createFeed } from './stream.js';
@@ -47,7 +48,7 @@ export interface DashboardDeps {
   config: Config;
   clock: Clock;
   logger: Logger;
-  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations'>;
+  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google'>;
   // with a token, every api request must give it. the browser gives it in the query, because EventSource has no
   // headers.
   token?: string;
@@ -284,6 +285,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
     const done = await app.integrations.finishSignIn(input.url);
     return done.ok ? c.json({ text: done.text }) : c.json({ error: done.text }, 400);
   });
+  googleRoutes(server, { db, app, config, clock });
   server.get('/api/mcp-messages/:id', (c) => {
     const row = db.prepare('SELECT * FROM mcp_messages WHERE id = ?').get(Number(c.req.param('id')));
     if (!row) return notFound(c, 'mcp message');

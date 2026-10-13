@@ -77,7 +77,7 @@ async function setup(overrides: Partial<SlackDmPollDeps> = {}) {
     return message;
   };
   const signals = () =>
-    db.prepare('SELECT account, externalId, kind, summary, untrustedSource, occurredAt, seenAt, payloadBlob FROM integration_events ORDER BY id').all() as Array<
+    db.prepare('SELECT account, externalId, kind, summary, untrustedSource, occursAt, seenAt, payloadBlob FROM integration_events ORDER BY id').all() as Array<
       Record<string, string>
     >;
   const state = () => getSetting<{ position: string | null; complete: boolean; selfId: string | null }>(db, pollStateKey('slack-work'));
@@ -99,7 +99,7 @@ describe('slack dm poll', () => {
         kind: 'dm',
         summary: expect.stringMatching(new RegExp(`^${ALICE} in ${DM_ALICE}: .*can you review the deck by 5pm\\?$`)),
         untrustedSource: 'mcp:slack-work',
-        occurredAt: new Date(Number(first.ts) * 1000).toISOString(),
+        occursAt: new Date(Number(first.ts) * 1000).toISOString(),
         seenAt: '2026-10-13T16:00:00.000Z',
         payloadBlob: expect.stringMatching(/^[0-9a-f]{64}$/),
       },
@@ -324,7 +324,7 @@ describe('slack dm poll', () => {
     expect(signals).toHaveLength(PAGE_SIZE + 1);
     expect(signals.map((signal) => signal.externalId)).toContain(`${DM_ALICE}:${later.ts}`);
     expect(signals.filter((signal) => signal.kind === 'dm_reply')).toEqual([]);
-    expect(signals.every((signal) => signal.occurredAt?.startsWith('2026-10-13'))).toBe(true);
+    expect(signals.every((signal) => signal.occursAt?.startsWith('2026-10-13'))).toBe(true);
     expect(t.state()!.position).toBe(later.ts);
   });
 

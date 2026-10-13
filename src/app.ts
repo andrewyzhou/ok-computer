@@ -24,7 +24,10 @@ import {
 } from './memory/consolidate.js';
 import { appendToDailyNote, sessionExcerpt } from './memory/daily.js';
 import { createMemoryTools } from './memory/tools.js';
-import type { IntegrationEntry } from './integrations/config.js';
+import { createGoogle, syncGooglePoll, type Google } from './google/google.js';
+import type { GoogleEndpoints } from './google/accounts.js';
+import { finishDigest, noteFailedDigest, signalDigest, type Digest } from './signals/digest.js';
+import { sessionProfile, type IntegrationEntry } from './integrations/config.js';
 import { createIntegrations, type Integrations, type IntegrationsDeps } from './integrations/integrations.js';
 import { createOAuth } from './integrations/oauth.js';
 import { syncPolls } from './integrations/polls.js';
@@ -89,6 +92,8 @@ export interface AppDeps {
   // the codes of the dashboard that runs in this process. with them and dashboard.publicUrl, /dashboard sends a
   // sign-in link.
   loginCodes?: LoginCodes;
+  // tests point the google integration at a local fake.
+  googleEndpoints?: GoogleEndpoints;
 }
 
 export interface App {
@@ -102,6 +107,7 @@ export interface App {
   contextView(sessionKey: string): Promise<ModelRequest>;
   resolveApproval: ApprovalFlow['resolve'];
   integrations: Integrations;
+  google?: Google;
 }
 
 // a run ends at its timeout. the margin covers the end of the run itself, so a live run is never closed as stale.
@@ -153,9 +159,31 @@ export function createApp(deps: AppDeps): App {
     ...(deps.setTimer ? { setTimer: deps.setTimer } : {}),
     connects: deps.connectIntegrations !== false,
   });
+  // the slot runner comes later. the google classifier calls it only during a poll, after the start.
+  const google = config.google
+    ? createGoogle({
+        db,
+        clock,
+        logger,
+        blobs,
+        secrets,
+        slots: { call: (...args) => slots.call(...args) },
+        config: config.google,
+        timeZone: config.timeZone,
+        notifyOwner: (text) => owner.send(text),
+        polls: deps.connectIntegrations !== false,
+        signal: shutdown.signal,
+        ...(deps.googleEndpoints ? { endpoints: deps.googleEndpoints } : {}),
+        ...ids,
+      })
+    : undefined;
   // each run gets the integration tools of its session. the list comes from the config, not from a catalog, so the
   // tools parameter of a session never changes when a server changes its tools.
-  const withIntegrations = (sessionKey: string, base: readonly string[]) => [...base, ...integrations.allowedNames(sessionKey)];
+  const withIntegrations = (sessionKey: string, base: readonly string[]) => [
+    ...base,
+    ...integrations.allowedNames(sessionKey),
+    ...(google?.toolNames(sessionProfile(sessionKey)) ?? []),
+  ];
   const activeRuns = new Set<string>();
 
   const approvals = createApprovalFlow({
@@ -203,6 +231,7 @@ export function createApp(deps: AppDeps): App {
       createSkillWriteTool({ skillsDir: config.paths.skills }),
       createResultReadTool({ db, blobs }),
       ...integrations.tools,
+      ...(google?.tools ?? []),
     ],
     logger,
     integrations.find,
@@ -259,7 +288,29 @@ export function createApp(deps: AppDeps): App {
     return result;
   };
 
-  const heartbeat = createHeartbeat({ db, clock, logger, config, queue, owner, agent, signal: shutdown.signal, ...ids });
+  const heartbeat = createHeartbeat({
+    db,
+    clock,
+    logger,
+    config,
+    queue,
+    owner,
+    agent,
+    signal: shutdown.signal,
+    ...ids,
+    // the signals are the same for every source that polls. only google rows reach the digest now: a slack row stays
+    // new. a process that does not poll (npm run chat) does not take them either: its heartbeat would tell the cli and
+    // close them, so they never reach the owner's chat.
+    ...(google && deps.connectIntegrations !== false
+      ? {
+          signals: {
+            digest: (now: Date) => signalDigest(db, now, config.timeZone),
+            finish: (digest: Digest, runId: string | null, notified: boolean, now: Date) => finishDigest(db, digest, runId, notified, now),
+            failed: (digest: Digest) => noteFailedDigest(db, digest),
+          },
+        }
+      : {}),
+  });
   // only the process that connects polls. in npm run chat a due poll is skipped, and the service polls at its next turn.
   const slackDms = createSlackDmPoll({ db, blobs, logger, clock, connection: integrations.connection });
   const polls =
@@ -278,6 +329,7 @@ export function createApp(deps: AppDeps): App {
     consolidation: createConsolidation({ db, clock, config, memoryDir, queue, agent, signal: shutdown.signal, ...ids }),
     ...(polls ? { polls } : {}),
     workshop: createWorkshop({ db, clock, config, queue, agent, signal: shutdown.signal, background: deps.background !== false, ...ids }),
+    ...(google ? { sourcePolls: { google: google.poll } } : {}),
     signal: shutdown.signal,
     ...ids,
   });
@@ -290,8 +342,13 @@ export function createApp(deps: AppDeps): App {
     notifyOwner: async (text) => void (await owner.send(text)),
     onTick: (now) => sweep(now),
     ...(deps.setTimer ? { setTimer: deps.setTimer } : {}),
-    // npm run chat leaves the skill review to the service. if chat claimed it, the review of that day would not run.
-    ...(deps.background === false ? { owns: (automation: Automation) => automation.payload.type !== 'workshop' } : {}),
+    // npm run chat leaves the skill review to the service. if chat claimed it, the review of that day would not run. it
+    // does not poll either, and its claim of a due poll would use up the slot of the service, which then skipped it.
+    owns: (automation: Automation) => {
+      const type = automation.payload.type;
+      if (deps.background === false && type === 'workshop') return false;
+      return !(deps.connectIntegrations === false && (type === 'poll' || type === 'integration_poll'));
+    },
   });
 
   const router = createRouter({
@@ -387,6 +444,7 @@ export function createApp(deps: AppDeps): App {
       if (installWorkshop(db, config, clock())) logger.info('skill workshop installed');
       syncHeartbeat(db, config, clock());
       syncPolls(db, entries, clock(), config.timeZone);
+      syncGooglePoll(db, config, clock());
       // missed jobs can take minutes, so the start does not wait for them.
       void scheduler.start().catch((err: unknown) => logger.error('scheduler start failed', { err }));
       // a server can need many seconds to start, so the start does not wait. tool_search reads the stored catalog.
@@ -401,8 +459,10 @@ export function createApp(deps: AppDeps): App {
       await queue.drain();
       await integrations.stop();
       await oauth?.close();
+      await google?.close();
     },
     integrations,
+    ...(google ? { google } : {}),
     // without compaction hooks the strategy only renders. it does not call a model or append an event.
     contextView: (sessionKey) =>
       strategy.build({

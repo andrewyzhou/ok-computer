@@ -47,6 +47,8 @@ export interface JobDeps {
   // the poll of each integration, by its id. a poll reads new items in code, without a model call. only the process
   // that connects the integrations has polls.
   polls?: ReadonlyMap<string, () => Promise<JobResult>>;
+  // the poll in code of each source that is not an integration entry, for example google, by its source name.
+  sourcePolls?: Record<string, () => Promise<JobResult>>;
   workshop: (automation: Automation) => Promise<JobResult>;
   signal: AbortSignal;
   newId?: () => string;
@@ -151,6 +153,11 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
       case 'integration_poll': {
         const poll = deps.polls?.get(payload.integration);
         return poll ? poll() : { status: 'skipped', error: deps.polls ? `${payload.integration} has no poll` : 'the chat process does not poll' };
+      }
+      case 'poll': {
+        // the config can remove a source while its automation stays.
+        const poll = deps.sourcePolls?.[payload.source];
+        return poll ? poll() : { status: 'skipped', error: `no integration polls ${payload.source}` };
       }
       case 'workshop':
         return deps.workshop(automation);

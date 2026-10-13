@@ -289,3 +289,33 @@ describe('scheduler', () => {
     expect(getAutomation(db, job.id)?.nextRunAt).toBe('2026-10-12T18:00:00.000Z');
   });
 });
+
+// npm run chat shares the database and does not poll. its claim of a due poll used up the slot of the background app.
+describe('automations of another process', () => {
+  it('neither claims a poll that this process does not own nor keeps its timer at zero for it', async () => {
+    const db = openDb(':memory:');
+    let now = new Date('2026-10-12T17:00:00Z');
+    const timers: number[] = [];
+    const executed: string[] = [];
+    const scheduler = createScheduler({
+      db,
+      clock: () => now,
+      logger: silentLogger,
+      config: { timeZone: TZ, scheduler: { missedGraceMs: 2 * 60 * MIN } },
+      execute: async (automation) => (executed.push(automation.name), { status: 'completed' }),
+      notifyOwner: async () => {},
+      setTimer: (_fn, ms) => (timers.push(ms), () => {}),
+      owns: (automation) => automation.payload.type !== 'poll',
+    });
+    const poll = createAutomation(db, { name: 'google poll', schedule: { kind: 'every', everyMs: 15 * MIN }, payload: { type: 'poll', source: 'google' }, slot: 'utility', createdBy: 'system' }, now, TZ);
+    createAutomation(db, { name: 'note', schedule: { kind: 'every', everyMs: 60 * MIN }, payload: { type: 'system_event', text: 'hi' }, createdBy: 'owner' }, now, TZ);
+    if (!poll.ok) throw new Error(poll.error);
+    now = new Date(now.getTime() + 16 * MIN);
+    await scheduler.start();
+    expect(executed).toEqual([]);
+    expect(getAutomation(db, poll.value.id)!.nextRunAt).toBe(poll.value.nextRunAt);
+    // the next timer is for the note in 44 minutes, capped at one minute, and never zero for the due poll.
+    expect(timers.at(-1)).toBe(MIN);
+    scheduler.stop();
+  });
+});

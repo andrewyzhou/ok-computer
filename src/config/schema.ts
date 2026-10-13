@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { googleConfigSchema } from '../google/config.js';
 
 export const SLOTS = ['main', 'heartbeat', 'utility', 'batch', 'consolidation', 'compaction'] as const;
 export type Slot = (typeof SLOTS)[number];
@@ -127,6 +128,8 @@ export const configSchema = z.object({
       publicUrl: z.url({ protocol: /^https$/ }).optional(),
     })
     .prefault({}),
+  // the google integration is off without this block. see docs/setup/google.md.
+  google: googleConfigSchema.optional(),
 });
 
 // the result is in milliseconds. "0" gives 0.
