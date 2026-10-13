@@ -35,8 +35,9 @@ A small supervisor restarts the agent if it stops. The logon task means it runs 
 ## Phases
 
 1. **Core coach (done):** Telegram adapter, agent loop, workspace files, scheduler (automations + heartbeat), 3-goals routine, daily notes + nightly consolidation into weekly trends, run logging, first version of the observability dashboard.
-2. **Accounts and browser:** Google Calendar + Gmail (all accounts, OAuth, 15-min polling), browser control, approval gates.
-3. **Depth:** Skill Workshop, sub-agents, compaction, email + bank subscription sweep (local model triage, Plaid).
+2. **Foundation and core accounts:** full tracing v2, MCP client and integration registry, Gmail (all accounts) + Calendar, Telegram v2. See [docs/DESIGN-NEXT.md](docs/DESIGN-NEXT.md).
+3. **More reach:** Slack, web search + browser worker, reviewer model + taint + sub-agents, Claude history.
+4. **Power tools:** Docker sandbox, subscription sweep, Skill Workshop.
 
 ## TODO (later)
 
