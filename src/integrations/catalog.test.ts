@@ -57,6 +57,16 @@ describe('catalog', () => {
     ]);
   });
 
+  // a server names its tools. a plain risk map read constructor as the Object function, and the policy check failed
+  // with no trace row.
+  it('gives the default risk to a tool whose name is a key of Object.prototype', () => {
+    const names = ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__'];
+    const e = entry(names);
+    const tools = buildSnapshot(e, names.map((name) => tool(name))).tools;
+    expect(tools).toHaveLength(names.length);
+    for (const each of tools) expect([each.mcpName, riskOf(e, each), riskFrom(e, each)]).toEqual([each.mcpName, 'external', 'default: the server does not say read only']);
+  });
+
   it('never trusts a read hint: the config decides, and the default is a review or an approval', () => {
     const e = entry(['a', 'b', 'c'], { c: 'read' });
     const snap = buildSnapshot(e, [tool('a', { annotations: { readOnlyHint: true } }), tool('b'), tool('c')]);

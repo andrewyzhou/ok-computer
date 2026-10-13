@@ -50,14 +50,19 @@ export interface Catalog {
 const HIDDEN_LIMIT = 200;
 const HIDDEN_NAME_LIMIT = 100;
 
+// the server names its tools, and a name such as constructor or __proto__ reads a value of Object.prototype from a
+// plain object. so only an own key of the risk map counts.
+const configuredRisk = (entry: IntegrationEntry, tool: CatalogTool): Risk | undefined =>
+  Object.hasOwn(entry.risk, tool.mcpName) ? entry.risk[tool.mcpName] : undefined;
+
 export function riskOf(entry: IntegrationEntry, tool: CatalogTool): Risk {
   // a hint of the server never makes a tool read. the config decides, and the default asks for a review at least.
-  return entry.risk[tool.mcpName] ?? (tool.readOnlyHint ? 'write' : 'external');
+  return configuredRisk(entry, tool) ?? (tool.readOnlyHint ? 'write' : 'external');
 }
 
 // the owner sees where a risk comes from, so a default that asks for each call is easy to find and change.
 export function riskFrom(entry: IntegrationEntry, tool: CatalogTool): string {
-  if (entry.risk[tool.mcpName]) return 'okc.integrations.json';
+  if (configuredRisk(entry, tool)) return 'okc.integrations.json';
   return tool.readOnlyHint ? 'default: the server says read only' : 'default: the server does not say read only';
 }
 
