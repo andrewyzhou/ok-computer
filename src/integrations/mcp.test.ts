@@ -296,7 +296,7 @@ describe('stdio server', () => {
 
     await connection.start();
     expect(connection.state().status).toBe('connected');
-    await expect.poll(() => lines).toContain('test server ready');
+    await expect.poll(() => lines.some((line) => line.startsWith('test server ready'))).toBe(true);
     expect(resultOf(await connection.callTool('echo', { text: 'from a child' }, trace)).content).toEqual([
       { type: 'text', text: 'from a child' },
     ]);
