@@ -256,22 +256,20 @@ describe('mcp connection failure modes', () => {
     else expect(outcome).toMatchObject({ kind: 'refused', code: -32602 });
   });
 
-  it('lets a caller wait for the first connection, and gives up on a server that needs the owner', async () => {
+  it('does not send a call before the first connection', async () => {
     let release = () => {};
     const gate = new Promise<void>((resolve) => (release = resolve));
     const make = memoryTransport();
-    const { connection } = setup(async () => {
+    const { connection, db } = setup(async () => {
       await gate;
       return make();
     });
     const starting = connection.start();
-    const ready = connection.ready(5_000, new AbortController().signal);
+    expect(await connection.callTool('echo', { text: 'early' }, trace)).toMatchObject({ kind: 'not_sent' });
     release();
     await starting;
-    expect(await ready).toBe(true);
-    const stopped = new AbortController();
-    stopped.abort();
-    expect(await connection.ready(5_000, stopped.signal)).toBe(true);
+    expect(await connection.callTool('echo', { text: 'late' }, trace)).toMatchObject({ kind: 'result' });
+    expect(db.prepare("SELECT count(*) AS n FROM mcp_messages WHERE method = 'tools/call' AND direction = 'out'").get()).toEqual({ n: 1 });
   });
 });
 

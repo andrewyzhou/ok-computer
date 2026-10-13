@@ -137,7 +137,7 @@ describe('mcp acceptance', () => {
     expect(sessionTaint(t.db, 'main').map((each) => each.source)).toContain('mcp:notes');
   });
 
-  it('finds the stored catalog after a restart, and a call waits for the slow server', async () => {
+  it('finds the stored catalog after a restart, and a call before the slow server connects does not run', async () => {
     const db = openDb(':memory:');
     const first = memoryServers();
     const t1 = createTestApp([], { start, deps: { db, integrations: [notesEntry()], mcpTransport: first.transport } });
@@ -148,19 +148,28 @@ describe('mcp acceptance', () => {
     let release = () => {};
     const second = memoryServers(new Promise<void>((resolve) => (release = resolve)));
     const t2 = createTestApp(
-      [search('s1', 'echo'), call('c1', 'notes__echo', { text: 'after restart' }), textStep('Done.')],
+      [
+        search('s1', 'echo'),
+        call('c1', 'notes__echo', { text: 'too early' }),
+        textStep('It is not connected yet.'),
+        call('c2', 'notes__echo', { text: 'after restart' }),
+        textStep('Done.'),
+      ],
       { start, deps: { db, integrations: [notesEntry()], mcpTransport: second.transport } },
     );
     apps.push(t2);
     await t2.app.start();
     expect(t2.app.integrations.status()[0]).toMatchObject({ state: { status: 'connecting' }, catalogStored: true });
-    const said = t2.say('echo after restart');
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await t2.say('echo after restart');
     release();
-    await said;
+    await expect.poll(() => t2.app.integrations.status()[0]!.state.status).toBe('connected');
+    await t2.say('try again');
     const results = listEvents(db, 'main').filter((event) => event.type === 'tool_result').map((event) => (event.payload as { content: string }).content);
     expect(results[0]).toContain('server connecting');
-    expect(results[1]).toContain('after restart');
+    expect(results[1]).toContain('notes__echo did not run: notes is not connected yet. The app connects it now; try again in a moment.');
+    expect(results[2]).toContain('after restart');
+    // the early call never reached the server, so only the second call has a tools/call request.
+    expect(db.prepare("SELECT toolCallId FROM mcp_messages WHERE method = 'tools/call' AND direction = 'out'").all()).toEqual([{ toolCallId: 'c2' }]);
   });
 
   it('records a late result when the run stopped while the server worked', async () => {

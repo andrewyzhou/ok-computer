@@ -173,9 +173,6 @@ export interface McpConnection {
   stop(): Promise<void>;
   // the transport of the last attempt. the oauth flow calls finishAuth on it.
   transport(): Transport | undefined;
-  // ready waits until the connection is up, for example after a restart of the app. it gives false when the server
-  // needs the owner or the wait ends first.
-  ready(waitMs: number, signal: AbortSignal): Promise<boolean>;
   callTool(name: string, args: Record<string, unknown>, trace: CallTrace): Promise<CallOutcome>;
 }
 
@@ -209,12 +206,10 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
   let generation = 0;
   let connectedAt: number | undefined;
   let cancelTimer: (() => void) | undefined;
-  const waiters = new Set<() => void>();
 
   const setState = (next: ConnectionState) => {
     state = next;
     deps.onState?.(next);
-    for (const wake of [...waiters]) wake();
   };
   const clearTimer = () => {
     cancelTimer?.();
@@ -330,24 +325,6 @@ export function createMcpConnection(deps: McpConnectionDeps): McpConnection {
       // an attempt that has not finished closes its own transport when it sees the new generation.
       await inner?.close().catch(() => {});
       setState({ status: 'stopped' });
-    },
-    async ready(waitMs, signal) {
-      const settled = () => state.status === 'connected' || state.status === 'needs_auth' || state.status === 'stopped';
-      if (!settled() && waitMs > 0 && !signal.aborted) {
-        await new Promise<void>((resolve) => {
-          const done = () => {
-            waiters.delete(check);
-            signal.removeEventListener('abort', done);
-            cancel();
-            resolve();
-          };
-          const check = () => settled() && done();
-          const cancel = setTimer(done, waitMs);
-          waiters.add(check);
-          signal.addEventListener('abort', done, { once: true });
-        });
-      }
-      return state.status === 'connected';
     },
     async callTool(name, args, trace) {
       const connected = client;

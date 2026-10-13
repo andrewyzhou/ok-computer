@@ -15,9 +15,6 @@ import { toolName } from './names.js';
 import type { SecretStore } from './secrets.js';
 import { httpTransport, stdioTransport } from './transports.js';
 
-// a call after a restart waits this long for its server. npx can need many seconds to start a server.
-export const READY_WAIT_MS = 30_000;
-
 export interface IntegrationsDeps {
   db: Db;
   blobs: BlobStore;
@@ -31,7 +28,12 @@ export interface IntegrationsDeps {
   // the owner gets a message when a server needs a new sign-in, for example after a failed refresh.
   onNeedsAuth?: (integrationId: string) => void;
   setTimer?: SetTimer;
-  readyWaitMs?: number;
+}
+
+// the text says why a call did not run, and whether a retry can help.
+function unavailable(id: string, state: ConnectionState): string {
+  if (state.status === 'connecting') return `${id} is not connected yet. The app connects it now; try again in a moment.`;
+  return `${id} is ${state.status}${state.error ? ` (${state.error})` : ''}.`;
 }
 
 export interface IntegrationStatus {
@@ -148,10 +150,10 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       source: 'mcp',
       serverId: entry.id,
       async run(input, ctx) {
-        if (!(await connection.ready(deps.readyWaitMs ?? READY_WAIT_MS, ctx.signal))) {
-          const state = connection.state();
-          return { content: `${item.name} did not run: ${entry.id} is ${state.status}${state.error ? ` (${state.error})` : ''}.`, isError: true };
-        }
+        // a call does not wait for a server that is not connected. a wait would hold the session queue, and the tool
+        // did not run, so the model can safely try again.
+        const state = connection.state();
+        if (state.status !== 'connected') return { content: `${item.name} did not run: ${unavailable(entry.id, state)}`, isError: true };
         const outcome = await connection.callTool(item.mcpName, input as Record<string, unknown>, { runId: ctx.runId, toolCallId: ctx.toolCallId ?? '' });
         return outcomeOutput(item.name, entry.id, outcome);
       },
