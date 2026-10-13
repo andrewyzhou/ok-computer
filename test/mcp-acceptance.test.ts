@@ -206,18 +206,19 @@ describe('mcp acceptance', () => {
     const results = listEvents(t.db, 'main')
       .filter((event) => event.type === 'tool_result')
       .map((event) => (event.payload as { content: string }).content);
-    // the text names the field, so the model can fix it.
-    expect(results[0]).toBe('invalid input for notes__echo:\n✖ text must be string');
+    // the text names the field, so the model can fix it. it can quote the server's schema, so it is outside text.
+    expect(results[0]).toBe('<untrusted source="mcp:notes">\ninvalid input for notes__echo:\n✖ text must be string\n</untrusted>');
     // a tool outside the allow list and a built-in tool are not reachable through tool_call.
     expect(results[1]).toBe('no integration tool is named notes__hidden_admin. Use tool_search to find the tool and its exact name.');
     expect(results[2]).toBe('no integration tool is named now. Use tool_search to find the tool and its exact name.');
     expect(t.rows("SELECT count(*) AS n FROM mcp_messages WHERE method = 'tools/call'")).toEqual([{ n: 0 }]);
     expect(t.rows('SELECT count(*) AS n FROM policy_decisions')).toEqual([{ n: 0 }]);
     // the trace names the tool that the model asked for, with its arguments, not tool_call.
-    expect(t.rows('SELECT name, input FROM tool_calls ORDER BY toolCallId')).toEqual([
-      { name: 'notes__echo', input: '{"text":42}' },
-      { name: 'notes__hidden_admin', input: '{}' },
-      { name: 'now', input: '{}' },
+    // the bad input counts for the integration on the dashboard, and it taints the session.
+    expect(t.rows('SELECT name, input, source, serverId, untrustedSource FROM tool_calls ORDER BY toolCallId')).toEqual([
+      { name: 'notes__echo', input: '{"text":42}', source: 'mcp', serverId: 'notes', untrustedSource: 'mcp:notes' },
+      { name: 'notes__hidden_admin', input: '{}', source: 'builtin', serverId: null, untrustedSource: null },
+      { name: 'now', input: '{}', source: 'builtin', serverId: null, untrustedSource: null },
     ]);
   });
 

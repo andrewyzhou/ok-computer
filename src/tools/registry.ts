@@ -43,7 +43,10 @@ export interface Tool<I = unknown> {
 // the approval and the trace then see that tool and its arguments, never tool_call. unknown marks a name that no tool
 // of the session has, so an approved call can say that its tool is gone. a failed tool_call carries the call that it
 // names, so the trace row names the integration tool too.
-export type Resolved = { ok: true; tool: Tool; input: unknown; call: ToolCall } | { ok: false; output: ToolOutput; unknown?: true; call?: ToolCall };
+// tool is the tool that the call found, when only its input was wrong.
+export type Resolved =
+  | { ok: true; tool: Tool; input: unknown; call: ToolCall }
+  | { ok: false; output: ToolOutput; unknown?: true; call?: ToolCall; tool?: Tool };
 
 export const TOOL_CALL = 'tool_call';
 
@@ -77,7 +80,10 @@ export function createToolRegistry(tools: Tool[], logger: Logger = silentLogger,
     if (!tool || !allowed.includes(call.name)) return { ok: false, output: { content: `unknown tool: ${call.name}`, isError: true }, unknown: true };
     const parsed = tool.input.safeParse(call.input);
     if (!parsed.success) {
-      return { ok: false, output: { content: `invalid input for ${tool.name}:\n${z.prettifyError(parsed.error)}`, isError: true } };
+      // the schema of an integration tool comes from its server, and the message of the check quotes it, for example
+      // the name of a required property. so the message is outside text, as the output of the tool is.
+      const outside = !byName.has(tool.name) && tool.untrustedOutput ? { untrustedSource: tool.untrustedOutput } : {};
+      return { ok: false, output: { content: `invalid input for ${tool.name}:\n${z.prettifyError(parsed.error)}`, isError: true, ...outside }, tool };
     }
     return { ok: true, tool, input: parsed.data, call };
   };

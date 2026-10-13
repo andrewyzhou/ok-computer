@@ -320,7 +320,8 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         toolCallId: modelCall.id,
       };
       const resolved = tools.resolve(modelCall, ctx.allowed, ctx.sessionKey);
-      if (!resolved.ok) return strip(record(ctx.runId, resolved.call ?? modelCall, resolved.output, started, {}));
+      // a bad input to an integration tool counts for that integration on the dashboard.
+      if (!resolved.ok) return strip(record(ctx.runId, resolved.call ?? modelCall, resolved.output, started, resolved.tool ? sourceOf(resolved.tool) : {}));
       // for tool_call this is the integration tool that it names, with the same id.
       const { tool, input, call } = resolved;
 
