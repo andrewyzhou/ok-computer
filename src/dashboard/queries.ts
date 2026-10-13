@@ -263,9 +263,12 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
         asked.push(tool);
         continue;
       }
-      // the delegate row is written when the child ends. until then, the call shows as running with its child.
+      // the delegate row is written when the child ends. until then, the call shows as running with its child. a
+      // crash can stop both runs before the row exists, and the row comes only at the next run of the session. so a
+      // call of a closed run, or with a closed child, shows as interrupted.
       const link = links.find((each) => each.toolCallId === requested.id);
-      if (link) asked.push(runningDelegate(id, requested, link, -1 - links.indexOf(link)));
+      const live = run.status === 'running' && (link?.status === null || link?.status === 'running');
+      if (link) asked.push(pendingDelegate(id, requested, link, -1 - links.indexOf(link), live));
     }
     timeline.push({ kind: 'model', call: toModelCall(row), tools: asked });
   }
@@ -279,15 +282,15 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
 }
 
 // the call has no tool_calls row yet, so its id is negative and unique in the run.
-function runningDelegate(runId: string, requested: { id: string; input: unknown }, link: SubagentLink, rowId: number): ToolCallRow {
+function pendingDelegate(runId: string, requested: { id: string; input: unknown }, link: SubagentLink, rowId: number, live: boolean): ToolCallRow {
   return {
     id: rowId,
     runId,
     toolCallId: requested.id,
     name: 'delegate',
     input: requested.input,
-    output: { content: 'The sub-agent is still running.' },
-    isError: false,
+    output: { content: live ? 'The sub-agent is still running.' : 'The app stopped while the sub-agent ran, so the call has no result.' },
+    isError: !live,
     durationMs: 0,
     createdAt: '',
     source: 'builtin',
@@ -297,7 +300,7 @@ function runningDelegate(runId: string, requested: { id: string; input: unknown 
     truncated: false,
     resultHandle: null,
     rawResultBlob: null,
-    outcome: 'running',
+    outcome: live ? 'running' : 'interrupted',
     policy: null,
     serverId: null,
     mcpMessages: [],

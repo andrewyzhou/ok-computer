@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PROFILES } from '../src/agent/delegate.js';
 import { fullHistory } from '../src/context/full-history.js';
+import { getRunDetail } from '../src/dashboard/queries.js';
 import { openDb } from '../src/db/index.js';
 import { listEvents } from '../src/events/log.js';
 import { textStep, toolStep, type FakeStep } from '../src/models/fake.js';
@@ -103,6 +104,10 @@ describe('sub-agents in the app', () => {
       { trigger: 'message', status: 'aborted' },
       { trigger: 'subagent', status: 'aborted' },
     ]);
+    // before the next parent run, the run page shows the call as interrupted, not as running.
+    const [parent] = second.rows("SELECT id FROM runs WHERE trigger = 'message'") as Array<{ id: string }>;
+    const shown = getRunDetail(second.db, parent!.id)!.timeline.flatMap((item) => (item.kind === 'model' ? item.tools : [item.call]));
+    expect(shown.find((call) => call.toolCallId === 'd1')).toMatchObject({ outcome: 'interrupted', isError: true, child: { status: 'aborted' } });
     await second.say('what happened?');
     expect(result(second.db, 'd1')?.content).toContain('unknown whether it finished');
     expect(second.rows("SELECT outcome FROM tool_calls WHERE toolCallId = 'd1'")).toEqual([{ outcome: 'interrupted' }]);
