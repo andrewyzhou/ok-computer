@@ -270,7 +270,10 @@ export function createOAuth(deps: OAuthDeps): OAuth {
     (base: typeof fetch): typeof fetch =>
     async (input, init) => {
       const body = init?.body;
-      const params = body instanceof URLSearchParams ? body : typeof body === 'string' ? new URLSearchParams(body) : undefined;
+      // only a form body can be a refresh. a json-rpc call to the mcp endpoint is a string too, and the arguments of a
+      // tool call can hold any text, also text that reads as a refresh.
+      const form = /application\/x-www-form-urlencoded/i.test(new Headers(init?.headers).get('content-type') ?? '');
+      const params = body instanceof URLSearchParams ? body : typeof body === 'string' && form ? new URLSearchParams(body) : undefined;
       const token = params?.get('grant_type') === 'refresh_token' ? params.get('refresh_token') : null;
       if (init?.method !== 'POST' || !token) return base(input, init);
       const now = clock().getTime();
