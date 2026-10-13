@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Config, Slot } from '../config/schema.js';
-import type { ContextStrategy } from '../context/strategy.js';
+import type { CompactionHooks, ContextStrategy } from '../context/strategy.js';
 import type { Db } from '../db/index.js';
 import { appendEvent, listEvents, type EventInput } from '../events/log.js';
 import type { SlotRunner } from '../models/slots.js';
@@ -39,6 +39,8 @@ export interface RunInput {
   // events that start the run, for example the owner's message. they get the run id.
   events: EventInput[];
   signal?: AbortSignal;
+  // the memory flush before a compaction runs with this flag, so it cannot start a second compaction.
+  noCompaction?: boolean;
 }
 
 export interface RunResult {
@@ -97,6 +99,23 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
     });
     const system = deps.stablePrompt(input.sessionKey);
     const toolSpecs = tools.specs(input.allowedTools);
+    const compaction: CompactionHooks | undefined = input.noCompaction
+      ? undefined
+      : {
+          runId,
+          signal: abort.signal,
+          flush: (text) =>
+            runAgent(deps, {
+              sessionKey: input.sessionKey,
+              trigger: 'system',
+              slot: input.slot,
+              channel: input.channel,
+              allowedTools: input.allowedTools,
+              events: [{ type: 'system_event', payload: { text } }],
+              signal: abort.signal,
+              noCompaction: true,
+            }),
+        };
 
     for (let iteration = 1; ; iteration++) {
       if (iteration > config.agent.maxIterations) {
@@ -109,6 +128,7 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
         events: listEvents(db, input.sessionKey),
         system,
         tools: toolSpecs,
+        ...(compaction ? { compaction } : {}),
       });
       const result = await slots.call(input.slot, request, { runId, signal: abort.signal });
       if (!result.ok) {

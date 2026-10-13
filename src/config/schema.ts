@@ -72,6 +72,13 @@ export const configSchema = z.object({
       backgroundTimeoutMs: z.number().int().positive().default(30 * 60_000),
     })
     .prefault({}),
+  // the window is a budget for the input of one model call, not the limit of the model. a long session compacts
+  // when it nears the budget, so the cost of each call stays bounded.
+  context: z
+    .object({
+      windowTokens: z.number().int().min(1000).default(200_000),
+    })
+    .prefault({}),
   paths: z
     .object({
       data: z.string().default('data'),

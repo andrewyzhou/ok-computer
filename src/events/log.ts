@@ -11,6 +11,15 @@ export interface EventPayloads {
   // a message from the system, not from the owner: an automation prompt, a check-in, or an approval result.
   system_event: { text: string };
   note: { text: string };
+  // the summary replaces the events before firstKeptEventId. clearToolResults freezes the trim of the kept events.
+  compaction: {
+    summary: string;
+    firstKeptEventId: number;
+    tokensBefore: number;
+    tokensAfter: number;
+    model: string;
+    clearToolResults: boolean;
+  };
   session_reset: Record<string, never>;
 }
 

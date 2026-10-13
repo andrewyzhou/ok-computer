@@ -5,7 +5,8 @@ import { createApprovalFlow } from './approvals/flow.js';
 import { expireApprovals } from './approvals/store.js';
 import type { ChannelAdapter } from './channels/types.js';
 import type { Config } from './config/schema.js';
-import { fullHistory, sinceLastReset } from './context/full-history.js';
+import { sinceLastReset } from './context/full-history.js';
+import { createTrimAndCompact } from './context/trim-and-compact.js';
 import type { Db } from './db/index.js';
 import { listEvents } from './events/log.js';
 import { installRoutine } from './goals/routine.js';
@@ -97,11 +98,12 @@ export function createApp(deps: AppDeps): App {
     { gate: approvals.gate },
   );
 
+  const slots = createSlotRunner({ db, config, clients: deps.clients, logger, clock });
   const agentDeps: AgentDeps = {
     db,
-    slots: createSlotRunner({ db, config, clients: deps.clients, logger, clock }),
+    slots,
     tools,
-    strategy: fullHistory,
+    strategy: createTrimAndCompact({ db, slots, logger, clock, windowTokens: config.context.windowTokens }),
     logger,
     config,
     clock,

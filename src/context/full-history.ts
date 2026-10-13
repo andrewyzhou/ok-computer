@@ -50,6 +50,7 @@ export function renderEvents(events: StoredEvent[]): ModelMessage[] {
       case 'assistant_message':
         messages.push({ role: 'assistant', ...event.payload });
         break;
+      case 'compaction':
       case 'session_reset':
         break;
     }
