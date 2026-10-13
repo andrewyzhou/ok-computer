@@ -72,7 +72,8 @@ interface Trace {
   risk?: Risk;
   decisionId?: number | null;
   tainted?: boolean;
-  // abandoned: the run stopped while the tool ran. a later result changes it to late.
+  // abandoned: the run stopped while the tool ran. a later result changes it to late. the row of an output whose
+  // effect is none gets unsent: its integration did not send the call, so the tool did not run.
   outcome?: 'abandoned';
   source?: string;
   serverId?: string;
@@ -166,7 +167,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
           rawResultBlob,
           view.truncated ? 1 : 0,
           view.handle ?? null,
-          trace.outcome ?? null,
+          trace.outcome ?? (raw.effect === 'none' ? 'unsent' : null),
           trace.source ?? 'builtin',
           trace.serverId ?? null,
         );

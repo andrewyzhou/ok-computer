@@ -1,10 +1,11 @@
-// the outcome of a tool call in the owner's words. the trace stores only the three facts that a later read cannot
-// find (abandoned, late, interrupted). the other words come from the row, its decision and its approval, so they
-// can never go out of step with them. isError stays as it is, because it controls what the model sees.
+// the outcome of a tool call in the owner's words. the trace stores only the four facts that a later read cannot
+// find (abandoned, late, interrupted, unsent). the other words come from the row, its decision and its approval, so
+// they can never go out of step with them. isError stays as it is, because it controls what the model sees.
 // - ran, failed: the tool ran (failed also covers a call that failed before it could run).
 // - invalid: the call never reached the policy: an unknown tool, bad input, or a reply that the token limit cut.
 // - denied: a policy rule said no. held: the reviewer said no.
 // - waiting, approved, declined, expired: the call asked the owner. the run after an approval has its own row.
+// - unsent: the integration did not send the call (paused, not connected, the chat process), so the tool did not run.
 export type Outcome =
   | 'ran'
   | 'failed'
@@ -17,12 +18,13 @@ export type Outcome =
   | 'expired'
   | 'abandoned'
   | 'late'
-  | 'interrupted';
+  | 'interrupted'
+  | 'unsent';
 
 export interface OutcomeInput {
   toolCallId: string;
   isError: boolean;
-  // the stored outcome: abandoned, late, interrupted, or null.
+  // the stored outcome: abandoned, late, interrupted, unsent, or null.
   stored: string | null;
   riskLevel: string | null;
   decision: { decision: string; reviewerVerdict: string | null; approvalId: number | null; approvalStatus: string | null } | null;
@@ -31,7 +33,7 @@ export interface OutcomeInput {
 const APPROVAL: Record<string, Outcome> = { pending: 'waiting', approved: 'approved', denied: 'declined', expired: 'expired' };
 
 export function outcomeOf(call: OutcomeInput): Outcome {
-  if (call.stored === 'abandoned' || call.stored === 'late' || call.stored === 'interrupted') return call.stored;
+  if (call.stored === 'abandoned' || call.stored === 'late' || call.stored === 'interrupted' || call.stored === 'unsent') return call.stored;
   const decision = call.decision;
   // a call without a decision has no risk level when it failed to resolve. a failed policy check keeps the risk.
   if (!decision) return !call.isError ? 'ran' : call.riskLevel ? 'failed' : 'invalid';

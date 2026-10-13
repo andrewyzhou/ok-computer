@@ -32,6 +32,7 @@ const STATUS_TONE: Record<string, string> = {
   abandoned: 'serious',
   late: 'warning',
   interrupted: 'serious',
+  unsent: 'warning',
   connected: 'good',
   connecting: 'info',
   needs_auth: 'warning',

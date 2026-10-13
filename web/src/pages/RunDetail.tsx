@@ -105,6 +105,7 @@ const OUTCOME_NOTES: Record<string, string> = {
   abandoned: 'The run stopped while the tool ran. The model was told that the effect is unknown.',
   late: 'The run stopped while the tool ran, and the tool finished later. The raw result is the late result. The model saw the note, and the late result came to the session as a system event.',
   interrupted: 'The app stopped while the tool ran. The model got a note that the effect is unknown.',
+  unsent: 'The integration did not send the call, so the tool did not run. An approved call waits for the owner again.',
 };
 
 // these outcomes have no result of the tool. the model view holds the note of the caller.

@@ -199,11 +199,27 @@ describe('closeStaleWork', () => {
     db.prepare(
       "INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt, resolvedAt, startedAt) VALUES ('r1', 'notes__add_note', '{}', 'add', 'approved', 'x', ?, ?)",
     ).run(ago(2 * hour), ago(2 * hour));
+    // the earlier row is later than the start mark, as after a clock that moved back. its outcome tells it apart.
     db.prepare(
-      "INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt) VALUES ('r1', 'approval-1', 'notes__add_note', '{}', '{}', 1, 0, ?)",
-    ).run(ago(3 * hour));
+      "INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, outcome) VALUES ('r1', 'approval-1', 'notes__add_note', '{}', '{}', 1, 0, ?, 'unsent')",
+    ).run(ago(hour));
     expect(closeStaleWork(db, now, hour).interrupted.map((each) => each.id)).toEqual([1]);
-    expect(db.prepare("SELECT outcome FROM tool_calls WHERE toolCallId = 'approval-1' ORDER BY id").all()).toEqual([{ outcome: null }, { outcome: 'interrupted' }]);
+    expect(db.prepare("SELECT outcome FROM tool_calls WHERE toolCallId = 'approval-1' ORDER BY id").all()).toEqual([{ outcome: 'unsent' }, { outcome: 'interrupted' }]);
+  });
+
+  // the sweep compared the time of the row with the start mark. a clock that moved back during the call made a
+  // finished call look interrupted, and the owner read that its effect was unknown.
+  it('finds the row of a finished approved call that is older than its start mark', () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r1', 'main', 'message', 'main', 'completed', 'x')").run();
+    db.prepare(
+      "INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt, resolvedAt, startedAt) VALUES ('r1', 'notes__add_note', '{}', 'add', 'approved', 'x', ?, ?)",
+    ).run(ago(2 * hour), ago(2 * hour));
+    db.prepare(
+      "INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt) VALUES ('r1', 'approval-1', 'notes__add_note', '{}', '{}', 0, 0, ?)",
+    ).run(ago(2 * hour + 1_000));
+    expect(closeStaleWork(db, now, hour).interrupted).toEqual([]);
+    expect(db.prepare("SELECT count(*) AS n FROM tool_calls WHERE toolCallId = 'approval-1'").get()).toEqual({ n: 1 });
   });
 
   // the service and npm run chat can sweep at the same moment. here the second sweep runs between the select of the

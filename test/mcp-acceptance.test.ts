@@ -427,6 +427,8 @@ describe('mcp acceptance', () => {
       { direction: 'in' },
     ]);
     expect(t.rows('SELECT status FROM approvals WHERE id = ?', id)).toEqual([{ status: 'approved' }]);
+    // the row of the attempt that did not send the call is marked, so the crash sweep needs no clock to skip it.
+    expect(t.rows('SELECT outcome FROM tool_calls WHERE toolCallId = ? ORDER BY id', `approval-${id}`)).toEqual([{ outcome: 'unsent' }, { outcome: null }]);
   });
 
   it('tells the owner that an abandoned approved call that ends without an answer still has an unknown effect', async () => {

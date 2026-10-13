@@ -80,7 +80,7 @@ export interface ToolCallRow {
   // preview, a wrapped text, or a late result. such a row without a blob lost its raw text in a failed blob write.
   rawResultBlob: string | null;
   // one word from outcomeOf in outcome.ts: ran, failed, invalid, denied, held, waiting, approved, declined, expired,
-  // abandoned, late or interrupted.
+  // abandoned, late, interrupted or unsent.
   outcome: string;
   policy: PolicyDecisionRow | null;
   // the integration that ran the tool, and the json-rpc messages of the call. a built-in tool has none.

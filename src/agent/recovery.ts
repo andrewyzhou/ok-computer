@@ -156,14 +156,15 @@ export function closeStaleWork(db: Db, now: Date, staleMs: number, live: LiveWor
       `SELECT id FROM approvals WHERE status = 'approved' AND startedAt < ?
          AND id NOT IN (SELECT value FROM json_each(?))
          AND NOT EXISTS (SELECT 1 FROM tool_calls WHERE tool_calls.runId = approvals.runId
-                         AND tool_calls.toolCallId = 'approval-' || approvals.id AND tool_calls.createdAt >= approvals.startedAt)
+                         AND tool_calls.toolCallId = 'approval-' || approvals.id AND tool_calls.outcome IS NOT 'unsent')
        ORDER BY id`,
     )
     .all(cutoff, liveApprovals)
     .map((row) => getApproval(db, Number(row.id))!);
   // the insert is the claim. a sweep of a second process at the same moment can insert the row after the select
-  // above, so only the sweep whose insert writes the row reports the call. a row from before the start mark belongs to
-  // an earlier attempt that did not send the call, after which the approval waited for the owner again.
+  // above, so only the sweep whose insert writes the row reports the call. an unsent row belongs to an earlier attempt
+  // that did not send the call, after which the approval waited for the owner again. the outcome and not the time
+  // tells it apart, because the clock can move back while a call runs.
   const interrupted = candidates.filter((approval) => {
     const content = interruptedText(approval.toolName);
     const callId = `approval-${approval.id}`;
@@ -172,8 +173,7 @@ export function closeStaleWork(db: Db, now: Date, staleMs: number, live: LiveWor
         .prepare(
           `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, policyDecisionId, outcome, source, serverId)
            SELECT ?, ?, ?, ?, ?, 1, 0, ?, (SELECT id FROM policy_decisions WHERE approvalId = ? ORDER BY id LIMIT 1), 'interrupted', ?, ?
-           WHERE NOT EXISTS (SELECT 1 FROM tool_calls WHERE runId IS ? AND toolCallId = ?
-                             AND createdAt >= (SELECT startedAt FROM approvals WHERE id = ?))`,
+           WHERE NOT EXISTS (SELECT 1 FROM tool_calls WHERE runId IS ? AND toolCallId = ? AND outcome IS NOT 'unsent')`,
         )
         .run(
           approval.runId,
@@ -186,7 +186,6 @@ export function closeStaleWork(db: Db, now: Date, staleMs: number, live: LiveWor
           ...sourceOf(approval.toolName),
           approval.runId,
           callId,
-          approval.id,
         ).changes === 1
     );
   });

@@ -39,6 +39,7 @@ describe('outcomeOf', () => {
     ['a late call', call({ stored: 'late' }), 'late'],
     ['an interrupted call', call({ isError: true, stored: 'interrupted' }), 'interrupted'],
     ['an interrupted run after an approval', call({ toolCallId: 'approval-1', isError: true, stored: 'interrupted', decision: decision({ decision: 'approve', approvalId: 1, approvalStatus: 'approved' }) }), 'interrupted'],
+    ['an approved call that its integration did not send', call({ toolCallId: 'approval-1', isError: true, stored: 'unsent', decision: decision({ decision: 'approve', approvalId: 1, approvalStatus: 'pending' }) }), 'unsent'],
   ])('%s', (_name, input, expected) => {
     expect(outcomeOf(input)).toBe(expected);
   });
