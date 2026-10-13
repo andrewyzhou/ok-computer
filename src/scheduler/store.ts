@@ -136,15 +136,25 @@ export function listAutomations(db: Db): Automation[] {
   return db.prepare('SELECT * FROM automations ORDER BY nextRunAt IS NULL, nextRunAt, name').all().map(toAutomation);
 }
 
-export function dueAutomations(db: Db, now: Date): Automation[] {
+// skip names the payload types that the caller does not run. both queries take it, so a due job that the caller
+// leaves alone does not keep its timer at zero.
+export function dueAutomations(db: Db, now: Date, skip: readonly string[] = []): Automation[] {
   return db
-    .prepare('SELECT * FROM automations WHERE enabled = 1 AND nextRunAt <= ? ORDER BY nextRunAt')
-    .all(now.toISOString())
+    .prepare(
+      `SELECT * FROM automations WHERE enabled = 1 AND nextRunAt <= ?
+         AND json_extract(payload, '$.type') NOT IN (SELECT value FROM json_each(?)) ORDER BY nextRunAt`,
+    )
+    .all(now.toISOString(), JSON.stringify(skip))
     .map(toAutomation);
 }
 
-export function earliestRunAt(db: Db): Date | null {
-  const row = db.prepare('SELECT MIN(nextRunAt) AS next FROM automations WHERE enabled = 1').get();
+export function earliestRunAt(db: Db, skip: readonly string[] = []): Date | null {
+  const row = db
+    .prepare(
+      `SELECT MIN(nextRunAt) AS next FROM automations WHERE enabled = 1
+         AND json_extract(payload, '$.type') NOT IN (SELECT value FROM json_each(?))`,
+    )
+    .get(JSON.stringify(skip));
   return row?.next ? new Date(String(row.next)) : null;
 }
 

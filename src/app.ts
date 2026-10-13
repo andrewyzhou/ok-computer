@@ -261,8 +261,10 @@ export function createApp(deps: AppDeps): App {
     agent,
     signal: shutdown.signal,
     ...ids,
-    // the signals are the same for every source that polls. only google polls now.
-    ...(google
+    // the signals are the same for every source that polls. only google polls now. a process that does not poll (npm
+    // run chat) does not take them either: its heartbeat would tell the cli and close them, so they never reach the
+    // owner's chat.
+    ...(google && deps.connectIntegrations !== false
       ? {
           signals: {
             digest: (now: Date) => signalDigest(db, now, config.timeZone),
@@ -294,6 +296,7 @@ export function createApp(deps: AppDeps): App {
     notifyOwner: async (text) => void (await owner.send(text)),
     onTick: (now) => sweep(now),
     ...(deps.setTimer ? { setTimer: deps.setTimer } : {}),
+    ...(deps.connectIntegrations === false ? { skipTypes: ['poll'] } : {}),
   });
 
   const router = createRouter({

@@ -23,6 +23,9 @@ export interface SchedulerDeps {
   setTimer?: SetTimer;
   // the scheduler calls this at the start of each tick, for small periodic work.
   onTick?: (now: Date) => void;
+  // the payload types that this process does not run. npm run chat does not poll, and a claim there would use up the
+  // slot of the background app, which then skipped that poll.
+  skipTypes?: readonly string[];
 }
 
 export interface Scheduler {
@@ -58,7 +61,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     cancel?.();
     cancel = undefined;
     if (stopped) return;
-    const earliest = earliestRunAt(db);
+    const earliest = earliestRunAt(db, deps.skipTypes);
     const delay = earliest ? Math.max(0, earliest.getTime() - clock().getTime()) : MAX_SLEEP_MS;
     const run = () => void tick().catch((err: unknown) => logger.error('scheduler tick failed', { err }));
     cancel = setTimer(run, Math.min(delay, MAX_SLEEP_MS));
@@ -156,7 +159,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const tick = async (): Promise<void> => {
     const now = clock();
     deps.onTick?.(now);
-    const runs = dueAutomations(db, now).map((automation) => fire(automation, now));
+    const runs = dueAutomations(db, now, deps.skipTypes).map((automation) => fire(automation, now));
     arm();
     await Promise.all(runs);
     arm();
