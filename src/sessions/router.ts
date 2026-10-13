@@ -73,6 +73,8 @@ export function createRouter(deps: RouterDeps): Router {
   };
   // the owner messages that wait in the queue of the main session. /status shows the count.
   let queued = 0;
+  // the run ended, and its reply goes out now. the queue is still busy, but no approved call or automation holds it.
+  let replying = false;
 
   return {
     async handle(message) {
@@ -128,9 +130,10 @@ export function createRouter(deps: RouterDeps): Router {
       // /stop and the commands answer at once. a message that waits in the queue would wait for the run it stops.
       // an approved call or an automation of the main session also holds the queue, but only the router's own run
       // has a stop.
-      const held = !current && queue.busy(MAIN_SESSION);
+      const held = !current && !replying && queue.busy(MAIN_SESSION);
       if (message.text.trim().toLowerCase() === '/stop') {
         if (stopCurrent()) return;
+        if (replying) return reply('The reply is already going out, so there is nothing to stop.');
         return reply(held ? 'An approved call or an automation runs now, and /stop cannot stop it. The dashboard shows it.' : 'Nothing runs now.');
       }
       const state: RunState = {
@@ -138,6 +141,7 @@ export function createRouter(deps: RouterDeps): Router {
         ...(current ? { runningSince: current.since } : {}),
         ...(current?.tools ? { tools: current.tools } : {}),
         ...(held ? { held } : {}),
+        ...(replying ? { replying } : {}),
       };
       const cards = deps.commands?.(message.text, state);
       if (cards) {
@@ -158,9 +162,10 @@ export function createRouter(deps: RouterDeps): Router {
       // the user message goes into the log when its run starts. if it went in earlier, it could land between a
       // tool call and its result in a run that is still active.
       queued++;
-      await queue.enqueue(MAIN_SESSION, async () => {
+      const task = async () => {
         queued--;
-        if (message.text === '/new') {
+        // a phone keyboard can write "/New". the commands menu offers /new, so it matches as /stop does.
+        if (message.text.trim().toLowerCase() === '/new') {
           // no later run reads the calls before the reset, so a dangling call gets its result and its row now. /new
           // is the way out of a broken session, so a failed repair does not stop it.
           try {
@@ -195,6 +200,7 @@ export function createRouter(deps: RouterDeps): Router {
           });
         } finally {
           current = undefined;
+          replying = true;
           await progress?.end();
           // a run that threw sends no reply.
           if (!result) progress?.done(false);
@@ -217,7 +223,12 @@ export function createRouter(deps: RouterDeps): Router {
         const sent = text && text !== NO_REPLY ? await send({ text: result.text, markdown: true, runId: result.runId }) : true;
         // the done mark shows only for a reply that went out.
         progress?.done(sent);
-      });
+      };
+      await queue.enqueue(MAIN_SESSION, () =>
+        task().finally(() => {
+          replying = false;
+        }),
+      );
     },
   };
 }

@@ -176,4 +176,68 @@ describe('router', () => {
       '1 message waits for the reply.',
     ]);
   });
+
+  // the run ended, but its reply still goes out. the queue is busy for that time, and /stop and /status once named an
+  // approved call or an automation that did not exist.
+  it('says that the reply goes out while the router sends it, not that an approved call holds the session', async () => {
+    const db = openDb(':memory:');
+    const sent: string[] = [];
+    let release: (() => void) | undefined;
+    const channel: ChannelAdapter = {
+      id: 'cli',
+      start: async () => {},
+      stop: async () => {},
+      send: async (out) => {
+        if (out.text === 'Hello.') await new Promise<void>((resolve) => (release = resolve));
+        sent.push(out.text);
+        return { messageId: String(sent.length) };
+      },
+    };
+    const states: RunState[] = [];
+    const router = createRouter({
+      db,
+      logger: silentLogger,
+      clock: () => new Date(),
+      queue: createRunQueue(),
+      channels: new Map([['cli', channel]]),
+      agent: async () => ({ runId: 'r', status: 'completed', text: 'Hello.' }),
+      isOwner: () => true,
+      commands: (text, state) => (text === '/status' ? (states.push(state), [{ text: 'status' }]) : undefined),
+    });
+    const run = router.handle(message('hi'));
+    await vi.waitFor(() => expect(release).toBeDefined());
+    await router.handle(message('/stop'));
+    await router.handle(message('/status'));
+    expect(sent).toEqual(['The reply is already going out, so there is nothing to stop.', 'status']);
+    expect(states).toEqual([{ queued: 0, replying: true }]);
+    release!();
+    await run;
+    await router.handle(message('/stop'));
+    expect(sent.slice(2)).toEqual(['Hello.', 'Nothing runs now.']);
+
+    const commands = createCommands({ db, clock: () => new Date(), timeZone: 'UTC', dashboardUrl: 'http://127.0.0.1:4317', approvalCard: () => ({ text: '' }) });
+    expect(commands('/status', { queued: 0, replying: true })![0]!.text.split('\n')[0]).toBe('Sending the reply.');
+  });
+
+  // a phone keyboard writes "/New" with a capital letter. it went to the model, and the session was not reset.
+  it('resets the session with /new in any case', async () => {
+    const agent = vi.fn();
+    const { router, sent, db } = setup(agent);
+    await router.handle(message(' /New '));
+    expect(sent).toEqual(['Started a new session.']);
+    expect(agent).not.toHaveBeenCalled();
+    expect(listEvents(db, 'main').map((event) => event.type)).toEqual(['session_reset']);
+  });
+
+  // a memory flush runs inside the run of a reply and starts after it, so /status showed the flush as the last reply,
+  // and a reply that failed after it showed as completed.
+  it('shows the last run for an owner message as the last reply', () => {
+    const db = openDb(':memory:');
+    const insert = db.prepare('INSERT INTO runs (id, sessionKey, trigger, slot, status, error, startedAt, endedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    insert.run('reply', 'main', 'message', 'main', 'failed', 'the model request failed', '2026-10-13T16:00:00.090Z', '2026-10-13T16:00:05.000Z');
+    insert.run('flush', 'main', 'system', 'main', 'completed', null, '2026-10-13T16:00:00.140Z', '2026-10-13T16:00:02.000Z');
+    insert.run('automation', 'main', 'automation', 'main', 'completed', null, '2026-10-13T16:00:06.000Z', '2026-10-13T16:00:07.000Z');
+    const commands = createCommands({ db, clock: () => new Date('2026-10-13T16:01:00Z'), timeZone: 'UTC', dashboardUrl: 'http://127.0.0.1:4317', approvalCard: () => ({ text: '' }) });
+    expect(commands('/status', {})![0]!.text.split('\n')).toContain('Last reply: failed at 16:00: the model request failed.');
+  });
 });

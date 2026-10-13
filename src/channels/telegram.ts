@@ -2,6 +2,7 @@ import { randomInt } from 'node:crypto';
 import { GrammyError, type Bot } from 'grammy';
 import type { InlineKeyboardMarkup } from 'grammy/types';
 import type { Logger } from '../observability/logger.js';
+import { NO_REPLY } from '../sessions/router.js';
 import { headOf, tailOf } from '../text.js';
 import { systemClock, type Clock } from '../time.js';
 import { buttonSigner } from './telegram-buttons.js';
@@ -131,6 +132,9 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
       }
       // the plain text of a card holds the full details, which the html cut. so the plain text can need more parts.
       const pieces = splitMessage(part.plain);
+      // a part with no plain text, for example a link without a label, then goes out in no format. the caller must
+      // not count it as sent.
+      if (!pieces.length) throw new Error('telegram refused the formatted text, and its plain text is empty');
       for (const [j, piece] of pieces.entries()) {
         const plain = await bot.api.sendMessage(chatId, piece, markup(last && j === pieces.length - 1));
         delivery.formats.push('plain');
@@ -269,7 +273,10 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
       let ticks = 0;
       let failures = 0;
       let inFlight: Promise<void> | undefined;
-      const composed = () => (tools ? `${latest}\n\n⏳ ${tools}`.trimStart() : latest);
+      // the router sends no message for a NO_REPLY answer, so no message replaces its draft. a text that can still
+      // become NO_REPLY therefore never shows in a draft.
+      const visible = () => (NO_REPLY.startsWith(latest.trim()) ? '' : latest);
+      const composed = () => (tools ? `${visible()}\n\n⏳ ${tools}`.trimStart() : visible());
       // an empty draft shows the "Thinking…" placeholder. one draft at a time, so drafts never arrive out of order.
       const draft = () => {
         if (inFlight || failures >= DRAFT_FAILURES) return;

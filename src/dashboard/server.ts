@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { join } from 'node:path';
@@ -38,7 +38,7 @@ import {
   toMcpMessage,
 } from './queries.js';
 import { integrationDetail, summaryOf } from './integrations.js';
-import { createLocalSessions, LOGIN_PAGE, type LoginCodes } from './login.js';
+import { createSessions, LOCAL_SESSION_MS, LOGIN_PAGE, REMOTE_SESSION_MS, type LoginCodes } from './login.js';
 import { createFeed } from './stream.js';
 import type { ContextView, MemoryFile, Meta } from './types.js';
 
@@ -60,7 +60,6 @@ export interface DashboardDeps {
 const WEB_DIR = join(import.meta.dirname, '../../web/dist');
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const SESSION_COOKIE = 'okc_session';
-const SESSION_SECONDS = 30 * 24 * 60 * 60;
 
 // the compare takes the same time for each wrong value of one length, so the time does not show the token.
 function same(given: string | undefined, expected: string | undefined): boolean {
@@ -86,10 +85,10 @@ export function createDashboard(deps: DashboardDeps): Hono {
   const blobs = createBlobStore(db, join(config.paths.data, 'blobs'), clock);
   const server = new Hono();
 
-  // the cookie of the public host holds a value derived from the token, not the token. a new token makes every old
-  // cookie invalid. the browser sends it only to the public host, so it stays valid for 30 days and over a restart.
-  const session = deps.token ? createHmac('sha256', deps.token).update('okc dashboard session').digest('hex') : undefined;
-  const localSessions = createLocalSessions(clock);
+  // each sign-in gets a random id (see login.ts). a restart or a new token signs out every browser. an id of one host
+  // does not open the other host.
+  const localSessions = createSessions(clock, LOCAL_SESSION_MS);
+  const remoteSessions = createSessions(clock, REMOTE_SESSION_MS);
   // tailscale serve forwards the requests of the tailnet name. that name is accepted only with a token, so the
   // dashboard is never open on the tailnet without one.
   const remoteHost = deps.token && config.dashboard.publicUrl ? new URL(config.dashboard.publicUrl).hostname : undefined;
@@ -105,7 +104,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
       const open = c.req.path === '/api/login';
       const given = c.req.header('authorization')?.replace(/^Bearer /, '') ?? c.req.query('token');
       const cookie = getCookie(c, SESSION_COOKIE);
-      const signedIn = (given !== undefined && same(given, deps.token)) || (host === remoteHost && same(cookie, session)) || localSessions.valid(cookie);
+      const signedIn = (given !== undefined && same(given, deps.token)) || (host === remoteHost ? remoteSessions : localSessions).valid(cookie);
       if (deps.token && !signedIn && !open) return c.json({ error: 'unauthorized' }, 401);
       const write = c.req.method !== 'GET' && c.req.method !== 'HEAD';
       if (write && !c.req.header('content-type')?.startsWith('application/json')) {
@@ -123,12 +122,12 @@ export function createDashboard(deps: DashboardDeps): Hono {
 
   // the owner signs in one time with a code or the token. the token then never goes into a url, a bookmark or the
   // history.
-  server.get('/login', (c) => (session ? c.html(LOGIN_PAGE) : c.redirect('/')));
+  server.get('/login', (c) => (deps.token ? c.html(LOGIN_PAGE) : c.redirect('/')));
   server.post('/api/login', async (c) => {
     const given = await body(c, loginBody);
     const host = new URL(c.req.url).hostname;
     const valid = given !== undefined && ('code' in given ? deps.codes?.spend(given.code) === true : same(given.token, deps.token));
-    if (!session || !given || !valid) {
+    if (!deps.token || !given || !valid) {
       logger.warn('dashboard login refused', { host });
       return c.json({ error: 'that code or token does not work' }, 401);
     }
@@ -136,11 +135,11 @@ export function createDashboard(deps: DashboardDeps): Hono {
     const https = host === remoteHost || c.req.header('x-forwarded-proto') === 'https' || new URL(c.req.url).protocol === 'https:';
     // a cookie of a sign-in on the pc goes to every local port, so it is short and ends with the browser (see login.ts).
     const remote = host === remoteHost;
-    setCookie(c, SESSION_COOKIE, remote ? session : localSessions.issue(), {
+    setCookie(c, SESSION_COOKIE, (remote ? remoteSessions : localSessions).issue(), {
       httpOnly: true,
       sameSite: 'Strict',
       path: '/',
-      ...(remote ? { maxAge: SESSION_SECONDS } : {}),
+      ...(remote ? { maxAge: REMOTE_SESSION_MS / 1000 } : {}),
       secure: https,
     });
     logger.info('dashboard login', { host, via: 'code' in given ? 'code' : 'token' });
@@ -333,7 +332,9 @@ export function startDashboard(deps: DashboardDeps & { port: number }): Promise<
   return new Promise((resolve, reject) => {
     // by default the server puts its own Response class in place of the global one. a real fetch result then fails
     // `instanceof Response` in this process, and the mcp sdk misreads the error of a failed token refresh.
-    const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: deps.port, overrideGlobalObjects: false }, (info) =>
+    const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: deps.port, overrideGlobalObjects: false }, (info) => {
+      // a code from /dashboard works only here, so the codes go out only once this server listens.
+      deps.codes?.listening();
       resolve({
         port: info.port,
         close: () =>
@@ -342,8 +343,8 @@ export function startDashboard(deps: DashboardDeps & { port: number }): Promise<
             server.close(() => done());
             (server as Server).closeAllConnections();
           }),
-      }),
-    );
+      });
+    });
     server.once('error', reject);
   });
 }

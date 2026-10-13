@@ -20,6 +20,8 @@ export interface RunState {
   queued?: number;
   // an approved call or an automation holds the main session, so a new message waits for it.
   held?: boolean;
+  // the run ended, and the router sends its reply now.
+  replying?: boolean;
 }
 
 const NO_LINK = (url: string) =>
@@ -35,7 +37,8 @@ export interface CommandDeps {
   timeZone: string;
   dashboardUrl: string;
   approvalCard: (id: number) => Card;
-  // signInLink gives a link to the public dashboard with a new code. without it, /dashboard says what to set.
+  // signInLink gives the answer to /dashboard, normally a link to the public dashboard with a new code. without it,
+  // /dashboard says what to set.
   signInLink?: () => string;
   // the state of each integration, for /status.
   integrations?: () => Array<{ id: string; state: { status: string } }>;
@@ -43,7 +46,15 @@ export interface CommandDeps {
 
 const MAX_CARDS = 10;
 
-export const signInLink = (publicUrl: string, codes: LoginCodes) => () => `${new URL('/login', publicUrl).href}?code=${codes.issue()}`;
+// a code works only in the dashboard of this process. when that dashboard did not start, for example because an older
+// process holds its port, a link would only fail.
+export const signInLink = (publicUrl: string, codes: LoginCodes, port: number) => () => {
+  const code = codes.issue();
+  if (code === undefined) {
+    return `The dashboard did not start, so a sign-in link would not work. Another program, for example an older copy of the app, can hold port ${port}. The log says why.`;
+  }
+  return `${new URL('/login', publicUrl).href}?code=${code}\nThe link signs you in one time and works for 5 minutes.`;
+};
 
 // these commands read the database and answer in code. they need no model call, and they work while a run is busy.
 // a command name that is not here goes to the model as text.
@@ -62,11 +73,14 @@ export function createCommands(deps: CommandDeps) {
       const minutes = Math.floor((clock().getTime() - state.runningSince.getTime()) / 60_000);
       lines.push(`I am working on a reply since ${localTime(state.runningSince, timeZone)} (${minutes} min). /stop stops it.`);
       if (state.tools) lines.push(`Running now: ${state.tools}.`);
-    } else if (state.held) lines.push('An approved call or an automation runs now. /stop cannot stop it, and the dashboard shows it.');
+    } else if (state.replying) lines.push('Sending the reply.');
+    else if (state.held) lines.push('An approved call or an automation runs now. /stop cannot stop it, and the dashboard shows it.');
     else lines.push('Nothing runs now.');
     if (state.queued) lines.push(`${plural(state.queued, 'message waits', 'messages wait')} for the reply.`);
+    // a memory flush or an automation also runs in the main session, and a flush starts inside the run of a reply. so
+    // only a run for an owner message is a reply.
     const last = db
-      .prepare("SELECT status, error, endedAt FROM runs WHERE sessionKey = 'main' AND status != 'running' ORDER BY startedAt DESC LIMIT 1")
+      .prepare("SELECT status, error, endedAt FROM runs WHERE sessionKey = 'main' AND trigger = 'message' AND status != 'running' ORDER BY startedAt DESC LIMIT 1")
       .get();
     if (last) {
       const at = last.endedAt ? ` at ${localTime(new Date(String(last.endedAt)), timeZone)}` : '';
@@ -96,7 +110,7 @@ export function createCommands(deps: CommandDeps) {
         return ids.length > MAX_CARDS ? [...cards, { text: `${ids.length - MAX_CARDS} more wait on the dashboard: ${deps.dashboardUrl}` }] : cards;
       }
       case '/dashboard':
-        return [{ text: deps.signInLink ? `${deps.signInLink()}\nThe link signs you in one time and works for 5 minutes.` : NO_LINK(deps.dashboardUrl) }];
+        return [{ text: deps.signInLink ? deps.signInLink() : NO_LINK(deps.dashboardUrl) }];
       default:
         return undefined;
     }

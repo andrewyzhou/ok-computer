@@ -140,6 +140,42 @@ describe('telegram v2 acceptance', () => {
     expect(of(failing, 'setMessageReaction').map((r) => r.reaction)).toEqual([[{ type: 'emoji', emoji: '👀' }], []]);
   });
 
+  // the router sends no message for NO_REPLY, so nothing replaces the draft. the owner once saw the word in it.
+  it('never shows a NO_REPLY answer in a draft', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const streamed: FakeStep = async (_call, _signal, onText) => {
+      for (const text of ['NO_', 'NO_REPLY']) {
+        onText!(text);
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      return fakeResponse({ text: 'NO_REPLY' });
+    };
+    const t = setup([streamed]);
+    apps.push(t);
+    await t.app.start();
+    owner(t, 'ok, thanks');
+    await until(() => t.rows("SELECT status FROM runs WHERE sessionKey = 'main'").length === 1);
+    await t.app.idle();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(of(t, 'sendMessageDraft').length).toBeGreaterThan(0);
+    expect(new Set(of(t, 'sendMessageDraft').map((d) => d.text))).toEqual(new Set(['']));
+    expect(of(t, 'sendRichMessage')).toEqual([]);
+    expect(of(t, 'sendMessage')).toEqual([]);
+  });
+
+  // a link without a label has no plain text. telegram refused the other formats, and the reply counted as sent.
+  it('counts a reply as failed when telegram refuses each format and the part has no plain text', async () => {
+    const t = setup([textStep('[](https://example.com/report)')]);
+    apps.push(t);
+    t.telegram.refuse((c) => (c.method === 'sendRichMessage' || c.method === 'sendMessage' ? 400 : false));
+    await t.app.start();
+    owner(t, 'the report link');
+    await until(() => of(t, 'setMessageReaction').length === 2);
+    await t.app.idle();
+    expect(of(t, 'sendMessage')).toEqual([expect.objectContaining({ parse_mode: 'HTML' })]);
+    expect(of(t, 'setMessageReaction').map((r) => r.reaction)).toEqual([[{ type: 'emoji', emoji: '👀' }], []]);
+  });
+
   it('stops the run when the owner presses stop on the draft, and ignores a stop from another chat', async () => {
     const waits: FakeStep = (_call, signal, onText) => {
       onText!('Working on');
@@ -270,6 +306,15 @@ describe('telegram v2 acceptance', () => {
     const t = setup([], { config: { dashboard: { publicUrl } }, loginCodes: codes });
     apps.push(t);
     await t.app.start();
+    // the dashboard of this process did not start, for example because an older process holds the port. no code of
+    // this process works there, so no link goes out.
+    owner(t, '/dashboard');
+    await until(() => of(t, 'sendMessage').length === 1);
+    expect(of(t, 'sendMessage')[0]!.text).toBe(
+      'The dashboard did not start, so a sign-in link would not work. Another program, for example an older copy of the app, can hold port 4317. The log says why.',
+    );
+    t.telegram.calls.splice(0);
+    codes.listening();
     owner(t, '/dashboard');
     await until(() => of(t, 'sendMessage').length === 1);
     const [link, note] = String(of(t, 'sendMessage')[0]!.text).split('\n');

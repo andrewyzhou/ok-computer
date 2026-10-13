@@ -1,10 +1,11 @@
 import { mkdtempSync } from 'node:fs';
+import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../src/config/load.js';
 import { createLoginCodes, type LoginCodes } from '../src/dashboard/login.js';
-import { createDashboard } from '../src/dashboard/server.js';
+import { createDashboard, startDashboard } from '../src/dashboard/server.js';
 import { openDb } from '../src/db/index.js';
 import { silentLogger } from '../src/observability/logger.js';
 
@@ -12,11 +13,11 @@ const REMOTE = 'https://okc-pc.example.ts.net';
 // tailscale serve forwards plain http with the host name of the tailnet.
 const FORWARDED = 'http://okc-pc.example.ts.net';
 
-function dashboard(options: { token?: string; publicUrl?: string; codes?: LoginCodes; clock?: () => Date }) {
+function dashboardDeps(options: { token?: string; publicUrl?: string; codes?: LoginCodes; clock?: () => Date }) {
   const dir = mkdtempSync(join(tmpdir(), 'okc-login-'));
   const parsed = parseConfig({ paths: { data: dir, workspace: dir }, ...(options.publicUrl ? { dashboard: { publicUrl: options.publicUrl } } : {}) });
   if (!parsed.ok) throw new Error(parsed.error);
-  return createDashboard({
+  return {
     db: openDb(':memory:'),
     config: parsed.value,
     clock: options.clock ?? (() => new Date('2026-10-13T16:00:00Z')),
@@ -25,8 +26,9 @@ function dashboard(options: { token?: string; publicUrl?: string; codes?: LoginC
     webDir: dir,
     ...(options.token ? { token: options.token } : {}),
     ...(options.codes ? { codes: options.codes } : {}),
-  });
+  };
 }
+const dashboard = (options: Parameters<typeof dashboardDeps>[0]) => createDashboard(dashboardDeps(options));
 
 const login = (server: ReturnType<typeof dashboard>, body: unknown, base = 'http://127.0.0.1', headers: Record<string, string> = {}) =>
   server.request(`${base}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
@@ -73,6 +75,7 @@ describe('dashboard login', () => {
     let now = new Date('2026-10-13T16:00:00Z');
     const codes = createLoginCodes(() => now);
     const server = dashboard({ token: 'secret-token', publicUrl: REMOTE, codes });
+    codes.listening();
 
     const code = codes.issue();
     expect(code).toMatch(/^[\w-]{22}$/);
@@ -101,15 +104,45 @@ describe('dashboard login', () => {
     expect((await login(server, { token: 'secret-token' })).headers.get('set-cookie')).not.toContain('Secure');
     expect((await login(server, { token: 'secret-token' }, 'http://127.0.0.1', { 'x-forwarded-proto': 'https' })).headers.get('set-cookie')).toContain('; Secure');
     const right = await login(server, { token: 'secret-token' }, FORWARDED);
-    // the browser sends the cookie of the public host only to that host, so it lasts 30 days and holds a value derived
-    // from the token. a new token makes it invalid.
+    // the cookie of the public host lasts 30 days. the browser also sends it to other services on the same tailnet
+    // name, so it is a random id that a restart or a new token makes invalid, never a value derived from the token.
     expect(right.headers.get('set-cookie')).toMatch(/^okc_session=[0-9a-f]{64}; Max-Age=2592000; Path=\/; HttpOnly; Secure; SameSite=Strict$/);
     const session = right.headers.get('set-cookie')!.split(';')[0]!;
+    expect((await login(server, { token: 'secret-token' }, FORWARDED)).headers.get('set-cookie')!.split(';')[0]).not.toBe(session);
     expect((await server.request(`${REMOTE}/api/meta`, { headers: { cookie: session } })).status).toBe(200);
-    expect((await dashboard({ token: 'secret-token', publicUrl: REMOTE }).request(`${REMOTE}/api/meta`, { headers: { cookie: session } })).status).toBe(200);
+    expect((await dashboard({ token: 'secret-token', publicUrl: REMOTE }).request(`${REMOTE}/api/meta`, { headers: { cookie: session } })).status).toBe(401);
     expect((await dashboard({ token: 'new-token', publicUrl: REMOTE }).request(`${REMOTE}/api/meta`, { headers: { cookie: session } })).status).toBe(401);
     // the cookie of the public host does not open the local address.
     expect((await server.request('/api/meta', { headers: { cookie: session } })).status).toBe(401);
+  });
+
+  it('ends a sign-in on the public host after 30 days', async () => {
+    let now = new Date('2026-10-13T16:00:00Z');
+    const server = dashboard({ token: 'secret-token', publicUrl: REMOTE, clock: () => now });
+    const session = (await login(server, { token: 'secret-token' }, FORWARDED)).headers.get('set-cookie')!.split(';')[0]!;
+    now = new Date(now.getTime() + 30 * 24 * 60 * 60_000 - 1);
+    expect((await server.request(`${REMOTE}/api/meta`, { headers: { cookie: session } })).status).toBe(200);
+    now = new Date(now.getTime() + 1);
+    expect((await server.request(`${REMOTE}/api/meta`, { headers: { cookie: session } })).status).toBe(401);
+  });
+
+  // an older process can hold the port. a code of this process then works nowhere, so no code goes out.
+  it('gives codes only after its own dashboard listens', async () => {
+    const holder = createServer();
+    await new Promise<void>((done) => holder.listen(0, '127.0.0.1', done));
+    try {
+      const taken = (holder.address() as AddressInfo).port;
+      const codes = createLoginCodes(() => new Date('2026-10-13T16:00:00Z'));
+      expect(codes.issue()).toBeUndefined();
+      const deps = { ...dashboardDeps({ token: 'secret-token', publicUrl: REMOTE, codes }), app: {} as never };
+      await expect(startDashboard({ ...deps, port: taken })).rejects.toThrow(/EADDRINUSE/);
+      expect(codes.issue()).toBeUndefined();
+      const running = await startDashboard({ ...deps, port: 0 });
+      await running.close();
+      expect(codes.issue()).toMatch(/^[\w-]{22}$/);
+    } finally {
+      holder.close();
+    }
   });
 
   it('refuses a public url that is not https', () => {
