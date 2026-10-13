@@ -33,6 +33,7 @@ import type { ModelClient, ModelRequest } from './models/types.js';
 import { createBlobStore } from './observability/blobs.js';
 import type { Logger } from './observability/logger.js';
 import { BUILTIN_RULES, type Rule } from './policy/policy.js';
+import { guardReply } from './policy/reply.js';
 import { createReviewer } from './policy/reviewer.js';
 import { scheduleContext } from './scheduler/context.js';
 import {
@@ -190,12 +191,13 @@ export function createApp(deps: AppDeps): App {
     integrations.explain,
   );
   const slots = createSlotRunner({ db, config, clients: deps.clients, logger, clock });
+  const reviewer = createReviewer({ db, slots });
   const caller = createToolCaller({
     db,
     blobs,
     tools,
     rules: deps.rules ?? BUILTIN_RULES,
-    reviewer: createReviewer({ db, slots }),
+    reviewer,
     requestApproval: approvals.request,
     queue,
     logger,
@@ -239,7 +241,10 @@ export function createApp(deps: AppDeps): App {
     if (result.stoppedAtLimit && input.trigger !== 'message') {
       await owner.send(`The ${input.trigger} run did not finish: ${result.error}.`);
     }
-    return result;
+    // the router and the automation runner send the final text to the owner's chat, so it goes through the guard.
+    if (result.status !== 'completed') return result;
+    const run = { runId: result.runId, sessionKey: input.sessionKey, signal: input.signal };
+    return { ...result, text: await guardReply({ db, reviewer, logger }, run, result.text) };
   };
 
   const heartbeat = createHeartbeat({ db, clock, logger, config, queue, owner, agent, signal: shutdown.signal, ...ids });

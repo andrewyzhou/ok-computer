@@ -247,7 +247,7 @@ const PATH_LIMIT = 48;
 const LABEL_LIMIT = 32;
 // a url that the session already read carries no new data, for example a link from a mail or a search result. the
 // check of each url reads the event log, so a call with many urls goes to the reviewer without the check.
-const SEEN_CHECKS = 20;
+export const SEEN_CHECKS = 20;
 
 export function dataUrls(value: unknown): Array<{ url: string; signal: string }> {
   const found: Array<{ url: string; signal: string }> = [];

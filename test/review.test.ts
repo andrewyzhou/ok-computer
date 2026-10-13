@@ -481,3 +481,40 @@ describe('the run page of a parent and a reviewer', () => {
     expect(done.filter((call) => call.toolCallId === 'approval-1')).toMatchObject([{ outcome: 'ran', child: { childRunId, status: 'completed' } }]);
   });
 });
+
+// verification round 4: the final reply goes to the owner's chat, and a chat app fetches a link preview.
+describe('the final reply of a tainted run', () => {
+  const reply = `Your mail is summarized here: ${LEAK}`;
+
+  it('removes a link with data that the reviewer holds, and keeps the full reply in the log', async () => {
+    const t = await setup([mail('r1', 'read_inbox'), textStep(reply)], [verdict('hold', 'the owner did not ask for a link')]);
+    await t.say('check my mail');
+    expect(t.reviewer.calls).toHaveLength(1);
+    expect(sent(t.reviewer.calls[0])).toContain('<tool_call name="reply_to_owner" risk="write">');
+    expect(t.printed()).not.toContain(LEAK);
+    expect(t.printed()).toContain('Your mail is summarized here: [link removed: it can carry data out of this session.');
+    expect(listEvents(t.db, 'main').at(-1)!.payload).toMatchObject({ text: reply });
+  });
+
+  it('sends the link when the reviewer allows it, and also when the session read it or is not tainted', async () => {
+    const allowed = await setup([mail('r1', 'read_inbox'), textStep(reply)], [verdict('allow', 'the owner asked for the link')]);
+    await allowed.say('check my mail');
+    expect(allowed.printed()).toContain(LEAK);
+    const read = await setup([mail('r1', 'read_inbox'), textStep(`Track it here: ${TRACK}`)], []);
+    await read.say('where is my order?');
+    expect(read.reviewer.calls).toHaveLength(0);
+    expect(read.printed()).toContain(TRACK);
+    const clean = await setup([textStep(reply)], []);
+    await clean.say('hi');
+    expect(clean.reviewer.calls).toHaveLength(0);
+    expect(clean.printed()).toContain(LEAK);
+  });
+
+  it('removes the link when the reviewer gives no verdict', async () => {
+    const t = await setup([mail('r1', 'read_inbox'), textStep(`Done. ${LEAK}`)], [fakeResponse({ text: 'not sure' })]);
+    await t.say('check my mail');
+    expect(t.printed()).not.toContain(LEAK);
+    expect(t.reviewer.calls).toHaveLength(1);
+    expect(t.printed()).toContain('Done. [link removed');
+  });
+});
