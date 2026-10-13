@@ -483,7 +483,9 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       let error: string | undefined;
       let acted = true;
       try {
-        note = (await action(tab.page)) ?? '';
+        const out = await within(action(tab.page), deadline);
+        if (out === TIMED_OUT) return await hung(tab, input, urlBefore, started);
+        note = out ?? '';
       } catch (err) {
         error = errorText(err).split('\n')[0]!;
         acted = !(err instanceof NotDone);
@@ -506,6 +508,21 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       const title = await within(untraced(tab.page, () => tab.page.title()), t.capture).catch(() => '');
       return { ...base, ok: !error, note: error ? [error, stayed].filter(Boolean).join('. ') : note, title: typeof title === 'string' ? title : '' };
     });
+  }
+
+  // most calls of an action have a timeout of their own, but a read in the page (a count, an evaluate, the html) waits
+  // for ever when a script of the page loops. the queue of the tab then also holds browser_close and the idle close.
+  // the deadline is longer than any action with its own timeouts, so only a hung page reaches it.
+  const deadline = t.navigation + 2 * t.action;
+
+  // the action can still run, so the tab closes: it is the only way back from a hung page (probe p5). a capture would
+  // only wait twice more.
+  async function hung(tab: Tab, input: StepInput, urlBefore: string, started: number): Promise<StepResult> {
+    const error = `the page gave no answer within ${deadline / 1000} s`;
+    const stepId = record(tab, input, { urlBefore, urlAfter: tab.page.url(), started, error });
+    const base = { url: tab.page.url(), blocked: [...tab.blocked], sent: [...tab.sent], taskId: tab.id, acted: true, ...(stepId ? { stepId } : {}) };
+    await endTab(tab, 'crashed', 'the page stopped responding');
+    return { ...base, ok: false, title: '', note: `${error}. The page stopped responding, so its tab closed and the task ended.` };
   }
 
   // a blocked navigation leaves chrome on its own error page. the model would read that page as the site, and its
@@ -597,6 +614,8 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       });
       if (tabs.has(tab.page)) await endTab(tab, 'closed', 'the search ended');
       if ('refused' in result) return result;
+      // a hung page never ends the work, so the step says why.
+      error ??= result.ok ? undefined : result.note;
       return { ...(value !== undefined ? { value } : {}), ...(error ? { error } : {}), result };
     },
     allow(pageUrl, domain) {

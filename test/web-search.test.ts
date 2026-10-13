@@ -96,6 +96,17 @@ describe.skipIf(!hasChrome())('web_search through the browser', { timeout: 60_00
     expect(out.content).toContain('Google gave no result that the reader found');
   });
 
+  it('tries the next engine when a results page hangs, and the next search does not wait for it', async () => {
+    const s = setup();
+    site.google = 'hang';
+    const out = await s.search('shirts');
+    expect(out.untrustedSource).toBe('web_search:duckduckgo');
+    expect(out.content).toContain('Google did not load: the page gave no answer within');
+    expect(s.h.tasks().map((task) => task.status)).toEqual(['crashed', 'closed']);
+    site.google = 'ok';
+    expect((await s.search('shirts')).untrustedSource).toBe('web_search:google');
+  });
+
   it('keeps a gap between two searches of one engine', async () => {
     const s = setup();
     await Promise.all([s.search('one'), s.search('two')]);

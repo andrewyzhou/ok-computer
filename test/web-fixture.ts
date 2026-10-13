@@ -10,7 +10,7 @@ export interface Fixture {
   hits: Array<{ host: string; method: string; path: string; body: string; agent: string }>;
   hitsOn(host: string): Array<{ method: string; path: string; body: string; agent: string }>;
   // the search pages answer with this mode. ok gives results, captcha and consent give a wall, empty gives no result.
-  google: 'ok' | 'captcha' | 'consent' | 'layout';
+  google: 'ok' | 'captcha' | 'consent' | 'layout' | 'hang';
   close(): Promise<void>;
 }
 
@@ -207,6 +207,8 @@ export async function startFixture(): Promise<Fixture> {
       case 'www.google.test/search': {
         if (fixture.google === 'captcha') return send(302, '', 'text/plain', { location: at('www.google.test', '/sorry/index?continue=x') });
         if (fixture.google === 'consent') return send(302, '', 'text/plain', { location: at('consent.google.test', '/ml?continue=x') });
+        // the page hangs right after it loads, so only the reader of the results waits for it.
+        if (fixture.google === 'hang') return send(200, html('<script>addEventListener("DOMContentLoaded", () => setTimeout(() => { for (;;) {} }, 0))</script><p>wait</p>'));
         if (fixture.google === 'layout') return send(200, html('<div id="main"><span>results moved</span><a href="/x">x</a></div>'));
         const q = new URL(path, 'http://x').searchParams.get('q') ?? '';
         return send(

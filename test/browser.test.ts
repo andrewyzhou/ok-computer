@@ -347,6 +347,24 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect((await h.run('browser_open', { url: site.url('shop.test') })).isError).toBe(false);
   });
 
+  it.each([
+    ['browser_extract', () => ({})],
+    ['browser_click', (snapshot: string) => ({ ref: refOf(snapshot, /button "Freeze"/), element: 'Freeze' })],
+  ])('ends the task when the page hangs between two steps, and %s and the close do not wait for ever', async (tool, input) => {
+    const h = harness();
+    await h.run('browser_open', { url: site.url('shop.test', '/freeze') });
+    const freeze = await h.run('browser_snapshot', {});
+    const clicked = await h.run('browser_click', { ref: refOf(freeze.content, /button "Freeze"/), element: 'Freeze' });
+    // the loop starts 500 ms after the click, when no step runs.
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const out = await h.run(tool, input(clicked.content));
+    expect(out).toMatchObject({ isError: true, content: expect.stringContaining('stopped responding') });
+    expect(await h.run('browser_close', {})).toMatchObject({ content: 'no browser task was open' });
+    expect(h.tasks()[0]).toMatchObject({ status: 'crashed', endReason: 'the page stopped responding' });
+    expect(h.steps().at(-1)).toMatchObject({ error: expect.stringContaining('no answer within') });
+    expect((await h.run('browser_open', { url: site.url('shop.test') }, 'auto:x')).isError).toBe(false);
+  });
+
   it('marks the open tasks of a crashed app as interrupted when chrome starts again', async () => {
     const h = harness();
     h.db.prepare("INSERT INTO browser_tasks (id, kind, sessionKey, allowlist, status, startedAt) VALUES ('old', 'task', 'main', '[]', 'open', 'x')").run();
