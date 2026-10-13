@@ -80,26 +80,43 @@ const fileSchema = z
   });
 
 // these runners download a package from the registry at each start, so the package must name an exact version. the
-// value is the words after the command that select the runner, for example dlx in pnpm dlx.
-const RUNNERS: Record<string, string[]> = { npx: [], pnpx: [], bunx: [], pnpm: ['dlx'], yarn: ['dlx'], npm: ['exec'], bun: ['x'] };
+// value is the words after the command that select the runner, for example dlx in pnpm dlx, and x, the short form of
+// npm exec. an empty list means that the command is the runner.
+const RUNNERS: Record<string, string[]> = { npx: [], pnpx: [], bunx: [], pnpm: ['dlx'], yarn: ['dlx'], npm: ['exec', 'x'], bun: ['x'] };
 const EXACT = /^\d+\.\d+\.\d+(?:-[0-9a-z.-]+)?(?:\+[0-9a-z.-]+)?$/i;
 // a path to a local package is the owner's own code, so it needs no version.
 const LOCAL = /^(?:\.{1,2}[\\/]|[\\/]|[a-z]:[\\/]|file:)/i;
 
+const baseName = (command: string) => command.replace(/\\/g, '/').split('/').pop()!.toLowerCase().replace(/\.(cmd|exe|ps1)$/, '');
+
 // unpinnedPackage gives the first package that a runner downloads without an exact version.
 export function unpinnedPackage(command: string, args: string[]): string | undefined {
-  const runner = command.replace(/\\/g, '/').split('/').pop()!.toLowerCase().replace(/\.(cmd|exe|ps1)$/, '');
-  const prefix = RUNNERS[runner];
-  if (!prefix || !prefix.every((word, i) => args[i] === word)) return undefined;
+  // many server guides give cmd /c npx for windows. the command after /c or /k is the one that runs, and cmd can get
+  // it as one text with spaces.
+  if (baseName(command) === 'cmd') {
+    const at = args.findIndex((arg) => /^\/[ck]$/i.test(arg));
+    if (at < 0 || at + 1 >= args.length) return undefined;
+    const [inner, ...rest] = [...args[at + 1]!.trim().split(/\s+/), ...args.slice(at + 2)];
+    return unpinnedPackage(inner!, rest);
+  }
+  const words = RUNNERS[baseName(command)];
+  if (!words) return undefined;
+  let i = 0;
+  if (words.length) {
+    // an option can come before the word, as in npm --yes exec.
+    while (i < args.length && args[i]!.startsWith('-')) i++;
+    if (!words.includes(args[i] ?? '')) return undefined;
+    i++;
+  }
   const packages: string[] = [];
   let explicit = false;
-  for (let i = prefix.length; i < args.length; i++) {
+  for (; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === '--') {
       if (!explicit && args[i + 1] !== undefined) packages.push(args[i + 1]!);
       break;
     }
-    const named = /^--package=(.+)$/.exec(arg)?.[1];
+    const named = /^(?:--package|-p)=(.+)$/.exec(arg)?.[1];
     if (named !== undefined) {
       packages.push(named);
       explicit = true;

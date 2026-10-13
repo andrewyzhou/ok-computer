@@ -64,6 +64,23 @@ describe('integration registry', () => {
     expect(stdio('node', ['server.js'])).toMatchObject({ ok: true });
   });
 
+  it('reads the runner behind cmd /c, the short form npm x, an option before the runner word, and -p=', () => {
+    const stdio = (command: string, args: string[]) => parseIntegrations({ integrations: [{ id: 'fs', kind: 'mcp-stdio', command, args, tools: { allow: ['read_file'] } }] });
+    const refused: Array<[string, string[]]> = [
+      ['cmd', ['/c', 'npx', '-y', 'some-notes-server']],
+      ['cmd.exe', ['/d', '/C', 'npx', '-y', 'some-notes-server@next']],
+      ['C:\\Windows\\System32\\cmd.exe', ['/c', 'npx -y some-notes-server']],
+      ['npm', ['x', '-y', 'some-notes-server']],
+      ['npm', ['--yes', 'exec', 'some-notes-server']],
+      ['pnpm', ['--silent', 'dlx', 'some-notes-server']],
+      ['npx', ['-p=some-notes-server@next', 'some-notes-server@1.0.0']],
+    ];
+    for (const [command, args] of refused) expect(stdio(command, args), `${command} ${args.join(' ')}`).toMatchObject({ ok: false, error: expect.stringContaining('no exact version') });
+    expect(stdio('cmd', ['/c', 'npx', '-y', 'some-notes-server@1.4.2'])).toMatchObject({ ok: true });
+    expect(stdio('cmd', ['/c', 'node', 'server.js'])).toMatchObject({ ok: true });
+    expect(stdio('npm', ['--silent', 'run', 'server'])).toMatchObject({ ok: true });
+  });
+
   it('treats a missing file as no integrations and a broken file as an error', () => {
     const dir = mkdtempSync(join(tmpdir(), 'okc-integrations-'));
     expect(loadIntegrations(join(dir, 'missing.json'))).toEqual({ ok: true, value: [] });
