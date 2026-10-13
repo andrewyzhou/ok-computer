@@ -5,7 +5,8 @@ const text = (value: string) => ({ content: [{ type: 'text' as const, text: valu
 
 // the test server has a read tool, a write tool, a long result, an error, and a tool that adds a tool. the stdio
 // fixture runs the same server in a child process.
-export function createTestServer(): McpServer {
+// with needsBook, add_note asks for a book too, as a newer version of the server would.
+export function createTestServer(options: { needsBook?: boolean } = {}): McpServer {
   const server = new McpServer({ name: 'okc-test-server', version: '1.2.3' });
   server.registerTool(
     'echo',
@@ -14,7 +15,10 @@ export function createTestServer(): McpServer {
   );
   server.registerTool(
     'add_note',
-    { description: 'Add a note to the shared notebook.', inputSchema: z.object({ note: z.string(), tags: z.array(z.string()).optional() }) },
+    {
+      description: 'Add a note to the shared notebook.',
+      inputSchema: z.object({ note: z.string(), tags: z.array(z.string()).optional(), ...(options.needsBook ? { book: z.string() } : {}) }),
+    },
     async ({ note }) => text(`saved: ${note}`),
   );
   server.registerTool('long_report', { description: 'Give a long report.' }, async () =>

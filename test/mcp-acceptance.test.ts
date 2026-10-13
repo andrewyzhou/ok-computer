@@ -262,6 +262,48 @@ describe('mcp acceptance', () => {
     expect(history).toHaveLength(1);
   });
 
+  it('does not run an approved call when its tool is gone or its input no longer matches the schema', async () => {
+    const db = openDb(':memory:');
+    const first = memoryServers();
+    const t1 = createTestApp([call('c1', 'notes__add_note', { note: 'one' }), call('c2', 'notes__add_note', { note: 'two' }), textStep('waiting')], {
+      start,
+      deps: { db, integrations: [notesEntry()], mcpTransport: first.transport },
+    });
+    await t1.app.start();
+    await expect.poll(() => t1.app.integrations.status()[0]!.state.status).toBe('connected');
+    await t1.say('add two notes');
+    await t1.app.stop();
+    const [one, two] = db.prepare("SELECT id FROM approvals ORDER BY id").all() as Array<{ id: number }>;
+
+    // after a restart, the server's add_note needs a field that the stored input does not have.
+    const changed = async (): Promise<Transport> => {
+      const [client, server] = InMemoryTransport.createLinkedPair();
+      await createTestServer({ needsBook: true }).connect(server);
+      return client;
+    };
+    let ids = 0;
+    const t2 = createTestApp([], { start, deps: { db, integrations: [notesEntry()], mcpTransport: changed, newId: () => `t2-${++ids}` } });
+    apps.push(t2);
+    await t2.app.start();
+    await expect.poll(() => t2.app.integrations.status()[0]!.state.status).toBe('connected');
+    expect(await t2.app.resolveApproval(one!.id, 'approve', 'dashboard')).toBeTypeOf('string');
+    await t2.settle();
+    expect(db.prepare('SELECT output FROM tool_calls WHERE toolCallId = ?').get(`approval-${one!.id}`)).toEqual({
+      output: expect.stringContaining('invalid input for notes__add_note'),
+    });
+
+    // the owner removed the integration from the config. the approved call finds no tool and does not run.
+    const t3 = createTestApp([], { start, deps: { db, newId: () => `t3-${++ids}` } });
+    apps.push(t3);
+    await t3.app.start();
+    await t3.app.resolveApproval(two!.id, 'approve', 'dashboard');
+    await t3.settle();
+    expect(db.prepare('SELECT output FROM tool_calls WHERE toolCallId = ?').get(`approval-${two!.id}`)).toEqual({
+      output: expect.stringContaining('unknown tool: notes__add_note'),
+    });
+    expect(db.prepare("SELECT count(*) AS n FROM mcp_messages WHERE method = 'tools/call' AND toolCallId LIKE 'approval-%'").get()).toEqual({ n: 0 });
+  });
+
   it('works with a real stdio server', async () => {
     const t = createTestApp([search('s1', 'echo'), call('c1', 'notes__echo', { text: 'from a child process' }), textStep('ok')], {
       start,
