@@ -1,7 +1,7 @@
 import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
-import { redact } from '../observability/redact.js';
+import { redactedJson } from '../observability/redact.js';
 import type { TaintSource } from '../policy/policy.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
 import type { RunQueue } from '../sessions/queue.js';
@@ -38,18 +38,24 @@ const FIELD_TAIL = 100;
 
 // the owner approves what the summary shows, so the summary shows each field of the input on its own line. a long
 // value is cut in its middle with a mark. the dashboard shows the full input. the value is redacted before the cut,
-// because a cut secret no longer matches the redaction.
+// because a cut secret no longer matches the redaction. each value is json text, so a line break in a value is
+// escaped and cannot add a false field line or a false "Why:" line.
 export function describeInput(toolName: string, input: unknown): string {
   const fields: Array<[string, unknown]> =
     input !== null && typeof input === 'object' && !Array.isArray(input) ? Object.entries(input) : [['input', input]];
   const lines = fields.map(([key, value]) => {
-    const text = redact(typeof value === 'string' ? value : String(JSON.stringify(value)));
-    if (text.length <= FIELD_HEAD + FIELD_TAIL) return `${key}: ${text}`;
+    const name = /^[\w.-]+$/.test(key) ? key : oneLine(JSON.stringify(key));
+    const text = oneLine(redactedJson(value) ?? String(value));
+    if (text.length <= FIELD_HEAD + FIELD_TAIL) return `${name}: ${text}`;
     const cut = text.length - FIELD_HEAD - FIELD_TAIL;
-    return `${key}: ${text.slice(0, FIELD_HEAD)} [... ${cut} characters cut, the dashboard shows the full input ...] ${text.slice(-FIELD_TAIL)}`;
+    return `${name}: ${text.slice(0, FIELD_HEAD)} [... ${cut} characters cut, the dashboard shows the full input ...] ${text.slice(-FIELD_TAIL)}`;
   });
   return [toolName, ...lines].join('\n');
 }
+
+// json text keeps these line breaks, and a chat app can show them as new lines.
+const LINE_BREAKS = new RegExp(`[${String.fromCharCode(0x85, 0x2028, 0x2029)}]`, 'g');
+const oneLine = (text: string) => text.replace(LINE_BREAKS, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);
 
 // the run does not wait for the owner. the tool result says that the call is pending, and the decision comes back
 // to the same session as a system event.
@@ -66,12 +72,19 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
       // the owner sees the reason with the request. the taint can come from an older run, so the message names it.
       const lines = [`Approval needed (#${approval.id}): ${summary}`, `Why: ${why.reason}.`];
       if (why.taint.length) lines.push(`Untrusted content in this session: ${why.taint.map((each) => taintText(each, ctx.timeZone)).join('; ')}.`);
-      await deps.owner.send(lines.join('\n'), [
+      const reached = await deps.owner.send(lines.join('\n'), [
         [
           { text: 'Approve', data: approvalButtonData(approval.id, 'approve') },
           { text: 'Deny', data: approvalButtonData(approval.id, 'deny') },
         ],
       ]);
+      // the model must not tell the owner to press a button that the owner never got.
+      if (!reached) {
+        logger.warn('the request for an approval did not reach the owner', { approvalId: approval.id, runId: ctx.runId });
+        return {
+          content: `${tool.name} needs the owner's approval, and the tool did not run yet. Approval #${approval.id} is pending, but the message to the owner failed, so the owner sees it only on the dashboard or with /approve ${approval.id}. Tell the owner about it when you can. The decision comes back as a system event.`,
+        };
+      }
       return {
         content: `${tool.name} needs the owner's approval. Approval #${approval.id} is pending, and the tool did not run yet. The owner can approve it with the button or with /approve ${approval.id}. The decision comes back as a system event.`,
       };

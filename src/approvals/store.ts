@@ -82,15 +82,21 @@ export function expireApprovals(db: Db, now: Date): Approval[] {
     .map((row) => getApproval(db, Number(row.id))!);
 }
 
+// only the sweep expires approvals, because it also tells their sessions. an approval past its age cannot be resolved
+// here, and it stays pending until the next sweep.
 export function resolveApproval(db: Db, id: number, decision: Decision, via: ResolvedVia, now: Date): Result<Approval> {
-  expireApprovals(db, now);
   const approval = getApproval(db, id);
   if (!approval) return { ok: false, error: `No approval has the id ${id}.` };
+  const cutoff = new Date(now.getTime() - APPROVAL_TTL_MS).toISOString();
   // the status check is part of the update, so two decisions for one approval (a button and the dashboard) cannot
   // both win.
   const changed = db
-    .prepare("UPDATE approvals SET status = ?, resolvedAt = ?, resolvedBy = ? WHERE id = ? AND status = 'pending'")
-    .run(decision === 'approve' ? 'approved' : 'denied', now.toISOString(), via, id).changes;
-  if (!changed) return { ok: false, error: `Approval #${id} is already ${getApproval(db, id)!.status}.` };
+    .prepare("UPDATE approvals SET status = ?, resolvedAt = ?, resolvedBy = ? WHERE id = ? AND status = 'pending' AND requestedAt > ?")
+    .run(decision === 'approve' ? 'approved' : 'denied', now.toISOString(), via, id, cutoff).changes;
+  if (!changed) {
+    const status = getApproval(db, id)!.status;
+    if (status === 'pending') return { ok: false, error: `Approval #${id} expired after 24 hours without an answer. The tool did not run.` };
+    return { ok: false, error: `Approval #${id} is already ${status}.` };
+  }
   return { ok: true, value: getApproval(db, id)! };
 }
