@@ -10,3 +10,6 @@ web/dist/
 *.sqlite-shm
 
 workspace/USER.md
+
+# design explorations, kept local for the owner to review
+explorations/
