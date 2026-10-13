@@ -75,7 +75,14 @@ export function decisionOfApproval(db: Db, approvalId: number): number | null {
 export function sessionTaint(db: Db, sessionKey: string): TaintSource[] {
   const rows = db
     .prepare(
-      `SELECT runId, createdAt, json_extract(payload, '$.untrustedSource') AS source, json_extract(payload, '$.name') AS name,
+      // the event of an integration call names tool_call, the model's own call. the owner needs the tool that read
+      // the content, so the name comes from the trace row when it exists. the row is only for the name: the event
+      // alone decides the taint.
+      `SELECT runId, createdAt, json_extract(payload, '$.untrustedSource') AS source,
+         CASE WHEN json_extract(payload, '$.name') = 'tool_call'
+           THEN COALESCE((SELECT name FROM tool_calls WHERE tool_calls.runId = events.runId
+             AND tool_calls.toolCallId = json_extract(events.payload, '$.toolCallId') ORDER BY id LIMIT 1), 'tool_call')
+           ELSE json_extract(payload, '$.name') END AS name,
          json_extract(payload, '$.toolCallId') AS toolCallId, json_extract(payload, '$.taint') AS taint
        FROM events
        WHERE sessionKey = ? AND type IN ('tool_result', 'system_event')
