@@ -4,19 +4,20 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createTestCaller } from '../../test/harness.js';
 import { runAgent, type AgentDeps } from '../agent/loop.js';
+import { repairSession } from '../agent/recovery.js';
 import { parseConfig } from '../config/load.js';
 import { openDb } from '../db/index.js';
 import { appendEvent, listEvents, type EventInput } from '../events/log.js';
 import { createMemoryTools } from '../memory/tools.js';
 import { createFakeClient, fakeResponse, textStep, toolStep, type FakeStep } from '../models/fake.js';
 import { createSlotRunner } from '../models/slots.js';
-import type { ModelCall } from '../models/types.js';
+import type { ModelCall, ModelMessage } from '../models/types.js';
 import { silentLogger } from '../observability/logger.js';
 import { nowTool } from '../tools/now.js';
 import { createToolRegistry } from '../tools/registry.js';
-import { fullHistory } from './full-history.js';
+import { fullHistory, renderEvents } from './full-history.js';
 import { DROPPED_HEADING, findIdentifiers, SUMMARY_HEADINGS, SUMMARY_PROMPT } from './summary.js';
-import { createTrimAndCompact, FLUSH_DONE, FLUSH_PROMPT } from './trim-and-compact.js';
+import { chooseBoundary, createTrimAndCompact, FLUSH_DONE, FLUSH_PROMPT } from './trim-and-compact.js';
 
 const WINDOW = 3000;
 const TOOLS = ['memory_write', 'now'];
@@ -254,5 +255,45 @@ describe('trim-and-compact strategy', () => {
     expect(t.model.calls[0]!.system).toBe(SUMMARY_PROMPT);
     expect(t.events().some((e) => e.type === 'system_event' && e.payload.text === FLUSH_PROMPT)).toBe(false);
     expect(t.events().some((e) => e.type === 'compaction')).toBe(true);
+  });
+});
+
+describe('the compaction boundary', () => {
+  // a tool_result block is valid only when the message just before it is an assistant turn with that call.
+  const orphanResults = (messages: ModelMessage[]) =>
+    messages.flatMap((message, i) => {
+      if (message.role !== 'user') return [];
+      const prev = messages[i - 1];
+      const ids = new Set(prev?.role === 'assistant' ? prev.toolCalls.map((call) => call.id) : []);
+      return message.content.flatMap((block) => (block.type === 'tool_result' && !ids.has(block.toolCallId) ? [block.toolCallId] : []));
+    });
+
+  // after a crash, the repaired result comes after the events that arrived while the process was down. a boundary on
+  // such an event kept the result and summarized its call away, and every later request of the session failed.
+  it('never keeps a repaired result without its call', () => {
+    const db = openDb(':memory:');
+    const now = new Date('2026-10-13T03:15:00Z');
+    for (const id of ['r1', 'r2']) {
+      db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES (?, 'main', 'message', 'main', 'running', 'x')").run(id);
+    }
+    const add = (runId: string | null, event: EventInput) => appendEvent(db, { sessionKey: 'main', runId, ...event }, now);
+    add('r1', user('older talk '.repeat(200)));
+    add('r1', assistant('older answer '.repeat(200)));
+    add('r1', user('please save a note'));
+    add('r1', assistant('', [{ id: 'toolu_1', name: 'memory_write', input: { text: 'n' } }]));
+    // the process stops while the tool runs. after the restart a relay arrives, and then the next run repairs the call.
+    add(null, { type: 'system_event', payload: { text: 'automation result '.repeat(50) } });
+    repairSession(db, 'main', () => now);
+    add('r2', user('did it work? '.repeat(50)));
+    add('r2', assistant('newer answer '.repeat(300)));
+
+    const live = listEvents(db, 'main');
+    expect(live.map((event) => event.type)).toContain('tool_result');
+    const broken: number[] = [];
+    for (let keep = 1; keep <= 5000; keep += 7) {
+      const boundary = chooseBoundary(live, keep);
+      if (boundary > 0 && orphanResults(renderEvents(live.slice(boundary))).length) broken.push(keep);
+    }
+    expect(broken).toEqual([]);
   });
 });

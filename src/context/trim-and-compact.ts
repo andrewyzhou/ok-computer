@@ -62,14 +62,21 @@ function render(view: View): ModelMessage[] {
   return view.compaction ? renderCompacted(view.live, view.compaction) : renderEvents(view.live);
 }
 
-// the kept part starts at an event that is not a tool result, so a tool call never loses its result. it is the
-// longest such part under keepTokens, or the shortest one when even that is larger.
+// the kept part must hold the call of each tool result in it, or the request is invalid. a result usually comes just
+// after its call, but a repaired result comes after the events that arrived while the process was down, for example
+// a system event. so the scan keeps the ids of the results whose call it did not reach yet, and a boundary is valid
+// only when that set is empty. the kept part is the longest valid part under keepTokens, or the shortest valid part
+// when even that is larger.
 export function chooseBoundary(live: StoredEvent[], keepTokens: number): number {
   let tokens = 0;
   let boundary = -1;
+  const open = new Set<string>();
   for (let i = live.length - 1; i > 0; i--) {
-    tokens += estimateTokens(live[i]!.payload);
-    if (live[i]!.type === 'tool_result') continue;
+    const event = live[i]!;
+    tokens += estimateTokens(event.payload);
+    if (event.type === 'tool_result') open.add(event.payload.toolCallId);
+    if (event.type === 'assistant_message') for (const call of event.payload.toolCalls) open.delete(call.id);
+    if (event.type === 'tool_result' || open.size) continue;
     if (tokens > keepTokens && boundary !== -1) break;
     boundary = i;
   }
