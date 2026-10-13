@@ -32,6 +32,8 @@ It runs on this PC. Its persona files (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, an
 
 A small supervisor restarts the agent if it stops. The logon task means it runs whenever you are signed in to Windows.
 
+`npm run chat` uses the same database as the background agent. That is fine, but do not chat with it while the agent is answering you in Telegram at the same moment: two processes in one conversation can give the same tool call two results.
+
 ## Phases
 
 1. **Core coach (done):** Telegram adapter, agent loop, workspace files, scheduler (automations + heartbeat), 3-goals routine, daily notes + nightly consolidation into weekly trends, run logging, first version of the observability dashboard.
