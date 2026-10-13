@@ -121,6 +121,7 @@ export function createApp(deps: AppDeps): App {
       ...createSkillTools({ skillsDir: config.paths.skills }),
       createResultReadTool({ db, blobs }),
     ],
+    logger,
   );
   const caller = createToolCaller({
     db,
@@ -128,6 +129,8 @@ export function createApp(deps: AppDeps): App {
     tools,
     rules: deps.rules ?? BUILTIN_RULES,
     requestApproval: approvals.request,
+    queue,
+    logger,
     clock,
     timeZone: config.timeZone,
   });

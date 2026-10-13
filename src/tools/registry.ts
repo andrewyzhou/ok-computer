@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ToolCall, ToolSpec } from '../models/types.js';
+import { silentLogger, type Logger } from '../observability/logger.js';
 import type { Risk } from '../policy/policy.js';
 import type { Clock } from '../time.js';
 
@@ -9,6 +10,8 @@ export interface ToolContext {
   timeZone: string;
   clock: Clock;
   signal: AbortSignal;
+  // the tool caller sets the id of the model's tool call. traces and log lines use it to find the call.
+  toolCallId?: string;
 }
 
 export interface ToolOutput {
@@ -36,8 +39,8 @@ export interface ToolRegistry {
   specs(allowed: readonly string[]): ToolSpec[];
   // resolve finds the tool and checks its input. the error output goes back to the model.
   resolve(call: ToolCall, allowed: readonly string[]): Resolved;
-  // execute runs a resolved tool. a tool that throws gives an error output. only the tool caller calls it, so every
-  // call goes through the policy.
+  // execute runs a resolved tool. a tool that throws gives an error output, and the log gets the stack. only the tool
+  // caller calls it, so every call goes through the policy.
   execute(tool: Tool, input: unknown, ctx: ToolContext): Promise<ToolOutput>;
 }
 
@@ -45,7 +48,7 @@ export function defineTool<I>(tool: Tool<I>): Tool<unknown> {
   return tool as Tool<unknown>;
 }
 
-export function createToolRegistry(tools: Tool[]): ToolRegistry {
+export function createToolRegistry(tools: Tool[], logger: Logger = silentLogger): ToolRegistry {
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   // the tool list is part of the cached prefix, so the order must not change between requests.
   const sorted = [...tools].sort((a, b) => a.name.localeCompare(b.name));
@@ -69,6 +72,8 @@ export function createToolRegistry(tools: Tool[]): ToolRegistry {
       try {
         return await tool.run(input, ctx);
       } catch (err) {
+        // the model gets only the message. the stack goes to the log with the ids of the run and the call.
+        logger.error('tool crashed', { tool: tool.name, runId: ctx.runId, toolCallId: ctx.toolCallId, err });
         return { content: `${tool.name} failed: ${(err as Error).message}`, isError: true };
       }
     },

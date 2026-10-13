@@ -1,0 +1,232 @@
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { z } from 'zod';
+import { describe, expect, it } from 'vitest';
+import { createTestCaller } from '../../test/harness.js';
+import { createApprovalFlow } from '../approvals/flow.js';
+import { getApproval } from '../approvals/store.js';
+import { openDb } from '../db/index.js';
+import { listEvents } from '../events/log.js';
+import type { BlobStore } from '../observability/blobs.js';
+import { createLogger, silentLogger, type Logger } from '../observability/logger.js';
+import { BUILTIN_RULES } from '../policy/policy.js';
+import { createRunQueue } from '../sessions/queue.js';
+import { abandonedText, type ToolCallerDeps } from './caller.js';
+import { createToolRegistry, defineTool, type Tool } from './registry.js';
+
+const clock = () => new Date('2026-10-13T03:15:00Z');
+
+// the logger keeps each line in memory, so a test can check what the caller logged.
+function memoryLogger() {
+  const lines: Array<{ level: string; msg: string; fields: Record<string, unknown> }> = [];
+  const make = (base: Record<string, unknown>): Logger => {
+    const log = (level: string) => (msg: string, fields: Record<string, unknown> = {}) => void lines.push({ level, msg, fields: { ...base, ...fields } });
+    return { debug: log('debug'), info: log('info'), warn: log('warn'), error: log('error'), child: (fields) => make({ ...base, ...fields }) };
+  };
+  return { logger: make({}), lines };
+}
+
+function setup(tools: Tool[], extra: Partial<ToolCallerDeps> = {}) {
+  const db = openDb(':memory:');
+  db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r1', 'main', 'message', 'main', 'running', 'x')").run();
+  const { caller, blobs } = createTestCaller(db, createToolRegistry(tools), clock, extra);
+  const allowed = tools.map((tool) => tool.name);
+  const call = (name: string, id = `${name}-call`, signal = new AbortController().signal) =>
+    caller.call({ id, name, input: {} }, { runId: 'r1', sessionKey: 'main', allowed, signal });
+  const row = (id: string) => db.prepare('SELECT * FROM tool_calls WHERE toolCallId = ?').get(id) as Record<string, unknown> | undefined;
+  const decisions = () => db.prepare('SELECT * FROM policy_decisions ORDER BY id').all() as Array<Record<string, unknown>>;
+  return { db, caller, blobs, call, row, decisions };
+}
+
+function counted(name: string, risk: Tool['risk'], run: () => Promise<{ content: string }> = async () => ({ content: 'x'.repeat(5000) })) {
+  const ran: string[] = [];
+  const tool = defineTool({
+    name,
+    description: name,
+    input: z.object({}),
+    risk,
+    async run() {
+      ran.push(name);
+      return run();
+    },
+  });
+  return { tool, ran };
+}
+
+describe('the tool caller before the tool acts', () => {
+  it('does not run the tool when the decision cannot be written', async () => {
+    const { tool, ran } = counted('archive', 'write');
+    const { logger, lines } = memoryLogger();
+    const { db, call, row } = setup([tool], { logger, rules: [...BUILTIN_RULES, { id: 'ok', tool: 'archive', effect: 'allow' }] });
+    db.exec("CREATE TRIGGER no_decisions BEFORE INSERT ON policy_decisions BEGIN SELECT RAISE(ABORT, 'disk is full'); END");
+    const output = await call('archive');
+    expect(output).toEqual({ content: 'archive did not run, because its policy check failed: disk is full', isError: true });
+    expect(ran).toEqual([]);
+    expect(row('archive-call')).toMatchObject({ isError: 1, policyDecisionId: null });
+    expect(lines).toContainEqual(expect.objectContaining({ level: 'error', fields: expect.objectContaining({ runId: 'r1', toolCallId: 'archive-call' }) }));
+  });
+
+  it('writes the decision before it asks the owner, and leaves no approval when the request fails', async () => {
+    const { tool, ran } = counted('send', 'external');
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r1', 'main', 'message', 'main', 'running', 'x')").run();
+    const queue = createRunQueue();
+    const flow = createApprovalFlow({
+      db,
+      clock,
+      logger: silentLogger,
+      queue,
+      owner: { remember() {}, chat: () => undefined, send: async () => true },
+      caller: () => caller,
+      signal: new AbortController().signal,
+    });
+    const { caller } = createTestCaller(db, createToolRegistry([tool]), clock, { requestApproval: flow.request, queue });
+    db.exec("CREATE TRIGGER no_approvals BEFORE INSERT ON approvals BEGIN SELECT RAISE(ABORT, 'disk is full'); END");
+    const output = await caller.call({ id: 's1', name: 'send', input: {} }, { runId: 'r1', sessionKey: 'main', allowed: ['send'], signal: new AbortController().signal });
+    expect(output).toMatchObject({ isError: true, content: expect.stringContaining("send did not run, because the request for the owner's approval failed") });
+    expect(ran).toEqual([]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM approvals').get()).toEqual({ n: 0 });
+    expect(db.prepare('SELECT decision, approvalId, reason FROM policy_decisions').get()).toEqual({
+      decision: 'approve',
+      approvalId: null,
+      reason: expect.stringContaining("the request for the owner's approval failed, so the call did not run"),
+    });
+
+    // without the trigger the decision row exists before the approval, and then it links to it.
+    db.exec('DROP TRIGGER no_approvals');
+    await caller.call({ id: 's2', name: 'send', input: {} }, { runId: 'r1', sessionKey: 'main', allowed: ['send'], signal: new AbortController().signal });
+    expect(db.prepare("SELECT approvalId FROM policy_decisions WHERE toolCallId = 's2'").get()).toEqual({ approvalId: 1 });
+    expect(getApproval(db, 1)).toMatchObject({ status: 'pending' });
+  });
+
+  it('sends the call to the owner when the reviewer fails, and the turn goes on', async () => {
+    const { tool, ran } = counted('archive', 'write');
+    const asked: string[] = [];
+    const { db, call, decisions } = setup([tool], {
+      reviewer: async () => {
+        throw new Error('529 overloaded');
+      },
+      requestApproval: async (_tool, _input, _ctx, why) => {
+        asked.push(why.reason);
+        return { approvalId: 1, output: { content: 'approval #1 is pending' } };
+      },
+    });
+    db.prepare("INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt) VALUES ('r1', 'archive', '{}', 'archive', 'pending', 'x')").run();
+    expect(await call('archive')).toEqual({ content: 'approval #1 is pending' });
+    expect(ran).toEqual([]);
+    expect(asked).toEqual([expect.stringContaining('the reviewer failed (529 overloaded), so the owner decides')]);
+    expect(decisions()).toMatchObject([{ decision: 'review', reviewerVerdict: null, reason: expect.stringContaining('the reviewer failed') }]);
+  });
+});
+
+describe('the tool caller after the tool acts', () => {
+  it('gives the model the output when the trace write fails, and logs the error', async () => {
+    const { tool, ran } = counted('fetch', 'read');
+    const { logger, lines } = memoryLogger();
+    const broken: BlobStore = {
+      put: () => {
+        throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+      },
+      read: () => undefined,
+    };
+    const { call, row } = setup([tool], { logger, blobs: broken });
+    const output = await call('fetch');
+    expect(ran).toEqual(['fetch']);
+    expect(output.content).toContain('the full result is res_');
+    expect(output.isError).toBeUndefined();
+    expect(row('fetch-call')).toBeUndefined();
+    expect(lines).toContainEqual({
+      level: 'error',
+      msg: 'tool call trace write failed',
+      fields: expect.objectContaining({ runId: 'r1', toolCallId: 'fetch-call', tool: 'fetch', err: expect.any(Error) }),
+    });
+  });
+
+  it('logs the stack of a tool that throws with the ids of the run and the call', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'okc-caller-log-'));
+    const logger = createLogger({ dir, consoleLevel: 'off', clock });
+    const broken = defineTool({
+      name: 'broken',
+      description: 'Throws.',
+      input: z.object({}),
+      risk: 'read',
+      async run() {
+        throw new Error('the disk is full');
+      },
+    });
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r1', 'main', 'message', 'main', 'running', 'x')").run();
+    const { caller } = createTestCaller(db, createToolRegistry([broken], logger), clock, { logger });
+    const output = await caller.call({ id: 'call-9', name: 'broken', input: {} }, { runId: 'r1', sessionKey: 'main', allowed: ['broken'], signal: new AbortController().signal });
+    expect(output).toEqual({ content: 'broken failed: the disk is full', isError: true });
+    const logged = readFileSync(join(dir, 'okc-2026-10-13.log'), 'utf8').trim().split('\n').map((text) => JSON.parse(text));
+    expect(logged).toContainEqual(
+      expect.objectContaining({
+        level: 'error',
+        msg: 'tool crashed',
+        tool: 'broken',
+        runId: 'r1',
+        toolCallId: 'call-9',
+        err: expect.objectContaining({ message: 'the disk is full', stack: expect.stringContaining('caller-contract.test.ts') }),
+      }),
+    );
+  });
+
+  it('abandons a tool that ignores the abort signal, and records its late result with a note to the session', async () => {
+    let finish!: (output: { content: string; untrustedSource: string }) => void;
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => (started = resolve));
+    const slow = defineTool({
+      name: 'slow',
+      description: 'Ignores the abort signal.',
+      input: z.object({}),
+      risk: 'read',
+      run: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+          started();
+        }),
+    });
+    const queue = createRunQueue();
+    const { db, call, row, blobs } = setup([slow], { queue });
+    const abort = new AbortController();
+    const pending = call('slow', 'slow-1', abort.signal);
+    await running;
+    abort.abort(new Error('timeout'));
+    expect(await pending).toEqual({ content: abandonedText('slow'), isError: true });
+    expect(row('slow-1')).toMatchObject({ outcome: 'abandoned', isError: 1, rawResultBlob: null });
+
+    finish({ content: `page text ${'p'.repeat(5000)}`, untrustedSource: 'web' });
+    await new Promise((resolve) => setImmediate(resolve));
+    await queue.drain();
+    const late = row('slow-1')!;
+    expect(late).toMatchObject({ outcome: 'late', isError: 0, untrustedSource: 'web', resultHandle: expect.stringMatching(/^res_/) });
+    expect(blobs.read(String(late.rawResultBlob))).toMatch(/^page text p/);
+    // the model view of the abandoned call stays what the model saw.
+    expect(JSON.parse(String(late.output))).toEqual({ content: abandonedText('slow'), isError: true });
+    const [note] = listEvents(db, 'main');
+    expect(note).toMatchObject({
+      type: 'system_event',
+      payload: {
+        text: expect.stringMatching(/^slow \(call slow-1\) finished after its run stopped\. Result:\n<untrusted source="web">/),
+        taint: [{ source: 'web', toolName: 'slow', runId: 'r1', toolCallId: 'slow-1' }],
+      },
+    });
+  });
+
+  it('runs an approved call one time, also when it is resolved twice at the same time', async () => {
+    const { tool, ran } = counted('send', 'external', async () => ({ content: 'sent' }));
+    const { db, caller } = setup([tool]);
+    db.prepare(
+      "INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt, resolvedAt) VALUES ('r1', 'send', '{}', 'send', 'approved', 'x', 'y')",
+    ).run();
+    const approval = getApproval(db, 1)!;
+    const signal = new AbortController().signal;
+    const outputs = await Promise.all([caller.callApproved(approval, signal), caller.callApproved(approval, signal)]);
+    expect(ran).toEqual(['send']);
+    expect(outputs).toContainEqual({ content: 'sent' });
+    expect(outputs).toContainEqual({ content: 'approval #1 already ran, so it did not run again', isError: true });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM tool_calls WHERE toolCallId = 'approval-1'").get()).toEqual({ n: 1 });
+  });
+});
