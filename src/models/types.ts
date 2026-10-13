@@ -73,6 +73,10 @@ export interface ModelClient {
 export type ModelErrorKind = 'transient' | 'request' | 'aborted';
 
 export class ModelError extends Error {
+  // a stream that failed or that the owner stopped can have sent text first. the owner saw it in the draft, so the
+  // trace keeps it with its usage.
+  partial?: ModelResponse;
+
   constructor(
     readonly kind: ModelErrorKind,
     message: string,

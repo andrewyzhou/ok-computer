@@ -5,7 +5,7 @@ import { openDb } from '../db/index.js';
 import { silentLogger } from '../observability/logger.js';
 import { registerSecret } from '../observability/redact.js';
 import { costUsd } from './cost.js';
-import { createFakeClient, textStep, type FakeStep } from './fake.js';
+import { createFakeClient, fakeResponse, textStep, type FakeStep } from './fake.js';
 import { createSlotRunner } from './slots.js';
 import { ModelError, type ModelRequest } from './types.js';
 
@@ -137,6 +137,17 @@ describe('slot runner', () => {
   it('reports an aborted call', async () => {
     const { runner } = setup(['anthropic/a'], { anthropic: [new ModelError('aborted', 'aborted')] });
     expect(await runner.call('main', request, { runId: null })).toMatchObject({ ok: false, aborted: true });
+  });
+
+  // the owner saw the text of a stopped stream in the draft, so the trace must hold it, with its tokens and cost.
+  it('records the partial response and its cost of a stream that the owner stopped', async () => {
+    const stopped = new ModelError('aborted', 'the request was aborted');
+    stopped.partial = fakeResponse({ text: 'I will now forward the invoice', stopReason: 'other', usage: { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 } });
+    const { runner, db } = setup(['anthropic/claude-haiku-5-5'], { anthropic: [stopped] });
+    expect(await runner.call('main', request, { runId: null })).toMatchObject({ ok: false, aborted: true });
+    const row = db.prepare('SELECT outputTokens, costUsd, error, response FROM model_calls').get() as Record<string, unknown>;
+    expect(row).toMatchObject({ outputTokens: 100, costUsd: 0.00015, error: 'the request was aborted' });
+    expect(JSON.parse(String(row.response))).toMatchObject({ text: 'I will now forward the invoice' });
   });
 });
 

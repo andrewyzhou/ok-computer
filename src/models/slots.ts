@@ -81,7 +81,10 @@ export function createSlotRunner(deps: SlotRunnerDeps): SlotRunner {
             const latencyMs = Math.round(performance.now() - started);
             // a provider can echo the key in its error body. the text goes to the trace, the run, and the owner's chat.
             const message = redact(err.message);
-            record(db, { runId, slot, provider, model, call, error: message, cost: null, latencyMs }, clock());
+            // the text of a cut stream reached the owner's draft, and its tokens are billed, so the row keeps them.
+            const partial = err.partial;
+            const cost = partial ? costUsd(config.pricing, ref, partial.usage) : null;
+            record(db, { runId, slot, provider, model, call, error: message, cost, latencyMs, ...(partial ? { response: partial } : {}) }, clock());
             if (err.kind === 'aborted') return { ok: false, error: 'the run was aborted', aborted: true };
             if (err.kind === 'request') {
               logger.error('model request failed', { slot, ref, runId, status: err.status, err });

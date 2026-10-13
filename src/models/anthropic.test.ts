@@ -1,7 +1,7 @@
 import type { BetaMessage } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import { describe, expect, it } from 'vitest';
 import { createAnthropicClient, fromAnthropicMessage, toAnthropicParams } from './anthropic.js';
-import type { AssistantTurn, ModelCall } from './types.js';
+import type { AssistantTurn, ModelCall, ModelError } from './types.js';
 
 const tool = { name: 'now', description: 'current time', inputSchema: { type: 'object', properties: {} } };
 
@@ -211,6 +211,34 @@ describe('createAnthropicClient streaming', () => {
     for (const body of [() => sse.slice(0, sse.indexOf('event: message_delta')), reset, () => 'event: message_start\ndata: {not json\n\n']) {
       await expect(answering(body).complete(request, undefined, () => {})).rejects.toMatchObject({ name: 'ModelError', kind: 'transient' });
     }
+  });
+
+  // the owner saw the text of a cut stream in the draft, and its tokens are billed, so the error carries them.
+  it('gives the text and the usage that a stream sent before it was cut', async () => {
+    const cut = createAnthropicClient('test-key', {
+      fetch: async () => new Response(sse.slice(0, sse.indexOf('event: message_stop')), { status: 200, headers: { 'content-type': 'text/event-stream' } }),
+    });
+    const error = (await cut.complete(request, undefined, () => {}).catch((err: unknown) => err)) as ModelError;
+    expect(error).toMatchObject({ kind: 'transient', partial: { text: 'Hello there.', usage: { inputTokens: 12, outputTokens: 7 } } });
+    // the stop button aborts the stream after the text went to the draft.
+    const abort = new AbortController();
+    const held = createAnthropicClient('test-key', {
+      fetch: async (_url, init) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(sse.slice(0, sse.lastIndexOf('event: content_block_stop'))));
+              init?.signal?.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')));
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'text/event-stream' } },
+        ),
+    });
+    const stopped = held.complete(request, abort.signal, (text) => text === 'Hello there.' && abort.abort()).catch((err: unknown) => err);
+    expect(await stopped).toMatchObject({ kind: 'aborted', partial: { text: 'Hello there.', usage: { inputTokens: 12 } } });
+    // a plain request has no partial message.
+    const plain = createAnthropicClient('test-key', { fetch: async () => new Response('{', { status: 200, headers: { 'content-type': 'application/json' } }) });
+    expect(((await plain.complete(request).catch((err: unknown) => err)) as ModelError).partial).toBeUndefined();
   });
 
   it('maps a refused stream and an abort to the same errors as a plain request', async () => {
