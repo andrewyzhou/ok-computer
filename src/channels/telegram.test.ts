@@ -43,6 +43,8 @@ describe('telegram channel', () => {
     expect(sent[0]).toMatchObject({ chat_id: '777', text: 'a'.repeat(3000) });
     expect(sent[0]).not.toHaveProperty('reply_markup');
     expect(sent.some((p) => 'parse_mode' in p)).toBe(false);
+    // a preview would make telegram fetch a link of the text before the owner reads it.
+    expect(sent.every((p) => JSON.stringify(p.link_preview_options) === '{"is_disabled":true}')).toBe(true);
     expect(sent[1]).toMatchObject({
       text: 'b'.repeat(3000),
       reply_markup: {
@@ -261,6 +263,17 @@ describe('telegram formats', () => {
     fake.refuse((c) => (c.payload.parse_mode === 'HTML' ? 400 : false));
     await channel.send({ chatId: '777', text: 'Card', details: '{ "a": 1 }' });
     expect(fake.calls.at(-1)!.payload).toEqual({ chat_id: '777', text: 'Card\n\n{ "a": 1 }', link_preview_options: { is_disabled: true } });
+  });
+
+  it('sends a long card text alone in one message when no room is left for the details', async () => {
+    const fake = createFakeTelegram();
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock });
+    const text = `Approval needed (#1): skill_write\nbody (in full):\n${'│ x\n'.repeat(1000)}`.trimEnd();
+    expect(text.length).toBeGreaterThan(TELEGRAM_LIMIT - 300);
+    expect(text.length).toBeLessThanOrEqual(TELEGRAM_LIMIT);
+    await channel.send({ chatId: '777', text, details: JSON.stringify({ body: 'x\n'.repeat(1000) }, null, 2), buttons });
+    expect(fake.sent()).toHaveLength(1);
+    expect(fake.sent()[0]).toMatchObject({ text, reply_markup: { inline_keyboard: [[{ text: 'OK' }]] } });
   });
 
   // the html of a card cuts the details, but its plain fallback holds them all.

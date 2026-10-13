@@ -239,7 +239,11 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
         if (out.details !== undefined) {
           const html = cardHtml(out.text, out.details);
           const plain = `${out.text}\n\n${out.details}`;
-          ({ messageId } = await sendParts(out.chatId, html ? [{ html, plain }] : plainParts(plain), keyboard, delivery));
+          // a card text with no room left for the details, such as a skill card with its body in full, goes out alone
+          // when it fits one message, so its buttons stay under it. its cut fields name the dashboard.
+          const alone = !html && out.text.trim().length <= TELEGRAM_LIMIT;
+          const parts = html ? [{ html, plain }] : plainParts(alone ? out.text : plain);
+          ({ messageId } = await sendParts(out.chatId, parts, keyboard, delivery));
         } else if (!out.markdown) {
           ({ messageId } = await sendParts(out.chatId, plainParts(out.text), keyboard, delivery));
         } else {
