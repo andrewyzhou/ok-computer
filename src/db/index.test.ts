@@ -42,7 +42,9 @@ describe('openDb', () => {
     const db = openDb(join(dir, 'nested', 'okc.sqlite'));
     expect(db.prepare('PRAGMA journal_mode').get()?.journal_mode).toBe('wal');
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
-    expect(tables).toEqual(expect.arrayContaining(['events', 'runs', 'model_calls', 'tool_calls', 'migrations']));
+    expect(tables).toEqual(
+      expect.arrayContaining(['events', 'runs', 'model_calls', 'tool_calls', 'migrations', 'blobs', 'policy_decisions']),
+    );
     db.close();
   });
 });
