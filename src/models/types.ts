@@ -64,8 +64,9 @@ export interface ModelResponse {
 
 export interface ModelClient {
   provider: string;
-  // complete throws ModelError when the provider fails.
-  complete(call: ModelCall, signal?: AbortSignal): Promise<ModelResponse>;
+  // complete throws ModelError when the provider fails. an adapter that streams gives onText the text so far. the
+  // response is the same with or without it.
+  complete(call: ModelCall, signal?: AbortSignal, onText?: (text: string) => void): Promise<ModelResponse>;
 }
 
 // transient errors can succeed on a retry. request errors fail again with the same request.

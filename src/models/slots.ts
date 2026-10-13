@@ -18,7 +18,11 @@ export type SlotResult =
   | { ok: false; error: string; aborted: boolean };
 
 export interface SlotRunner {
-  call(slot: Slot, request: ModelRequest, context: { runId: string | null; signal?: AbortSignal }): Promise<SlotResult>;
+  call(
+    slot: Slot,
+    request: ModelRequest,
+    context: { runId: string | null; signal?: AbortSignal; onText?: (text: string) => void },
+  ): Promise<SlotResult>;
 }
 
 export interface SlotRunnerDeps {
@@ -45,7 +49,7 @@ export function createSlotRunner(deps: SlotRunnerDeps): SlotRunner {
   const clock = deps.clock ?? (() => new Date());
 
   return {
-    async call(slot, request, { runId, signal }) {
+    async call(slot, request, { runId, signal, onText }) {
       const slotConfig = config.slots[slot];
       let lastError = 'the slot chain is empty';
       for (const ref of slotConfig.chain) {
@@ -60,7 +64,7 @@ export function createSlotRunner(deps: SlotRunnerDeps): SlotRunner {
         for (let attempt = 0; attempt < 2; attempt++) {
           const started = performance.now();
           try {
-            const response = await client.complete(call, signal);
+            const response = await client.complete(call, signal, onText);
             const cost = costUsd(config.pricing, ref, response.usage);
             record(db, { runId, slot, provider, model, call, response, cost, latencyMs: response.latencyMs }, clock());
             if (response.warnings) logger.warn('provider changed the input', { slot, ref, runId, warnings: response.warnings });

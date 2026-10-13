@@ -28,11 +28,19 @@ export function createAnthropicClient(apiKey: string, options: { fetch?: typeof 
   const client = new Anthropic({ apiKey, maxRetries: 0, ...options });
   return {
     provider: ANTHROPIC,
-    async complete(call, signal) {
+    async complete(call, signal, onText) {
       const started = performance.now();
       let message: BetaMessage;
       try {
-        message = await client.beta.messages.create(toAnthropicParams(call), { signal });
+        // a stream sends the same body with stream: true, and finalMessage gives the same message as create.
+        if (onText) {
+          const stream = client.beta.messages.stream(toAnthropicParams(call), { signal });
+          let text = '';
+          stream.on('text', (delta) => onText((text += delta)));
+          message = await stream.finalMessage();
+        } else {
+          message = await client.beta.messages.create(toAnthropicParams(call), { signal });
+        }
       } catch (err) {
         throw toModelError(err);
       }

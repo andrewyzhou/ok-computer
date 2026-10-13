@@ -45,6 +45,8 @@ export interface RunInput {
   signal?: AbortSignal;
   // the memory flush before a compaction runs with this flag, so it cannot start a second compaction.
   noCompaction?: boolean;
+  // onText gets the text of the current model call while it streams. a channel shows it as a draft.
+  onText?: (text: string) => void;
 }
 
 export interface RunResult {
@@ -143,7 +145,11 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
         tools: toolSpecs,
         ...(compaction ? { compaction } : {}),
       });
-      const result = await slots.call(input.slot, request, { runId, signal: abort.signal });
+      const result = await slots.call(input.slot, request, {
+        runId,
+        signal: abort.signal,
+        ...(input.onText ? { onText: input.onText } : {}),
+      });
       if (!result.ok) {
         return finish(result.aborted ? 'aborted' : 'failed', '', abortReason(abort.signal) ?? result.error);
       }

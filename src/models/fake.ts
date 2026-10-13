@@ -2,7 +2,10 @@ import { ModelError, type ModelCall, type ModelClient, type ModelResponse, type 
 
 export const FAKE = 'fake';
 
-export type FakeStep = Partial<ModelResponse> | ModelError | ((call: ModelCall, signal?: AbortSignal) => Promise<ModelResponse>);
+export type FakeStep =
+  | Partial<ModelResponse>
+  | ModelError
+  | ((call: ModelCall, signal?: AbortSignal, onText?: (text: string) => void) => Promise<ModelResponse>);
 
 export interface FakeClient extends ModelClient {
   calls: ModelCall[];
@@ -15,12 +18,13 @@ export function createFakeClient(steps: FakeStep[], provider = FAKE): FakeClient
   return {
     provider,
     calls,
-    async complete(call, signal) {
+    async complete(call, signal, onText) {
       calls.push(structuredClone(call));
       const step = queue.shift();
       if (!step) throw new Error(`fake model has no step for call ${calls.length}`);
       if (step instanceof ModelError) throw step;
-      if (typeof step === 'function') return step(call, signal);
+      if (typeof step === 'function') return step(call, signal, onText);
+      if (step.text) onText?.(step.text);
       return fakeResponse({ ...step, model: step.model ?? call.model });
     },
   };

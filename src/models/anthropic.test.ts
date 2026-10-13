@@ -125,3 +125,69 @@ describe('createAnthropicClient errors', () => {
     await expect(client.complete(request)).rejects.toMatchObject({ kind: 'transient' });
   });
 });
+
+describe('createAnthropicClient streaming', () => {
+  const request = call([{ role: 'user', content: [{ type: 'text', text: 'hi' }] }]);
+  const message = {
+    id: 'msg_1',
+    type: 'message',
+    role: 'assistant',
+    model: 'claude-haiku-5-5',
+    content: [] as unknown[],
+    stop_reason: null,
+    stop_sequence: null,
+    usage: { input_tokens: 12, output_tokens: 0, cache_read_input_tokens: 3, cache_creation_input_tokens: 0 },
+  };
+  const events = [
+    { type: 'message_start', message },
+    { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '', signature: '' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'sig-1' } },
+    { type: 'content_block_stop', index: 0 },
+    { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } },
+    { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'Hello ' } },
+    { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'there.' } },
+    { type: 'content_block_stop', index: 1 },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 7 } },
+    { type: 'message_stop' },
+  ];
+  const sse = events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('');
+
+  it('sends the same body with stream: true, gives the text so far, and returns the same response', async () => {
+    const bodies: unknown[] = [];
+    const client = createAnthropicClient('test-key', {
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      },
+    });
+    const seen: string[] = [];
+    const response = await client.complete(request, undefined, (text) => seen.push(text));
+    expect(bodies).toEqual([{ ...JSON.parse(JSON.stringify(toAnthropicParams(request))), stream: true }].map(({ betas: _betas, ...body }) => body));
+    expect(seen).toEqual(['Hello ', 'Hello there.']);
+    expect(response).toMatchObject({
+      text: 'Hello there.',
+      stopReason: 'end_turn',
+      usage: { inputTokens: 12, outputTokens: 7, cacheReadTokens: 3, cacheWriteTokens: 0 },
+      content: [
+        { type: 'thinking', thinking: '', signature: 'sig-1' },
+        { type: 'text', text: 'Hello there.' },
+      ],
+    });
+  });
+
+  it('maps a refused stream and an abort to the same errors as a plain request', async () => {
+    const limited = createAnthropicClient('test-key', {
+      fetch: async () => new Response(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'slow down' } }), { status: 429 }),
+    });
+    await expect(limited.complete(request, undefined, () => {})).rejects.toMatchObject({ name: 'ModelError', kind: 'transient', status: 429 });
+
+    const abort = new AbortController();
+    const hanging = createAnthropicClient('test-key', {
+      fetch: (_url, init) =>
+        new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))),
+    });
+    const pending = hanging.complete(request, abort.signal, () => {});
+    abort.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'ModelError', kind: 'aborted' });
+  });
+});
