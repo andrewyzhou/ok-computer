@@ -58,7 +58,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     if (stopped) return;
     const earliest = earliestRunAt(db);
     const delay = earliest ? Math.max(0, earliest.getTime() - clock().getTime()) : MAX_SLEEP_MS;
-    cancel = setTimer(() => void tick(), Math.min(delay, MAX_SLEEP_MS));
+    const run = () => void tick().catch((err: unknown) => logger.error('scheduler tick failed', { err }));
+    cancel = setTimer(run, Math.min(delay, MAX_SLEEP_MS));
   };
 
   // the claim moves nextRunAt before the job starts, so a second tick during a long job does not run it again.

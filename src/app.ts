@@ -155,7 +155,7 @@ export function createApp(deps: AppDeps): App {
       if (installRoutine(db, config, clock())) logger.info('goals routine installed');
       syncHeartbeat(db, config, clock());
       // missed jobs can take minutes, so the start does not wait for them.
-      void scheduler.start();
+      void scheduler.start().catch((err: unknown) => logger.error('scheduler start failed', { err }));
     },
     idle: () => queue.drain(),
     async stop() {

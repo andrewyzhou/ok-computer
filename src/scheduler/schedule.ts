@@ -19,7 +19,7 @@ const cronExpr = z.string().refine((expr) => {
 
 export const scheduleSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('at'), at: isoWithOffset }),
-  // an interval under one minute is almost always a mistake, and it can send the owner a flood of messages.
+  // an interval under one minute is usually a mistake. it can send the owner too many messages.
   z.object({ kind: z.literal('every'), everyMs: z.number().int().min(60_000), anchor: isoWithOffset.optional() }),
   z.object({ kind: z.literal('cron'), expr: cronExpr, tz: z.string().optional() }),
 ]);
