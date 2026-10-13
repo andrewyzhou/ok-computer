@@ -40,7 +40,11 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
       const received = (message: Omit<InboundMessage, 'channel' | 'receivedAt'>) =>
         onMessage({ ...message, channel: TELEGRAM, receivedAt: clock().toISOString() });
 
+      // the bot answers only in a private chat. a group chat would show the owner's data to other people.
+      const isPrivate = (chat: { type: string } | undefined) => !chat || chat.type === 'private';
+
       bot.on('message:text', (ctx) => {
+        if (!isPrivate(ctx.chat)) return logger.info('message outside a private chat ignored', { chatId: String(ctx.chat.id) });
         const reply = ctx.message.reply_to_message;
         received({
           senderId: String(ctx.from.id),
@@ -52,6 +56,7 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
       bot.on('callback_query:data', async (ctx) => {
         // telegram shows a spinner on the button until the bot answers the press.
         await ctx.answerCallbackQuery();
+        if (!isPrivate(ctx.chat)) return logger.info('button outside a private chat ignored', { chatId: String(ctx.chat?.id) });
         received({
           senderId: String(ctx.from.id),
           chatId: String(ctx.chat?.id ?? ctx.from.id),

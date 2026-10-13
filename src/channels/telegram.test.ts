@@ -72,6 +72,7 @@ describe('telegram channel', () => {
       receivedAt: '2026-10-13T03:15:00.000Z',
     });
 
+    fake.push({ message: { message_id: 3, date: 0, chat: { id: -100, type: 'group', title: 'g' }, from: { id: 777, is_bot: false, first_name: 'a' }, text: 'hi all' } } as never);
     fake.push({ message: { message_id: 2, date: 0, chat: { id: 777, type: 'private', first_name: 'a' }, from: { id: 777, is_bot: false, first_name: 'a' }, sticker: {} } } as never);
     fake.push(buttonUpdate(777, 'approval:3:deny'));
     await until(() => inbound.length === 2);
