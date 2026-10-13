@@ -148,6 +148,12 @@ describe('extraction', () => {
     expect(page).toMatchObject({ method: 'raw', title: 'T', text: 'one\ntwo', note: expect.stringContaining('took more than') });
   });
 
+  it('skips readability on a page with more elements than the cap', () => {
+    const page = extractReadable(`<html><body>${'<p>row</p>'.repeat(20_001)}<p>the end</p></body></html>`, 'https://x.example/');
+    expect(page.method).toBe('page');
+    expect(page.text).toContain('the end');
+  });
+
   it('reads a page in the worker', async () => {
     const page = await extractIsolated('<html><body><article><h1>Hi</h1><p>text</p></article></body></html>', 'https://x.example/');
     expect(page.text).toContain('text');

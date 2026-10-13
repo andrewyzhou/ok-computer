@@ -1,8 +1,9 @@
 import { Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 
-// readability walks every element several times. above this count it stops with an error, and the plain walk below
-// reads the page instead, so a huge page costs one pass.
+// readability walks every element several times. above this count the plain walk below reads the page instead, so a
+// huge page costs one pass. readability's own maxElemsToParse never stops on linkedom, because there
+// getElementsByTagName('*') gives no element, so the count is ours.
 const MAX_ELEMENTS = 20_000;
 // the time of readability grows with about the cube of the depth: 1,000 nested elements took 7.7 s, and 500 took
 // 1.1 s. real pages are rarely deeper than 60 levels.
@@ -65,17 +66,17 @@ export function textOf(root: DomNode, base: string): string {
     .trim();
 }
 
-function depthOf(root: DomNode): number {
-  let max = 0;
+// the walk stops at the first element past a cap, so a huge page costs little here.
+function fitsReadability(root: DomNode): boolean {
+  let count = 0;
   const stack: Array<[DomNode, number]> = [[root, 0]];
   while (stack.length) {
     const [node, depth] = stack.pop()!;
-    if (depth > max) max = depth;
-    if (max > MAX_DEPTH) return max;
+    if (depth > MAX_DEPTH || ++count > MAX_ELEMENTS) return false;
     const kids = Array.from(node.childNodes);
     for (const kid of kids) if (kid.nodeType === 1) stack.push([kid, depth + 1]);
   }
-  return max;
+  return true;
 }
 
 export interface Extracted {
@@ -90,9 +91,9 @@ export function extractReadable(html: string, url: string): Extracted {
   const { document } = parseHTML(html);
   const title = (document.title ?? '').trim();
   const body = (document.body ?? document) as unknown as DomNode;
-  if (depthOf(body) <= MAX_DEPTH) {
+  if (fitsReadability(body)) {
     try {
-      const article = new Readability(document as unknown as ConstructorParameters<typeof Readability>[0], { maxElemsToParse: MAX_ELEMENTS }).parse();
+      const article = new Readability(document as unknown as ConstructorParameters<typeof Readability>[0]).parse();
       if (article?.content) {
         const { document: inner } = parseHTML(`<!doctype html><html><body>${article.content}</body></html>`);
         const text = textOf(inner.body as unknown as DomNode, url);
