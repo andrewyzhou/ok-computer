@@ -64,7 +64,7 @@ describe('migrations 006 and 007', () => {
         VALUES ('a1', 'daily', '{}', '{}', 'isolated', 'main', 1, 'owner', 'x', 'x');
     `);
 
-    expect(migrate(db, real)).toEqual(['006_trace_contract.sql', '007_automation_taint.sql', '008_browser.sql']);
+    expect(migrate(db, real)).toEqual(['006_trace_contract.sql', '007_automation_taint.sql', '008_browser.sql', '009_browser_offsite.sql']);
     // an automation from before 007 has no taint.
     expect(db.prepare('SELECT id, taint FROM automations').all()).toEqual([{ id: 'a1', taint: null }]);
     const columns = (table: string) => db.prepare('SELECT name FROM pragma_table_info(?)').all(table).map((row) => row.name);

@@ -51,6 +51,7 @@ describe('the browser pages', () => {
     const [shot] = (await screen.findAllByAltText(/page after step/)) as HTMLImageElement[];
     expect(shot!.getAttribute('src')).toBe(`/api/browser/screenshots/${seeded.shot}`);
     expect(screen.getByText('https://evil.example/x')).toBeTruthy();
+    expect(screen.getByText('Also reached, off the allowlist: cdn.example')).toBeTruthy();
     expect(screen.getByRole('link', { name: /trace zip/ }).getAttribute('href')).toBe('/api/browser/tasks/bt_1/trace');
     fireEvent.click(screen.getAllByRole('button', { name: /snapshot/ })[0]!);
     expect(await screen.findByText('- button "Buy now" [ref=s1e7]')).toBeTruthy();

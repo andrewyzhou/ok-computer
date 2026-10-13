@@ -10,7 +10,7 @@ import { redactedJson } from '../observability/redact.js';
 import type { Clock } from '../time.js';
 import { errorText } from '../tools/registry.js';
 import { checkUrlShape, type Egress } from '../web/egress.js';
-import { allowedBy, guardContext, guardTab, siteOf, tooBroad, type Blocked, type Sent, type TabRules } from './gate.js';
+import { allowedBy, guardContext, guardSockets, guardTab, siteOf, tooBroad, type Blocked, type Sent, type TabRules } from './gate.js';
 
 export interface BrowserDeps {
   db: Db;
@@ -105,6 +105,8 @@ interface Tab {
   submit: boolean;
   blocked: Blocked[];
   sent: Sent[];
+  // the hosts off the allowlist that the gate let a request reach in this step.
+  reached: Set<string>;
   // a navigation of the page itself was blocked in this step.
   topBlocked: boolean;
   // the address after the last step that did not end on the error page of chrome.
@@ -314,7 +316,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   async function newTab(ctx: BrowserContext, kind: Tab['kind'], step: StepInput, allowlist: string[]): Promise<Tab> {
     const page = await ctx.newPage();
     owned.add(page);
-    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), submit: false, blocked: [], sent: [], console: [], lastUsed: Date.now(), queue: Promise.resolve(), snapshot: 0 } as unknown as Tab;
+    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), submit: false, blocked: [], sent: [], reached: new Set(), console: [], lastUsed: Date.now(), queue: Promise.resolve(), snapshot: 0 } as unknown as Tab;
     tab.rules = {
       allows: (host) => allowedBy(tab.allowlist, host),
       submitting: () => tab.submit,
@@ -324,6 +326,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       },
       // the route and the cdp layer both see the first request of a page, so one request comes here twice.
       onSent: (sent) => void (tab.sent.some((each) => each.method === sent.method && each.url === sent.url) || tab.sent.push(sent)),
+      onReached: (host) => void tab.reached.add(host),
     };
     page.setDefaultTimeout(t.action);
     page.setDefaultNavigationTimeout(t.navigation);
@@ -333,6 +336,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     // the tab gets no address before both layers of the gate are in place.
     try {
       await guardTab(await ctx.newCDPSession(page), deps.egress, tab.rules);
+      await guardSockets(page, deps.egress, tab.rules);
     } catch (err) {
       await page.close().catch(() => undefined);
       throw err;
@@ -430,7 +434,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       const row = db
         .prepare(
           `INSERT INTO browser_steps (taskId, runId, toolCallId, action, target, urlBefore, urlAfter, snapshotBlob, screenshotBlob,
-             consoleErrors, blockedRequests, sent, error, durationMs, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+             consoleErrors, blockedRequests, sent, offsiteHosts, error, durationMs, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
         )
         .get(
           tab.id,
@@ -445,6 +449,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
           tab.console.length ? redactedJson(tab.console) : null,
           tab.blocked.length ? redactedJson(tab.blocked) : null,
           tab.sent.length ? redactedJson(tab.sent) : null,
+          tab.reached.size ? JSON.stringify([...tab.reached].sort()) : null,
           data.error ?? null,
           Math.round(performance.now() - data.started),
           now(),
@@ -461,6 +466,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   function recorded(tab: Tab): void {
     tab.blocked = [];
     tab.sent = [];
+    tab.reached = new Set();
     tab.console = [];
   }
 

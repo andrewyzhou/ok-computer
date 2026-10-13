@@ -152,6 +152,23 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(existsSync(downloads) ? readdirSync(downloads) : []).toEqual([]);
   });
 
+  it('opens a web socket only to the allowlist, and records the hosts that a page script reached with typed text', async () => {
+    const h = harness();
+    site.hits.length = 0;
+    const page = await h.run('browser_open', { url: site.url('shop.test', '/typed') });
+    expect(site.hitsOn('shop.test').filter((hit) => hit.method === 'UPGRADE')).toMatchObject([{ path: '/ws-own' }]);
+    await h.run('browser_type', { ref: refOf(page.content, /textbox "Address"/), element: 'Address', text: 'HOME-42' });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await h.run('browser_snapshot', {});
+    expect(site.hitsOn('evil.test').filter((hit) => hit.method === 'UPGRADE')).toEqual([]);
+    const all = (column: string) => h.steps().flatMap((step) => (step[column] ? (JSON.parse(String(step[column])) as unknown[]) : []));
+    expect(all('blockedRequests')).toContainEqual(expect.objectContaining({ url: expect.stringMatching(/^ws:\/\/evil\.test:\d+\/ws\?v=HOME-42$/) }));
+    // an image is a get, which the gate lets out. the steps record where it went.
+    expect(site.hitsOn('evil.test').map((hit) => hit.path)).toContain('/img?v=HOME-42');
+    expect(all('offsiteHosts')).toContain('evil.test');
+    expect(all('offsiteHosts')).not.toContain('shop.test');
+  });
+
   it('lets a click send a get form, such as a search box', async () => {
     const h = harness();
     const first = await h.run('browser_open', { url: site.url('shop.test', '/search') });
@@ -163,6 +180,7 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
 
   it('blocks a 307 hop of an approved post to an off-list host', async () => {
     const h = harness();
+    site.hits.length = 0;
     await h.run('browser_open', { url: site.url('shop.test', '/pay') });
     const out = await h.run('browser_submit', { url: site.url('shop.test', '/pay'), button: 'Pay', fields: { amount: '5' } });
     expect(site.hitsOn('evil.test')).toEqual([]);

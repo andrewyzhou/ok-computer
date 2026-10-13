@@ -49,6 +49,9 @@ export interface BrowserStep {
   consoleErrors: string[];
   blockedRequests: Array<{ url: string; reason: string }>;
   sent: Array<{ method: string; url: string }>;
+  // the hosts off the allowlist that a request of the step reached, for example an image. a page script can carry
+  // typed text in such a request.
+  offsiteHosts: string[];
   error: string | null;
   durationMs: number;
   createdAt: string;

@@ -30,9 +30,9 @@ export function seedBrowser() {
       VALUES ('bt_1', 'task', 'main', 'run-1', '["shop.example"]', 'closed', 'the agent closed it', 'traces/bt_1.zip', 4, '2026-10-13T17:00:00Z', '2026-10-13T17:01:00Z');
     INSERT INTO browser_tasks (id, kind, sessionKey, allowlist, status, endReason, tracePath, traceError, startedAt)
       VALUES ('bt_2', 'task', 'main', '[]', 'crashed', 'the browser stopped', '../../okc.sqlite', 'the browser stopped before the trace was saved', '2026-10-13T17:02:00Z');
-    INSERT INTO browser_steps (taskId, runId, toolCallId, action, target, urlBefore, urlAfter, snapshotBlob, screenshotBlob, blockedRequests, durationMs, createdAt)
+    INSERT INTO browser_steps (taskId, runId, toolCallId, action, target, urlBefore, urlAfter, snapshotBlob, screenshotBlob, blockedRequests, offsiteHosts, durationMs, createdAt)
       VALUES ('bt_1', 'run-1', 'c1', 'open', '"https://shop.example/"', 'about:blank', 'https://shop.example/', '${snapshot}', '${shot}',
-        '[{"url":"https://evil.example/x","reason":"evil.example is not on the allowlist of this task"}]', 120, '2026-10-13T17:00:01Z');
+        '[{"url":"https://evil.example/x","reason":"evil.example is not on the allowlist of this task"}]', '["cdn.example"]', 120, '2026-10-13T17:00:01Z');
     INSERT INTO browser_steps (taskId, runId, toolCallId, action, target, urlBefore, urlAfter, snapshotBlob, screenshotBlob, sent, durationMs, createdAt)
       VALUES ('bt_1', 'run-1', 'approval-7', 'submit', '"{\\"button\\":\\"Buy now\\"}"', 'https://shop.example/', 'https://shop.example/buy', '${snapshot}', '${shot}',
         '[{"method":"POST","url":"https://shop.example/buy"}]', 90, '2026-10-13T17:00:05Z');

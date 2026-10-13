@@ -175,6 +175,9 @@ export function BrowserTask({ id }: { id: string }) {
                     </ul>
                   </>
                 ) : null}
+                {step.offsiteHosts.length ? (
+                  <p className="wrap muted small">Also reached, off the allowlist: {step.offsiteHosts.join(', ')}</p>
+                ) : null}
                 {step.screenshotBlob ? (
                   <img className="shot" alt={`page after step ${step.id}`} src={apiUrl(`/api/browser/screenshots/${step.screenshotBlob}`)} />
                 ) : (

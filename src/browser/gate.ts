@@ -18,6 +18,8 @@ export interface TabRules {
   // top is true for a navigation of the page itself, not of a frame in it.
   onBlocked(blocked: Blocked, top: boolean): void;
   onSent(sent: Sent): void;
+  // a request that the gate let through to a host off the allowlist, for example an image of a cdn.
+  onReached(host: string): void;
 }
 
 // an entry allows its host and the subdomains of the host. "www." is not part of an entry, so www.shop.example and
@@ -79,8 +81,12 @@ export async function judge(check: ReturnType<typeof cachedCheck>, rules: TabRul
 
 // both layers can see the same request, so each verdict goes to the tab rules through this one place.
 function report(rules: TabRules, url: string, method: string, top: boolean, verdict: Verdict): void {
-  if (!verdict.ok) rules.onBlocked({ url, reason: verdict.reason }, top);
-  else if (!READ_METHODS.has(method)) rules.onSent({ method, url });
+  if (!verdict.ok) return rules.onBlocked({ url, reason: verdict.reason }, top);
+  if (!READ_METHODS.has(method)) rules.onSent({ method, url });
+  // a page script can put text that the agent typed into the address of a subresource. the gate lets it out, so the
+  // step records where it went.
+  const parsed = URL.parse(url);
+  if (parsed && /^https?:$/.test(parsed.protocol) && !rules.allows(parsed.hostname)) rules.onReached(parsed.hostname);
 }
 
 interface Paused {
@@ -143,10 +149,18 @@ export async function guardContext(
     if (verdict.ok) return route.fallback().catch(() => undefined);
     return route.abort('blockedbyclient').catch(() => undefined);
   });
-  // cdp Fetch does not pause web sockets, so the route checks them too. a socket only needs a public address.
-  await context.routeWebSocket(/.*/, async (socket) => {
-    const host = new URL(socket.url()).hostname;
-    const verdict = await check(host);
+  // cdp Fetch does not pause web sockets, so routes check them. the route of each tab of the app has the rules of the
+  // tab (guardSockets), and it comes before this one. this route refuses the sockets of every other page.
+  await context.routeWebSocket(/.*/, (socket) => socket.close({ code: 1008, reason: 'blocked' }));
+}
+
+// a socket carries data both ways for as long as it is open, also text that the agent typed. it needs the allowlist,
+// like a document, and a public address.
+export async function guardSockets(page: Page, egress: Egress, rules: TabRules): Promise<void> {
+  const check = cachedCheck(egress);
+  await page.routeWebSocket(/.*/, async (socket) => {
+    const verdict = await judge(check, rules, socket.url().replace(/^ws/, 'http'), true, 'GET');
+    report(rules, socket.url(), 'GET', false, verdict);
     if (verdict.ok) return void socket.connectToServer();
     return socket.close({ code: 1008, reason: 'blocked' });
   });

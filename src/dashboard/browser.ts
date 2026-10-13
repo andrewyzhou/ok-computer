@@ -84,6 +84,7 @@ export function browserTask(db: Db, id: string): BrowserTaskDetail | undefined {
         consoleErrors: json<string[]>(step.consoleErrors, []),
         blockedRequests: json<BrowserStep['blockedRequests']>(step.blockedRequests, []),
         sent: json<BrowserStep['sent']>(step.sent, []),
+        offsiteHosts: json<string[]>(step.offsiteHosts, []),
         error: (step.error as string | null) ?? null,
         durationMs: Number(step.durationMs),
         createdAt: String(step.createdAt),

