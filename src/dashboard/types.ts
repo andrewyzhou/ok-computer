@@ -57,6 +57,8 @@ export interface PolicyDecisionRow {
   // the untrusted sources that the session had read when the policy decided.
   taint: Array<{ source: string; toolName: string; runId: string | null; toolCallId: string; at: string }>;
   createdAt: string;
+  // the model call of the reviewer. the run timeline shows it here, inside the tool call that it checked.
+  reviewerCall?: ModelCallRow;
 }
 
 export interface ToolCallRow {
@@ -86,6 +88,18 @@ export interface ToolCallRow {
   // the integration that ran the tool, and the json-rpc messages of the call. a built-in tool has none.
   serverId: string | null;
   mcpMessages: McpMessageRow[];
+  // the child run that a delegate call started. the run page shows its timeline inside the call.
+  child?: SubagentLink;
+}
+
+// the link between a child run and the delegate call of its parent. a child that never started has no status.
+export interface SubagentLink {
+  parentRunId: string;
+  toolCallId: string;
+  childRunId: string;
+  profile: string;
+  status: string | null;
+  costUsd: number | null;
 }
 
 // a payload over 8 kb is in the blob store. payload is then null, and the page loads it on demand. unsent marks a
@@ -189,6 +203,8 @@ export interface EventRow {
 
 export interface RunDetail {
   run: RunRow;
+  // a child run names the delegate call of its parent.
+  parent: SubagentLink | null;
   timeline: TimelineItem[];
   events: EventRow[];
 }

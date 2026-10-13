@@ -26,6 +26,7 @@ import type {
   RunDetail,
   RunRow,
   SessionRow,
+  SubagentLink,
   TimelineItem,
   ToolCallRow,
   ToolCatalog,
@@ -232,9 +233,16 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
     .prepare('SELECT * FROM tool_calls WHERE runId = ? ORDER BY id')
     .all(id)
     .map((row) => toToolCall(row, decisions, messages));
+  // a reviewer call goes inside the tool call that it checked, not among the turns of the agent.
+  const reviews = new Map([...decisions.values()].flatMap((decision) => (decision.reviewerModelCallId === null ? [] : [[decision.reviewerModelCallId, decision] as const])));
   const placed = new Set<number>();
   const timeline: TimelineItem[] = [];
   for (const row of modelRows) {
+    const reviewed = reviews.get(Number(row.id));
+    if (reviewed) {
+      reviewed.reviewerCall = toModelCall(row);
+      continue;
+    }
     const response = row.response ? (JSON.parse(String(row.response)) as { toolCalls?: Array<{ id: string }> }) : undefined;
     const asked: ToolCallRow[] = [];
     for (const requested of response?.toolCalls ?? []) {
@@ -246,8 +254,29 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
     timeline.push({ kind: 'model', call: toModelCall(row), tools: asked });
   }
   for (const tool of tools) if (!placed.has(tool.id)) timeline.push({ kind: 'tool', call: tool });
+  for (const link of subagentLinks(db, 'subagent_runs.parentRunId = ?', id)) {
+    const tool = tools.find((call) => call.name === 'delegate' && call.toolCallId === link.toolCallId);
+    if (tool) tool.child = link;
+  }
   const events = db.prepare('SELECT * FROM events WHERE runId = ? ORDER BY id').all(id).map(toEventRow);
-  return { run, timeline, events };
+  return { run, parent: subagentLinks(db, 'subagent_runs.childRunId = ?', id)[0] ?? null, timeline, events };
+}
+
+function subagentLinks(db: Db, where: string, id: string): SubagentLink[] {
+  return db
+    .prepare(
+      `SELECT subagent_runs.*, runs.status, (SELECT SUM(costUsd) FROM model_calls WHERE runId = subagent_runs.childRunId) AS costUsd
+       FROM subagent_runs LEFT JOIN runs ON runs.id = subagent_runs.childRunId WHERE ${where} ORDER BY subagent_runs.id`,
+    )
+    .all(id)
+    .map((row) => ({
+      parentRunId: String(row.parentRunId),
+      toolCallId: String(row.toolCallId),
+      childRunId: String(row.childRunId),
+      profile: String(row.profile),
+      status: str(row.status),
+      costUsd: num(row.costUsd),
+    }));
 }
 
 export function getModelCallBody(db: Db, id: number): ModelCallBody | undefined {
