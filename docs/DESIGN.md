@@ -424,7 +424,7 @@ Any text from outside the owner (email, web pages, files from the web) is wrappe
 </untrusted>
 ```
 
-The base instructions say that this content is data and never instructions. Strip any closing tags that appear inside the content.
+The base instructions say that this content is data and never instructions. Strip any closing tags that appear inside the content. Every tool that returns outside text uses `wrapUntrusted(source, text)` from `src/tools/untrusted.ts`. It replaces each closing tag in the text (any case, with spaces) and escapes the source attribute.
 
 ## 15. Skills
 
