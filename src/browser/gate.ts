@@ -59,7 +59,9 @@ export async function judge(check: ReturnType<typeof cachedCheck>, rules: TabRul
   }
   if (parsed.protocol === 'data:' || parsed.protocol === 'blob:' || parsed.protocol === 'about:') return { ok: true };
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return { ok: false, reason: `the scheme ${parsed.protocol} is refused` };
-  if (document && !rules.allows(parsed.hostname)) return { ok: false, reason: `${parsed.hostname} is not on the allowlist of this task` };
+  if (document && !rules.allows(parsed.hostname)) {
+    return { ok: false, reason: `${parsed.hostname} is not on the allowlist of this task. Use browser_allow_domain to ask the owner` };
+  }
   if (!READ_METHODS.has(method) && !rules.submitting()) {
     return { ok: false, reason: `the page tried to send data (${method}) outside an approved submit. To send a form, use browser_submit, which the owner approves` };
   }

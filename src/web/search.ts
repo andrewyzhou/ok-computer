@@ -164,7 +164,7 @@ export function createWebSearchTool(deps: SearchDeps): Tool {
           // a consent page on another google domain is blocked by the allowlist, and the block names it.
           const walled = got.result.blocked.some((each) => /consent\./.test(each.url));
           if (!seen || walled) {
-            notes.push(walled ? `${engine.label} showed a consent page.` : `${engine.label} did not load: ${got.error ?? 'no answer'}.`);
+            notes.push(walled ? `${engine.label} showed a consent page. The owner can answer it once with okc browser login.` : `${engine.label} did not load: ${got.error ?? 'no answer'}.`);
             if (walled) save(engine.id, { ...state, until: new Date(now.getTime() + CONSENT_PAUSE_MS).toISOString(), reason: 'a consent page' });
             continue;
           }
@@ -172,7 +172,7 @@ export function createWebSearchTool(deps: SearchDeps): Tool {
             const strikes = state.strikes + 1;
             const until = new Date(now.getTime() + BACKOFF_MS[Math.min(strikes, BACKOFF_MS.length) - 1]!);
             save(engine.id, { strikes, until: until.toISOString(), reason: 'a CAPTCHA' });
-            notes.push(`${engine.label} showed a CAPTCHA, so it pauses until ${localTime(until, deps.timeZone)}.`);
+            notes.push(`${engine.label} showed a CAPTCHA, so it pauses until ${localTime(until, deps.timeZone)}. The owner can answer the CAPTCHA with okc browser login.`);
             continue;
           }
           if (seen.kind === 'consent') {
