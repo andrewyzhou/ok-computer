@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TOOL_NAME, toolName } from './names.js';
-import { createValidatorSet, prepareSchema, SCHEMA_DEPTH_LIMIT } from './schema-guard.js';
+import { createValidatorSet, prepareSchema, SCHEMA_DEPTH_LIMIT, SCHEMA_PARTS_LIMIT } from './schema-guard.js';
 
 describe('tool names', () => {
   it('keeps a plain name and changes the others to a stable valid name', () => {
@@ -123,5 +123,65 @@ describe('schema guard', () => {
     const validate = compile(prepared.schema);
     expect(validate({ kind: 'a', x: 'q' })).toEqual({ ok: true });
     expect(validate({ kind: 'a' })).toMatchObject({ ok: false });
+  });
+
+  // each level of the chain refers twice to the next level, so the check visits 2^levels parts. 24 levels of anyOf
+  // ran out of heap memory, and 31 levels of allOf took 7.9 s on a valid input.
+  const chain = (levels: number, keyword: string) => {
+    const defs: Record<string, unknown> = {};
+    for (let i = 0; i < levels; i++) defs[`d${i}`] = { [keyword]: [{ $ref: `#/$defs/d${i + 1}` }, { $ref: `#/$defs/d${i + 1}` }] };
+    defs[`d${levels}`] = { type: 'string' };
+    return { type: 'object', properties: { text: { $ref: '#/$defs/d0' } }, $defs: defs };
+  };
+  const recursive = (a: Record<string, unknown>) => ({ type: 'object', properties: { a: { $ref: '#/$defs/a' } }, $defs: { a } });
+
+  it('refuses a schema whose references branch into more parts than the limit', () => {
+    const start = performance.now();
+    expect(prepareSchema(chain(24, 'anyOf'))).toMatchObject({ ok: false, reason: expect.stringContaining(`more than ${SCHEMA_PARTS_LIMIT} parts`) });
+    expect(prepareSchema(chain(31, 'allOf'))).toMatchObject({ ok: false, reason: expect.stringContaining('parts') });
+    expect(performance.now() - start).toBeLessThan(100);
+    // a short chain stays, and its check is quick.
+    expect(quick(chain(8, 'allOf'), { text: 'x' })).toEqual({ ok: true });
+  });
+
+  it('refuses a recursion that comes back twice over the same input, or without a step into the input', () => {
+    const twice = recursive({ allOf: [{ items: { $ref: '#/$defs/a' } }, { items: { $ref: '#/$defs/a' } }] });
+    expect(prepareSchema(twice)).toMatchObject({ ok: false, reason: expect.stringContaining('exponentially') });
+    // the paths x and x.x split a chain of x in fib(n) ways: 30 levels took 64 ms, and each level adds 60 %.
+    const xx = recursive({ properties: { x: { $ref: '#/$defs/a' } }, allOf: [{ properties: { x: { properties: { x: { $ref: '#/$defs/a' } } } } }] });
+    expect(prepareSchema(xx)).toMatchObject({ ok: false, reason: expect.stringContaining('exponentially') });
+    expect(prepareSchema(recursive({ allOf: [{ $ref: '#/$defs/a' }] }))).toMatchObject({ ok: false, reason: expect.stringContaining('does not end') });
+    // a reference to the root counts the same.
+    const root = { properties: { a: { $ref: '#' } } };
+    expect(prepareSchema({ type: 'object', ...root })).toMatchObject({ ok: true });
+    expect(prepareSchema({ type: 'object', allOf: [root, root] })).toMatchObject({ ok: false, reason: expect.stringContaining('exponentially') });
+  });
+
+  it('keeps a recursion with one path over each input, such as a filter, a json value or a tree', () => {
+    const nest = (n: number, make: (inner: unknown) => unknown, leaf: unknown) => {
+      let value = leaf;
+      for (let i = 0; i < n; i++) value = make(value);
+      return value;
+    };
+    const filter = recursive({
+      anyOf: [
+        { properties: { and: { type: 'array', items: { $ref: '#/$defs/a' } } }, required: ['and'] },
+        { properties: { or: { type: 'array', items: { $ref: '#/$defs/a' } } }, required: ['or'] },
+        { properties: { property: { type: 'string' } }, required: ['property'] },
+      ],
+    });
+    expect(quick(filter, { a: nest(200, (f) => ({ or: [f, { property: 'p' }] }), { property: 'p' }) })).toEqual({ ok: true });
+    const json = recursive({ anyOf: [{ type: 'string' }, { type: 'array', items: { $ref: '#/$defs/a' } }, { type: 'object', additionalProperties: { $ref: '#/$defs/a' } }] });
+    expect(quick(json, { a: nest(200, (v) => ({ k: [v, 'x'] }), 'x') })).toEqual({ ok: true });
+    const tree = recursive({ type: 'object', properties: { left: { $ref: '#/$defs/a' }, right: { $ref: '#/$defs/a' } } });
+    expect(quick(tree, { a: nest(200, (n) => ({ left: n, right: {} }), {}) })).toEqual({ ok: true });
+    expect(quick(tree, { a: { left: 1 } })).toMatchObject({ ok: false });
+  });
+
+  it('removes format url, whose check is quadratic, and keeps the other formats', () => {
+    const prepared = prepareSchema({ type: 'object', properties: { u: { type: 'string', format: 'url' }, v: { type: 'string', format: 'uri' } } });
+    if (!prepared.ok) throw new Error(prepared.reason);
+    expect(prepared.schema).toEqual({ type: 'object', properties: { u: { type: 'string' }, v: { type: 'string', format: 'uri' } } });
+    expect(quick(prepared.schema, { u: `http://[${':'.repeat(40_000)}]`, v: 'https://example.com' })).toEqual({ ok: true });
   });
 });

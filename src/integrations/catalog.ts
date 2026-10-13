@@ -172,13 +172,22 @@ export function createCatalogStore(deps: { db: Db; clock: Clock; logger: Logger;
       // the config can have changed since the snapshot. a tool that the config no longer allows stays hidden.
       const allowed = new Set(entry.tools.allow);
       const keep = (name: string) => allowed.has(name);
+      // an older version of the guard stored the schema. the guard of today must apply to it too, because the model
+      // can call the tool before the server sends its list again.
+      const tools: CatalogTool[] = [];
+      const rejected = stored.rejected.filter((each) => keep(each.mcpName));
+      for (const tool of stored.tools.filter((each) => keep(each.mcpName))) {
+        const prepared = prepareSchema(tool.inputSchema);
+        if (prepared.ok) tools.push({ ...tool, inputSchema: prepared.schema });
+        else rejected.push({ mcpName: tool.mcpName, reason: prepared.reason });
+      }
       catalogs.set(
         entry.id,
         compile(
           {
             integrationId: entry.id,
-            tools: stored.tools.filter((tool) => keep(tool.mcpName)),
-            rejected: stored.rejected.filter((each) => keep(each.mcpName)),
+            tools,
+            rejected,
             missing: (stored.missing ?? []).filter(keep),
           },
           true,

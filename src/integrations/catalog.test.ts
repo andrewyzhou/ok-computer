@@ -76,6 +76,30 @@ describe('catalog', () => {
     const restarted = createCatalogStore({ db, clock, logger: silentLogger, entries: [entry(['b'])] });
     expect(restarted.get('notes')).toMatchObject({ stored: true, snapshot: { tools: [] } });
   });
+
+  it('puts a stored catalog through the guard of today, so a schema that an older guard kept cannot hold the app', () => {
+    const db = openDb(':memory:');
+    const e = entry(['evil', 'loop', 'ok']);
+    const store = createCatalogStore({ db, clock, logger: silentLogger, entries: [e] });
+    store.update(e, [tool('evil'), tool('loop'), tool('ok')]);
+    // an older guard kept a pattern under draft-07 dependencies, and a recursion that comes back over the same input.
+    const evil = { type: 'object', properties: { q: { type: 'string' } }, dependencies: { q: { properties: { q: { pattern: '^(a+)+$' } } } } };
+    const loop = { type: 'object', properties: { a: { $ref: '#/$defs/a' } }, $defs: { a: { allOf: [{ items: { $ref: '#/$defs/a' } }, { items: { $ref: '#/$defs/a' } }] } } };
+    const row = db.prepare('SELECT hash, tools FROM tool_catalog_snapshots').get()!;
+    const stored = JSON.parse(String(row.tools)) as { tools: CatalogTool[] };
+    for (const each of stored.tools) {
+      if (each.mcpName === 'evil') each.inputSchema = evil;
+      if (each.mcpName === 'loop') each.inputSchema = loop;
+    }
+    db.prepare('UPDATE tool_catalog_snapshots SET tools = ? WHERE hash = ?').run(JSON.stringify(stored), String(row.hash));
+
+    const restarted = createCatalogStore({ db, clock, logger: silentLogger, entries: [e] }).get('notes')!;
+    expect(restarted.snapshot.tools.map((each) => each.mcpName)).toEqual(['evil', 'ok']);
+    expect(restarted.snapshot.rejected).toEqual([{ mcpName: 'loop', reason: expect.stringContaining('exponentially') }]);
+    const start = performance.now();
+    expect(restarted.validators.get('notes__evil')!({ q: 'a'.repeat(30) + '!' })).toEqual({ ok: true });
+    expect(performance.now() - start).toBeLessThan(100);
+  });
 });
 
 describe('tool_search', () => {
