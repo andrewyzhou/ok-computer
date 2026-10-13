@@ -5,13 +5,28 @@ import { createDashboard, type DashboardDeps } from '../src/dashboard/server.js'
 import { appendEvent, listEvents } from '../src/events/log.js';
 import { addGoal, updateGoal } from '../src/goals/store.js';
 import { appendToDailyNote } from '../src/memory/daily.js';
-import { textStep, toolStep } from '../src/models/fake.js';
-import { ModelError } from '../src/models/types.js';
+import { fakeResponse, textStep, toolStep } from '../src/models/fake.js';
+import { ModelError, type ModelCall } from '../src/models/types.js';
 import { createLogger, silentLogger } from '../src/observability/logger.js';
 import { setChecklist } from '../src/scheduler/heartbeat.js';
+import { handleIn } from '../src/tools/results.js';
 import { createTestApp } from './app-harness.js';
 
 export const pdt = (time: string, day = '2026-10-12') => new Date(`${day}T${time}:00-07:00`).toISOString();
+
+// the weekly file is long, so memory_get gives the model a preview with a handle.
+export const WEEKLY = [
+  '# 2026-W42',
+  '',
+  '## trends',
+  '',
+  ...Array.from({ length: 150 }, (_, i) => (i === 75 ? '- late nights hurt sleep and the next morning' : `- day ${i}: steady work on the essay`)),
+].join('\n');
+
+const lastToolResult = (call: ModelCall) =>
+  call.messages
+    .flatMap((message) => (message.role === 'user' ? message.content : []))
+    .findLast((block) => block.type === 'tool_result')!;
 
 export const SUMMARY = [
   '## goals and commitments',
@@ -41,6 +56,12 @@ export async function seedDashboard(options: Partial<Pick<DashboardDeps, 'token'
       new ModelError('request', 'the request was too large', 400),
       toolStep({ id: 'call-heartbeat', name: 'heartbeat_respond', input: { notify: false } }),
       textStep('NO_REPLY'),
+      toolStep({ id: 'call-week', name: 'memory_get', input: { path: 'weekly/2026-W42.md' } }),
+      async (call) => {
+        const result = lastToolResult(call);
+        const handle = result.type === 'tool_result' ? handleIn(result.content) : undefined;
+        return fakeResponse({ model: call.model, toolCalls: [{ id: 'call-read', name: 'result_read', input: { handle, query: 'sleep' } }] });
+      },
       textStep('Next is the essay check-in at 21:00.'),
     ],
     { start: pdt('18:00') },
@@ -50,7 +71,7 @@ export async function seedDashboard(options: Partial<Pick<DashboardDeps, 'token'
   mkdirSync(join(memoryDir, 'weekly'), { recursive: true });
   mkdirSync(join(memoryDir, 'history'), { recursive: true });
   writeFileSync(join(memoryDir, 'MEMORY.md'), '# memory\n\n- the owner writes essays in the evening\n');
-  writeFileSync(join(memoryDir, 'weekly', '2026-W42.md'), '# 2026-W42\n\n## trends\n\n- evenings work best\n');
+  writeFileSync(join(memoryDir, 'weekly', '2026-W42.md'), WEEKLY);
   writeFileSync(join(memoryDir, 'consolidation-log.md'), '- 2026-10-12: weekly trends saved\n');
   writeFileSync(join(memoryDir, 'history', 'MEMORY.md.bak-2026-10-12'), 'old memory\n');
 

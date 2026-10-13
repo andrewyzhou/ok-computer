@@ -10,6 +10,7 @@ import type {
   ApprovalRow,
   AutomationRow,
   AutomationRunRow,
+  BlobBody,
   CostGroup,
   CostPage,
   EventRow,
@@ -19,11 +20,13 @@ import type {
   ModelCallBody,
   ModelCallRow,
   Overview,
+  PolicyDecisionRow,
   RunDetail,
   RunRow,
   SessionRow,
   TimelineItem,
   ToolCallRow,
+  ToolCatalog,
 } from './types.js';
 
 type Row = Record<string, unknown>;
@@ -106,10 +109,27 @@ function toModelCall(row: Row): ModelCallRow {
     stopReason: str(row.stopReason),
     error: str(row.error),
     createdAt: String(row.createdAt),
+    toolCatalogHash: str(row.toolCatalogHash),
+    toolCount: num(row.toolCount),
   };
 }
 
-function toToolCall(row: Row): ToolCallRow {
+function toDecision(row: Row): PolicyDecisionRow {
+  return {
+    id: Number(row.id),
+    decision: String(row.decision),
+    rule: String(row.rule),
+    reason: String(row.reason),
+    reviewerModelCallId: num(row.reviewerModelCallId),
+    reviewerVerdict: str(row.reviewerVerdict),
+    reviewerReason: str(row.reviewerReason),
+    approvalId: num(row.approvalId),
+    approvalStatus: str(row.approvalStatus),
+    createdAt: String(row.createdAt),
+  };
+}
+
+function toToolCall(row: Row, decisions: Map<number, PolicyDecisionRow>): ToolCallRow {
   return {
     id: Number(row.id),
     runId: String(row.runId),
@@ -120,6 +140,15 @@ function toToolCall(row: Row): ToolCallRow {
     isError: row.isError === 1,
     durationMs: Number(row.durationMs),
     createdAt: String(row.createdAt),
+    source: String(row.source),
+    riskLevel: str(row.riskLevel),
+    tainted: row.tainted === 1,
+    untrustedSource: str(row.untrustedSource),
+    truncated: row.truncated === 1,
+    resultHandle: str(row.resultHandle),
+    rawResultBlob: str(row.rawResultBlob),
+    modelViewBlob: str(row.modelViewBlob),
+    policy: row.policyDecisionId === null ? null : (decisions.get(Number(row.policyDecisionId)) ?? null),
   };
 }
 
@@ -135,24 +164,43 @@ export function toEventRow(row: Row): EventRow {
   };
 }
 
-// a fixed clock gives many rows the same time, so the timeline does not sort by time. each tool call goes after the
+// a fixed clock gives many rows the same time, so the timeline does not sort by time. each tool call goes inside the
 // model call that asked for it. a tool call that ran after an approval has no such model call, so it goes last.
 export function getRunDetail(db: Db, id: string): RunDetail | undefined {
   const run = getRun(db, id);
   if (!run) return undefined;
-  const modelRows = db.prepare('SELECT * FROM model_calls WHERE runId = ? ORDER BY id').all(id);
-  const tools = db.prepare('SELECT * FROM tool_calls WHERE runId = ? ORDER BY id').all(id).map(toToolCall);
+  const modelRows = db
+    .prepare(
+      `SELECT model_calls.*, (SELECT json_array_length(tools) FROM tool_catalog_snapshots
+         WHERE hash = model_calls.toolCatalogHash) AS toolCount
+       FROM model_calls WHERE runId = ? ORDER BY id`,
+    )
+    .all(id);
+  const decisions = new Map(
+    db
+      .prepare(
+        `SELECT policy_decisions.*, approvals.status AS approvalStatus FROM policy_decisions
+         LEFT JOIN approvals ON approvals.id = policy_decisions.approvalId WHERE policy_decisions.runId = ?`,
+      )
+      .all(id)
+      .map((row) => [Number(row.id), toDecision(row)]),
+  );
+  const tools = db
+    .prepare('SELECT * FROM tool_calls WHERE runId = ? ORDER BY id')
+    .all(id)
+    .map((row) => toToolCall(row, decisions));
   const placed = new Set<number>();
   const timeline: TimelineItem[] = [];
   for (const row of modelRows) {
-    timeline.push({ kind: 'model', call: toModelCall(row) });
     const response = row.response ? (JSON.parse(String(row.response)) as { toolCalls?: Array<{ id: string }> }) : undefined;
+    const asked: ToolCallRow[] = [];
     for (const requested of response?.toolCalls ?? []) {
       const tool = tools.find((call) => call.toolCallId === requested.id && !placed.has(call.id));
       if (!tool) continue;
       placed.add(tool.id);
-      timeline.push({ kind: 'tool', call: tool });
+      asked.push(tool);
     }
+    timeline.push({ kind: 'model', call: toModelCall(row), tools: asked });
   }
   for (const tool of tools) if (!placed.has(tool.id)) timeline.push({ kind: 'tool', call: tool });
   const events = db.prepare('SELECT * FROM events WHERE runId = ? ORDER BY id').all(id).map(toEventRow);
@@ -163,6 +211,19 @@ export function getModelCallBody(db: Db, id: number): ModelCallBody | undefined 
   const row = db.prepare('SELECT request, response FROM model_calls WHERE id = ?').get(id);
   if (!row) return undefined;
   return { request: JSON.parse(String(row.request)), response: row.response ? JSON.parse(String(row.response)) : null };
+}
+
+export function getBlob(db: Db, read: (hash: string) => string | undefined, hash: string): BlobBody | undefined {
+  const row = db.prepare('SELECT * FROM blobs WHERE hash = ?').get(hash);
+  const text = row ? read(hash) : undefined;
+  if (!row || text === undefined) return undefined;
+  return { hash, size: Number(row.size), mime: String(row.mime), createdAt: String(row.createdAt), text };
+}
+
+export function getToolCatalog(db: Db, hash: string): ToolCatalog | undefined {
+  const row = db.prepare('SELECT * FROM tool_catalog_snapshots WHERE hash = ?').get(hash);
+  if (!row) return undefined;
+  return { hash, createdAt: String(row.createdAt), tools: JSON.parse(String(row.tools)) };
 }
 
 export function listSessions(db: Db): SessionRow[] {
@@ -292,7 +353,13 @@ export function overview(db: Db, now: Date, settings: Settings): Overview {
       .filter((automation) => automation.enabled && automation.nextRunAt)
       .slice(0, 5),
     heartbeat: heartbeatStatus(db, now, settings),
+    blobs: blobTotals(db),
   };
+}
+
+function blobTotals(db: Db): Overview['blobs'] {
+  const row = db.prepare('SELECT COUNT(*) AS count, SUM(size) AS bytes FROM blobs').get()!;
+  return { count: Number(row.count), bytes: Number(row.bytes ?? 0) };
 }
 
 // the stored input of an approval is not redacted, because the tool runs again with it. the dashboard shows only the

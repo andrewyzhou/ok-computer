@@ -37,6 +37,7 @@ describe('every dashboard page loads against the seeded database', () => {
     open('#/');
     expect(await screen.findByText('Cost today')).toBeTruthy();
     expect(screen.getByText('check-in: finish essay')).toBeTruthy();
+    expect(screen.getByText('Blob store')).toBeTruthy();
     expect(screen.getByText('remind me when a goal eta is less than one hour away')).toBeTruthy();
   });
 
@@ -62,6 +63,26 @@ describe('every dashboard page loads against the seeded database', () => {
     fireEvent.click(within(steps[0] as HTMLElement).getByText(/full request and response/));
     expect(await screen.findByText('Request')).toBeTruthy();
     expect(screen.getByText(/"call-goals"/)).toBeTruthy();
+  });
+
+  it('nests tool calls in their model call and shows what the model saw next to the raw result', async () => {
+    open('#/runs/run-5');
+    expect(await screen.findByText('Timeline')).toBeTruthy();
+    const nested = document.querySelectorAll('.timeline.nested > li');
+    expect([...nested].map((step) => step.querySelector('.step-head')?.textContent)).toEqual([
+      expect.stringMatching(/memory_get.*allow.*by risk:read.*risk read.*res_[0-9a-f]{12}/),
+      expect.stringMatching(/result_read.*allow/),
+    ]);
+    const week = nested[0] as HTMLElement;
+    fireEvent.click(within(week).getByText(/result and what the model saw/));
+    expect(await within(week).findByText('Raw result')).toBeTruthy();
+    expect(within(week).getByText('What the model saw')).toBeTruthy();
+    expect(within(week).getByText(/The model got a preview and the handle/)).toBeTruthy();
+    expect(await within(week).findByText(/late nights hurt sleep/)).toBeTruthy();
+    fireEvent.click(within(week).getByText(/policy decision/));
+    expect(within(week).getByText('memory_get only reads')).toBeTruthy();
+    fireEvent.click(screen.getAllByText(/tools offered/)[0]!);
+    expect(await screen.findByText(/Catalog [0-9a-f]{12}, first offered/)).toBeTruthy();
   });
 
   it('lists sessions', async () => {

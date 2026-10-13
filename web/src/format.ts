@@ -46,6 +46,12 @@ export function ms(value: number): string {
   return `${Math.floor(value / 60_000)} min ${Math.round((value % 60_000) / 1000)} s`;
 }
 
+export function bytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export function percent(value: number | null): string {
   return value === null ? '-' : `${Math.round(value * 100)}%`;
 }

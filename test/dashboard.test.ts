@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type {
   ApprovalRow,
   AutomationRow,
+  BlobBody,
   ContextView,
   CostPage,
   EventRow,
@@ -13,11 +14,12 @@ import type {
   RunRow,
   SessionRow,
   StreamMessage,
+  ToolCatalog,
 } from '../src/dashboard/types.js';
 import { startDashboard } from '../src/dashboard/server.js';
 import { appendEvent } from '../src/events/log.js';
 import { silentLogger } from '../src/observability/logger.js';
-import { seedDashboard, SUMMARY } from './seed.js';
+import { seedDashboard, SUMMARY, WEEKLY } from './seed.js';
 
 const json = (body: unknown, method = 'POST') => ({
   method,
@@ -42,6 +44,8 @@ describe('the dashboard api on a seeded database', () => {
     expect(overview.costUsd).toBeGreaterThan(0);
     expect(overview.openGoals.map((goal) => goal.title)).toEqual(['finish essay', 'gym']);
     expect(overview.nextAutomations.length).toBe(5);
+    expect(overview.blobs.count).toBeGreaterThan(0);
+    expect(overview.blobs.bytes).toBeGreaterThan(WEEKLY.length);
     expect(overview.heartbeat).toMatchObject({
       every: '30m',
       inActiveHours: true,
@@ -60,19 +64,24 @@ describe('the dashboard api on a seeded database', () => {
     expect((await get<RunRow[]>(dashboard, '/api/runs?day=2026-10-12')).length).toBe(5);
   });
 
-  it('shows the full timeline of a run, with each tool call after its model call', async () => {
+  it('shows the full timeline of a run, with each tool call inside its model call', async () => {
     const { dashboard } = await seedDashboard();
     const detail = await get<RunDetail>(dashboard, '/api/runs/run-1');
     expect(detail.run).toMatchObject({ status: 'completed', trigger: 'message', modelCalls: 2, toolCalls: 2 });
-    expect(detail.timeline.map((item) => (item.kind === 'model' ? 'model' : item.call.name))).toEqual([
-      'model',
-      'goals_set',
-      'goal_update',
-      'model',
+    expect(detail.timeline.map((item) => (item.kind === 'model' ? item.tools.map((tool) => tool.name) : item.call.name))).toEqual([
+      ['goals_set', 'goal_update'],
+      [],
     ]);
-    const [first, , bad, last] = detail.timeline;
-    expect(first?.kind === 'model' && first.call).toMatchObject({ stopReason: 'tool_use', costUsd: expect.any(Number) });
-    expect(bad?.kind === 'tool' && bad.call).toMatchObject({ isError: true, input: { id: 99, status: 'done' } });
+    const [first, last] = detail.timeline;
+    expect(first?.kind === 'model' && first.call).toMatchObject({
+      stopReason: 'tool_use',
+      costUsd: expect.any(Number),
+      toolCatalogHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      toolCount: 15,
+    });
+    const [set, bad] = first?.kind === 'model' ? first.tools : [];
+    expect(set?.policy).toMatchObject({ decision: 'allow', rule: 'builtin:goals_set' });
+    expect(bad).toMatchObject({ isError: true, input: { id: 99, status: 'done' }, riskLevel: 'write', policy: { decision: 'allow' } });
     expect(last?.kind === 'model' && last.call).toMatchObject({ cacheReadTokens: 800, stopReason: 'end_turn' });
     expect(detail.events.map((event) => event.type)).toEqual([
       'user_message',
@@ -91,6 +100,40 @@ describe('the dashboard api on a seeded database', () => {
     expect(failed.run.error).toContain('the request was too large');
     expect(failed.timeline).toMatchObject([{ kind: 'model', call: { error: 'the request was too large', costUsd: null } }]);
     expect((await dashboard.request('/api/runs/nope')).status).toBe(404);
+  });
+
+  it('shows the preview that the model got for a large result, its handle, the full blob, and the policy decision', async () => {
+    const { dashboard } = await seedDashboard();
+    const detail = await get<RunDetail>(dashboard, '/api/runs/run-5');
+    const tools = detail.timeline.flatMap((item) => (item.kind === 'model' ? item.tools : [item.call]));
+    expect(tools.map((tool) => tool.name)).toEqual(['memory_get', 'result_read']);
+    const [week, read] = tools;
+    expect(week).toMatchObject({
+      truncated: true,
+      resultHandle: expect.stringMatching(/^res_[0-9a-f]{12}$/),
+      riskLevel: 'read',
+      tainted: false,
+      policy: { decision: 'allow', rule: 'risk:read', reason: 'memory_get only reads', approvalId: null },
+    });
+    expect(week!.output.content).toContain(`the full result is ${week!.resultHandle}`);
+    expect(week!.output.content).not.toContain('late nights hurt sleep');
+
+    const raw = await get<BlobBody>(dashboard, `/api/blobs/${week!.rawResultBlob}`);
+    expect(raw.text).toBe(`weekly/2026-W42.md lines 1-154 of 154:
+${WEEKLY}`);
+    expect(raw.size).toBe(raw.text.length);
+    const view = await get<BlobBody>(dashboard, `/api/blobs/${week!.modelViewBlob}`);
+    expect(view.text).toBe(week!.output.content);
+
+    expect(read).toMatchObject({ input: { handle: week!.resultHandle, query: 'sleep' }, truncated: false, resultHandle: null });
+    expect(read!.output.content).toContain('late nights hurt sleep and the next morning');
+
+    const first = detail.timeline[0]!;
+    const catalog = await get<ToolCatalog>(dashboard, `/api/tool-catalogs/${first.kind === 'model' ? first.call.toolCatalogHash : ''}`);
+    expect(catalog.tools.map((tool) => tool.name)).toContain('result_read');
+    expect((await dashboard.request(`/api/blobs/${'0'.repeat(64)}`)).status).toBe(404);
+    expect((await dashboard.request('/api/blobs/..%2F..%2Fokc.sqlite')).status).toBe(404);
+    expect((await dashboard.request('/api/tool-catalogs/nope')).status).toBe(404);
   });
 
   it('lists sessions and gives the raw log with the compaction marker', async () => {
@@ -203,10 +246,10 @@ describe('the dashboard api on a seeded database', () => {
     const cost = await get<CostPage>(dashboard, '/api/cost');
     const total = Number(t.rows('SELECT SUM(costUsd) AS total FROM model_calls')[0]!.total);
     expect(cost.days).toHaveLength(30);
-    expect(cost.days.at(-1)).toMatchObject({ key: '2026-10-12', calls: 7 });
+    expect(cost.days.at(-1)).toMatchObject({ key: '2026-10-12', calls: 9 });
     expect(cost.days.at(-1)!.costUsd).toBeCloseTo(total);
     expect(cost.slots.map((group) => group.key).sort()).toEqual(['heartbeat', 'main']);
-    expect(cost.models).toMatchObject([{ key: 'fake/m', calls: 7 }]);
+    expect(cost.models).toMatchObject([{ key: 'fake/m', calls: 9 }]);
     expect(cost.unpricedCalls).toBe(0);
   });
 

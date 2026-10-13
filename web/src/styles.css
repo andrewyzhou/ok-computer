@@ -592,3 +592,7 @@ pre {
 .summarized .event {
   opacity: 0.6;
 }
+
+.timeline.nested {
+  margin-top: 6px;
+}

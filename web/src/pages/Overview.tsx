@@ -1,7 +1,7 @@
 import type { Overview as OverviewData } from '../../../src/dashboard/types';
 import { useApi } from '../api';
 import { Empty, Load, Page, Panel, Status, Tile } from '../components';
-import { clock, time, usd } from '../format';
+import { bytes, clock, time, usd } from '../format';
 
 export function Overview() {
   const loaded = useApi<OverviewData>('/api/overview', (message) => message.kind === 'run');
@@ -19,6 +19,7 @@ export function Overview() {
                 note={`${data.failedRuns} failed runs, ${data.modelErrors} failed model calls`}
               />
               <Tile label="Open goals" value={data.openGoals.length} />
+              <Tile label="Blob store" value={bytes(data.blobs.bytes)} note={`${data.blobs.count} blobs`} />
             </div>
             <div className="columns">
               <Panel title="Open goals today">

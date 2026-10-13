@@ -11,6 +11,7 @@ import type { Config } from '../config/schema.js';
 import { estimateTokens } from '../context/tokens.js';
 import type { Db } from '../db/index.js';
 import { resolveMemoryPath } from '../memory/search.js';
+import { createBlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
 import { setChecklist } from '../scheduler/heartbeat.js';
 import { getAutomation, updateAutomation } from '../scheduler/store.js';
@@ -20,8 +21,10 @@ import {
   automationRuns,
   automations,
   costPage,
+  getBlob,
   getModelCallBody,
   getRunDetail,
+  getToolCatalog,
   goalsPage,
   heartbeatStatus,
   listApprovals,
@@ -59,6 +62,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
   const memoryDir = join(config.paths.data, 'memory');
   const logDir = join(config.paths.data, 'logs');
   const webDir = deps.webDir ?? WEB_DIR;
+  const blobs = createBlobStore(db, join(config.paths.data, 'blobs'), clock);
   const server = new Hono();
 
   // a web page in the browser can send requests to a loopback port. the host check stops dns rebinding, and the
@@ -109,6 +113,15 @@ export function createDashboard(deps: DashboardDeps): Hono {
   server.get('/api/model-calls/:id', (c) => {
     const call = getModelCallBody(db, Number(c.req.param('id')));
     return call ? c.json(call) : notFound(c, 'model call');
+  });
+
+  server.get('/api/blobs/:hash', (c) => {
+    const blob = getBlob(db, blobs.read, c.req.param('hash'));
+    return blob ? c.json(blob) : notFound(c, 'blob');
+  });
+  server.get('/api/tool-catalogs/:hash', (c) => {
+    const catalog = getToolCatalog(db, c.req.param('hash'));
+    return catalog ? c.json(catalog) : notFound(c, 'tool catalog');
   });
 
   server.get('/api/sessions', (c) => c.json(listSessions(db)));

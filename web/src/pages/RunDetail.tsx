@@ -1,8 +1,16 @@
-import type { ModelCallBody, ModelCallRow, RunDetail as RunDetailData, ToolCallRow } from '../../../src/dashboard/types';
+import type {
+  BlobBody,
+  ModelCallBody,
+  ModelCallRow,
+  PolicyDecisionRow,
+  RunDetail as RunDetailData,
+  ToolCallRow,
+  ToolCatalog,
+} from '../../../src/dashboard/types';
 import { useApi } from '../api';
 import { Expand, Json, Load, Page, Panel, Status } from '../components';
 import { EventView } from '../events';
-import { duration, ms, time, tokens, usd } from '../format';
+import { bytes, duration, ms, time, tokens, usd } from '../format';
 import { sessionHref } from './Runs';
 
 function ModelCallBodyView({ id }: { id: number }) {
@@ -25,7 +33,23 @@ function ModelCallBodyView({ id }: { id: number }) {
   );
 }
 
-function ModelCallItem({ call }: { call: ModelCallRow }) {
+function CatalogView({ hash }: { hash: string }) {
+  const loaded = useApi<ToolCatalog>(`/api/tool-catalogs/${hash}`);
+  return (
+    <Load loaded={loaded}>
+      {(catalog) => (
+        <>
+          <p className="muted">
+            Catalog {hash.slice(0, 12)}, first offered {time(catalog.createdAt)}
+          </p>
+          <Json value={catalog.tools} />
+        </>
+      )}
+    </Load>
+  );
+}
+
+function ModelCallItem({ call, tools }: { call: ModelCallRow; tools: ToolCallRow[] }) {
   return (
     <li className={`step step-model${call.error ? ' is-error' : ''}`}>
       <div className="step-head">
@@ -42,8 +66,94 @@ function ModelCallItem({ call }: { call: ModelCallRow }) {
         <span className="muted">{time(call.createdAt)}</span>
       </div>
       {call.error ? <p className="error-text">{call.error}</p> : null}
+      {call.toolCatalogHash ? (
+        <Expand label={`${call.toolCount ?? '?'} tools offered (catalog ${call.toolCatalogHash.slice(0, 8)})`}>
+          {() => <CatalogView hash={call.toolCatalogHash!} />}
+        </Expand>
+      ) : null}
       <Expand label="full request and response">{() => <ModelCallBodyView id={call.id} />}</Expand>
+      {tools.length ? (
+        <ol className="timeline nested">
+          {tools.map((tool) => (
+            <ToolCallItem key={tool.id} call={tool} />
+          ))}
+        </ol>
+      ) : null}
     </li>
+  );
+}
+
+function BlobText({ hash }: { hash: string }) {
+  const loaded = useApi<BlobBody>(`/api/blobs/${hash}`);
+  return (
+    <Load loaded={loaded}>
+      {(blob) => (
+        <>
+          <p className="muted">
+            {bytes(blob.size)}, blob {hash.slice(0, 12)}
+          </p>
+          <Json value={blob.text} />
+        </>
+      )}
+    </Load>
+  );
+}
+
+// the raw result is what the tool gave. the model view is the exact text that the model got, after the wrapper of
+// untrusted text and the cut to a preview.
+function ResultView({ call }: { call: ToolCallRow }) {
+  return (
+    <>
+      {call.truncated ? (
+        <p className="muted">
+          The model got a preview and the handle <code>{call.resultHandle}</code>. It can read the full result with
+          result_read.
+        </p>
+      ) : null}
+      {call.untrustedSource ? (
+        <p className="muted">The result came from {call.untrustedSource}, so the model got it inside an untrusted wrapper.</p>
+      ) : null}
+      <div className="split">
+        <div>
+          <h3>Raw result</h3>
+          {call.rawResultBlob ? <BlobText hash={call.rawResultBlob} /> : <Json value={call.output.content} />}
+        </div>
+        <div>
+          <h3>What the model saw</h3>
+          <p className="muted">{bytes(new TextEncoder().encode(call.output.content).length)}</p>
+          <Json value={call.output.content} />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function PolicyView({ policy }: { policy: PolicyDecisionRow }) {
+  return (
+    <dl className="facts">
+      <dt>Decision</dt>
+      <dd>
+        <Status value={policy.decision} /> by {policy.rule}
+      </dd>
+      <dt>Reason</dt>
+      <dd>{policy.reason}</dd>
+      {policy.reviewerVerdict ? (
+        <>
+          <dt>Reviewer</dt>
+          <dd>
+            <Status value={policy.reviewerVerdict} /> {policy.reviewerReason}
+          </dd>
+        </>
+      ) : null}
+      {policy.approvalId !== null ? (
+        <>
+          <dt>Approval</dt>
+          <dd>
+            <a href="#/approvals">#{policy.approvalId}</a> {policy.approvalStatus ? <Status value={policy.approvalStatus} /> : null}
+          </dd>
+        </>
+      ) : null}
+    </dl>
   );
 }
 
@@ -52,10 +162,19 @@ function ToolCallItem({ call }: { call: ToolCallRow }) {
     <li className={`step step-tool${call.isError ? ' is-error' : ''}`}>
       <div className="step-head">
         <strong>tool call</strong> {call.name} {call.isError ? <Status value="error" /> : null}
+        {call.policy ? (
+          <span className="muted">
+            <Status value={call.policy.decision} /> by {call.policy.rule}
+          </span>
+        ) : null}
+        {call.riskLevel ? <span className="muted">risk {call.riskLevel}</span> : null}
+        {call.tainted ? <Status value="tainted" /> : null}
+        {call.resultHandle ? <code>{call.resultHandle}</code> : null}
         <span className="muted">{ms(call.durationMs)}</span>
       </div>
       <Expand label="input">{() => <Json value={call.input} />}</Expand>
-      <Expand label="output">{() => <Json value={call.output.content} />}</Expand>
+      <Expand label="result and what the model saw">{() => <ResultView call={call} />}</Expand>
+      {call.policy ? <Expand label="policy decision">{() => <PolicyView policy={call.policy!} />}</Expand> : null}
     </li>
   );
 }
@@ -96,7 +215,7 @@ export function RunDetail({ id }: { id: string }) {
               <ol className="timeline">
                 {timeline.map((item) =>
                   item.kind === 'model' ? (
-                    <ModelCallItem key={`m${item.call.id}`} call={item.call} />
+                    <ModelCallItem key={`m${item.call.id}`} call={item.call} tools={item.tools} />
                   ) : (
                     <ToolCallItem key={`t${item.call.id}`} call={item.call} />
                   ),

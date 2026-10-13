@@ -34,11 +34,27 @@ export interface ModelCallRow {
   stopReason: string | null;
   error: string | null;
   createdAt: string;
+  // the hash of the tool list that the call offered, and the number of tools in it.
+  toolCatalogHash: string | null;
+  toolCount: number | null;
 }
 
 export interface ModelCallBody {
   request: unknown;
   response: unknown;
+}
+
+export interface PolicyDecisionRow {
+  id: number;
+  decision: string;
+  rule: string;
+  reason: string;
+  reviewerModelCallId: number | null;
+  reviewerVerdict: string | null;
+  reviewerReason: string | null;
+  approvalId: number | null;
+  approvalStatus: string | null;
+  createdAt: string;
 }
 
 export interface ToolCallRow {
@@ -47,13 +63,39 @@ export interface ToolCallRow {
   toolCallId: string;
   name: string;
   input: unknown;
+  // output holds the exact text that the model got.
   output: { content: string; isError?: boolean };
   isError: boolean;
   durationMs: number;
   createdAt: string;
+  source: string;
+  riskLevel: string | null;
+  tainted: boolean;
+  untrustedSource: string | null;
+  truncated: boolean;
+  resultHandle: string | null;
+  rawResultBlob: string | null;
+  modelViewBlob: string | null;
+  policy: PolicyDecisionRow | null;
 }
 
-export type TimelineItem = { kind: 'model'; call: ModelCallRow } | { kind: 'tool'; call: ToolCallRow };
+// a model call holds the tool calls that its response asked for. a tool call that ran after an approval has no
+// such model call, so it is an item of its own.
+export type TimelineItem = { kind: 'model'; call: ModelCallRow; tools: ToolCallRow[] } | { kind: 'tool'; call: ToolCallRow };
+
+export interface BlobBody {
+  hash: string;
+  size: number;
+  mime: string;
+  createdAt: string;
+  text: string;
+}
+
+export interface ToolCatalog {
+  hash: string;
+  createdAt: string;
+  tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>;
+}
 
 export interface EventRow {
   id: number;
@@ -168,6 +210,7 @@ export interface Overview {
   openGoals: GoalRow[];
   nextAutomations: AutomationRow[];
   heartbeat: HeartbeatStatus;
+  blobs: { count: number; bytes: number };
 }
 
 export interface ApprovalRow {

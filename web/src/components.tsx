@@ -18,6 +18,12 @@ const STATUS_TONE: Record<string, string> = {
   failed: 'critical',
   error: 'critical',
   warn: 'warning',
+  allow: 'good',
+  review: 'warning',
+  approve: 'warning',
+  deny: 'critical',
+  hold: 'serious',
+  tainted: 'serious',
 };
 
 // a status always shows its word, so the color is never the only signal.
