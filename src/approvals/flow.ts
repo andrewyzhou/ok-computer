@@ -12,7 +12,7 @@ import { localDay, localTime, type Clock } from '../time.js';
 import type { RequestApproval, ToolCaller } from '../tools/caller.js';
 import type { ToolOutput } from '../tools/registry.js';
 import { wrapIfTainted } from '../tools/untrusted.js';
-import { approvalButtonData, createApproval, getApproval, resolveApproval, type Approval, type Decision, type ResolvedVia } from './store.js';
+import { approvalButtonData, createApproval, getApproval, markUnsent, resolveApproval, type Approval, type Decision, type ResolvedVia } from './store.js';
 
 export interface ApprovalFlowDeps {
   db: Db;
@@ -135,6 +135,7 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
       // the model must not tell the owner to press a button that the owner never got.
       if (!reached) {
         logger.warn('the request for an approval did not reach the owner', { approvalId: approval.id, runId: ctx.runId });
+        markUnsent(db, approval.id, clock());
         return {
           content: `${tool.name} needs the owner's approval, and the tool did not run yet. Approval #${approval.id} is pending, but the message to the owner failed, so the owner sees it only on the dashboard or with /approve ${approval.id}. Tell the owner about it when you can. The decision comes back as a system event.`,
         };

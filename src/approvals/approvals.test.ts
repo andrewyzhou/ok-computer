@@ -162,11 +162,16 @@ describe('approvals', () => {
   });
 
   it('tells the model when the request did not reach the owner', async () => {
-    const { sent, request } = setup();
+    const { db, sent, request } = setup();
     sent.fail = true;
     const output = await request();
     expect(output.content).toContain('the message to the owner failed, so the owner sees it only on the dashboard');
     expect(output.content).not.toContain('with the button');
+    // the skill review needs to know that the owner never saw this card when it expires.
+    expect(db.prepare('SELECT unsentAt FROM approvals WHERE id = 1').get()).toEqual({ unsentAt: expect.any(String) });
+    sent.fail = false;
+    await request();
+    expect(db.prepare('SELECT unsentAt FROM approvals WHERE id = 2').get()).toEqual({ unsentAt: null });
   });
 
   it('parses only well-formed button data', () => {
