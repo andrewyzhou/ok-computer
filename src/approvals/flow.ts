@@ -2,7 +2,7 @@ import type { Button } from '../channels/types.js';
 import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
-import { redactedJson } from '../observability/redact.js';
+import { redact, redactedJson } from '../observability/redact.js';
 import type { TaintSource } from '../policy/policy.js';
 import { decisionForApproval } from '../policy/store.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
@@ -48,11 +48,12 @@ const FIELD_TAIL = 100;
 // value is cut in its middle with a mark. the dashboard shows the full input. the value is redacted before the cut,
 // because a cut secret no longer matches the redaction. each value is json text, so a line break in a value is
 // escaped and cannot add a false field line or a false "Why:" line.
-export function describeInput(toolName: string, input: unknown): string {
+export function describeInput(toolName: string, input: unknown, full: readonly string[] = []): string {
   const fields: Array<[string, unknown]> =
     input !== null && typeof input === 'object' && !Array.isArray(input) ? Object.entries(input) : [['input', input]];
   const lines = fields.map(([key, value]) => {
     const name = /^[\w.-]+$/.test(key) ? key : oneLine(JSON.stringify(key));
+    if (full.includes(key) && typeof value === 'string') return fullField(name, value);
     const json = redactedJson(value);
     const { text, found } = showInvisible(oneLine(json));
     const marks = warnings(json !== (JSON.stringify(value) ?? 'null'), found, text);
@@ -62,6 +63,16 @@ export function describeInput(toolName: string, input: unknown): string {
     return `${name}: ${head} [... ${text.length - head.length - tail.length} characters cut, the dashboard shows the full input ...] ${tail}${marks}`;
   });
   return [toolName, ...lines].join('\n');
+}
+
+// a field in full keeps its lines, so the owner can read a long text. each line starts with a bar, so a line of the
+// value cannot look like a field line or a "Why:" line of the card. other line breaks show as \u codes.
+function fullField(name: string, value: string): string {
+  const text = redact(value);
+  const breaks = text.replace(/[\r\v\f]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);
+  const { text: shown, found } = showInvisible(oneLine(breaks));
+  const block = shown.split('\n').map((line) => `│ ${line}`).join('\n');
+  return `${name} (in full, ${value.length} characters):${warnings(text !== value, found, shown)}\n${block}`;
 }
 
 // the card hides a stored secret, but the tool gets the real value. the owner must know that the call sends it.
@@ -114,7 +125,7 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
   return {
     active,
     async request(tool, input, ctx, why) {
-      const summary = describeInput(tool.name, input);
+      const summary = describeInput(tool.name, input, tool.fullFields);
       const approval = createApproval(db, { runId: ctx.runId, toolName: tool.name, input, summary, decisionId: why.decisionId }, clock());
       logger.info('approval requested', { approvalId: approval.id, tool: tool.name, runId: ctx.runId });
       // the owner sees the reason with the request. the taint can come from an older run, so the message names it.
