@@ -37,6 +37,8 @@ export interface Catalog {
   // stored means that the catalog came from the database at the start, before the server answered.
   stored: boolean;
   validators: Map<string, Validate>;
+  // the hash of the snapshot before the compile. an equal list from the server keeps this catalog.
+  source?: string;
 }
 
 export function riskOf(entry: IntegrationEntry, tool: CatalogTool): Risk {
@@ -132,7 +134,13 @@ export function createCatalogStore(deps: { db: Db; clock: Clock; logger: Logger;
   return {
     get: (id) => catalogs.get(id),
     update(entry, listed) {
-      const catalog = compile(buildSnapshot(entry, listed), false, logger);
+      // a server can send list_changed often. the compile of 200 schemas takes about 120 ms on the event loop, so an
+      // unchanged list keeps the catalog that exists.
+      const built = buildSnapshot(entry, listed);
+      const source = hashOf(built);
+      const current = catalogs.get(entry.id);
+      if (current && !current.stored && current.source === source) return current;
+      const catalog = { ...compile(built, false, logger), source };
       const last = db.prepare('SELECT hash FROM integration_catalogs WHERE integrationId = ? ORDER BY id DESC LIMIT 1').get(entry.id);
       if (last?.hash !== catalog.hash) {
         const now = clock().toISOString();

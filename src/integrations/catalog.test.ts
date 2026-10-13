@@ -42,8 +42,9 @@ describe('catalog', () => {
   it('records a version only when the catalog changed, and hides a stored tool that the config no longer allows', () => {
     const db = openDb(':memory:');
     const store = createCatalogStore({ db, clock, logger: silentLogger, entries: [entry(['a', 'b'])] });
-    store.update(entry(['a', 'b']), [tool('a'), tool('b')]);
-    store.update(entry(['a', 'b']), [tool('b'), tool('a')]);
+    const first = store.update(entry(['a', 'b']), [tool('a'), tool('b')]);
+    // an equal list keeps the compiled catalog, so a server that sends list_changed often costs little.
+    expect(store.update(entry(['a', 'b']), [tool('b'), tool('a')])).toBe(first);
     expect(db.prepare('SELECT count(*) AS n FROM integration_catalogs').get()).toEqual({ n: 1 });
     store.update(entry(['a', 'b']), [tool('a')]);
     expect(db.prepare('SELECT count(*) AS n FROM integration_catalogs').get()).toEqual({ n: 2 });
