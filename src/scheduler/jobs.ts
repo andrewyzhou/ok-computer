@@ -57,6 +57,9 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
       : { status: 'failed', runId: result.runId, error: result.error ?? result.status };
   const hasText = (result: RunResult) => result.status === 'completed' && result.text.trim() !== '' && result.text.trim() !== NO_REPLY;
 
+  // the first event carries the taint of the automation, so the run starts as tainted as the session that wrote it.
+  const start = (text: string, taint: TaintSource[]) => [{ type: 'system_event' as const, payload: { text, ...(taint.length ? { taint } : {}) } }];
+
   // a run in the main session is part of the conversation, so the owner can answer it there.
   const runInMain = (automation: Automation, text: string): Promise<JobResult> =>
     queue.enqueue(MAIN_SESSION, async () => {
@@ -66,7 +69,7 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
         slot: automation.slot,
         channel: channel(),
         allowedTools: MAIN_TOOLS,
-        events: [{ type: 'system_event', payload: { text } }],
+        events: start(text, automation.taint),
         signal: deps.signal,
       });
       if (hasText(result)) await owner.send(result.text);
@@ -84,7 +87,7 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
         slot: automation.slot,
         channel: channel(),
         allowedTools: AUTOMATION_TOOLS,
-        events: [{ type: 'system_event', payload: { text } }],
+        events: start(text, automation.taint),
         signal: deps.signal,
       }),
     );
@@ -107,7 +110,7 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
     const payload = automation.payload;
     switch (payload.type) {
       case 'system_event':
-        await appendToMain(`Automation "${automation.name}": ${payload.text}`);
+        await appendToMain(`Automation "${automation.name}": ${payload.text}`, automation.taint);
         return { status: 'completed' };
       case 'agent': {
         if (payload.condition === 'no_goals_today' && listGoals(db, localDay(clock(), config.timeZone)).length) {

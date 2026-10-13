@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Result } from '../config/load.js';
 import type { Slot } from '../config/schema.js';
 import type { Db } from '../db/index.js';
+import type { TaintSource } from '../policy/policy.js';
 import { nextRun, type Schedule } from './schedule.js';
 
 export const payloadSchema = z.discriminatedUnion('type', [
@@ -37,6 +38,8 @@ export interface Automation {
   nextRunAt: string | null;
   lastRunAt: string | null;
   consecutiveFailures: number;
+  // the untrusted sources behind the payload. a run of the automation starts with them.
+  taint: TaintSource[];
 }
 
 export interface NewAutomation {
@@ -47,9 +50,10 @@ export interface NewAutomation {
   slot?: Slot;
   enabled?: boolean;
   createdBy: CreatedBy;
+  taint?: TaintSource[];
 }
 
-export type AutomationPatch = Partial<Pick<Automation, 'name' | 'schedule' | 'payload' | 'sessionMode' | 'slot' | 'enabled'>>;
+export type AutomationPatch = Partial<Pick<Automation, 'name' | 'schedule' | 'payload' | 'sessionMode' | 'slot' | 'enabled' | 'taint'>>;
 
 const PAST = 'the time of this one-shot automation is in the past';
 
@@ -61,8 +65,8 @@ export function createAutomation(db: Db, input: NewAutomation, now: Date, timeZo
   const id = randomUUID().slice(0, 8);
   db.prepare(
     `INSERT INTO automations (id, name, schedule, payload, sessionMode, slot, enabled, createdBy, createdAt, updatedAt,
-       nextRunAt, consecutiveFailures)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+       nextRunAt, consecutiveFailures, taint)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
   ).run(
     id,
     input.name,
@@ -75,6 +79,7 @@ export function createAutomation(db: Db, input: NewAutomation, now: Date, timeZo
     now.toISOString(),
     now.toISOString(),
     next?.toISOString() ?? null,
+    taintJson(input.taint ?? []),
   );
   return { ok: true, value: getAutomation(db, id)! };
 }
@@ -99,7 +104,7 @@ export function updateAutomation(
   }
   db.prepare(
     `UPDATE automations SET name = ?, schedule = ?, payload = ?, sessionMode = ?, slot = ?, enabled = ?, updatedAt = ?,
-       nextRunAt = ?, consecutiveFailures = ? WHERE id = ?`,
+       nextRunAt = ?, consecutiveFailures = ?, taint = ? WHERE id = ?`,
   ).run(
     merged.name,
     JSON.stringify(merged.schedule),
@@ -110,6 +115,7 @@ export function updateAutomation(
     now.toISOString(),
     nextRunAt,
     failures,
+    taintJson(merged.taint),
     id,
   );
   return { ok: true, value: getAutomation(db, id)! };
@@ -155,5 +161,8 @@ function toAutomation(row: Record<string, unknown>): Automation {
     nextRunAt: row.nextRunAt === null ? null : String(row.nextRunAt),
     lastRunAt: row.lastRunAt === null ? null : String(row.lastRunAt),
     consecutiveFailures: Number(row.consecutiveFailures),
+    taint: row.taint === null ? [] : (JSON.parse(String(row.taint)) as TaintSource[]),
   };
 }
+
+const taintJson = (taint: TaintSource[]) => (taint.length ? JSON.stringify(taint) : null);

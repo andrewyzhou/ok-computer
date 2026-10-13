@@ -6,6 +6,7 @@ import type { Db } from '../db/index.js';
 import { getSetting, setSetting } from '../db/settings.js';
 import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
+import type { TaintSource } from '../policy/policy.js';
 import { sessionTaint } from '../policy/store.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
 import type { RunQueue } from '../sessions/queue.js';
@@ -18,6 +19,7 @@ import { createAutomation, listAutomations, updateAutomation, type Automation } 
 export const HEARTBEAT_TOOLS: readonly string[] = ['goals_list', 'heartbeat_respond', 'now'];
 export const HEARTBEAT_PREFIX = 'heartbeat:';
 const CHECKLIST = 'heartbeat_checklist';
+const CHECKLIST_TAINT = 'heartbeat_checklist_taint';
 const SYNCED_EVERY = 'heartbeat_synced_every_ms';
 const RECENT_LIMIT = 5;
 
@@ -27,8 +29,15 @@ export function getChecklist(db: Db): string {
   return getSetting<string>(db, CHECKLIST) ?? '';
 }
 
-export function setChecklist(db: Db, text: string, now: Date): void {
+// the checklist can repeat untrusted text that the writing session read. each heartbeat run starts with that taint.
+// the owner's own checklist from the dashboard has no taint.
+export function setChecklist(db: Db, text: string, now: Date, taint: TaintSource[] = []): void {
   setSetting(db, CHECKLIST, text.trim(), now);
+  setSetting(db, CHECKLIST_TAINT, taint, now);
+}
+
+export function checklistTaint(db: Db): TaintSource[] {
+  return getSetting<TaintSource[]>(db, CHECKLIST_TAINT) ?? [];
 }
 
 export function inActiveHours(now: Date, timeZone: string, hours: { start: string; end: string }): boolean {
@@ -91,7 +100,7 @@ export function createHeartbeatTools(deps: { db: Db }): Tool[] {
     risk: 'write',
     async run(input, ctx) {
       if (input.notify && !input.text?.trim()) return { content: 'notify true needs a text', isError: true };
-      if (input.checklist !== undefined) setChecklist(deps.db, input.checklist, ctx.clock());
+      if (input.checklist !== undefined) setChecklist(deps.db, input.checklist, ctx.clock(), sessionTaint(deps.db, ctx.sessionKey));
       return { content: 'recorded' };
     },
   });
@@ -103,7 +112,7 @@ export function createHeartbeatTools(deps: { db: Db }): Tool[] {
     input: z.object({ checklist: z.string() }),
     risk: 'write',
     async run({ checklist }, ctx) {
-      setChecklist(deps.db, checklist, ctx.clock());
+      setChecklist(deps.db, checklist, ctx.clock(), sessionTaint(deps.db, ctx.sessionKey));
       return { content: checklist.trim() ? `the checklist is now:\n${checklist.trim()}` : 'the checklist is empty' };
     },
   });
@@ -146,6 +155,7 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
       'Recent notifications to the owner:',
       ...(recent.length ? recent.map((line) => `- ${line}`) : ['- none']),
     ].join('\n');
+    const inherited = checklistTaint(db);
     const runId = newId();
     const sessionKey = `${HEARTBEAT_PREFIX}${runId}`;
     const result = await queue.enqueue(sessionKey, () =>
@@ -156,7 +166,7 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
         slot: automation.slot,
         channel: owner.chat()?.channel ?? 'cli',
         allowedTools: HEARTBEAT_TOOLS,
-        events: [{ type: 'system_event', payload: { text } }],
+        events: [{ type: 'system_event', payload: { text, ...(inherited.length ? { taint: inherited } : {}) } }],
         signal: deps.signal,
       }),
     );

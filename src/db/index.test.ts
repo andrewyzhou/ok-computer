@@ -36,8 +36,8 @@ describe('migrate', () => {
   });
 });
 
-describe('migration 006', () => {
-  it('upgrades a database at 005 with real rows', () => {
+describe('migrations 006 and 007', () => {
+  it('upgrade a database at 005 with real rows', () => {
     const real = join(import.meta.dirname, 'migrations');
     const files = readdirSync(real).filter((file) => file.endsWith('.sql'));
     const upTo005 = migrationsDir(Object.fromEntries(files.filter((file) => file < '006').map((file) => [file, readFileSync(join(real, file), 'utf8')])));
@@ -60,9 +60,13 @@ describe('migration 006', () => {
         VALUES ('r', 'c1', 'memory_get', '{}', '{"content":"x"}', 0, 1, 'x', 1, '${blob}', '${'b'.repeat(64)}', 1, 'res_0123456789ab', 0.5);
       INSERT INTO mcp_messages (serverId, direction, method, payload, createdAt) VALUES ('fs', 'out', 'tools/list', '{}', 'x');
       INSERT INTO subagent_runs (parentRunId, childRunId, profile, task, createdAt) VALUES ('r', 'r', 'p', 't', 'x');
+      INSERT INTO automations (id, name, schedule, payload, sessionMode, slot, enabled, createdBy, createdAt, updatedAt)
+        VALUES ('a1', 'daily', '{}', '{}', 'isolated', 'main', 1, 'owner', 'x', 'x');
     `);
 
-    expect(migrate(db, real)).toEqual(['006_trace_contract.sql']);
+    expect(migrate(db, real)).toEqual(['006_trace_contract.sql', '007_automation_taint.sql']);
+    // an automation from before 007 has no taint.
+    expect(db.prepare('SELECT id, taint FROM automations').all()).toEqual([{ id: 'a1', taint: null }]);
     const columns = (table: string) => db.prepare('SELECT name FROM pragma_table_info(?)').all(table).map((row) => row.name);
     expect(columns('tool_calls')).not.toContain('modelViewBlob');
     expect(columns('tool_calls')).not.toContain('costUsd');

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SLOTS } from '../config/schema.js';
 import type { Db } from '../db/index.js';
+import { sessionTaint } from '../policy/store.js';
 import { formatLocal } from '../time.js';
 import { defineTool, type Tool } from '../tools/registry.js';
 import { describeSchedule, scheduleSchema } from './schedule.js';
@@ -71,7 +72,8 @@ export function createAutomationTools(deps: { db: Db; replan: () => void }): Too
     }),
     risk: 'write',
     async run(input, ctx) {
-      const created = createAutomation(db, { ...input, createdBy: 'agent' }, ctx.clock(), ctx.timeZone);
+      // the prompt can repeat untrusted text that the session read. its runs keep that taint.
+      const created = createAutomation(db, { ...input, createdBy: 'agent', taint: sessionTaint(db, ctx.sessionKey) }, ctx.clock(), ctx.timeZone);
       if (!created.ok) return { content: created.error, isError: true };
       deps.replan();
       return { content: `created ${formatAutomation(created.value, ctx.timeZone)}` };
@@ -103,7 +105,14 @@ export function createAutomationTools(deps: { db: Db; replan: () => void }): Too
         patch.payload?.type === 'agent' && current.payload.type === 'agent' && current.payload.condition
           ? { ...patch.payload, condition: current.payload.condition }
           : patch.payload;
-      const updated = updateAutomation(db, id, { ...patch, ...(payload && { payload }) }, ctx.clock(), ctx.timeZone);
+      // a new payload replaces the old text, so it also replaces the taint.
+      const updated = updateAutomation(
+        db,
+        id,
+        { ...patch, ...(payload && { payload, taint: sessionTaint(db, ctx.sessionKey) }) },
+        ctx.clock(),
+        ctx.timeZone,
+      );
       if (!updated.ok) return { content: updated.error, isError: true };
       deps.replan();
       return { content: `updated ${formatAutomation(updated.value, ctx.timeZone)}` };
