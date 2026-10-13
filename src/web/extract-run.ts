@@ -2,9 +2,10 @@ import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { stripTags, type Extracted } from './extract.js';
 
-// a hostile page can make the parser or readability slow in ways that no check before the parse finds. the work runs
-// in a worker thread with a time and memory limit, so it never holds the event loop of the app, which also serves
-// telegram and the scheduler.
+// a hostile page can make the parser or readability slow in ways that no check before the parse finds. a page inside
+// the depth and element caps took up to 14 s (a list of 19,700 items under 117 levels), and 5 mb of nested tags took
+// 2 minutes. the work runs in a worker thread with a time and memory limit, so it never holds the event loop of the
+// app, which also serves telegram and the scheduler.
 export const EXTRACT_TIMEOUT_MS = 5_000;
 
 const here = fileURLToPath(import.meta.url);
