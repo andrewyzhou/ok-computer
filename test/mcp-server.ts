@@ -30,6 +30,15 @@ export function createTestServer(): McpServer {
     );
     return text('grown');
   });
+  server.registerTool(
+    'slow',
+    { description: 'Answer after a delay.', inputSchema: z.object({ ms: z.number() }) },
+    async ({ ms }) => {
+      await new Promise((resolve) => setTimeout(resolve, ms));
+      return text(`done after ${ms} ms`);
+    },
+  );
+  server.registerTool('hang', { description: 'Never answer.' }, () => new Promise(() => {}));
   server.registerTool('crash', { description: 'Stop the server process.' }, async () => {
     setTimeout(() => process.exit(1), 10);
     return text('stopping');
