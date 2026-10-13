@@ -30,6 +30,9 @@ export interface Tool<I = unknown> {
   risk: Risk;
   // an external tool always needs approval. this flag also asks for approval on other tools.
   needsApproval?: boolean;
+  // the source of all outputs of a tool that returns outside text. the registry marks each output with it, also an
+  // error, because the message of an error can contain outside text, for example an http body.
+  untrustedOutput?: string;
   run(input: I, ctx: ToolContext): Promise<ToolOutput>;
 }
 
@@ -69,15 +72,22 @@ export function createToolRegistry(tools: Tool[], logger: Logger = silentLogger)
       return { ok: true, tool, input: parsed.data };
     },
     async execute(tool, input, ctx) {
+      let output: ToolOutput;
       try {
-        return await tool.run(input, ctx);
+        output = await tool.run(input, ctx);
       } catch (err) {
         // the model gets only the message. the stack goes to the log with the ids of the run and the call.
         logger.error('tool crashed', { tool: tool.name, runId: ctx.runId, toolCallId: ctx.toolCallId, err });
-        return { content: `${tool.name} failed: ${(err as Error).message}`, isError: true };
+        output = { content: `${tool.name} failed: ${errorText(err)}`, isError: true };
       }
+      return tool.untrustedOutput && !output.untrustedSource ? { ...output, untrustedSource: tool.untrustedOutput } : output;
     },
   };
+}
+
+// third-party code can throw a value that is not an Error, for example null or a string.
+export function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 function toSpec(tool: Tool): ToolSpec {

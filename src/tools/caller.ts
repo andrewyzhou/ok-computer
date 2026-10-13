@@ -9,7 +9,7 @@ import { decide, type ReviewResult, type Reviewer, type Risk, type Rule, type Ta
 import { decisionOfApproval, recordDecision, sessionTaint, updateDecision } from '../policy/store.js';
 import type { RunQueue } from '../sessions/queue.js';
 import type { Clock } from '../time.js';
-import type { Tool, ToolContext, ToolOutput, ToolRegistry } from './registry.js';
+import { errorText, type Tool, type ToolContext, type ToolOutput, type ToolRegistry } from './registry.js';
 import { modelView, newHandle } from './results.js';
 
 export interface CallContext {
@@ -158,7 +158,10 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
     const first = await Promise.race([running, stopped]).finally(() => ctx.signal.removeEventListener('abort', onAbort));
     if (first !== STOPPED) return finish(first);
     const recorded = finish({ content: abandonedText(tool.name), isError: true }, 'abandoned');
-    void running.then((late) => recordLate(ctx.runId, ctx.sessionKey, call, recorded.rowId, late));
+    // nobody waits for this chain, so an error in it must go to the log. an unhandled rejection stops the process.
+    void running
+      .then((late) => recordLate(ctx.runId, ctx.sessionKey, call, recorded.rowId, late))
+      .catch((err: unknown) => logger.error('late tool result failed', { runId: ctx.runId, toolCallId: call.id, err }));
     return recorded;
   };
 
@@ -189,7 +192,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       } catch (err) {
         logger.error('approval request failed, so the tool did not run', { runId: ctx.runId, toolCallId: call.id, tool: tool.name, err });
         updateDecision(db, decisionId, { reason: `${reason}. the request for the owner's approval failed, so the call did not run` });
-        return { content: `${tool.name} did not run, because the request for the owner's approval failed: ${(err as Error).message}`, isError: true };
+        return { content: `${tool.name} did not run, because the request for the owner's approval failed: ${errorText(err)}`, isError: true };
       }
       updateDecision(db, decisionId, { approvalId: requested.approvalId });
       return requested.output;
@@ -206,7 +209,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       } catch (err) {
         // a reviewer that fails must not allow the call. the owner decides instead.
         logger.warn('reviewer failed, so the owner decides', { runId: ctx.runId, toolCallId: call.id, tool: tool.name, err });
-        reason = `${reason}. the reviewer failed (${(err as Error).message}), so the owner decides`;
+        reason = `${reason}. the reviewer failed (${errorText(err)}), so the owner decides`;
         updateDecision(db, decisionId, { reason });
         return { ...gate, held: await askOwner() };
       }
@@ -238,7 +241,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         gate = await check(tool, input, call, ctx, toolCtx);
       } catch (err) {
         logger.error('policy check failed, so the tool did not run', { runId: ctx.runId, toolCallId: call.id, tool: tool.name, err });
-        const output = { content: `${tool.name} did not run, because its policy check failed: ${(err as Error).message}`, isError: true };
+        const output = { content: `${tool.name} did not run, because its policy check failed: ${errorText(err)}`, isError: true };
         return strip(record(ctx.runId, call, output, started, { risk: tool.risk }));
       }
       const trace = { risk: tool.risk, decisionId: gate.decisionId, tainted: gate.taint.length > 0 };
@@ -270,7 +273,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         trace = { decisionId: decisionOfApproval(db, approval.id), tainted: sessionTaint(db, approval.sessionKey).length > 0 };
       } catch (err) {
         logger.error('approved call failed before it ran', { runId: approval.runId, approvalId: approval.id, err });
-        return { content: `approval #${approval.id} did not run: ${(err as Error).message}`, isError: true };
+        return { content: `approval #${approval.id} did not run: ${errorText(err)}`, isError: true };
       }
       const resolved = tools.resolve(call, [approval.toolName]);
       if (!resolved.ok) return strip(record(approval.runId, call, resolved.output, started, trace));
