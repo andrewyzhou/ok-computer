@@ -32,7 +32,7 @@ Put the file next to `okc.config.json`. Example with one local server and one re
 ```
 
 - `id`: at most 24 lower-case letters, digits and dashes. The model sees each tool as `<id>__<tool>`.
-- `command` and `args`: pin an exact version. `@latest` is refused.
+- `command` and `args`: pin an exact version, for example `some-notes-server@1.4.2`. For `npx`, `pnpx`, `bunx`, `pnpm dlx`, `yarn dlx`, `npm exec` and `bun x`, a tag (`@latest`, `@next`), a range (`@^1.2.0`) or no version is refused. A local path needs no version.
 - `tools.allow`: the only tools the agent can see. Every other tool of the server is hidden.
 - `risk`: `read` runs without approval. A tool without an entry is `write` when the server says it is read only, and `external` otherwise. Until the reviewer model exists (Phase 3), `write` and `external` tools ask you on each call. The Integrations page shows where each risk comes from.
 - `untrustedOutput` (default `true`): the results taint the session, so an `external` call after them always asks you.
