@@ -1,5 +1,6 @@
 import type { ElementHandle, Locator, Page } from 'playwright-core';
 import { z } from 'zod';
+import { redact } from '../observability/redact.js';
 import { defineTool, type Tool, type ToolContext, type ToolOutput } from '../tools/registry.js';
 import { extractIsolated } from '../web/extract-run.js';
 import { NotDone, untraced, type ActTab, type BrowserRefusal, type BrowserWorker, type StepInput, type StepResult } from './worker.js';
@@ -184,7 +185,9 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
             if (await untraced(page, () => target.evaluate((el) => (el as unknown as PageControl).matches('input[type=password]')))) {
               throw new NotDone(`${id} is a password field. The agent never types a password. Nothing was typed. The owner signs in with okc browser login`);
             }
-            await target.fill(text);
+            // the trace keeps the text of a fill, and the dashboard serves the zip. a text with a secret in it is typed
+            // outside the trace, and the step row keeps it redacted.
+            await (redact(text) === text ? target.fill(text) : untraced(page, () => target.fill(text)));
             return `typed ${text.length} characters`;
           }),
         );

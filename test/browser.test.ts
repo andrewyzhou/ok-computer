@@ -3,11 +3,16 @@ import { tmpdir } from 'node:os';
 import { createServer, get } from 'node:http';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { browserLogin } from '../src/browser/login.js';
 import { siteOf } from '../src/browser/gate.js';
+import { browserLogin } from '../src/browser/login.js';
 import { profileBusy } from '../src/browser/worker.js';
+import { registerSecret } from '../src/observability/redact.js';
 import { createBrowserHarness, hasChrome, killChrome, traceEntries } from './browser-harness.js';
 import { FIXTURE_COOKIE, FIXTURE_PASSWORD, startFixture, type Fixture } from './web-fixture.js';
+
+// not real secrets: a value with the shape of an api key, and a value that the test registers.
+const PATTERN_KEY = 'sk-ant-api03-PROBESECRETvalue0123456789';
+const REGISTERED = 'REGISTERED-SECRET-VALUE-42';
 
 let site: Fixture;
 beforeAll(async () => {
@@ -340,7 +345,11 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
   it('keeps no cookie, header, network log or dom in the trace, and keeps the screenshots and the actions', async () => {
     const h = harness();
     const first = await h.run('browser_open', { url: site.url('shop.test') });
-    await h.run('browser_type', { ref: refOf(first.content, /textbox "Name"/), element: 'name', text: 'Ada' });
+    let typed = await h.run('browser_type', { ref: refOf(first.content, /textbox "Name"/), element: 'name', text: 'Ada' });
+    // a key that the pattern finds, and a value that the app registered as a secret.
+    registerSecret(REGISTERED);
+    for (const secret of [PATTERN_KEY, REGISTERED]) typed = await h.run('browser_type', { ref: refOf(typed.content, /textbox "Name"/), element: 'name', text: secret });
+    expect(typed.isError).toBe(false);
     await h.run('browser_open', { url: site.url('shop.test', '/about') });
     await h.run('browser_close', {});
     const entries = traceEntries(join(h.dir, 'traces', 'task-1.zip'));
@@ -356,6 +365,9 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(text).toMatch(/"method":"goto"/);
     // the fill keeps what the agent typed. the tool_calls row of browser_type already stores the same text, redacted.
     expect(text).toMatch(/"method":"fill"[^\n]*"value":"Ada"/);
+    // a text with a secret is typed outside the trace.
+    expect(text).not.toContain(PATTERN_KEY);
+    expect(text).not.toContain(REGISTERED);
   });
 
   it('ends the task when chrome dies, and the next open starts chrome again', async () => {
