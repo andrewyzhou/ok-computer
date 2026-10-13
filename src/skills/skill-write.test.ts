@@ -39,6 +39,26 @@ describe('skill_write input', () => {
     expect(refused({ name: 'console' })).toBe(false);
   });
 
+  it('keeps the name rule for a new skill only, so a change can name a skill that the owner named by hand', () => {
+    const change = { replaces: true, base: skillVersion('x') };
+    for (const name of ['weekly_review', 'Expense-Report', 'con']) {
+      expect(refused({ ...change, name }), name).toBe(false);
+      expect(refused({ name }), name).toBe(true);
+    }
+    for (const name of ['', `weekly${char(0x200b)}`, `a${char(0x0a)}b`]) expect(refused({ ...change, name }), name).toBe(true);
+  });
+
+  it('refuses a run of 4 or more combining marks, which a reader draws over the lines next to it', () => {
+    const stack = (n: number) => Array.from({ length: n }, (_, i) => char(0x300 + i)).join('');
+    for (const field of ['body', 'description', 'why'] as const) {
+      expect(refused({ [field]: `x${stack(4)} book` }), field).toBe(true);
+      expect(refused({ [field]: `x${stack(3)} book` }), field).toBe(false);
+    }
+    expect(refused({ body: ['1. Book the event.', `x${stack(30).repeat(13)}`, '2. Confirm.'].join(char(0x0a)) })).toBe(true);
+    // a vietnamese letter has two marks, and a keycap has a selector and an enclosing mark.
+    expect(refused({ body: `vi${char(0x0323)}${char(0x0302)}t, press 1${char(0xfe0f)}${char(0x20e3)}` })).toBe(false);
+  });
+
   it('refuses a description of two lines and hidden characters in the body and in why', () => {
     expect(refused({ description: 'one\ntwo' })).toBe(true);
     expect(refused({ description: 'x'.repeat(201) })).toBe(true);
@@ -147,6 +167,14 @@ describe('the skill_write tool', () => {
     expect(await write(dir, change)).toEqual({ content: 'the skill calendar-booking is already saved with this text' });
     expect((await write(dir, { ...change, name: 'deleted-skill' })).content).toBe('the skill deleted-skill does not exist now, so the change was not written');
     expect(existsSync(join(dir, 'deleted-skill'))).toBe(false);
+  });
+
+  it('writes a change of a skill that the owner named by hand', async () => {
+    const old = ['---', 'name: weekly_review', 'description: old', '---', '', 'old steps', ''].join(char(0x0a));
+    const dir = folder({ weekly: old });
+    const change = { name: 'weekly_review', replaces: true, base: skillVersion(old), body: 'new steps' };
+    expect((await write(dir, change)).content).toBe(`changed the skill weekly_review. The old text was:${char(0x0a)}${old}`);
+    expect(loadSkills(dir).map((skill) => skill.name)).toEqual(['weekly_review']);
   });
 });
 

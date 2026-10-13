@@ -41,6 +41,15 @@ function hiddenIn(text: string): string | undefined {
   return undefined;
 }
 
+// a reader draws a long run of combining marks above and below its line, so the run can cover the lines next to it
+// on the card. real text puts at most three marks on one letter.
+const MARKS = /\p{M}{4,}/u;
+
+function marksIn(text: string): string | undefined {
+  const found = MARKS.exec(text);
+  return found ? `it has ${[...found[0]].length} combining marks in a row at position ${found.index}. Use at most 3 on one letter` : undefined;
+}
+
 // a skill has no reason to hold a secret. the card shows a secret as [redacted], and the file would get the real value.
 const noSecret = (text: string) => redact(text) === text;
 
@@ -52,6 +61,8 @@ const text = (limit: number) =>
     .superRefine((value, ctx) => {
       const hidden = hiddenIn(value);
       if (hidden) ctx.addIssue({ code: 'custom', message: `${hidden}. Remove it.` });
+      const marks = marksIn(value);
+      if (marks) ctx.addIssue({ code: 'custom', message: `${marks}.` });
       if (!noSecret(value)) ctx.addIssue({ code: 'custom', message: 'it holds a secret. A skill must not hold a secret.' });
     });
 
@@ -59,9 +70,9 @@ export const skillWriteInput = z
   .object({
     name: z
       .string()
+      .min(1)
       .max(64)
-      .regex(NAME, 'use lower-case words with single hyphens, for example "expense-report"')
-      .refine((name) => !DEVICE.test(name), 'this is a device name on windows. Choose another name.'),
+      .refine((name) => !hiddenIn(name), 'the name has a hidden or control character'),
     description: text(DESCRIPTION_LIMIT).refine((value) => !value.includes('\n'), 'the description is one line'),
     body: text(BODY_LIMIT).refine((value) => value.split('\n').length <= BODY_LINES, `the body has at most ${BODY_LINES} lines`),
     replaces: z.boolean(),
@@ -69,6 +80,13 @@ export const skillWriteInput = z
     // the card shows a hidden character of why as a \u code of six characters, so a why of them would make the card
     // too long for one telegram message.
     why: text(300),
+  })
+  // a new name becomes a folder name. a change writes to the file of the skill that has this exact name, so it keeps a
+  // name that the owner gave by hand, for example "weekly_review".
+  .superRefine((input, ctx) => {
+    if (input.replaces) return;
+    if (!NAME.test(input.name)) ctx.addIssue({ code: 'custom', message: 'use lower-case words with single hyphens, for example "expense-report"', path: ['name'] });
+    else if (DEVICE.test(input.name)) ctx.addIssue({ code: 'custom', message: 'this is a device name on windows. Choose another name.', path: ['name'] });
   })
   .refine((input) => !input.replaces || input.base !== undefined, { message: 'a change needs base: the version of the skill from the review input', path: ['base'] })
   // the loader trims a field and removes quotes around it, and it leaves out a skill without a description. so a
