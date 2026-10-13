@@ -191,6 +191,21 @@ describe('closeStaleWork', () => {
     });
   });
 
+  // an attempt that the integration did not send gives the approval back, and its row stays. a later approval that the
+  // process loses while it runs must still be found.
+  it('reports an interrupted approved call that has a row of an earlier attempt that did not send it', () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r1', 'main', 'message', 'main', 'completed', 'x')").run();
+    db.prepare(
+      "INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt, resolvedAt, startedAt) VALUES ('r1', 'notes__add_note', '{}', 'add', 'approved', 'x', ?, ?)",
+    ).run(ago(2 * hour), ago(2 * hour));
+    db.prepare(
+      "INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt) VALUES ('r1', 'approval-1', 'notes__add_note', '{}', '{}', 1, 0, ?)",
+    ).run(ago(3 * hour));
+    expect(closeStaleWork(db, now, hour).interrupted.map((each) => each.id)).toEqual([1]);
+    expect(db.prepare("SELECT outcome FROM tool_calls WHERE toolCallId = 'approval-1' ORDER BY id").all()).toEqual([{ outcome: null }, { outcome: 'interrupted' }]);
+  });
+
   // the service and npm run chat can sweep at the same moment. here the second sweep runs between the select of the
   // first sweep and its inserts. each call must get one row, one note and one message to the owner.
   it('reports an interrupted approved call one time when two processes sweep at the same moment', () => {

@@ -372,6 +372,72 @@ describe('mcp acceptance', () => {
     expect(db.prepare("SELECT count(*) AS n FROM mcp_messages WHERE method = 'tools/call' AND toolCallId LIKE 'approval-%'").get()).toEqual({ n: 0 });
   });
 
+  it('gives an approval back to the owner when its integration cannot take the call, and runs it at the next approval', async () => {
+    const { transport } = memoryServers();
+    const t = createTestApp([call('c1', 'notes__add_note', { note: 'buy milk' }), textStep('It waits for your approval.')], {
+      start,
+      deps: { integrations: [notesEntry()], mcpTransport: transport },
+    });
+    apps.push(t);
+    await t.app.start();
+    await expect.poll(() => t.app.integrations.status()[0]!.state.status).toBe('connected');
+    await t.say('add a note: buy milk');
+    const { id } = t.rows("SELECT id FROM approvals WHERE toolName = 'notes__add_note'")[0] as { id: number };
+    await t.app.integrations.setPaused('notes', true);
+
+    const reply = String(await t.app.resolveApproval(id, 'approve', 'dashboard'));
+    await t.settle();
+    expect(reply).toMatch(/^Approved #\d+\. The tool did not run: /);
+    expect(reply).toContain('notes__add_note did not run: the owner paused the notes integration.');
+    expect(reply).toContain(`Approval #${id} waits again`);
+    const notes = () =>
+      listEvents(t.db, 'main')
+        .filter((event) => event.type === 'system_event')
+        .map((event) => (event.payload as { text: string }).text);
+    expect(notes().find((text) => text.includes(`approved #${id}`))).toContain(`The tool did not run, so approval #${id} waits for the owner again.`);
+    expect(t.rows('SELECT status, startedAt, resolvedAt FROM approvals WHERE id = ?', id)).toEqual([{ status: 'pending', startedAt: null, resolvedAt: null }]);
+    expect(t.rows("SELECT count(*) AS n FROM mcp_messages WHERE method = 'tools/call'")).toEqual([{ n: 0 }]);
+
+    await t.app.integrations.setPaused('notes', false);
+    await expect.poll(() => t.app.integrations.status()[0]!.state.status).toBe('connected');
+    expect(String(await t.app.resolveApproval(id, 'approve', 'dashboard'))).toMatch(/^Approved #\d+\. Result: /);
+    expect(t.rows("SELECT direction FROM mcp_messages WHERE method = 'tools/call' AND toolCallId = ?", `approval-${id}`)).toEqual([
+      { direction: 'out' },
+      { direction: 'in' },
+    ]);
+    expect(t.rows('SELECT status FROM approvals WHERE id = ?', id)).toEqual([{ status: 'approved' }]);
+  });
+
+  it('tells the owner that an abandoned approved call that ends without an answer still has an unknown effect', async () => {
+    const { transport } = memoryServers();
+    const t = createTestApp([call('c1', 'notes__hang'), textStep('It waits for you.')], {
+      start,
+      // the approved call gets this long before it is abandoned.
+      config: { agent: { backgroundTimeoutMs: 300 } },
+      deps: { integrations: [notesEntry({ tools: { allow: ['hang'] }, risk: {} })], mcpTransport: transport },
+    });
+    apps.push(t);
+    await t.app.start();
+    await expect.poll(() => t.app.integrations.status()[0]!.state.status).toBe('connected');
+    await t.say('run hang');
+    const { id } = t.rows("SELECT id FROM approvals WHERE toolName = 'notes__hang'")[0] as { id: number };
+    expect(String(await t.app.resolveApproval(id, 'approve', 'dashboard'))).toContain('You get a message if it finishes later.');
+
+    // a pause ends the call without an answer, as a restart, a crash of the server and the 1 h limit do.
+    const before = t.printed().length;
+    await t.app.integrations.setPaused('notes', true);
+    await t.settle();
+    const told = t.printed().slice(before);
+    expect(told).toContain(`Approval #${id} (notes__hang) ended without an answer, so its effect is still unknown`);
+    expect(told).not.toContain('finished after all');
+    expect(t.rows('SELECT outcome FROM tool_calls WHERE toolCallId = ?', `approval-${id}`)).toEqual([{ outcome: 'abandoned' }]);
+    const note = listEvents(t.db, 'main')
+      .filter((event) => event.type === 'system_event')
+      .map((event) => (event.payload as { text: string }).text)
+      .find((text) => text.includes('after its run stopped'));
+    expect(note).toContain('ended after its run stopped, but no answer came, so its effect is still unknown');
+  });
+
   it('reads every page of a tool list, so a tool on the second page can be found and called', async () => {
     const paged = async (): Promise<Transport> => {
       const [client, server] = InMemoryTransport.createLinkedPair();

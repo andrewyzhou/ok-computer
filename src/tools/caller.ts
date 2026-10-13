@@ -57,13 +57,15 @@ export interface ToolCaller {
   notRun(call: ToolCall, ctx: CallContext, text: string): ToolOutput;
   // callApproved runs the stored input of an approval one time. the call goes into the trace of the original run.
   // started tells whether the tool began to run, so the note to the session does not say that a skipped call ran.
-  // abandoned tells that the tool started and did not finish before the signal, so its effect is unknown. onLate gets
-  // the redacted view of a result that comes after that, because the owner who approved the call must learn it.
+  // again tells that the tool did not act, for example because its integration was not connected, so the approval
+  // waits for the owner again. abandoned tells that the tool started and did not finish before the signal, so its
+  // effect is unknown. onLate gets the redacted view of a result that comes after that, because the owner who approved
+  // the call must learn it. a late output with the effect unknown ended without an answer.
   callApproved(
     approval: Approval,
     signal: AbortSignal,
     onLate?: (late: ToolOutput) => void,
-  ): Promise<{ started: boolean; abandoned?: boolean; output: ToolOutput }>;
+  ): Promise<{ started: boolean; again?: boolean; abandoned?: boolean; output: ToolOutput }>;
 }
 
 interface Trace {
@@ -180,6 +182,8 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
   // so the model does not repeat an action that worked.
   const recordLate = (runId: string, sessionKey: string, call: ToolCall, rowId: number | undefined, late: ToolOutput) => {
     const { clean, view } = viewOf(late);
+    // a call that ended without an answer did not finish. the row stays abandoned, because its effect is still unknown.
+    const unknown = late.effect === 'unknown';
     let rawResultBlob: string | null = null;
     try {
       rawResultBlob = blobs.put(clean.content);
@@ -189,23 +193,25 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
     try {
       if (rowId !== undefined) {
         db.prepare(
-          "UPDATE tool_calls SET outcome = 'late', isError = ?, rawResultBlob = ?, resultHandle = ?, untrustedSource = ? WHERE id = ?",
-        ).run(late.isError ? 1 : 0, rawResultBlob, view.handle ?? null, clean.untrustedSource ?? null, rowId);
+          'UPDATE tool_calls SET outcome = ?, isError = ?, rawResultBlob = ?, resultHandle = ?, untrustedSource = ? WHERE id = ?',
+        ).run(unknown ? 'abandoned' : 'late', late.isError ? 1 : 0, rawResultBlob, view.handle ?? null, clean.untrustedSource ?? null, rowId);
       }
-      logger.warn('an abandoned tool call finished late', { runId, toolCallId: call.id, tool: call.name });
+      logger.warn(unknown ? 'an abandoned tool call ended without an answer' : 'an abandoned tool call finished late', { runId, toolCallId: call.id, tool: call.name });
     } catch (err) {
       logger.error('late tool result trace write failed', { runId, toolCallId: call.id, tool: call.name, err });
     }
     const taint: TaintSource[] = clean.untrustedSource
       ? [{ source: clean.untrustedSource, toolName: call.name, runId, toolCallId: call.id, at: clock().toISOString() }]
       : [];
-    const text = `${call.name} (call ${call.id}) finished after its run stopped.${late.isError ? ' It failed.' : ''} Result:\n${view.content}`;
+    const text = unknown
+      ? `${call.name} (call ${call.id}) ended after its run stopped, but no answer came, so its effect is still unknown:\n${view.content}`
+      : `${call.name} (call ${call.id}) finished after its run stopped.${late.isError ? ' It failed.' : ''} Result:\n${view.content}`;
     void deps.queue
       .enqueue(sessionKey, async () => {
         appendEvent(db, { sessionKey, runId: null, type: 'system_event', payload: { text, ...(taint.length ? { taint } : {}) } }, clock());
       })
       .catch((err: unknown) => logger.error('late tool result event failed', { runId, toolCallId: call.id, err }));
-    return { content: view.content, ...(late.isError ? { isError: true } : {}) };
+    return { content: view.content, ...(late.isError ? { isError: true } : {}), ...(unknown ? { effect: 'unknown' as const } : {}) };
   };
 
   // a tool that ignores the abort signal keeps running. the run does not wait for it, so a stuck tool cannot hold the
@@ -240,6 +246,21 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
   };
 
   const strip = ({ rowId: _rowId, ...output }: ToolOutput & { rowId?: number }): ToolOutput => output;
+
+  // a tool that did not act gives the approval back to the owner, for example when its integration was paused or not
+  // connected yet. the owner can then approve it again, until it expires like every pending approval.
+  const release = (approval: Approval): boolean => {
+    try {
+      return (
+        db
+          .prepare("UPDATE approvals SET status = 'pending', startedAt = NULL, resolvedAt = NULL, resolvedBy = NULL WHERE id = ? AND status = 'approved'")
+          .run(approval.id).changes === 1
+      );
+    } catch (err) {
+      logger.error('approval release failed', { runId: approval.runId, approvalId: approval.id, err });
+      return false;
+    }
+  };
 
   // check decides the call and writes the decision. it ends before the tool runs, so a failure here is safe. the
   // decision row comes before the request to the owner, so an approval never exists without its decision.
@@ -385,12 +406,15 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         return { started: false, output: strip(record(approval.runId, call, output, started, trace)) };
       }
       let abandoned = false;
+      let acted = true;
       const finish = (output: ToolOutput, outcome?: 'abandoned') => {
         abandoned = outcome === 'abandoned';
+        acted = output.effect !== 'none';
         return record(approval.runId, call, output, started, { ...trace, risk: resolved.tool.risk, ...sourceOf(resolved.tool), ...(outcome ? { outcome } : {}) });
       };
       // no await comes between the check of the signal and this line, so the tool starts.
       const output = strip(await run(resolved.tool, resolved.input, toolCtx, call, finish, onLate));
+      if (!acted) return { started: false, ...(release(approval) ? { again: true } : {}), output };
       return { started: true, ...(abandoned ? { abandoned } : {}), output };
     },
   };

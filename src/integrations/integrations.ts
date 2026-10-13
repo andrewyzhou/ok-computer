@@ -241,7 +241,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
         // a call does not wait for a server that is not connected. a wait would hold the session queue, and the tool
         // did not run, so the model can safely try again.
         const why = unavailable(entry.id, ctx.timeZone);
-        if (why) return { content: `${item.name} did not run: ${why}`, isError: true };
+        if (why) return { content: `${item.name} did not run: ${why}`, isError: true, effect: 'none' };
         const outcome = await connection.callTool(item.mcpName, input as Record<string, unknown>, { runId: ctx.runId, toolCallId: ctx.toolCallId ?? '' });
         return outcomeOutput(item.name, entry.id, outcome);
       },

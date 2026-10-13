@@ -20,6 +20,10 @@ export interface ToolOutput {
   // a tool that returns text from outside the owner names its source here. the tool caller wraps the text as
   // untrusted and marks the session as tainted.
   untrustedSource?: string;
+  // effect says what a failed output means for the world. none: the tool did not act, for example because an
+  // integration did not send the request, so a retry is safe. unknown: the request left, but no answer came. without
+  // it, the caller assumes that the tool ran.
+  effect?: 'none' | 'unknown';
 }
 
 export interface Tool<I = unknown> {

@@ -157,7 +157,7 @@ export function outcomeOutput(name: string, server: string, outcome: CallOutcome
     case 'result':
       return { content: resultText(outcome.result), ...(outcome.result.isError ? { isError: true } : {}) };
     case 'not_sent':
-      return { content: `${name} did not run: ${outcome.reason}`, isError: true };
+      return { content: `${name} did not run: ${outcome.reason}`, isError: true, effect: 'none' };
     case 'refused':
       return { content: `${name} did not run. ${server} answered with error ${outcome.code}: ${outcome.message}`, isError: true };
     case 'unknown':
@@ -170,6 +170,7 @@ export function outcomeOutput(name: string, server: string, outcome: CallOutcome
       return {
         content: `${name} was sent to ${server}, but no answer came (${outcome.reason}). Its effect is unknown. Check the result before you try it again.`,
         isError: true,
+        effect: 'unknown',
       };
   }
 }

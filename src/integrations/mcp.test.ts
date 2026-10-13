@@ -342,6 +342,14 @@ describe('mcp connection failure modes', () => {
     expect(shape.calls).toEqual(['stamp', 'text_only', 'slow_check', 'garbled']);
   });
 
+  it('marks the effect of each outcome, so an approval and a late note can say what happened', () => {
+    expect(outcomeOutput('notes__x', 'notes', { kind: 'not_sent', reason: 'paused' }).effect).toBe('none');
+    expect(outcomeOutput('notes__x', 'notes', { kind: 'unknown', reason: 'Connection closed' }).effect).toBe('unknown');
+    // the server answered, so the tool ran or refused. neither is unknown, and a refusal can come after a part acted.
+    expect(outcomeOutput('notes__x', 'notes', { kind: 'unknown', reason: 'bad block', answered: true }).effect).toBeUndefined();
+    expect(outcomeOutput('notes__x', 'notes', { kind: 'refused', code: -32602, message: 'bad' }).effect).toBeUndefined();
+  });
+
   it('sends no ping during a call, so a server with one thread is not closed in the middle of its work', async () => {
     const { connection, messages, fire } = setup(memoryTransport());
     await connection.start();
