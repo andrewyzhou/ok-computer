@@ -7,9 +7,14 @@ import type { DetectorHit } from './store.js';
 const DIGEST_LIMIT = 20;
 // an unhandled signal older than this is no longer news. it is closed without a model call.
 const STALE_MS = 3 * 24 * 60 * 60_000;
+// after this many failed heartbeat runs that showed a signal, the digest shows it without its outside text. a text
+// that makes each run fail (for example a refusal of the model) would else fail every heartbeat until the scheduler
+// turns the heartbeat off. two runs, so one failure of the model or the network keeps the text.
+const HOLD_AFTER_FAILURES = 2;
 
 export interface Digest {
-  // the signals that the heartbeat sees, newest first.
+  // the signals that the heartbeat sees: the ones with a detector hit first, then the deadline and needs_reply labels,
+  // then the rest, each part newest first.
   shown: number[];
   // newsletters and noise without a detector hit, and events that already started. the owner never needs them, so
   // they are closed as filtered without a model call.
@@ -28,6 +33,7 @@ interface Row {
   occursAt: string | null;
   detectors: string | null;
   seenAt: string;
+  heartbeatFailures: number;
 }
 
 // a row that the detectors did not check yet is never quiet, so a failed detector run shows more, never less.
@@ -47,10 +53,10 @@ export function signalDigest(db: Db, now: Date, timeZone: string): Digest | unde
   // while a poll runs. after a failed detector run no poll runs, so the mail shows unchecked.
   const open = db
     .prepare(
-      `SELECT id, source, account, kind, summary, label, occursAt, detectors, seenAt FROM integration_events
+      `SELECT id, source, account, kind, summary, label, occursAt, detectors, seenAt, heartbeatFailures FROM integration_events
        WHERE handledAt IS NULL AND state = 'ready'
          AND NOT (source = 'gmail' AND detectors IS NULL AND EXISTS (SELECT 1 FROM runs WHERE trigger = 'poll' AND status = 'running'))
-       ORDER BY id DESC`,
+       ORDER BY (detectors IS NOT NULL AND detectors != '[]') DESC, COALESCE(label IN ('deadline', 'needs_reply'), 0) DESC, id DESC`,
     )
     .all() as unknown as Row[];
   const filtered = open.filter((row) => quiet(row, now));
@@ -59,6 +65,11 @@ export function signalDigest(db: Db, now: Date, timeZone: string): Digest | unde
   const when = (iso: string) => new Date(iso).toLocaleString('en-US', { timeZone, dateStyle: 'medium', timeStyle: 'short' });
   const lines = shown.map((row) => {
     const hits = row.detectors ? (JSON.parse(row.detectors) as DetectorHit[]) : [];
+    // the detail of a hit quotes the subject, so a held signal shows only the names of its hits.
+    if (row.heartbeatFailures >= HOLD_AFTER_FAILURES) {
+      const names = hits.map((hit) => hit.name).join(', ');
+      return `#${row.id} ${row.kind}${row.label ? `/${row.label}` : ''} ${row.source}:${row.account}: (text held back, because ${row.heartbeatFailures} heartbeat runs that showed it failed. The Signals page shows it.)${names ? ` detectors: ${names}` : ''}`;
+    }
     return [
       `#${row.id} ${row.kind}${row.label ? `/${row.label}` : ''} ${row.source}:${row.account}${row.occursAt ? ` (${when(row.occursAt)})` : ''}: ${row.summary ?? ''}`,
       ...hits.map((hit) => `  detector ${hit.name}: ${hit.detail}`),
@@ -67,7 +78,7 @@ export function signalDigest(db: Db, now: Date, timeZone: string): Digest | unde
   const sources = [...new Set(shown.map((row) => `${row.source}:${row.account}`))];
   // the oldest shown signal of each source names where the text came from, like the first tool call of a source.
   const taint = sources.map((source) => {
-    const first = [...shown].reverse().find((row) => `${row.source}:${row.account}` === source)!;
+    const first = shown.filter((row) => `${row.source}:${row.account}` === source).reduce((a, b) => (a.id < b.id ? a : b));
     return { source, toolName: `${first.source} poll`, runId: null, toolCallId: `signal:${first.id}`, at: first.seenAt };
   });
   return {
@@ -86,4 +97,11 @@ export function finishDigest(db: Db, digest: Digest, runId: string | null, notif
   const at = now.toISOString();
   for (const id of digest.shown) mark.run(at, notified ? 'notified' : 'seen', runId, id);
   for (const id of digest.filtered) mark.run(at, 'filtered', runId, id);
+}
+
+// a failed heartbeat run leaves its signals open. each shown signal counts the failure, so a signal whose text makes
+// the runs fail loses its text after two runs, and the next run can finish.
+export function noteFailedDigest(db: Db, digest: Digest): void {
+  const note = db.prepare('UPDATE integration_events SET heartbeatFailures = heartbeatFailures + 1 WHERE id = ? AND handledAt IS NULL');
+  for (const id of digest.shown) note.run(id);
 }

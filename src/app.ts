@@ -24,7 +24,7 @@ import { appendToDailyNote, sessionExcerpt } from './memory/daily.js';
 import { createMemoryTools } from './memory/tools.js';
 import { createGoogle, syncGooglePoll, type Google } from './google/google.js';
 import type { GoogleEndpoints } from './google/accounts.js';
-import { finishDigest, signalDigest, type Digest } from './signals/digest.js';
+import { finishDigest, noteFailedDigest, signalDigest, type Digest } from './signals/digest.js';
 import { sessionProfile, type IntegrationEntry } from './integrations/config.js';
 import { createIntegrations, type Integrations, type IntegrationsDeps } from './integrations/integrations.js';
 import { createOAuth } from './integrations/oauth.js';
@@ -269,6 +269,7 @@ export function createApp(deps: AppDeps): App {
           signals: {
             digest: (now: Date) => signalDigest(db, now, config.timeZone),
             finish: (digest: Digest, runId: string | null, notified: boolean, now: Date) => finishDigest(db, digest, runId, notified, now),
+            failed: (digest: Digest) => noteFailedDigest(db, digest),
           },
         }
       : {}),

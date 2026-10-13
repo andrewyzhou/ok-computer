@@ -142,6 +142,8 @@ export interface HeartbeatDeps {
   signals?: {
     digest(now: Date): Digest | undefined;
     finish(digest: Digest, runId: string | null, notified: boolean, now: Date): void;
+    // a failed run that showed signals counts against each of them.
+    failed(digest: Digest): void;
   };
 }
 
@@ -173,7 +175,7 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
       ...(digest?.shown.length
         ? [
             '',
-            "New signals from the owner's accounts, newest first. Tell the owner about a signal only when it needs attention soon, for example a deadline that is not on the calendar. Each signal is shown one time.",
+            "New signals from the owner's accounts: the ones with a detector hit first, then the newest. Tell the owner about a signal only when it needs attention soon, for example a deadline that is not on the calendar. Each signal is shown one time.",
             digest.text,
           ]
         : []),
@@ -197,8 +199,13 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
         signal: deps.signal,
       }),
     );
-    // a failed run leaves the signals unhandled, so the next heartbeat shows them again.
-    if (result.status !== 'completed') return { status: 'failed', runId, error: result.error ?? result.status };
+    // a failed run leaves the signals unhandled, so the next heartbeat shows them again. a failure counts against the
+    // shown signals, so a signal whose text makes every run fail loses that text, and the scheduler does not turn the
+    // heartbeat off. an aborted run (a stop of the app) does not count.
+    if (result.status !== 'completed') {
+      if (result.status === 'failed' && digest?.shown.length) deps.signals!.failed(digest);
+      return { status: 'failed', runId, error: result.error ?? result.status };
+    }
 
     // the answer comes from the event log, because one failed trace write must not drop the owner's notification.
     const answer = succeededCalls(db, sessionKey, runId, 'heartbeat_respond').at(-1) as Respond | undefined;

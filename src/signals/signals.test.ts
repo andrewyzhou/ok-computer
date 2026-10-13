@@ -9,7 +9,7 @@ import { createRunQueue } from '../sessions/queue.js';
 import { createHeartbeat } from '../scheduler/heartbeat.js';
 import { classifySignals } from './classify.js';
 import { dateHits, mentionedDates, soonSignals, type CalendarItem } from './detectors.js';
-import { finishDigest, signalDigest, type Digest } from './digest.js';
+import { finishDigest, noteFailedDigest, signalDigest, type Digest } from './digest.js';
 import { addSignals, saveHits } from './store.js';
 
 const TZ = 'America/Los_Angeles';
@@ -153,8 +153,36 @@ describe('digest', () => {
     mail(db, 'unchecked', 'promo', 'noise');
     const digest = signalDigest(db, NOW, TZ)!;
     expect(digest.filtered).toEqual([1]);
-    expect(digest.shown).toEqual([3, 2]);
+    expect(digest.shown).toEqual([2, 3]);
     expect(digest.text).toContain('detector date_not_on_calendar: mentions "Oct 20"');
+  });
+
+  // round 4: sixty instances of one recurring invitation must not hold a deadline out of the heartbeat.
+  it('shows detector hits first, then deadline and needs_reply labels, then the newest', () => {
+    const db = openDb(':memory:');
+    const due = mail(db, 'due', 'Essay due tomorrow');
+    saveHits(db, due, [{ name: 'date_not_on_calendar', detail: 'mentions "tomorrow"' }]);
+    const reply = mail(db, 'reply', 'can you answer', 'needs_reply');
+    for (let i = 0; i < 30; i++) addSignals(db, [{ source: 'calendar', account: 'school', externalId: `standup${i}`, kind: 'invite', state: 'ready', summary: 'Team standup' }], NOW);
+    const digest = signalDigest(db, NOW, TZ)!;
+    expect(digest.shown.slice(0, 3)).toEqual([due, reply, 32]);
+    expect(digest.shown).toHaveLength(20);
+  });
+
+  // round 4: a text that makes every heartbeat run fail must not stop the heartbeat. after two failed runs that
+  // showed it, the signal shows without its outside text.
+  it('holds back the text of a signal after two failed heartbeat runs that showed it', () => {
+    const db = openDb(':memory:');
+    const id = mail(db, 'poison', 'POISON subject');
+    saveHits(db, id, [{ name: 'date_not_on_calendar', detail: 'mentions "POISON"' }]);
+    noteFailedDigest(db, signalDigest(db, NOW, TZ)!);
+    expect(signalDigest(db, NOW, TZ)!.text).toContain('POISON');
+    noteFailedDigest(db, signalDigest(db, NOW, TZ)!);
+    const held = signalDigest(db, NOW, TZ)!;
+    expect(held.shown).toEqual([id]);
+    expect(held.text).not.toContain('POISON');
+    expect(held.text).toContain('text held back');
+    expect(held.text).toContain('detectors: date_not_on_calendar');
   });
 
   it('marks shown signals notified or seen, and the filtered ones filtered', () => {
@@ -175,7 +203,11 @@ describe('digest', () => {
 describe('heartbeat with signals', () => {
   const digest: Digest = { shown: [7], filtered: [8], text: 'x', taint: [] };
   type Finished = Array<[Digest, string | null, boolean]>;
-  const heartbeat = (status: 'completed' | 'failed', finished: Finished, options: { notify?: boolean; shown?: number[]; send?: (text: string) => Promise<boolean> } = {}) => {
+  const heartbeat = (
+    status: 'completed' | 'failed' | 'aborted',
+    finished: Finished,
+    options: { notify?: boolean; shown?: number[]; send?: (text: string) => Promise<boolean>; failed?: number[][] } = {},
+  ) => {
     const db = openDb(':memory:');
     return createHeartbeat({
       db,
@@ -195,15 +227,24 @@ describe('heartbeat with signals', () => {
       },
       signal: new AbortController().signal,
       newId: () => 'r1',
-      signals: { digest: () => ({ ...digest, shown: options.shown ?? digest.shown }), finish: (d, runId, notified) => void finished.push([d, runId, notified]) },
+      signals: {
+        digest: () => ({ ...digest, shown: options.shown ?? digest.shown }),
+        finish: (d, runId, notified) => void finished.push([d, runId, notified]),
+        failed: (d) => void options.failed?.push(d.shown),
+      },
     });
   };
   const automation = { slot: 'heartbeat' } as never;
 
   it('runs without a checklist when signals wait, and marks them only after a completed run', async () => {
     const finished: Finished = [];
-    expect(await heartbeat('failed', finished)(automation)).toMatchObject({ status: 'failed' });
+    const failed: number[][] = [];
+    expect(await heartbeat('failed', finished, { failed })(automation)).toMatchObject({ status: 'failed' });
     expect(finished).toEqual([]);
+    // the failure counts against the shown signals. a stop of the app does not.
+    expect(failed).toEqual([[7]]);
+    await heartbeat('aborted', finished, { failed })(automation);
+    expect(failed).toEqual([[7]]);
     expect(await heartbeat('completed', finished, { notify: false })(automation)).toMatchObject({ status: 'completed' });
     expect(finished).toEqual([[digest, 'r1', false]]);
   });
