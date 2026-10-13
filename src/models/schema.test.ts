@@ -83,6 +83,26 @@ describe('schema normalization of hostile schemas', () => {
     expect(JSON.stringify(normalizeSchema(deep, 'openai-compat'))).toContain('too deep');
   });
 
+  it('puts a reference in place in every keyword, so no reference points to the removed $defs', () => {
+    const out = normalizeSchema(
+      {
+        type: 'object',
+        properties: {
+          pair: { type: 'array', prefixItems: [{ $ref: '#/$defs/Name' }] },
+          other: { not: { $ref: '#/$defs/Name' } },
+          when: { if: { $ref: '#/$defs/Name' }, then: { $ref: '#/$defs/Name' } },
+          tags: { type: 'object', patternProperties: { '^t': { $ref: '#/$defs/Name' } } },
+        },
+        $defs: { Name: { type: 'string' } },
+      },
+      'openai-compat',
+    ) as { properties: Record<string, Record<string, unknown>> };
+    expect(JSON.stringify(out)).not.toContain('$ref');
+    expect(out.properties.pair!.prefixItems).toEqual([{ type: 'string' }]);
+    expect(out.properties.other!.not).toEqual({ type: 'string' });
+    expect(out.properties.tags!.patternProperties).toEqual({ '^t': { type: 'string' } });
+  });
+
   it('gives the same bytes for the same schema, so the tools parameter stays stable', () => {
     expect(JSON.stringify(normalizeSchema(schema, 'openai-compat'))).toBe(JSON.stringify(normalizeSchema(structuredClone(schema), 'openai-compat')));
   });

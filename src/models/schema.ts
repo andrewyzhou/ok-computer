@@ -35,18 +35,29 @@ function plain(schema: Schema, defs: Schema, seen: string[], depth: number, budg
     if (!name || !isSchema(target) || seen.includes(name)) return { ...siblings, ...(siblings.description ? {} : { description: 'any value' }) };
     return plain({ ...target, ...siblings }, defs, [...seen, name], depth, budget);
   }
-  let out: Schema = { ...schema };
+  // the walk goes into every value and not only into a list of keywords, because the $defs are gone, and a reference
+  // that it misses, for example in prefixItems or not, would point to nothing. the unions come after it, and their
+  // variants get their own walk.
+  let out: Schema = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (DATA.has(key) || UNIONS.has(key)) out[key] = value;
+    else if (NAME_MAPS.has(key) && isSchema(value)) {
+      out[key] = Object.fromEntries(Object.entries(value).map(([name, each]) => [name, isSchema(each) ? next(each) : each]));
+    } else if (isSchema(value)) out[key] = next(value);
+    else if (Array.isArray(value)) out[key] = value.map((each) => (isSchema(each) ? next(each) : each));
+    else out[key] = value;
+  }
   for (const key of ['anyOf', 'oneOf'] as const) {
     if (Array.isArray(out[key])) out = { ...withoutKey(out, key), ...simplifyUnion(out[key] as unknown[], next) };
   }
   if (Array.isArray(out.allOf)) out = mergeAll(withoutKey(out, 'allOf'), (out.allOf as unknown[]).filter(isSchema).map(next));
-  if (isSchema(out.properties)) {
-    out.properties = Object.fromEntries(Object.entries(out.properties).map(([key, value]) => [key, isSchema(value) ? next(value) : value]));
-  }
-  if (isSchema(out.items)) out.items = next(out.items);
-  if (isSchema(out.additionalProperties)) out.additionalProperties = next(out.additionalProperties);
   return out;
 }
+
+// the keywords whose value maps a name to a schema, the keywords whose value is data, and the unions.
+const NAME_MAPS = new Set(['properties', 'patternProperties', 'dependentSchemas', 'dependencies']);
+const DATA = new Set(['const', 'enum', 'default', 'examples', 'required']);
+const UNIONS = new Set(['anyOf', 'oneOf', 'allOf']);
 
 // a null variant only makes a field nullable. the model can leave out the field instead.
 function simplifyUnion(variants: unknown[], next: (part: Schema) => Schema): Schema {
