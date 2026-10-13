@@ -10,7 +10,7 @@ import { redactedJson } from '../observability/redact.js';
 import type { Clock } from '../time.js';
 import { errorText } from '../tools/registry.js';
 import type { Egress } from '../web/egress.js';
-import { allowedBy, guardContext, guardTab, siteOf, type Blocked, type TabRules } from './gate.js';
+import { allowedBy, guardContext, guardTab, siteOf, type Blocked, type Sent, type TabRules } from './gate.js';
 
 export interface BrowserDeps {
   db: Db;
@@ -71,6 +71,8 @@ export interface StepResult {
   title: string;
   snapshot?: string;
   blocked: Blocked[];
+  // the requests that an approved submit let out, other than get.
+  sent: Sent[];
   stepId?: number;
   taskId: string;
 }
@@ -88,6 +90,7 @@ interface Tab {
   allowlist: Set<string>;
   submit: boolean;
   blocked: Blocked[];
+  sent: Sent[];
   console: string[];
   lastUsed: number;
   queue: Promise<unknown>;
@@ -251,11 +254,13 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   async function newTab(ctx: BrowserContext, kind: Tab['kind'], step: StepInput, allowlist: string[]): Promise<Tab> {
     const page = await ctx.newPage();
     owned.add(page);
-    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), submit: false, blocked: [], console: [], lastUsed: Date.now(), queue: Promise.resolve() } as unknown as Tab;
+    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), submit: false, blocked: [], sent: [], console: [], lastUsed: Date.now(), queue: Promise.resolve() } as unknown as Tab;
     tab.rules = {
       allows: (host) => allowedBy(tab.allowlist, host),
       submitting: () => tab.submit,
       onBlocked: (blocked) => void tab.blocked.push(blocked),
+      // the route and the cdp layer both see the first request of a page, so one request comes here twice.
+      onSent: (sent) => void (tab.sent.some((each) => each.method === sent.method && each.url === sent.url) || tab.sent.push(sent)),
     };
     page.setDefaultTimeout(t.action);
     page.setDefaultNavigationTimeout(t.navigation);
@@ -351,7 +356,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       const row = db
         .prepare(
           `INSERT INTO browser_steps (taskId, runId, toolCallId, action, target, urlBefore, urlAfter, snapshotBlob, screenshotBlob,
-             consoleErrors, blockedRequests, error, durationMs, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+             consoleErrors, blockedRequests, sent, error, durationMs, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
         )
         .get(
           tab.id,
@@ -365,6 +370,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
           screenshotBlob,
           tab.console.length ? redactedJson(tab.console) : null,
           tab.blocked.length ? redactedJson(tab.blocked) : null,
+          tab.sent.length ? redactedJson(tab.sent) : null,
           data.error ?? null,
           Math.round(performance.now() - data.started),
           now(),
@@ -395,6 +401,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       tab.lastUsed = Date.now();
       lastActivity = Date.now();
       tab.blocked = [];
+      tab.sent = [];
       tab.console = [];
       const urlBefore = tab.page.url();
       let note = '';
@@ -409,7 +416,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       const shot = await capture(tab);
       const urlAfter = tab.page.url();
       const stepId = record(tab, input, { urlBefore, urlAfter, snapshot: shot.snapshot, png: shot.png, started, ...(error || shot.errors.length ? { error: [error, ...shot.errors].filter(Boolean).join('; ') } : {}) });
-      const base = { url: urlAfter, blocked: [...tab.blocked], taskId: tab.id, ...(shot.snapshot !== undefined ? { snapshot: shot.snapshot } : {}), ...(stepId ? { stepId } : {}) };
+      const base = { url: urlAfter, blocked: [...tab.blocked], sent: [...tab.sent], taskId: tab.id, ...(shot.snapshot !== undefined ? { snapshot: shot.snapshot } : {}), ...(stepId ? { stepId } : {}) };
       // a page that answers neither capture is hung, for example by a loop in its script. closing the tab is the only
       // way back (probe p5), and the next browser_open starts a new task.
       if (shot.errors.length === 2 && /Timeout/.test(shot.errors.join(' '))) {

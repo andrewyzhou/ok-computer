@@ -79,8 +79,43 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     const buy = await h.run('browser_click', { ref: refOf(first.content, /button "Buy now"/) });
     expect(buy).toMatchObject({ isError: true, content: expect.stringContaining('Use browser_submit') });
     const save = await h.run('browser_click', { ref: refOf(first.content, /button "Save"/) });
-    expect(save.content).toContain('tried to send a form (POST)');
+    expect(save.content).toContain('tried to send data (POST)');
     expect(site.hitsOn('shop.test').filter((hit) => hit.path === '/buy')).toEqual([]);
+  });
+
+  it('sends no post from a script outside a submit: fetch, xhr and a beacon', async () => {
+    const h = harness();
+    let page = await h.run('browser_open', { url: site.url('shop.test', '/scripts') });
+    for (const button of ['Fetch post', 'Xhr post', 'Beacon']) {
+      const before = h.steps().length;
+      await h.run('browser_click', { ref: refOf(page.content, new RegExp(`button "${button}"`)) });
+      // the script sends after the click returns, so the next step sees the block too.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      page = await h.run('browser_snapshot', {});
+      const blocked = h.steps().slice(before).flatMap((step) => (step.blockedRequests ? JSON.parse(String(step.blockedRequests)) : []));
+      expect(blocked, button).toContainEqual({ url: site.url('shop.test', '/api/save'), reason: expect.stringContaining('send data (POST)') });
+    }
+    expect(site.hitsOn('shop.test').filter((hit) => hit.method !== 'GET')).toEqual([]);
+  });
+
+  it('lets a click send a get form, such as a search box', async () => {
+    const h = harness();
+    const first = await h.run('browser_open', { url: site.url('shop.test', '/search') });
+    const out = await h.run('browser_click', { ref: refOf(first.content, /button "Search"/) });
+    expect(out.isError).toBe(false);
+    expect(out.content).toContain('Found shirts');
+    expect(site.hitsOn('shop.test').filter((hit) => hit.path.startsWith('/find'))).toEqual([expect.objectContaining({ method: 'GET', path: '/find?q=shirts' })]);
+  });
+
+  it('blocks a 307 hop of an approved post to an off-list host', async () => {
+    const h = harness();
+    await h.run('browser_open', { url: site.url('shop.test', '/pay') });
+    const out = await h.run('browser_submit', { url: site.url('shop.test', '/pay'), button: 'Pay', fields: { amount: '5' } });
+    expect(site.hitsOn('evil.test')).toEqual([]);
+    expect(site.hitsOn('shop.test').filter((hit) => hit.method === 'POST')).toEqual([expect.objectContaining({ path: '/pay-go', body: 'amount=5' })]);
+    expect(out.content).toContain(site.url('evil.test', '/steal'));
+    const last = h.steps().at(-1)!;
+    expect(JSON.parse(String(last.blockedRequests))).toContainEqual(expect.objectContaining({ url: site.url('evil.test', '/steal') }));
   });
 
   it('submits only when the page, the button and the fields are what the input says', async () => {
@@ -95,6 +130,9 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(sent.isError).toBe(false);
     expect(sent.content).toContain('Order placed');
     expect(site.hitsOn('shop.test').filter((hit) => hit.path === '/buy')).toEqual([expect.objectContaining({ method: 'POST', body: 'name=Ada&size=S&csrf=t0k3n' })]);
+    // the step lists what the submit let out: one post, once, although both layers of the gate saw it.
+    expect(JSON.parse(String(h.steps().at(-1)!.sent))).toEqual([{ method: 'POST', url: site.url('shop.test', '/buy') }]);
+    expect(sent.content).toContain(`POST ${site.url('shop.test', '/buy')}`);
   });
 
   it('opens an off-list site only after browser_allow_domain', async () => {

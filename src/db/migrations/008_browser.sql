@@ -21,7 +21,8 @@ CREATE INDEX browser_tasks_started ON browser_tasks (startedAt);
 CREATE INDEX browser_tasks_open ON browser_tasks (status) WHERE status = 'open';
 
 -- one row for each action in a tab, also a failed one. runId has no reference to runs: the step is a record, and a
--- missing run row must not drop it. blockedRequests is a json array of { url, reason }.
+-- missing run row must not drop it. blockedRequests is a json array of { url, reason }. sent is a json array of
+-- { method, url }: each request other than get that an approved submit let out.
 CREATE TABLE browser_steps (
   id INTEGER PRIMARY KEY,
   taskId TEXT NOT NULL REFERENCES browser_tasks (id),
@@ -35,10 +36,12 @@ CREATE TABLE browser_steps (
   screenshotBlob TEXT,
   consoleErrors TEXT,
   blockedRequests TEXT,
+  sent TEXT,
   error TEXT,
   durationMs INTEGER NOT NULL,
   createdAt TEXT NOT NULL
 );
 
 CREATE INDEX browser_steps_task ON browser_steps (taskId, id);
-CREATE INDEX browser_steps_run ON browser_steps (runId);
+-- the dashboard joins a step to its tool call and its policy decision by run and call id.
+CREATE INDEX browser_steps_call ON browser_steps (runId, toolCallId);

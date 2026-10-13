@@ -38,6 +38,10 @@ function view(result: StepResult | BrowserRefusal, options: { body?: 'snapshot' 
     lines.push(`Blocked ${result.blocked.length} request${result.blocked.length > 1 ? 's' : ''}:`);
     for (const each of result.blocked.slice(0, 8)) lines.push(`- ${each.url.slice(0, 200)}: ${each.reason}`);
   }
+  if (result.sent.length) {
+    lines.push(`Sent ${result.sent.length} request${result.sent.length > 1 ? 's' : ''} with the owner's approval:`);
+    for (const each of result.sent.slice(0, 8)) lines.push(`- ${each.method} ${each.url.slice(0, 200)}`);
+  }
   if (options.body === 'note' && result.ok) lines.push('', result.note);
   else lines.push('', 'Snapshot (use the refs, such as e12, with browser_click, browser_type and browser_select):', result.snapshot ?? '(the snapshot failed)');
   return { content: lines.join('\n'), isError: !result.ok, untrustedSource: `browser:${hostOf(result.url)}` };
@@ -58,7 +62,7 @@ const SUBMIT_CONTROL = 'button:not([type]), button[type=submit], input[type=subm
 interface PageControl {
   closest(selector: string): PageControl | null;
   getAttribute(name: string): string | null;
-  form: { action: string; elements: ArrayLike<PageField> } | null;
+  form: { action: string; method: string; elements: ArrayLike<PageField> } | null;
   innerText?: string;
   value?: string;
 }
@@ -72,10 +76,12 @@ interface PageDocument {
   querySelectorAll(selector: string): ArrayLike<PageControl>;
 }
 
-async function isSubmit(locator: Locator): Promise<boolean> {
+// a get form only reads, for example a search box, so a click may send it. the gate allows only get anyway.
+async function sendsData(locator: Locator): Promise<boolean> {
   return locator.evaluate((el, selector) => {
     const control = (el as unknown as PageControl).closest(selector);
-    return !!control && !!control.form;
+    if (!control?.form) return false;
+    return (control.getAttribute('formmethod') ?? control.form.method).toLowerCase() !== 'get';
   }, SUBMIT_CONTROL);
 }
 
@@ -170,7 +176,7 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
         return view(
           await act(ctx, 'click', id, async (page) => {
             const target = await element(page, id);
-            if (await isSubmit(target)) throw new Error(`${id} sends a form. Nothing was clicked. Use browser_submit, which the owner approves`);
+            if (await sendsData(target)) throw new Error(`${id} sends a form. Nothing was clicked. Use browser_submit, which the owner approves`);
             await target.click();
           }),
         );
