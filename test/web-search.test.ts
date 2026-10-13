@@ -128,7 +128,7 @@ describe('web_search timing', () => {
     const worker = {
       inTab: async () => ({
         value: { kind: 'results', results: [{ title: 'A', url: 'https://a.example/', snippet: 'a' }] },
-        result: { ok: true, note: '', url: '', title: '', blocked: [], sent: [], taskId: 't', acted: true },
+        result: { ok: true, note: '', url: '', title: '', blocked: [], blockedMore: 0, sent: [], taskId: 't', acted: true },
       }),
     } as unknown as BrowserWorker;
     const waits: number[] = [];

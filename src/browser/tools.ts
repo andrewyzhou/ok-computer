@@ -39,7 +39,8 @@ function view(result: StepResult | BrowserRefusal, options: { body?: 'snapshot' 
   const lines = [`Page: ${result.title || '(no title)'}`, `Address: ${result.url}`];
   if (result.note && (options.body !== 'note' || !result.ok)) lines.push(`${result.ok ? 'Result' : 'Error'}: ${result.note}`);
   if (result.blocked.length) {
-    lines.push(`Blocked ${result.blocked.length} request${result.blocked.length > 1 ? 's' : ''}:`);
+    const count = result.blocked.length + result.blockedMore;
+    lines.push(`Blocked ${count} request${count > 1 ? 's' : ''}:`);
     for (const each of result.blocked.slice(0, 8)) lines.push(`- ${each.url.slice(0, 200)}: ${each.reason}`);
   }
   if (result.sent.length) {

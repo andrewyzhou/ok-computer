@@ -4,6 +4,8 @@ import { checkHost, type Egress } from '../web/egress.js';
 export interface Blocked {
   url: string;
   reason: string;
+  // a navigation of the page itself, not of a frame, a resource or a connection that the proxy refused.
+  top?: boolean;
 }
 
 export interface Sent {
