@@ -211,7 +211,7 @@ Decisions from M1:
 Built in two parts so prompt caching works:
 
 - **Stable part** (cached): base instructions for OK Computer, the persona files from `workspace/` (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`), `MEMORY.md` (main session only), the skills index, and tool descriptions. Per-file cap 20,000 characters, total cap 60,000; truncated files get a note that tells the model to read the file directly.
-- **Volatile part**: current time in the owner's time zone, the channel, today's goals with status, and the next three scheduled automations. It is not in the system prompt, because a system prompt that changes every run breaks the cache and the thinking blocks. The agent loop records it as a `context` event at the start of each run, and the strategy renders it as a `<context>` text block in that run's user turn.
+- **Volatile part**: current time in the owner's time zone, the channel, today's goals with status, and the next three scheduled automations (not the heartbeat). It is not in the system prompt, because a system prompt that changes every run breaks the cache and the thinking blocks. The agent loop records it as a `context` event at the start of each run, and the strategy renders it as a `<context>` text block in that run's user turn.
 
 Tool descriptions travel in the provider's `tools` parameter, not in the stable text.
 
@@ -283,7 +283,8 @@ interface OutboundMessage { chatId: string; text: string; buttons?: Button[][] }
 
 - **cli**: a terminal chat for development (`npm run chat`). It counts as the owner. Buttons show as numbered choices.
 - **telegram**: grammY with long polling. Owner is set by `TELEGRAM_OWNER_ID`. Split messages over 4,096 characters at paragraph boundaries. Escape formatting safely, or send plain text. Inline keyboard buttons for approvals. If `TELEGRAM_BOT_TOKEN` is missing, the adapter does not start and the log says so. The process still runs with the cli channel.
-- The owner's main chat for proactive messages is the most recent chat the owner used, stored in the database, with Telegram preferred when configured.
+- The owner's main chat for proactive messages is the most recent chat the owner used, stored in the database (`settings.owner_chat`), with Telegram preferred when configured. Before the first owner message it is the cli, when the cli runs.
+- An inbound message can carry `button` (the data of a pressed button). Such a message never goes to the model.
 
 ## 11. Scheduler
 
@@ -297,21 +298,28 @@ Schedule kinds:
 - `{ kind: 'cron', expr, tz }`: cron expression through croner. Default time zone from config (`America/Los_Angeles`).
 
 Payloads:
-- `{ type: 'agent', prompt }`: a run with this prompt in a fresh isolated session (or the main session when `sessionMode` is `main`).
+- `{ type: 'agent', prompt, condition? }`: a run with this prompt in a fresh isolated session (or the main session when `sessionMode` is `main`). With `condition: 'no_goals_today'` the run is skipped in code, without a model call, when today already has goals.
 - `{ type: 'system_event', text }`: append to the main session without a model call. The next run sees it.
+- System payloads that only code creates: `{ type: 'heartbeat' }`, `{ type: 'goal_checkin', goalId }`, and `{ type: 'goals_results' }`. The agent's tools can change their schedule and enabled state, but not their payload.
 
 Behavior:
-- The scheduler computes `nextRunAt` for all enabled automations and sleeps until the earliest one. It re-plans when automations change.
-- Missed runs (the PC was off): run once if missed by less than a configurable grace period (default 2 hours), then plan the next time. Do not replay every missed slot.
-- Each run writes an `automation_runs` row: `automationId, runId, status, startedAt, endedAt, error`.
-- Failures back off: 30s, 1m, 5m, 15m, 60m. After 5 consecutive failures, disable the automation and tell the owner.
+- The scheduler computes `nextRunAt` for all enabled automations and sleeps until the earliest one, but never more than one minute, because a timer can fire late after the PC sleeps. It re-plans when automations change.
+- Before a job starts, the scheduler moves `nextRunAt` to the next time ("claims" the job), so a second tick during a long job does not run it again.
+- Missed runs (the PC was off): run once if missed by less than a configurable grace period (default 2 hours), then plan the next time from now. Do not replay every missed slot. A miss outside the grace period writes a `skipped` run.
+- Each run writes an `automation_runs` row: `automationId, runId, status (completed | failed | skipped), startedAt, endedAt, error`.
+- Failures back off: 30s, 1m, 5m, 15m. A retry never comes later than the next normal run. After 5 consecutive failures, disable the automation and tell the owner.
+- An `every` interval must be at least one minute. A one-shot time in the past is refused.
+- Text from an isolated run goes to the owner and is also appended to the main session as a `system_event`, so the main conversation knows what the owner answers to.
+- Automations that the agent creates through tools have `createdBy: 'agent'`. `automations_list` leaves out one-shot automations that already ran.
 
 ### 11.2 Heartbeat
 
-- A system automation, interval from config (`heartbeat.every`: `15m`, `30m`, `1h`, or `0` to turn off).
+- A system automation, interval from config (`heartbeat.every`: `15m`, `30m`, `1h`, or `0` to turn off; default `30m`). The app syncs the automation with the config at each start. The owner can pause it with the automations tools; a restart turns it on again only when the interval in the config changed.
 - Active hours from config (default 08:00 to 23:00 in the owner's time zone). Outside those hours the heartbeat does not run.
 - It runs in a fresh `heartbeat:<runId>` session on the `heartbeat` slot with a light context: base instructions, `USER.md`, the heartbeat checklist, today's goals with status and ETAs, the next automations, and the last 5 heartbeat notifications (to avoid repeats).
-- The checklist is a row in a `settings` table, editable from chat (through a tool) and from the dashboard. An empty checklist skips the run without a model call.
+- The stable prompt of a heartbeat session is the base instructions, `USER.md`, and the heartbeat rules. The checklist and the last 5 notifications go in the run's first `system_event`; today's goals and the next automations come from the `context` event.
+- The checklist is a row in a `settings` table, editable from chat (through a tool) and from the dashboard. It is empty by default. An empty checklist skips the run without a model call.
+- The last 5 notifications come from the `tool_calls` rows of `heartbeat_respond` with `notify: true`. A sent notification is also appended to the main session as a `system_event`.
 - The model answers by calling `heartbeat_respond { notify: boolean, text?: string, checklist?: string }`, or by replying `NO_REPLY`. Only `notify: true` sends a message.
 - Skip the heartbeat if the main session has a run in progress.
 
@@ -323,11 +331,13 @@ Tables:
 
 Tools: `goals_set` (one or more goals for a day, with optional ETAs), `goals_list` (a day or a range), `goal_update` (status, ETA, note), `goals_stats` (hit rate and streaks for a range).
 
-Routine, created at first run as system automations so the owner can edit them:
-1. At 19:00 every day: ask the owner for today's three goals and an ETA for each.
-2. At 20:00, 21:00, and 22:00: if no goals exist for today, send a short reminder. Stop after the first goals are set.
-3. When a goal gets an ETA, schedule a one-shot check-in at that time. The check-in asks if the goal is done. If the answer is "not yet", the agent asks for a new ETA and schedules again.
-4. Before midnight the routine writes the day's results to the daily note.
+Routine, created at first run as system automations so the owner can edit them. A `settings` flag records the install, so an automation that the owner deletes does not come back. All routine runs use the main session, so the owner answers in the same conversation.
+1. At 19:00 every day: ask the owner for today's three goals and an ETA for each. The ask is skipped in code when today already has goals.
+2. At 20:00, 21:00, and 22:00: if no goals exist for today, send a short reminder. Stop after the first goals are set (the `no_goals_today` condition, checked in code).
+3. When a goal gets an ETA, schedule a one-shot check-in at that time. The check-in asks if the goal is done. If the answer is "not yet", the agent asks for a new ETA and schedules again. A new ETA or a closed goal replaces the planned check-in; a check-in for a goal that is no longer open is skipped. `goal_update` records the answer of the open check-in (`done`, `not_yet`, `dropped`); an open check-in gets `no_answer` when the next one starts or the day ends.
+4. At 23:45 (`routine.resultsAt`) code writes the day's results from the database to the daily note, under `## goals`, `## done`, and `## slipped and why`. There is no model call. The reason for a slip comes from the goal's note.
+
+ETAs are `HH:MM` in the owner's time zone on the goal's day, or an ISO time with an offset. All times in `routine` are in config.
 
 The owner can change all times by chat ("move the goals question to 8pm"). The agent does this with the automations tools.
 
@@ -361,7 +371,11 @@ interface Tool<I> {
 }
 ```
 
-The registry converts zod schemas to JSON Schema for the providers. Each session type has an allowlist of tools. Heartbeat and consolidation sessions get only the tools they need.
+The registry converts zod schemas to JSON Schema for the providers, in input mode, so a field with a default is optional for the model. Each session type has an allowlist of tools. Heartbeat and consolidation sessions get only the tools they need:
+
+- main: goals tools, automations tools, `heartbeat_checklist_set`, `now`.
+- isolated automation runs: goals tools, `automations_list`, `automations_create`, `automations_update`, `message_owner`, `now`.
+- heartbeat: `goals_list`, `heartbeat_respond`, `now`.
 
 Phase 1 tools: `goals_set`, `goals_list`, `goal_update`, `goals_stats`, `automations_list`, `automations_create`, `automations_update`, `automations_delete`, `memory_write`, `memory_search`, `memory_get`, `heartbeat_respond`, `heartbeat_checklist_set`, `skill_read`, `message_owner` (send a message now; used by isolated runs), `now` (current time in the owner's zone).
 
@@ -370,9 +384,10 @@ There is no shell tool, no file write tool outside `data/memory/`, and no networ
 ### 14.2 Approvals
 
 - Table `approvals`: `id, runId, toolName, input (json), summary, status (pending | approved | denied | expired), requestedAt, resolvedAt, resolvedBy`.
-- A tool with risk `external` (and any tool marked `needsApproval`) creates an approval and pauses the run. The owner gets a message with Approve and Deny buttons. The cli shows numbered choices. The dashboard can approve too.
-- Free text such as "yes" never approves. Only a button, `/approve <id>`, or the dashboard.
-- Pending approvals expire after 24 hours.
+- A tool with risk `external` (and any tool marked `needsApproval`) creates an approval instead of running. The owner gets a message with Approve and Deny buttons. The cli shows numbered choices, and typing the number right after the message presses that button. The dashboard can approve too.
+- The run does not stay open for up to 24 hours. The tool result tells the model that approval #id is pending, and the run ends normally. When the owner decides, the tool runs with the stored input (stored without redaction so that it runs unchanged), a `tool_calls` row is written for the original run, and a `system_event` with the decision and the result is appended to the original session through its run queue. The next run of that session sees it. There is no automatic follow-up run.
+- Free text such as "yes" never approves. Only a button, `/approve <id>` or `/deny <id>`, or the dashboard. The router handles these before the model, and only for the owner.
+- Approval ids are small integers, so the owner can type them. Pending approvals expire after 24 hours; each scheduler tick marks them `expired`.
 - Phase 1 has no `external` tools, but the mechanism and its tests ship in Phase 1 so later tools can use it.
 
 ### 14.3 Untrusted content
@@ -421,7 +436,7 @@ Everything below is queryable from SQLite:
 ## 17. Configuration
 
 - Secrets in `.env`: `CLAUDE_API_KEY` (also accept `ANTHROPIC_API_KEY`), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_ID`, optional `OPENAI_COMPAT_BASE_URL`, `OPENAI_COMPAT_API_KEY`, `DASHBOARD_TOKEN`.
-- Non-secret settings in `okc.config.json`, validated with zod, with defaults for every field: time zone, slot chains, pricing, heartbeat interval and active hours, routine times, dashboard port, paths.
+- Non-secret settings in `okc.config.json`, validated with zod, with defaults for every field: time zone, slot chains, pricing, missed-run grace (`scheduler.missedGraceMs`), heartbeat interval and active hours, routine times (`routine.askAt`, `routine.reminders`, `routine.resultsAt`), dashboard port, paths.
 - Invalid config stops the process at start with a clear message.
 
 ## 18. Process and operations
