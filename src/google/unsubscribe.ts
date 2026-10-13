@@ -64,7 +64,7 @@ export function planUnsubscribe(message: gmail_v1.Schema$Message, sender: string
 // so it names which signature passed.
 function gmailDkimPasses(message: gmail_v1.Schema$Message): Array<{ domain: string; b?: string }> {
   const top = (message.payload?.headers ?? []).find((each) => each.name?.toLowerCase() === 'authentication-results')?.value ?? '';
-  const [server, ...results] = top.replace(/\([^()]*\)/g, ' ').split(';').map((each) => each.trim());
+  const [server, ...results] = resultParts(top);
   if (server?.toLowerCase() !== 'mx.google.com') return [];
   return results.flatMap((result) => {
     if (!/^dkim\s*=\s*pass\b/i.test(result)) return [];
@@ -72,6 +72,41 @@ function gmailDkimPasses(message: gmail_v1.Schema$Message): Array<{ domain: stri
     const b = /\bheader\.b=([^\s;]+)/i.exec(result)?.[1];
     return domain ? [{ domain: domain.toLowerCase(), ...(b ? { b } : {}) }] : [];
   });
+}
+
+// the parts of an authentication-results header between the ';' (rfc 8601), without comments and without the text of
+// quoted strings. the sender chooses a quoted envelope sender, so a ';' in it must not start a part: else a quoted
+// "x; dkim=pass header.d=bank.example" gives a forged result. a comment can hold quotes, a quoted string can hold
+// parentheses, and a comment can hold a comment, so one scan reads all three.
+function resultParts(value: string): string[] {
+  const parts: string[] = [];
+  let part = '';
+  let depth = 0;
+  let quoted = false;
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i]!;
+    if (quoted || depth > 0) {
+      if (char === '\\') i++;
+      else if (quoted && char === '"') quoted = false;
+      else if (!quoted && char === '(') depth++;
+      else if (!quoted && char === ')') depth--;
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+      part += '""';
+    } else if (char === '(') {
+      depth = 1;
+      part += ' ';
+    } else if (char === ';') {
+      parts.push(part.trim());
+      part = '';
+    } else {
+      part += char;
+    }
+  }
+  parts.push(part.trim());
+  return parts;
 }
 
 // relaxed alignment: the signing domain is the from domain, a parent of it, or a child of it. a name without a dot is
@@ -190,7 +225,12 @@ export function oneClick(target: string, lookup: LookupFunction = publicOnlyLook
     );
     const deadline = setTimeout(() => req.destroy(new Error('the sender did not answer in time')), timeoutMs);
     req.on('close', () => clearTimeout(deadline));
-    req.on('socket', (socket) => socket.on('connect', () => (connected = true)));
+    // the post can leave only after the tls handshake. a bad certificate ends the handshake, so nothing was sent. a
+    // socket that the agent gives again is already through its handshake.
+    req.on('socket', (socket) => {
+      if (!socket.connecting) connected = true;
+      else socket.on('secureConnect', () => (connected = true));
+    });
     req.on('error', (err: NodeJS.ErrnoException) => resolve({ ok: false, sent: connected, ...(err.code === 'EPRIVATE' ? { refused: true } : {}), text: err.message }));
     req.end(ONE_CLICK_BODY);
   });

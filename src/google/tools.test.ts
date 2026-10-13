@@ -188,6 +188,23 @@ describe('gmail_unsubscribe', () => {
     expect(plan([pass, ...added, forged, real, ['From', `Bank <${SENDER}>`]]).way).toBe('refused');
   });
 
+  // round 4: the sender chooses a quoted envelope sender. a ';' in it must not start a forged dkim result.
+  it('reads no result out of a quoted string or a comment of the authentication results', () => {
+    const fake = '"x; dkim=pass header.d=bank.example header.b=AAAAAAAA "@evil.example';
+    const results = `mx.google.com; dkim=neutral (no key) header.i=@bank.example header.b=AAAAAAAA; spf=pass (google.com: domain of ${fake} designates 1.2.3.4) smtp.mailfrom=${fake}; dmarc=fail (p=NONE)`;
+    const headers = [
+      ['Authentication-Results', results],
+      ['From', 'Bank <alerts@bank.example>'],
+      ['List-Unsubscribe', '<https://evil.example/u>'],
+      ['List-Unsubscribe-Post', 'List-Unsubscribe=One-Click'],
+      ['DKIM-Signature', 'v=1; d=bank.example; s=s1; h=from:list-unsubscribe:list-unsubscribe-post; b=AAAAAAAAforged'],
+    ].map(([name, value]) => ({ name, value }));
+    expect(planUnsubscribe({ payload: { headers } }, 'alerts@bank.example', 'https://evil.example/u', false).way).toBe('refused');
+    // a real pass next to a quoted string with a ';' and a comment with a quote still counts.
+    headers[0]!.value = 'mx.google.com; dkim=pass (a "quote) header.i=@bank.example header.b=AAAAAAAA; spf=pass smtp.mailfrom="a;b"@bank.example';
+    expect(planUnsubscribe({ payload: { headers } }, 'alerts@bank.example', 'https://evil.example/u', false).way).toBe('one-click');
+  });
+
   // a from header can be forged when the domain has no strict dmarc policy. a forged mailto target would make the
   // owner's account send the forger's subject and body to a third party.
   it('refuses a mailto target without an aligned dkim pass that covers the unsubscribe header', async () => {
@@ -267,6 +284,8 @@ describe('gmail_unsubscribe', () => {
     // the lookup stands in for a public address of the sender. the test is about time, not about the address check.
     const lookup = ((_host: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) =>
       options.all ? callback(null, [{ address: '127.0.0.1', family: 4 }]) : callback(null, '127.0.0.1', 4)) as never;
+    // round 4: the certificate is not trusted, so the handshake fails and the post never leaves.
+    expect(await oneClick(`https://sender.example:${port}/trickle`, lookup, 1_000)).toMatchObject({ ok: false, sent: false });
     const before = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
     try {
