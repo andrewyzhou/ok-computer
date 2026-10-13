@@ -122,4 +122,30 @@ describe('google poll job', () => {
     expect(signalDigest(h.db, h.now.value, 'America/Los_Angeles')?.text).toContain('detector date_not_on_calendar');
     await google.close();
   });
+
+  // the date detector checks each mail one time. a mail that it checked against no calendar would keep a false hit.
+  it('checks the mail against the calendar also when the read of another message failed', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    h.fake.upsertEvent('personal', { id: 'essay', summary: 'Essay due', start: { dateTime: '2026-10-20T17:00:00Z' }, end: { dateTime: '2026-10-20T18:00:00Z' }, organizer: { email: 'personal@example.com', self: true } });
+    const google = createGoogle({
+      db: h.db,
+      clock: () => h.now.value,
+      logger: h.logger,
+      blobs: h.blobs,
+      secrets: h.secrets,
+      slots: { call: async () => ({ ok: false, error: 'x', aborted: false }) },
+      config: h.config,
+      timeZone: 'America/Los_Angeles',
+      notifyOwner: () => {},
+      endpoints: { apiRoot: h.fake.url, tokenUrl: `${h.fake.url}token` },
+    });
+    await google.poll();
+    h.fake.deliver('personal', { id: 'm1', labelIds: ['INBOX'], headers: { From: 't@school.example', Subject: 'Essay due Oct 20' }, snippet: 'hand in the essay by Oct 20' });
+    h.fake.deliver('personal', { id: 'm2', labelIds: ['INBOX'], headers: { From: 'a@b.example', Subject: 'hello' } });
+    h.fake.fault({ route: 'GET /gmail/v1/users/me/messages/m2', status: 503, times: 1 });
+    expect((await google.poll()).error).toContain('personal: 503');
+    expect(h.rows("SELECT detectors FROM integration_events WHERE externalId = 'm1'")).toEqual([{ detectors: '[]' }]);
+    await google.close();
+  });
 });

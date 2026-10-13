@@ -149,13 +149,25 @@ export function createSync(deps: SyncDeps): Sync {
     const rows = db
       .prepare("SELECT id, externalId FROM integration_events WHERE source = 'gmail' AND account = ? AND state = 'new' ORDER BY id LIMIT ?")
       .all(alias, HYDRATE_MAX) as Array<{ id: number; externalId: string }>;
+    // a 4xx for one message would stop the newer mail at each poll. a 4xx can also be about the whole account, and
+    // then every row gets it. so a refused row is skipped only when google gave another row of this poll.
+    const refused: number[] = [];
+    let refusal: GoogleError | undefined;
+    let answered = false;
     for (const row of rows) {
       let message: gmail_v1.Schema$Message;
       try {
         message = (await accounts.run(alias, (apis) => apis.gmail.users.messages.get({ userId: 'me', id: row.externalId, format: 'metadata', metadataHeaders: HEADERS }))).data;
+        answered = true;
       } catch (err) {
         if (err instanceof GoogleError && err.kind === 'not_found') {
+          answered = true;
           db.prepare("UPDATE integration_events SET state = 'gone' WHERE id = ?").run(row.id);
+          continue;
+        }
+        if (err instanceof GoogleError && err.kind === 'request') {
+          refused.push(row.id);
+          refusal ??= err;
           continue;
         }
         throw err;
@@ -182,6 +194,10 @@ export function createSync(deps: SyncDeps): Sync {
         row.id,
       );
     }
+    if (!refusal) return;
+    if (!answered) throw refusal;
+    logger.warn('google refused some messages of an account, so they make no signal', { alias, count: refused.length, err: refusal });
+    for (const id of refused) db.prepare("UPDATE integration_events SET state = 'skipped' WHERE id = ?").run(id);
   };
 
   const syncCalendar = async (alias: string, runId: string): Promise<void> => {
@@ -298,19 +314,35 @@ export function createSync(deps: SyncDeps): Sync {
     let resync = false;
     let events: CalendarItem[] | undefined;
     try {
-      resync = !!(await discoverMail(alias, runId)).resync;
-      await hydrateMail(alias);
-      // the detectors need the events also when the change list fails. without them, each deadline in the mail of the
-      // account looks missing from the calendar.
-      let calendarError: unknown;
+      // the detectors need the events also when the mail or the change list fails. the date detector checks each
+      // mail one time, and without the events of the account, each deadline in its mail looks missing from the
+      // calendar. so the live range is read after any failure. the change list is read after a failure of the mail
+      // only when google answered and the fault is not about the whole account.
+      let mailError: unknown;
       try {
-        await syncCalendar(alias, runId);
+        resync = !!(await discoverMail(alias, runId)).resync;
+        await hydrateMail(alias);
       } catch (err) {
         if (err instanceof CursorMoved) throw err;
-        calendarError = err;
+        mailError = err;
       }
-      events = await readRange(alias);
-      if (calendarError) throw calendarError;
+      const goesOn = mailError === undefined || (mailError instanceof GoogleError && mailError.status !== undefined && !['auth', 'client', 'rate'].includes(mailError.kind));
+      let calendarError: unknown;
+      if (goesOn) {
+        try {
+          await syncCalendar(alias, runId);
+        } catch (err) {
+          if (err instanceof CursorMoved) throw err;
+          calendarError = err;
+        }
+      }
+      try {
+        events = await readRange(alias);
+      } catch (err) {
+        if (mailError === undefined && calendarError === undefined) throw err;
+      }
+      if (mailError !== undefined) throw mailError;
+      if (calendarError !== undefined) throw calendarError;
       db.prepare("UPDATE google_accounts SET failures = 0, lastError = NULL, lastErrorAt = NULL WHERE alias = ? AND status = 'ok'").run(alias);
       return { alias, ok: true, failures: 0, events, ...(resync ? { resync } : {}) };
     } catch (err) {

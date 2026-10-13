@@ -100,6 +100,37 @@ describe('gmail sync', () => {
     expect(signals().map((each) => [each.externalId, each.state])).toEqual([['a', 'gone'], ['b', 'ready'], ['c', 'ready']]);
   });
 
+  // a message that google always refuses must not hold the newer mail and the calendar of the account for ever.
+  it('skips a message that google refuses while it gives the others, and still reads the calendar', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    await poll();
+    h.fake.deliver('personal', mail('bad', 'bad'));
+    h.fake.deliver('personal', mail('good', 'good'));
+    h.fake.fault({ route: 'GET /gmail/v1/users/me/messages/bad', status: 400 });
+    h.fake.upsertEvent('personal', { id: 'inv', summary: 'Interview', start: { dateTime: '2026-10-14T17:00:00Z' }, end: { dateTime: '2026-10-14T18:00:00Z' }, organizer: { email: 'hr@corp.example' } });
+    const [report] = await poll();
+    expect(report).toMatchObject({ ok: true, failures: 0 });
+    expect(signals().map((each) => [each.externalId, each.state])).toEqual([
+      ['bad', 'skipped'],
+      ['good', 'ready'],
+      ['inv@' + h.fake.mailbox('personal').events.get('inv')!.updated, 'ready'],
+    ]);
+  });
+
+  // a 4xx for every message can be about the account, so no row is dropped.
+  it('keeps the rows when google refuses every message of a poll', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    await poll();
+    h.fake.deliver('personal', mail('m1', 'one'));
+    h.fake.fault({ route: 'GET /gmail/v1/users/me/messages/m1', status: 400, times: 1 });
+    expect((await poll())[0]).toMatchObject({ ok: false, error: expect.stringContaining('400') });
+    expect(signals().map((each) => each.state)).toEqual(['new']);
+    await poll();
+    expect(signals().map((each) => each.state)).toEqual(['ready']);
+  });
+
   it('joins a running poll instead of a second one', async () => {
     h = await createGoogleHarness({ accounts: ['personal'] });
     h.signedIn('personal');
@@ -256,7 +287,9 @@ describe('token health against the token endpoint', () => {
     const [report] = await poll();
     expect(Date.now() - started).toBeLessThan(5_000);
     expect(report).toMatchObject({ ok: false, failures: 1, error: expect.stringContaining('the token request failed') });
-    expect(tokenRequests()).toBe(1);
+    // the mail phase sends one token request. the live range of the calendar is read after any failure, so it sends
+    // the second.
+    expect(tokenRequests()).toBe(2);
   });
 
   it('sends one message for a dead sign-in, then makes no token request, and works again after a new sign-in', async () => {
