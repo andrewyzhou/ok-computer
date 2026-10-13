@@ -55,4 +55,9 @@ describe('buildVolatilePrompt', () => {
     const text = buildVolatilePrompt({ now: new Date('2026-10-13T03:15:00Z'), timeZone: 'America/Los_Angeles', channel: 'cli' });
     expect(text).toBe('<context>\ncurrent time: Monday, October 12, 2026 at 20:15 PDT\nchannel: cli\n</context>');
   });
+
+  it('adds the extra lines after the channel', () => {
+    const text = buildVolatilePrompt({ now: new Date('2026-10-13T03:15:00Z'), timeZone: 'UTC', channel: 'cli', extra: 'goals: none' });
+    expect(text).toBe('<context>\ncurrent time: Tuesday, October 13, 2026 at 03:15 UTC\nchannel: cli\ngoals: none\n</context>');
+  });
 });

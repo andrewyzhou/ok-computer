@@ -2,6 +2,8 @@ export interface RunQueue {
   enqueue<T>(key: string, task: () => Promise<T>): Promise<T>;
   // drain waits until every queued task has ended.
   drain(): Promise<void>;
+  // busy is true while the session has a task that runs or waits.
+  busy(key: string): boolean;
 }
 
 // one session runs one task at a time. tasks of different sessions run in parallel.
@@ -21,5 +23,6 @@ export function createRunQueue(): RunQueue {
     async drain() {
       while (tails.size) await Promise.all(tails.values());
     },
+    busy: (key) => tails.has(key),
   };
 }

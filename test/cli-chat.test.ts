@@ -56,7 +56,17 @@ describe('cli chat through the full loop', () => {
     await say('what time is it?');
     expect(printed()).toContain('okc> It is 20:15.');
     expect(model.calls[0]?.system).toContain('The owner likes short answers.');
-    expect(model.calls[0]?.tools.map((t) => t.name)).toEqual(['now']);
+    expect(model.calls[0]?.tools.map((t) => t.name)).toEqual([
+      'automations_create',
+      'automations_delete',
+      'automations_list',
+      'automations_update',
+      'goal_update',
+      'goals_list',
+      'goals_set',
+      'goals_stats',
+      'now',
+    ]);
 
     const before = printed();
     await say('just listen');

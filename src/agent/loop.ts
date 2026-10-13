@@ -22,11 +22,15 @@ export interface AgentDeps {
   logger: Logger;
   config: Pick<Config, 'timeZone' | 'agent'>;
   stablePrompt: (sessionKey: string) => string;
+  // extra lines for the volatile context, for example today's goals and the next automations.
+  contextLines?: (now: Date) => string;
   clock: Clock;
   newId?: () => string;
 }
 
 export interface RunInput {
+  // a caller gives the run id when the session key must contain it.
+  runId?: string;
   sessionKey: string;
   trigger: Trigger;
   slot: Slot;
@@ -46,7 +50,7 @@ export interface RunResult {
 
 export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunResult> {
   const { db, slots, tools, strategy, config, clock } = deps;
-  const runId = (deps.newId ?? randomUUID)();
+  const runId = input.runId ?? (deps.newId ?? randomUUID)();
   const logger = deps.logger.child({ runId, sessionKey: input.sessionKey });
   const timeoutMs = input.trigger === 'message' ? config.agent.chatTimeoutMs : config.agent.backgroundTimeoutMs;
 
@@ -82,7 +86,14 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
     for (const event of input.events) append(event);
     append({
       type: 'context',
-      payload: { text: buildVolatilePrompt({ now: clock(), timeZone: config.timeZone, channel: input.channel }) },
+      payload: {
+        text: buildVolatilePrompt({
+          now: clock(),
+          timeZone: config.timeZone,
+          channel: input.channel,
+          ...(deps.contextLines ? { extra: deps.contextLines(clock()) } : {}),
+        }),
+      },
     });
     const system = deps.stablePrompt(input.sessionKey);
     const toolSpecs = tools.specs(input.allowedTools);

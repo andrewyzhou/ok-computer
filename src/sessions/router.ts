@@ -9,7 +9,18 @@ import type { RunQueue } from './queue.js';
 
 // all owner messages from all channels share one continuous conversation.
 export const MAIN_SESSION = 'main';
-export const MAIN_TOOLS: readonly string[] = ['now'];
+export const MAIN_TOOLS: readonly string[] = [
+  'automations_create',
+  'automations_delete',
+  'automations_list',
+  'automations_update',
+  'goal_update',
+  'goals_list',
+  'goals_set',
+  'goals_stats',
+  'heartbeat_checklist_set',
+  'now',
+];
 export const NO_REPLY = 'NO_REPLY';
 
 export interface RouterDeps {
