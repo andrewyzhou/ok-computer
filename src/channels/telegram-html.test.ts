@@ -69,5 +69,8 @@ describe('markdownToHtmlParts', () => {
     const parts = markdownToHtmlParts('<'.repeat(3000), 4096);
     expect(parts).toHaveLength(1);
     expect(parts[0]!.length).toBe(12_000);
+    // a long link has a short visible text, so its block fits and keeps its format.
+    const url = `https://a.example/${'y'.repeat(5000)}`;
+    expect(markdownToHtmlParts(`See [the page](${url}).`, 4096)).toEqual([`See <a href="${url}">the page</a>.`]);
   });
 });
