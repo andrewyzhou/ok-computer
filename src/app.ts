@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { runAgent, type AgentDeps } from './agent/loop.js';
 import { closeStaleWork, interruptedText, repairSession } from './agent/recovery.js';
 import { buildStablePrompt } from './agent/system-prompt.js';
+import { createAlwaysAllow } from './approvals/always.js';
 import { approvalNote, createApprovalFlow, type ApprovalFlow } from './approvals/flow.js';
 import { expireApprovals, type Approval } from './approvals/store.js';
 import type { ChannelAdapter } from './channels/types.js';
@@ -43,6 +44,7 @@ import {
 import { AUTOMATION_TOOLS, createJobRunner } from './scheduler/jobs.js';
 import { createScheduler, type Scheduler, type SetTimer } from './scheduler/scheduler.js';
 import { createAutomationTools } from './scheduler/tools.js';
+import { createCommands } from './sessions/commands.js';
 import { createOwnerMessenger } from './sessions/owner.js';
 import { createRunQueue } from './sessions/queue.js';
 import { createRouter, MAIN_SESSION, MAIN_TOOLS } from './sessions/router.js';
@@ -74,6 +76,8 @@ export interface AppDeps {
   mcpTransport?: IntegrationsDeps['transport'];
   // false in npm run chat. see start().
   connectIntegrations?: boolean;
+  // the policy file that "always allow" writes. without it, approval cards have no "always allow" button.
+  policyPath?: string;
 }
 
 export interface App {
@@ -152,7 +156,13 @@ export function createApp(deps: AppDeps): App {
     signal: shutdown.signal,
     timeoutMs: config.agent.backgroundTimeoutMs,
     timeZone: config.timeZone,
+    alwaysAllow: deps.policyPath !== undefined,
   });
+  // "always allow" changes this list in place, and the caller reads it at each call.
+  const rules = [...(deps.rules ?? BUILTIN_RULES)];
+  const always = deps.policyPath
+    ? createAlwaysAllow({ db, clock, logger, timeZone: config.timeZone, policyPath: deps.policyPath, rules, resolve: approvals.resolve })
+    : undefined;
   // the scheduler is created below. the tools call replan only after the start.
   const replan = () => scheduler.replan();
   const tools = createToolRegistry(
@@ -176,7 +186,7 @@ export function createApp(deps: AppDeps): App {
     db,
     blobs,
     tools,
-    rules: deps.rules ?? BUILTIN_RULES,
+    rules,
     requestApproval: approvals.request,
     queue,
     logger,
@@ -259,6 +269,14 @@ export function createApp(deps: AppDeps): App {
     rememberOwnerChat: owner.remember,
     approvals: approvals.resolve,
     approvalCard: approvals.card,
+    ...(always ? { always } : {}),
+    commands: createCommands({
+      db,
+      clock,
+      timeZone: config.timeZone,
+      dashboardUrl: config.dashboard.url ?? `http://127.0.0.1:${config.dashboard.port}`,
+      approvalCard: approvals.card,
+    }),
     onReset: () => {
       const now = clock();
       const excerpt = sessionExcerpt(sinceLastReset(listEvents(db, MAIN_SESSION)), localTime(now, config.timeZone));

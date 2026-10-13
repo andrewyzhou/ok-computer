@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { buttonUpdate, createFakeTelegram, textUpdate, until } from '../../test/fake-telegram.js';
 import { silentLogger } from '../observability/logger.js';
-import { createTelegramChannel, splitMessage, TELEGRAM_LIMIT } from './telegram.js';
+import { htmlToPlain } from './telegram-html.js';
+import { cardHtml, createTelegramChannel, RICH_LIMIT, splitMessage, TELEGRAM_LIMIT } from './telegram.js';
 import type { InboundMessage } from './types.js';
 
 const clock = () => new Date('2026-10-13T03:15:00Z');
@@ -69,6 +70,7 @@ describe('telegram channel', () => {
       senderId: '777',
       chatId: '777',
       text: 'hello',
+      messageId: '1',
       receivedAt: '2026-10-13T03:15:00.000Z',
     });
 
@@ -81,5 +83,80 @@ describe('telegram channel', () => {
 
     await channel.stop();
     expect(fake.bot.isRunning()).toBe(false);
+  });
+});
+
+describe('telegram formats', () => {
+  const methods = (fake: ReturnType<typeof createFakeTelegram>) => fake.calls.filter((c) => c.method !== 'getUpdates').map((c) => c.method);
+  const buttons = [[{ text: 'OK', data: 'x' }]];
+
+  it('sends a markdown reply as one rich message with its buttons', async () => {
+    const fake = createFakeTelegram();
+    const channel = createTelegramChannel({ bot: fake.bot, logger: silentLogger, clock });
+    await channel.send({ chatId: '777', text: '# Hi\n\n- **one**\n- two', markdown: true, buttons });
+    expect(fake.calls).toEqual([
+      {
+        method: 'sendRichMessage',
+        payload: {
+          chat_id: '777',
+          rich_message: { markdown: '# Hi\n\n- **one**\n- two' },
+          reply_markup: { inline_keyboard: [[{ text: 'OK', callback_data: 'x' }]] },
+        },
+      },
+    ]);
+  });
+
+  it('falls back to html parts when telegram refuses the rich message, and to plain text for a part it refuses', async () => {
+    const fake = createFakeTelegram();
+    const channel = createTelegramChannel({ bot: fake.bot, logger: silentLogger, clock });
+    // the second paragraph fills the first part, so the last paragraph needs a second part.
+    const tail = 'y'.repeat(100);
+    const text = `**First** part.\n\n${'word '.repeat(810)}\n\n_last_ part ${tail}`;
+    fake.refuse((c) => (c.method === 'sendRichMessage' || (c.payload.parse_mode === 'HTML' && String(c.payload.text).includes('last')) ? 400 : false));
+    await channel.send({ chatId: '777', text, markdown: true, buttons });
+    expect(methods(fake)).toEqual(['sendRichMessage', 'sendMessage', 'sendMessage', 'sendMessage']);
+    const [, first, refused, plain] = fake.calls.map((c) => c.payload);
+    expect(first).toMatchObject({ parse_mode: 'HTML', text: expect.stringMatching(/^<b>First<\/b> part\.\n\nword word/) });
+    expect(first).not.toHaveProperty('reply_markup');
+    expect(refused).toMatchObject({ parse_mode: 'HTML', text: `<i>last</i> part ${tail}` });
+    // the plain part has no tags and no parse mode, and it keeps the buttons of the last part.
+    expect(plain).toEqual({ chat_id: '777', text: `last part ${tail}`, reply_markup: { inline_keyboard: [[{ text: 'OK', callback_data: 'x' }]] } });
+  });
+
+  it('sends a reply over the rich limit as html parts, and does not send again after an error that is not a refusal', async () => {
+    const fake = createFakeTelegram();
+    const channel = createTelegramChannel({ bot: fake.bot, logger: silentLogger, clock });
+    await channel.send({ chatId: '777', text: 'x'.repeat(RICH_LIMIT + 1), markdown: true });
+    expect(new Set(methods(fake))).toEqual(new Set(['sendMessage']));
+
+    const broken = createFakeTelegram();
+    const other = createTelegramChannel({ bot: broken.bot, logger: silentLogger, clock });
+    broken.refuse(() => 500);
+    await expect(other.send({ chatId: '777', text: 'hi', markdown: true })).rejects.toThrow();
+    expect(methods(broken)).toEqual(['sendRichMessage']);
+  });
+
+  it('never parses plain text, for example an approval card, as markdown or html', async () => {
+    const fake = createFakeTelegram();
+    const channel = createTelegramChannel({ bot: fake.bot, logger: silentLogger, clock });
+    await channel.send({ chatId: '777', text: 'text: "[click](https://evil.example) **now**"' });
+    expect(fake.calls).toEqual([{ method: 'sendMessage', payload: { chat_id: '777', text: 'text: "[click](https://evil.example) **now**"' } }]);
+  });
+
+  it('puts the details of a card in an expandable quote, escaped, and cuts long details with a note', async () => {
+    const fake = createFakeTelegram();
+    const channel = createTelegramChannel({ bot: fake.bot, logger: silentLogger, clock });
+    await channel.send({ chatId: '777', text: 'Approval needed (#1): a <b>', details: '{\n  "to": "<x@y.example>"\n}', buttons });
+    expect(fake.calls[0]!.payload).toMatchObject({
+      parse_mode: 'HTML',
+      text: 'Approval needed (#1): a &lt;b&gt;\n<blockquote expandable>{\n  "to": "&lt;x@y.example&gt;"\n}</blockquote>',
+    });
+    const html = cardHtml('Approval needed', 'z'.repeat(10_000))!;
+    expect(htmlToPlain(html).length).toBeLessThanOrEqual(TELEGRAM_LIMIT);
+    expect(html).toContain('[... cut, the dashboard shows the full input]</blockquote>');
+
+    fake.refuse((c) => (c.payload.parse_mode === 'HTML' ? 400 : false));
+    await channel.send({ chatId: '777', text: 'Card', details: '{ "a": 1 }' });
+    expect(fake.calls.at(-1)!.payload).toEqual({ chat_id: '777', text: 'Card\n\n{ "a": 1 }' });
   });
 });

@@ -11,6 +11,8 @@ export function apiUrl(path: string): string {
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(apiUrl(path), init);
+  // with DASHBOARD_TOKEN set, a browser without the session cookie signs in one time on the login page.
+  if (response.status === 401 && !token) globalThis.location?.assign('/login');
   const body = (await response.json().catch(() => ({}))) as { error?: string };
   if (!response.ok) throw new Error(body.error ?? `${response.status} ${response.statusText}`);
   return body as T;

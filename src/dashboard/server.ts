@@ -1,9 +1,11 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { join } from 'node:path';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono, type Context } from 'hono';
+import { getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import type { App } from '../app.js';
@@ -54,6 +56,26 @@ export interface DashboardDeps {
 
 const WEB_DIR = join(import.meta.dirname, '../../web/dist');
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
+const SESSION_COOKIE = 'okc_session';
+const SESSION_SECONDS = 30 * 24 * 60 * 60;
+
+// the compare takes the same time for each wrong value of one length, so the time does not show the token.
+function same(given: string | undefined, expected: string | undefined): boolean {
+  if (given === undefined || expected === undefined) return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+const loginPage = (error: string) => `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>OK Computer</title></head>
+<body style="font-family: system-ui, sans-serif; max-width: 22rem; margin: 4rem auto; padding: 0 1rem">
+<h1 style="font-size: 1.3rem">OK Computer</h1>
+<form method="post" action="/login">
+<label>Dashboard token<br><input name="token" type="password" autocomplete="current-password" required style="width: 100%; padding: .4rem"></label>
+<p style="color: #b00020">${error}</p>
+<button type="submit" style="padding: .4rem 1rem">Sign in</button>
+</form></body></html>`;
 
 const enabledBody = z.object({ enabled: z.boolean() });
 const checklistBody = z.object({ checklist: z.string().max(10_000) });
@@ -69,13 +91,21 @@ export function createDashboard(deps: DashboardDeps): Hono {
   const blobs = createBlobStore(db, join(config.paths.data, 'blobs'), clock);
   const server = new Hono();
 
+  // the cookie holds a value derived from the token, not the token. a new token makes every old cookie invalid.
+  const session = deps.token ? createHmac('sha256', deps.token).update('okc dashboard session').digest('hex') : undefined;
+  // tailscale serve forwards the requests of the tailnet name. that name is accepted only with a token, so the
+  // dashboard is never open on the tailnet without one.
+  const remoteHost = deps.token && config.dashboard.url ? new URL(config.dashboard.url).hostname : undefined;
+
   // a web page in the browser can send requests to a loopback port. the host check stops dns rebinding, and the
   // json check makes the browser ask for cors permission before a write, which this server never gives.
   server.use(async (c, next) => {
-    if (!LOOPBACK.has(new URL(c.req.url).hostname)) return c.text('forbidden', 403);
+    const host = new URL(c.req.url).hostname;
+    if (!LOOPBACK.has(host) && host !== remoteHost) return c.text('forbidden', 403);
     if (c.req.path.startsWith('/api/')) {
       const given = c.req.header('authorization')?.replace(/^Bearer /, '') ?? c.req.query('token');
-      if (deps.token && given !== deps.token) return c.json({ error: 'unauthorized' }, 401);
+      const signedIn = (given !== undefined && same(given, deps.token)) || same(getCookie(c, SESSION_COOKIE), session);
+      if (deps.token && !signedIn) return c.json({ error: 'unauthorized' }, 401);
       const write = c.req.method !== 'GET' && c.req.method !== 'HEAD';
       if (write && !c.req.header('content-type')?.startsWith('application/json')) {
         return c.json({ error: 'send a json body' }, 415);
@@ -89,6 +119,18 @@ export function createDashboard(deps: DashboardDeps): Hono {
     return parsed.success ? parsed.data : undefined;
   };
   const notFound = (c: Context, what: string) => c.json({ error: `${what} not found` }, 404);
+
+  // the owner gives the token one time in a form. the token then never goes into a url, a bookmark or the history.
+  server.get('/login', (c) => (session ? c.html(loginPage('')) : c.redirect('/')));
+  server.post('/login', async (c) => {
+    const form = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
+    const token = typeof form.token === 'string' ? form.token : '';
+    if (!session || !same(token, deps.token)) return c.html(loginPage('That token is wrong.'), 401);
+    const https = c.req.header('x-forwarded-proto') === 'https' || new URL(c.req.url).protocol === 'https:';
+    setCookie(c, SESSION_COOKIE, session, { httpOnly: true, sameSite: 'Strict', path: '/', maxAge: SESSION_SECONDS, secure: https });
+    logger.info('dashboard login', { host: new URL(c.req.url).hostname });
+    return c.redirect('/', 303);
+  });
 
   server.get('/api/meta', (c) => c.json({ timeZone: tz, now: clock().toISOString() } satisfies Meta));
   server.get('/api/overview', (c) => c.json(overview(db, clock(), config)));

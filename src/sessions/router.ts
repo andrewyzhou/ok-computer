@@ -1,11 +1,13 @@
 import type { RunInput, RunResult } from '../agent/loop.js';
 import { repairSession } from '../agent/recovery.js';
 import { parseApprovalButton, type Decision, type ResolvedVia } from '../approvals/store.js';
-import type { Button, ChannelAdapter, InboundMessage } from '../channels/types.js';
+import { parseAlwaysButton } from '../approvals/always.js';
+import type { ChannelAdapter, InboundMessage } from '../channels/types.js';
 import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
 import type { Clock } from '../time.js';
+import type { Card } from './commands.js';
 import type { RunQueue } from './queue.js';
 
 // all owner messages from all channels share one continuous conversation.
@@ -42,7 +44,11 @@ export interface RouterDeps {
   // resolve gives the text of the reply to the owner.
   approvals?: (id: number, decision: Decision, via: ResolvedVia) => Promise<string>;
   // a typed /approve gives the stored card with its buttons. only a button or the dashboard approves.
-  approvalCard?: (id: number) => { text: string; buttons?: Button[][] };
+  approvalCard?: (id: number) => Card;
+  // "always allow" asks the owner to confirm, then adds a rule and approves.
+  always?: { confirm(id: number): Card; apply(id: number): Promise<string> };
+  // commands such as /status answer in code. undefined means that the text is not such a command.
+  commands?: (text: string, state: { runningSince?: Date }) => Card[] | undefined;
   // the router calls this on /new before the reset event goes into the log.
   onReset?: () => void;
   signal?: AbortSignal;
@@ -56,6 +62,8 @@ export interface Router {
 
 export function createRouter(deps: RouterDeps): Router {
   const { db, logger, clock, queue } = deps;
+  // the main run that runs now. /stop and the stop button of its draft abort it.
+  let current: { stop: AbortController; since: Date } | undefined;
 
   return {
     async handle(message) {
@@ -64,13 +72,14 @@ export function createRouter(deps: RouterDeps): Router {
         logger.error('message from a channel that is not running', { channel: message.channel });
         return;
       }
-      const reply = async (text: string) => {
+      const send = async (card: Card & { markdown?: boolean }) => {
         try {
-          await channel.send({ chatId: message.chatId, text });
+          await channel.send({ chatId: message.chatId, ...card });
         } catch (err) {
           logger.error('reply failed', { channel: channel.id, err });
         }
       };
+      const reply = (text: string) => send({ text });
 
       // the text of an unknown sender never reaches the model or the event log.
       if (!deps.isOwner(message)) {
@@ -93,8 +102,24 @@ export function createRouter(deps: RouterDeps): Router {
       // only a button or an explicit command resolves an approval. free text such as "yes" goes to the model.
       if (message.button !== undefined) {
         const pressed = parseApprovalButton(message.button);
+        const always = parseAlwaysButton(message.button);
         if (pressed && deps.approvals) await resolve(deps.approvals, pressed.id, pressed.decision, 'button');
-        else logger.warn('unknown button', { data: message.button });
+        else if (always && deps.always) {
+          const { confirm, apply } = deps.always;
+          if (!always.confirmed) await send(confirm(always.id));
+          else await resolve(async (id) => apply(id), always.id, 'approve', 'button');
+        } else logger.warn('unknown button', { data: message.button });
+        return;
+      }
+      // /stop and the commands answer at once. a message that waits in the queue would wait for the run it stops.
+      if (message.text.trim() === '/stop') {
+        if (!current) return reply('Nothing runs now.');
+        current.stop.abort();
+        return;
+      }
+      const cards = deps.commands?.(message.text, current ? { runningSince: current.since } : {});
+      if (cards) {
+        for (const card of cards) await send(card);
         return;
       }
       const command = APPROVAL_COMMAND.exec(message.text.trim());
@@ -104,13 +129,7 @@ export function createRouter(deps: RouterDeps): Router {
         if (command[1]!.toLowerCase() === 'deny') return resolve(deps.approvals, id, 'deny', 'command');
         // the assistant can send a false card with the id of a real approval. the stored card comes back with its
         // buttons, so the owner sees the real input before the call runs.
-        const card = deps.approvalCard(id);
-        try {
-          await channel.send({ chatId: message.chatId, text: card.text, ...(card.buttons ? { buttons: card.buttons } : {}) });
-        } catch (err) {
-          logger.error('reply failed', { channel: channel.id, err });
-        }
-        return;
+        return send(deps.approvalCard(id));
       }
 
       // the user message goes into the log when its run starts. if it went in earlier, it could land between a
@@ -129,22 +148,39 @@ export function createRouter(deps: RouterDeps): Router {
           await reply('Started a new session.');
           return;
         }
-        const result = await deps.agent({
-          sessionKey: MAIN_SESSION,
-          trigger: 'message',
-          slot: 'main',
-          channel: message.channel,
-          allowedTools: MAIN_TOOLS,
-          events: [{ type: 'user_message', payload: { text: message.text, channel: message.channel, chatId: message.chatId } }],
-          signal: deps.signal,
-        });
+        const stop = new AbortController();
+        current = { stop, since: clock() };
+        const progress = channel.progress?.(message, () => stop.abort());
+        let result: RunResult | undefined;
+        try {
+          result = await deps.agent({
+            sessionKey: MAIN_SESSION,
+            trigger: 'message',
+            slot: 'main',
+            channel: message.channel,
+            allowedTools: MAIN_TOOLS,
+            events: [{ type: 'user_message', payload: { text: message.text, channel: message.channel, chatId: message.chatId } }],
+            signal: deps.signal ? AbortSignal.any([deps.signal, stop.signal]) : stop.signal,
+            ...(progress ? { onText: (text: string) => progress.text(text) } : {}),
+          });
+        } finally {
+          current = undefined;
+          await progress?.end(result?.status === 'completed');
+        }
+        // the model did not see that its reply was cut, so the session says so. the next run then does not take the
+        // owner's next message as an answer to a reply that never came.
+        if (stop.signal.aborted && result.status === 'aborted') {
+          appendEvent(db, { sessionKey: MAIN_SESSION, runId: null, type: 'system_event', payload: { text: 'The owner stopped the previous reply before it was done.' } }, clock());
+          await reply('Stopped.');
+          return;
+        }
         if (result.status !== 'completed') {
           await reply(`Sorry, I could not finish that: ${result.error ?? result.status}.`);
           return;
         }
         const text = result.text.trim();
         if (!text) logger.warn('run completed without text', { runId: result.runId });
-        if (text && text !== NO_REPLY) await reply(result.text);
+        if (text && text !== NO_REPLY) await send({ text: result.text, markdown: true });
       });
     },
   };

@@ -25,20 +25,31 @@ export function buttonUpdate(from: number, data: string, chat = from): Omit<Upda
   } as Omit<Update, 'update_id'>;
 }
 
+export function stopUpdate(chat: number, draftId: number): Omit<Update, 'update_id'> {
+  return { stopped_message_generation: { chat: privateChat(chat), draft_id: draftId } } as Omit<Update, 'update_id'>;
+}
+
 // the fake bot api answers every call in memory. getUpdates gives the pushed updates and waits for more until
-// polling stops, so tests drive the real long polling loop without a network.
+// polling stops, so tests drive the real long polling loop without a network. a test can make telegram refuse a
+// format: a call that refuse() names gets a 400, as telegram gives for markdown or html that it cannot parse.
 export function createFakeTelegram() {
   const calls: ApiCall[] = [];
   const updates: Update[] = [];
   let nextUpdateId = 1;
   let nextMessageId = 100;
   let wake: (() => void) | undefined;
+  // the rule gives the error code of a refused call, or false.
+  let refuse: (call: ApiCall) => number | false = () => false;
 
   const transformer: Transformer = async (_prev, method, payload, signal) => {
     const body = (payload ?? {}) as Record<string, unknown>;
     calls.push({ method, payload: body });
     const ok = (result: unknown) => ({ ok: true as const, result }) as never;
+    const code = refuse({ method, payload: body });
+    if (code) return { ok: false as const, error_code: code, description: code === 400 ? "Bad Request: can't parse entities" : 'Internal Server Error' } as never;
     switch (method) {
+      case 'sendRichMessage':
+        return ok({ message_id: nextMessageId++, date: 0, chat: { id: Number(body.chat_id), type: 'private' } });
       case 'getUpdates': {
         const offset = Number(body.offset ?? 0);
         while (!updates.some((u) => u.update_id >= offset)) {
@@ -77,6 +88,14 @@ export function createFakeTelegram() {
     bot,
     calls,
     sent: () => calls.filter((c) => c.method === 'sendMessage').map((c) => c.payload),
+    // the messages that reached the chat in order, plain or rich.
+    messages: () =>
+      calls
+        .filter((c) => c.method === 'sendMessage' || c.method === 'sendRichMessage')
+        .map((c) => ({ chatId: String(c.payload.chat_id), text: String(c.payload.text ?? (c.payload.rich_message as { markdown: string }).markdown) })),
+    refuse(rule: (call: ApiCall) => number | false) {
+      refuse = rule;
+    },
     push(update: Omit<Update, 'update_id'>) {
       updates.push({ ...update, update_id: nextUpdateId++ } as Update);
       wake?.();

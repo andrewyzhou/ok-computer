@@ -1,5 +1,5 @@
 import { CLI_CHAT_ID } from '../channels/cli.js';
-import type { Button, ChannelAdapter } from '../channels/types.js';
+import type { Button, ChannelAdapter, OutboundMessage } from '../channels/types.js';
 import type { Db } from '../db/index.js';
 import { getSetting, setSetting } from '../db/settings.js';
 import type { Logger } from '../observability/logger.js';
@@ -16,7 +16,7 @@ export interface OwnerMessenger {
   remember(chat: OwnerChat): void;
   chat(): OwnerChat | undefined;
   // send gives false when no chat of the owner is known or the channel fails.
-  send(text: string, buttons?: Button[][]): Promise<boolean>;
+  send(text: string, buttons?: Button[][], extra?: Pick<OutboundMessage, 'markdown' | 'details'>): Promise<boolean>;
 }
 
 // proactive messages go to the chat that the owner used last. the preferred chat, for example the owner's private
@@ -43,14 +43,14 @@ export function createOwnerMessenger(deps: {
       if (saved?.channel !== next.channel || saved.chatId !== next.chatId) setSetting(db, OWNER_CHAT, next, deps.clock());
     },
     chat,
-    async send(text, buttons) {
+    async send(text, buttons, extra) {
       const target = chat();
       if (!target) {
         logger.error('no chat of the owner is known, so a message was not sent', { text });
         return false;
       }
       try {
-        await channels.get(target.channel)!.send({ chatId: target.chatId, text, ...(buttons ? { buttons } : {}) });
+        await channels.get(target.channel)!.send({ chatId: target.chatId, text, ...(buttons ? { buttons } : {}), ...extra });
         return true;
       } catch (err) {
         logger.error('message to the owner failed', { channel: target.channel, err });

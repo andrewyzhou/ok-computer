@@ -45,7 +45,7 @@ function setup(steps: FakeStep[], start = '2026-10-12T09:00:00-07:00') {
     clock: () => now,
     setTimer: () => () => {},
   });
-  const texts = () => telegram.sent().map((p) => `${p.chat_id}: ${String(p.text)}`);
+  const texts = () => telegram.messages().map((m) => `${m.chatId}: ${m.text}`);
   return {
     app,
     db,

@@ -84,6 +84,7 @@ async function main(): Promise<void> {
     ownerIds,
     clock: systemClock,
     rules: rules.value,
+    policyPath: 'okc.policy.json',
     integrations: integrations.value,
     ...(integrations.value.length ? { secrets: createKeyringStore() } : {}),
     connectIntegrations: !chatMode,
