@@ -217,8 +217,9 @@ const LABELED_TS = /\b(?:message_ts|msg_?id|ts)\b["'*\s:=]*(\d{9,10}\.\d{6})\b/i
 // d is a dm, g an older private group or a group dm, and c a channel. a slack id has upper case letters and digits. so
 // the id patterns have no i flag, and they need a digit, because a name in capitals such as GREGORYSMITH is not an id.
 const id = (first: string) => `\\b([${first}](?=[A-Z0-9]*\\d)[A-Z0-9]{8,})\\b`;
-const CHANNEL = new RegExp(id('CDG'));
 const USER = new RegExp(id('UW'));
+const CHANNEL_LABEL = /\b[Cc]hannel\b/;
+const USER_LABEL = /\b(?:[Ff]rom|[Uu]ser|[Aa]uthor)\b/;
 // only the label can be in upper or lower case. a name on the line, as in "From: Christopher (U0...)", is not the id.
 const CHANNEL_LINE = new RegExp(`\\b[Cc]hannel\\b[^\\n]*?${id('CDG')}`);
 const USER_LINE = new RegExp(`\\b(?:[Ff]rom|[Uu]ser|[Aa]uthor)\\b[^\\n]*?${id('UW')}`);
@@ -312,18 +313,24 @@ function messagesInMarkdown(text: string): SlackPage {
 }
 
 // messageInBlock reads one block, or gives the reason why it cannot. the fields of the server come before the text of
-// the dm, so the first match of a field is the one of the server. a heading before the ts is not text of a dm. it shows
-// that the first heading was not the form of a result.
+// the dm, so the first line with the label of a field is the one of the server. the id comes only from that line. an id
+// on a later line can be text of the dm, which could then give a stranger's dm the id of the owner. so a user line
+// without an id, for example a name or a bot, gives no user, and a channel line without an id makes the block not
+// whole. a heading before the ts is not text of a dm. it shows that the first heading was not the form of a result.
 function messageInBlock(lines: string[]): SlackMessage | string {
   const at = lines.findIndex((line) => LABELED_TS.test(line));
   if (at < 0) return 'a message has no labeled ts';
   if (lines.slice(0, at).some((line) => HEADING.test(line))) return 'a message has a heading before its ts';
-  const block = lines.join('\n');
   const ts = LABELED_TS.exec(lines[at]!)![1]!;
-  const channel = CHANNEL_LINE.exec(block)?.[1] ?? CHANNEL.exec(block)?.[1];
+  const channel = fieldId(lines, CHANNEL_LABEL, CHANNEL_LINE);
   if (!channel) return 'a message has no channel id';
-  const user = USER_LINE.exec(block)?.[1] ?? USER.exec(block)?.[1];
-  return { channel, ts, ...(user ? { user } : {}), text: block.trim() };
+  const user = fieldId(lines, USER_LABEL, USER_LINE);
+  return { channel, ts, ...(user ? { user } : {}), text: lines.join('\n').trim() };
+}
+
+function fieldId(lines: string[], label: RegExp, field: RegExp): string | undefined {
+  const line = lines.find((each) => label.test(each));
+  return line === undefined ? undefined : field.exec(line)?.[1];
 }
 
 // headingForm reads the form of the first heading, whose first number must be 1. it gives a function that returns the

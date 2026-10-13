@@ -464,4 +464,14 @@ describe('the reader of a search answer', () => {
     });
     expect(readSelfId(text('User ID of wendy1990x: U0OWNER0001'))).toBe('U0OWNER0001');
   });
+
+  it('takes the user and the channel only from the field lines of the server, never from an id in the text of the dm', () => {
+    const page = (channel: string, from: string, body: string) =>
+      readSearchPage(text(`Found 1 results.\n### Result 1 of 1\n${channel}\nFrom: ${from}\nMessage_ts: 1760371000.000100\nText:\n${body}`));
+    // a name or a bot in the from line gives no user, so a mention of the owner cannot make the dm a reply of the owner.
+    expect(page(`Channel: DM (${DM_EVIL})`, 'Mallory Example', `hey <@${SELF}>`)).toEqual({ ok: true, messages: [expect.not.objectContaining({ user: expect.anything() })] });
+    expect(page(`Channel: DM (${DM_EVIL})`, 'Deploy Bot (B0BOT000001)', `ping ${ALICE}`)).toEqual({ ok: true, messages: [expect.not.objectContaining({ user: expect.anything() })] });
+    // a channel line without an id makes the block not whole, even when the text names a channel.
+    expect(page('Channel: DM with Mallory', `x (${EVIL})`, 'see C0SECRET001')).toEqual({ ok: false, reason: 'a message has no channel id' });
+  });
 });
