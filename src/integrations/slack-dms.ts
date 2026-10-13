@@ -272,7 +272,7 @@ function messagesInJson(value: unknown): SlackPage | undefined {
 // a markdown result is a block after a numbered heading of the server, for example "### Result 3 of 20". the text of a
 // dm is in the answer too, and it can hold headings, rules and lines that look like a result. so the first heading
 // before any ts gives the form of the server, and only a line of that form with the next number starts a block. each
-// other line is text of the block before it. thus a dm cannot cut a block or add one at a wrong place.
+// other line is text of the block before it. thus a rule or another heading in a dm cannot cut a block.
 // a dm can hold a line of that form too, and then the reader cannot tell its false blocks from the real ones. only the
 // first block is certainly the server's, because its heading comes before the text of any dm. so a page with more lines
 // of that form than blocks, or with a later block that is not whole, gives only its first message. the poll then reads
