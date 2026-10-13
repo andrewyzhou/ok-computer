@@ -93,6 +93,9 @@ describe('mcp acceptance', () => {
     expect(names).toContain('tool_search');
     expect(names).toContain('tool_call');
     expect(names.some((name) => name.startsWith('notes__'))).toBe(false);
+    // the heartbeat and the consolidation see no integration, so they keep their small fixed tool lists.
+    expect(t.app.integrations.allowedNames('heartbeat:run-9')).toEqual([]);
+    expect(t.app.integrations.allowedNames('consolidate:2026-10-13')).toEqual([]);
 
     // the search found the new tool, and its text was wrapped as untrusted catalog text.
     const results = listEvents(t.db, 'main').filter((event) => event.type === 'tool_result');

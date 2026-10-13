@@ -162,7 +162,7 @@ describe('mcp connection failure modes', () => {
     const gate = new Promise<void>((resolve) => (release = resolve));
     let closed = false;
     const make = memoryTransport();
-    const { connection } = setup(async () => {
+    const { connection, messages } = setup(async () => {
       await gate;
       const transport = await make();
       const close = transport.close.bind(transport);
@@ -178,6 +178,8 @@ describe('mcp connection failure modes', () => {
     await starting;
     expect(connection.state().status).toBe('stopped');
     expect(closed).toBe(true);
+    // the attempt gave up before the handshake, so a stdio server would not even start.
+    expect(messages()).toEqual([]);
     expect((await connection.callTool('echo', { text: 'x' }, trace)).kind).toBe('not_sent');
   });
 
