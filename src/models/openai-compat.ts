@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import OpenAI from 'openai';
 import {
   ModelError,
@@ -28,7 +29,8 @@ export function createOpenAiCompatClient(
       } catch (err) {
         throw toModelError(err);
       }
-      return fromOpenAiCompletion(completion, Math.round(performance.now() - started));
+      const earlier = call.messages.flatMap((message) => (message.role === 'assistant' ? message.toolCalls.map((each) => each.id) : []));
+      return fromOpenAiCompletion(completion, Math.round(performance.now() - started), earlier);
     },
   };
 }
@@ -82,10 +84,19 @@ function toOpenAiMessages(message: ModelMessage): OpenAI.Chat.ChatCompletionMess
   return out;
 }
 
-export function fromOpenAiCompletion(completion: OpenAI.Chat.ChatCompletion, latencyMs: number): ModelResponse {
+// some servers number the calls of each reply from call_0, or give no id. the trace, the decisions and the repair after
+// a crash find a call by its run and its id, so a repeated id would give a call the result of an older call. such a
+// call gets a new id. the server only needs the ids to pair each call with its result in the next request.
+export function fromOpenAiCompletion(completion: OpenAI.Chat.ChatCompletion, latencyMs: number, earlier: Iterable<string> = []): ModelResponse {
   const choice = completion.choices[0];
+  const used = new Set(earlier);
+  const uniqueId = (id: string | undefined) => {
+    const unique = id && !used.has(id) ? id : `call_${randomBytes(8).toString('hex')}`;
+    used.add(unique);
+    return unique;
+  };
   const toolCalls: ToolCall[] = (choice?.message.tool_calls ?? []).flatMap((call) =>
-    call.type === 'function' ? [{ id: call.id, name: call.function.name, input: parseArguments(call.function.arguments) }] : [],
+    call.type === 'function' ? [{ id: uniqueId(call.id), name: call.function.name, input: parseArguments(call.function.arguments) }] : [],
   );
   const cached = completion.usage?.prompt_tokens_details?.cached_tokens ?? 0;
   return {

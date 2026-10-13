@@ -80,6 +80,31 @@ describe('createOpenAiCompatClient', () => {
     expect(response.usage).toEqual({ inputTokens: 20, outputTokens: 8, cacheReadTokens: 100, cacheWriteTokens: 0 });
   });
 
+  // a server that numbers the calls of each reply from call_0 gave the same id twice in one run. after a crash, the
+  // repair then gave the second call the recorded result of the first.
+  it('gives a new id to a call whose id an earlier call has, or that has no id', async () => {
+    const fn = (id: string) => ({ id, type: 'function', function: { name: 'now', arguments: '{}' } });
+    const client = createOpenAiCompatClient('http://localhost:11434/v1', undefined, {
+      fetch: reply({
+        id: 'c1',
+        object: 'chat.completion',
+        created: 0,
+        model: 'llama3',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'tool_calls',
+            message: { role: 'assistant', content: null, tool_calls: [fn('call_1'), fn('call_9'), fn('call_9'), fn('')] },
+          },
+        ],
+      }),
+    });
+    const ids = (await client.complete(base)).toolCalls.map((call) => call.id);
+    expect(ids[1]).toBe('call_9');
+    expect(ids[0]).toMatch(/^call_[0-9a-f]{16}$/);
+    expect(new Set([...ids, 'call_1']).size).toBe(5);
+  });
+
   it('maps status codes to error kinds', async () => {
     const busy = createOpenAiCompatClient('http://localhost/v1', undefined, { fetch: reply({ error: {} }, 503) });
     await expect(busy.complete(base)).rejects.toMatchObject({ kind: 'transient', status: 503 });
