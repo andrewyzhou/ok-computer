@@ -62,22 +62,39 @@ export async function stdioTransport(entry: StdioEntry, secrets: SecretStore, lo
 // only the direct child. a server that does not stop at the end of stdin then lives on, and each reconnect leaves one
 // more process. so the close takes a list of the descendants first and ends the ones that are still alive after it.
 function killTreeOnClose(transport: StdioClientTransport, id: string, logger: Logger) {
+  const start = transport.start.bind(transport);
   const close = transport.close.bind(transport);
+  // every process of the server starts after this time.
+  let startedAt = Date.now();
+  transport.start = async () => {
+    startedAt = Date.now();
+    return start();
+  };
   transport.close = async () => {
     const pid = transport.pid;
-    let tree: number[] = [];
+    let tree: ProcessRow[] = [];
     if (pid !== null) {
       try {
-        tree = await descendants(pid);
+        tree = descendants(await processList(), pid, startedAt);
       } catch (err) {
         logger.warn('mcp process list failed', { integration: id, err });
       }
     }
     await close();
-    for (const child of tree) {
+    if (!tree.length) return;
+    // a process of the list can end during the close, and windows can give its pid to a new process. so only a pid
+    // that still has the same start time is ended.
+    let alive: ProcessRow[];
+    try {
+      alive = sameProcesses(tree, await processList());
+    } catch (err) {
+      logger.warn('mcp process list failed', { integration: id, err });
+      return;
+    }
+    for (const child of alive) {
       try {
-        process.kill(child);
-        logger.warn('mcp server process ended after the close', { integration: id, pid: child });
+        process.kill(child.pid);
+        logger.warn('mcp server process ended after the close', { integration: id, pid: child.pid });
       } catch {
         // the process already stopped.
       }
@@ -85,27 +102,61 @@ function killTreeOnClose(transport: StdioClientTransport, id: string, logger: Lo
   };
 }
 
-export async function descendants(root: number): Promise<number[]> {
+// created is the start time of the process in milliseconds since 1970.
+export interface ProcessRow {
+  pid: number;
+  parent: number;
+  created: number;
+}
+
+export async function processList(): Promise<ProcessRow[]> {
   const { stdout } = await run(
     'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-Command', "Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId | ForEach-Object { '{0} {1}' -f $_.ProcessId, $_.ParentProcessId }"],
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      "Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate | ForEach-Object { '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, $(if ($_.CreationDate) { ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } else { 0 }) }",
+    ],
     { windowsHide: true, timeout: 10_000 },
   );
-  const children = new Map<number, number[]>();
+  const rows: ProcessRow[] = [];
   for (const line of stdout.split(/\r?\n/)) {
-    const [child, parent] = line.trim().split(' ').map(Number);
-    if (!child || parent === undefined) continue;
-    children.set(parent, [...(children.get(parent) ?? []), child]);
+    const [pid, parent, created] = line.trim().split(' ').map(Number);
+    if (pid && parent !== undefined && created !== undefined && Number.isFinite(created)) rows.push({ pid, parent, created });
   }
-  const found: number[] = [];
-  const queue = [...(children.get(root) ?? [])];
+  return rows;
+}
+
+// the clocks of node and of windows are the same, but the start time of a process can be a little earlier than the
+// time that node reads just before the spawn.
+const START_SLACK_MS = 1_000;
+
+// descendants gives the processes under root that the server started. a pid and a parent pid alone can name the wrong
+// process: windows keeps the parent pid of a process after its parent ends, and it gives the freed pid to new
+// processes. so a process that started before the server, or before its own parent, is not a descendant, also when
+// its parent pid matches. a root that this process did not start is not the server.
+export function descendants(rows: readonly ProcessRow[], root: number, startedAt: number, owner = process.pid): ProcessRow[] {
+  const top = rows.find((row) => row.pid === root);
+  if (top && (top.parent !== owner || top.created < startedAt - START_SLACK_MS)) return [];
+  const children = new Map<number, ProcessRow[]>();
+  for (const row of rows) children.set(row.parent, [...(children.get(row.parent) ?? []), row]);
+  const found: ProcessRow[] = [];
+  const queue: Array<{ pid: number; created: number }> = [{ pid: root, created: top?.created ?? startedAt - START_SLACK_MS }];
   while (queue.length) {
-    const next = queue.shift()!;
-    if (found.includes(next)) continue;
-    found.push(next);
-    queue.push(...(children.get(next) ?? []));
+    const parent = queue.shift()!;
+    for (const child of children.get(parent.pid) ?? []) {
+      if (child.pid === root || found.includes(child) || child.created < parent.created || child.created < startedAt - START_SLACK_MS) continue;
+      found.push(child);
+      queue.push(child);
+    }
   }
   return found;
+}
+
+// sameProcesses keeps each process of the list that still runs with the same start time.
+export function sameProcesses(listed: readonly ProcessRow[], now: readonly ProcessRow[]): ProcessRow[] {
+  return listed.filter((row) => now.some((each) => each.pid === row.pid && each.created === row.created));
 }
 
 export async function httpTransport(

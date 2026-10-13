@@ -5,7 +5,7 @@ import { silentLogger, type Logger } from '../observability/logger.js';
 import { parseIntegrations, type StdioEntry } from './config.js';
 import { STDERR_LINES_PER_MINUTE } from './mcp.js';
 import { createMemorySecretStore } from './secrets.js';
-import { stdioTransport } from './transports.js';
+import { descendants, sameProcesses, stdioTransport } from './transports.js';
 
 const FIXTURE = join(import.meta.dirname, '../../test/fixtures/stdio-server.ts');
 
@@ -34,6 +34,37 @@ const alive = (pid: number) => {
     return false;
   }
 };
+
+// windows keeps the parent pid of a process after its parent ends, and gives the freed pid to a new process. the close
+// of a server whose pid was such a freed pid ended the unrelated orphans, for example explorer.exe.
+describe('process tree of a stdio server', () => {
+  const owner = 100;
+  const startedAt = 10_000;
+  const server = { pid: 10, parent: owner, created: 10_010 };
+  const child = { pid: 11, parent: 10, created: 10_020 };
+  const grandchild = { pid: 12, parent: 11, created: 10_030 };
+  // the old owner of pid 10 started this process and ended before the server started.
+  const orphan = { pid: 20, parent: 10, created: 5_000 };
+  const orphanChild = { pid: 21, parent: 20, created: 6_000 };
+  // a process that got the freed pid 11 after the child ended, during the close.
+  const reused = { pid: 11, parent: 50, created: 10_500 };
+
+  it('lists only the processes that started after the server and after their parent', () => {
+    const rows = [server, child, grandchild, orphan, orphanChild];
+    expect(descendants(rows, 10, startedAt, owner)).toEqual([child, grandchild]);
+    // the server already ended: its children are still found by the start time.
+    expect(descendants([child, grandchild, orphan, orphanChild], 10, startedAt, owner)).toEqual([child, grandchild]);
+  });
+
+  it('lists nothing for a root that this process did not start', () => {
+    expect(descendants([{ ...server, parent: 77 }, child], 10, startedAt, owner)).toEqual([]);
+    expect(descendants([{ ...server, created: 1_000 }, child], 10, startedAt, owner)).toEqual([]);
+  });
+
+  it('ends only a listed process that still has the same start time', () => {
+    expect(sameProcesses([child, grandchild], [reused, grandchild])).toEqual([grandchild]);
+  });
+});
 
 describe('stdio transport', () => {
   it.skipIf(process.platform !== 'win32')(
