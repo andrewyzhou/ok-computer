@@ -106,9 +106,24 @@ const OUTCOME_NOTES: Record<string, string> = {
   interrupted: 'The app stopped while the tool ran. The model got a note that the effect is unknown.',
 };
 
+// these outcomes have no result of the tool. the model view holds the note of the caller.
+const NO_RESULT = new Set(['abandoned', 'interrupted']);
+
 // the raw result is what the tool gave. the model view is the exact text that the model got, after the wrapper of
-// untrusted text and the cut to a preview.
+// untrusted text and the cut to a preview. a preview, a wrapped text and a late result always get a blob, so such a
+// row without a blob lost its raw text when the blob write failed. its model view is not the raw result.
 function ResultView({ call }: { call: ToolCallRow }) {
+  const lost = !call.rawResultBlob && (call.truncated || call.untrustedSource !== null || call.outcome === 'late');
+  const none = !call.rawResultBlob && NO_RESULT.has(call.outcome);
+  const raw = call.rawResultBlob ? (
+    <BlobText hash={call.rawResultBlob} />
+  ) : lost ? (
+    <p className="muted">The raw result was not stored, because its blob write failed. The log has the error.</p>
+  ) : none ? (
+    <p className="muted">The tool gave no result.</p>
+  ) : (
+    <Json value={call.output.content} />
+  );
   return (
     <>
       {call.truncated ? (
@@ -121,11 +136,11 @@ function ResultView({ call }: { call: ToolCallRow }) {
         <p className="muted">The result came from {call.untrustedSource}, so the model got it inside an untrusted wrapper.</p>
       ) : null}
       {OUTCOME_NOTES[call.outcome] ? <p className="muted">{OUTCOME_NOTES[call.outcome]}</p> : null}
-      {call.rawResultBlob ? null : <p className="muted">The model saw the raw result unchanged.</p>}
+      {call.rawResultBlob || lost || none ? null : <p className="muted">The model saw the raw result unchanged.</p>}
       <div className="split">
         <div>
           <h3>Raw result</h3>
-          {call.rawResultBlob ? <BlobText hash={call.rawResultBlob} /> : <Json value={call.output.content} />}
+          {raw}
         </div>
         <div>
           <h3>What the model saw</h3>

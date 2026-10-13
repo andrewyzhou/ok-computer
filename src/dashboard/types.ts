@@ -76,7 +76,8 @@ export interface ToolCallRow {
   untrustedSource: string | null;
   truncated: boolean;
   resultHandle: string | null;
-  // the raw result is rawResultBlob ?? output.content. the blob exists only when the model saw other text.
+  // the raw result is rawResultBlob ?? output.content. the blob exists only when the model saw other text: a
+  // preview, a wrapped text, or a late result. such a row without a blob lost its raw text in a failed blob write.
   rawResultBlob: string | null;
   // one word from outcomeOf in outcome.ts: ran, failed, invalid, denied, held, waiting, approved, declined, expired,
   // abandoned, late or interrupted.

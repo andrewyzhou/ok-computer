@@ -85,6 +85,30 @@ describe('every dashboard page loads against the seeded database', () => {
     expect(await screen.findByText(/Catalog [0-9a-f]{12}, first offered/)).toBeTruthy();
   });
 
+  // a failed blob write keeps the row without its raw text. the page once said that the model saw the raw result
+  // unchanged, and showed the preview, or the note of an abandoned call, as the raw result.
+  it('says that the raw result was not stored when the blob write failed, and never calls a note the raw result', async () => {
+    const { db } = seeded.t;
+    db.prepare("UPDATE tool_calls SET rawResultBlob = NULL WHERE toolCallId = 'call-week'").run();
+    db.prepare("UPDATE tool_calls SET outcome = 'abandoned' WHERE toolCallId = 'call-read'").run();
+    open('#/runs/run-5');
+    expect(await screen.findByText('Timeline')).toBeTruthy();
+    const [week, read] = [...document.querySelectorAll('.timeline.nested > li')] as HTMLElement[];
+    fireEvent.click(within(week!).getByText(/result and what the model saw/));
+    expect(await within(week!).findByText(/The raw result was not stored, because its blob write failed/)).toBeTruthy();
+    expect(within(week!).queryByText('The model saw the raw result unchanged.')).toBeNull();
+    fireEvent.click(within(read!).getByText(/result and what the model saw/));
+    expect(await within(read!).findByText('The tool gave no result.')).toBeTruthy();
+    expect(within(read!).queryByText('The model saw the raw result unchanged.')).toBeNull();
+    db.prepare("UPDATE tool_calls SET outcome = 'late', rawResultBlob = NULL, untrustedSource = NULL, truncated = 0 WHERE toolCallId = 'call-read'").run();
+    cleanup();
+    open('#/runs/run-5');
+    expect(await screen.findByText('Timeline')).toBeTruthy();
+    const late = document.querySelectorAll('.timeline.nested > li')[1] as HTMLElement;
+    fireEvent.click(within(late).getByText(/result and what the model saw/));
+    expect(await within(late).findByText(/The raw result was not stored/)).toBeTruthy();
+  });
+
   it('shows the outcome of each tool call, so a call that waits for the owner never looks like it ran', async () => {
     const { db } = seeded.t;
     // the call to result_read waits for the owner, and the session was tainted by an email.
