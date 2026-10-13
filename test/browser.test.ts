@@ -98,6 +98,9 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(out.content).not.toContain('chrome-error');
     expect(out.untrustedSource).toBe(`browser:shop.test:${site.port}`);
     expect(site.hitsOn('evil.test')).toEqual([]);
+    // the block came when no step ran, so the next step records it.
+    expect(out.content).toContain(site.url('evil.test', '/late?leak=1'));
+    expect(JSON.parse(String(h.steps().at(-1)!.blockedRequests))).toContainEqual(expect.objectContaining({ url: site.url('evil.test', '/late?leak=1') }));
   });
 
   it('sends the user agent of normal chrome', async () => {

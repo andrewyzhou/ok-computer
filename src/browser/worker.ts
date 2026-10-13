@@ -456,6 +456,14 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     }
   }
 
+  // the lists start again only after a record. a block between two steps, for example of a timed refresh or a popup,
+  // then goes into the record of the next step.
+  function recorded(tab: Tab): void {
+    tab.blocked = [];
+    tab.sent = [];
+    tab.console = [];
+  }
+
   // one action at a time in a tab. the model can ask for several calls in one turn, and two actions in one page at
   // the same moment give a step record that belongs to neither.
   function serial<T>(tab: Tab, work: () => Promise<T>): Promise<T> {
@@ -474,10 +482,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       const started = performance.now();
       tab.lastUsed = Date.now();
       lastActivity = Date.now();
-      tab.blocked = [];
-      tab.sent = [];
       tab.topBlocked = false;
-      tab.console = [];
       const urlBefore = tab.page.url();
       let note = '';
       let error: string | undefined;
@@ -499,6 +504,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       if (!urlAfter.startsWith('chrome-error:')) tab.lastPage = urlAfter;
       const stepId = record(tab, input, { urlBefore, urlAfter, snapshot: shot.snapshot, jpeg: shot.jpeg, started, ...(error || shot.errors.length ? { error: [error, ...shot.errors].filter(Boolean).join('; ') } : {}) });
       const base = { url: urlAfter, blocked: [...tab.blocked], sent: [...tab.sent], taskId: tab.id, acted, ...(shot.snapshot !== undefined ? { snapshot: shot.snapshot } : {}), ...(stepId ? { stepId } : {}) };
+      recorded(tab);
       // a page that answers neither capture is hung, for example by a loop in its script. closing the tab is the only
       // way back (probe p5), and the next browser_open starts a new task.
       if (shot.errors.length === 2 && /Timeout/.test(shot.errors.join(' '))) {
@@ -521,6 +527,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     const error = `the page gave no answer within ${deadline / 1000} s`;
     const stepId = record(tab, input, { urlBefore, urlAfter: tab.page.url(), started, error });
     const base = { url: tab.page.url(), blocked: [...tab.blocked], sent: [...tab.sent], taskId: tab.id, acted: true, ...(stepId ? { stepId } : {}) };
+    recorded(tab);
     await endTab(tab, 'crashed', 'the page stopped responding');
     return { ...base, ok: false, title: '', note: `${error}. The page stopped responding, so its tab closed and the task ended.` };
   }
