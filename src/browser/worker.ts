@@ -119,11 +119,14 @@ export interface BrowserWorker {
   // open starts the task of the session at its first call, and the host of the address joins its allowlist.
   open(step: StepInput, url: string): Promise<StepResult | BrowserRefusal>;
   // act runs one action in the open task of the session, one action at a time, and records the step.
-  act(step: StepInput, action: (page: Page, tab: ActTab) => Promise<string | void>): Promise<StepResult | BrowserRefusal>;
+  // scope open acts on the one open task, whichever session started it. a submit uses it: a child session opens the
+  // page, and its parent sends the form after the owner approves.
+  act(step: StepInput, action: (page: Page, tab: ActTab) => Promise<string | void>, scope?: 'session' | 'open'): Promise<StepResult | BrowserRefusal>;
   // search runs in a short tab of its own with the hosts of the engine, and records one step.
   inTab<T>(step: StepInput, hosts: string[], work: (page: Page) => Promise<T>): Promise<{ value?: T; error?: string; result: StepResult } | BrowserRefusal>;
-  allowlistOf(sessionKey: string): string[] | undefined;
-  allow(sessionKey: string, domain: string): BrowserRefusal | { allowlist: string[] };
+  // allow adds a domain to the one open task, when the task allows the host of pageUrl. the owner approved a domain
+  // for the task of that page, not for any task.
+  allow(pageUrl: string, domain: string): BrowserRefusal | { allowlist: string[] };
   close(sessionKey: string, reason: string): Promise<boolean>;
   // sweep closes the rows of tasks that no chrome of this process has, after a crash of the app.
   sweep(): number;
@@ -537,10 +540,10 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
         return { refused: `${host} is not on the allowlist of this task (${[...tab.allowlist].join(', ')}). Use browser_allow_domain to ask the owner, or browser_close and start a new task.` };
       }
       if (!tab) {
+        // the task of another session can wait for the owner to approve a submit, for hours, so it is never taken.
         const other = ownTask();
         if (other) {
-          if (Date.now() - other.lastUsed < 60_000) return { refused: 'The browser is busy with a task of another session. Try again in a minute.' };
-          await serial(other, () => endTab(other, 'closed', 'another session needed the browser'));
+          return { refused: `The browser is busy with a task of another session (${other.sessionKey}). That task ends after ${Math.round(idleMs / 60_000)} minutes without an action. Try again later.` };
         }
         const ctx = await contextOrRefusal();
         if ('refused' in ctx) return ctx;
@@ -552,9 +555,9 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
         return response && response.status() >= 400 ? `the page answered with status ${response.status()}` : undefined;
       });
     },
-    async act(input, action) {
-      const tab = tasks.get(input.sessionKey);
-      if (!tab) return { refused: 'No page is open in this session. Use browser_open first.' };
+    async act(input, action, scope = 'session') {
+      const tab = scope === 'open' ? ownTask() : tasks.get(input.sessionKey);
+      if (!tab) return { refused: `No page is open${scope === 'open' ? '' : ' in this session'}. Use browser_open first.` };
       return step(tab, input, (page) => action(page, { allowlist: tab.allowlist, snapshot: tab.snapshot, setSubmit: (on) => void (tab.submit = on) }));
     },
     async inTab(input, hosts, work) {
@@ -575,13 +578,18 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       if ('refused' in result) return result;
       return { ...(value !== undefined ? { value } : {}), ...(error ? { error } : {}), result };
     },
-    allowlistOf: (sessionKey) => {
-      const tab = tasks.get(sessionKey);
-      return tab ? [...tab.allowlist] : undefined;
-    },
-    allow(sessionKey, domain) {
-      const tab = tasks.get(sessionKey);
-      if (!tab) return { refused: 'No browser task is open in this session, so there is no allowlist to change. The domain was not added.' };
+    allow(pageUrl, domain) {
+      const tab = ownTask();
+      if (!tab) return { refused: 'No browser task is open, so there is no allowlist to change. The domain was not added.' };
+      let host = '';
+      try {
+        host = new URL(pageUrl).hostname;
+      } catch {
+        // an address that does not parse matches no task.
+      }
+      if (!host || !allowedBy(tab.allowlist, host)) {
+        return { refused: `The open browser task is for ${[...tab.allowlist].join(', ')}, not for ${JSON.stringify(pageUrl)}. The domain was not added. Ask again with the address of the open page.` };
+      }
       tab.allowlist.add(siteOf(domain));
       try {
         db.prepare('UPDATE browser_tasks SET allowlist = ? WHERE id = ?').run(JSON.stringify([...tab.allowlist]), tab.id);

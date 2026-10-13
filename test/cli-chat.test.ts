@@ -67,7 +67,6 @@ describe('cli chat through the full loop', () => {
       'browser_close',
       'browser_extract',
       'browser_open',
-      'browser_screenshot',
       'browser_select',
       'browser_snapshot',
       'browser_submit',

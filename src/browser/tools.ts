@@ -4,19 +4,21 @@ import { defineTool, type Tool, type ToolContext, type ToolOutput } from '../too
 import { extractIsolated } from '../web/extract-run.js';
 import { NotDone, type ActTab, type BrowserRefusal, type BrowserWorker, type StepInput, type StepResult } from './worker.js';
 
-export const BROWSER_TOOLS = [
-  'browser_allow_domain',
+// the tools that change what leaves the pc. the owner approves each call, so they stay with the main session when a
+// browser child session gets the other tools.
+export const BROWSER_OWNER_TOOLS = ['browser_allow_domain', 'browser_submit'] as const;
+// the tools that read a page or change it only on this pc.
+export const BROWSER_PAGE_TOOLS = [
   'browser_back',
   'browser_click',
   'browser_close',
   'browser_extract',
   'browser_open',
-  'browser_screenshot',
   'browser_select',
   'browser_snapshot',
-  'browser_submit',
   'browser_type',
 ] as const;
+export const BROWSER_TOOLS = [...BROWSER_OWNER_TOOLS, ...BROWSER_PAGE_TOOLS].sort();
 
 const ref = z.string().regex(/^s\d+(f\d+)?e\d+$/, 'use a ref from the last snapshot, such as s3e12');
 const element = z.string().min(1).max(200).describe('a short description of the element, which the owner reads when the call needs approval');
@@ -143,7 +145,8 @@ const sameAddress = (a: string, b: string) => {
 };
 
 export function createBrowserTools(worker: BrowserWorker): Tool[] {
-  const act = (ctx: ToolContext, action: string, target: unknown, work: (page: Page, tab: ActTab) => Promise<string | void>) => worker.act(stepOf(ctx, action, target), work);
+  const act = (ctx: ToolContext, action: string, target: unknown, work: (page: Page, tab: ActTab) => Promise<string | void>, scope?: 'open') =>
+    worker.act(stepOf(ctx, action, target), work, scope);
 
   return [
     defineTool({
@@ -164,15 +167,6 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
       risk: 'read',
       async run(_input, ctx) {
         return view(await act(ctx, 'snapshot', undefined, async () => undefined));
-      },
-    }),
-    defineTool({
-      name: 'browser_screenshot',
-      description: 'Save a screenshot of the open page for the owner, who sees it on the Browser page of the dashboard. You get a snapshot.',
-      input: z.object({}),
-      risk: 'read',
-      async run(_input, ctx) {
-        return view(await act(ctx, 'screenshot', undefined, async () => 'the screenshot is saved for the owner'));
       },
     }),
     defineTool({
@@ -277,7 +271,7 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
             tab.setSubmit(false);
           }
           return `sent the form with ${button}`;
-        });
+        }, 'open');
         // the owner approved this call. a page that changed means the call did not act, but the approval must not
         // come back as pending: the same input would fail again.
         return view(result, { effectNone: false });
@@ -285,14 +279,19 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
     }),
     defineTool({
       name: 'browser_allow_domain',
-      description: 'Ask the owner to add a site to the allowlist of the open browser task, for example the payment site of a shop. Give the reason.',
+      description:
+        'Ask the owner to add a site to the allowlist of the open browser task, for example the payment site of a shop. ' +
+        'Give the address of the open page and the reason.',
       input: z.object({
+        url: z.string().min(1).max(2000).describe('the address of the open page'),
         domain: z.string().regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i, 'give a host name such as pay.example.com'),
         reason: z.string().min(1).max(300),
       }),
       risk: 'external',
-      async run({ domain }, ctx) {
-        const allowed = worker.allow(ctx.sessionKey, domain);
+      // a rule in okc.policy.json can allow external tools. the agent must never widen its own allowlist that way.
+      needsApproval: true,
+      async run({ url, domain }) {
+        const allowed = worker.allow(url, domain);
         if ('refused' in allowed) return { content: allowed.refused, isError: true };
         return { content: `the allowlist of this task is now: ${allowed.allowlist.join(', ')}` };
       },

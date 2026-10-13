@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { browserLogin } from '../src/browser/login.js';
 import { profileBusy } from '../src/browser/worker.js';
 import { createBrowserHarness, hasChrome, killChrome } from './browser-harness.js';
@@ -190,9 +190,37 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     const h = harness();
     await h.run('browser_open', { url: site.url('shop.test') });
     expect(await h.run('browser_open', { url: site.url('evil.test') })).toMatchObject({ isError: true, effect: 'none', content: expect.stringContaining('browser_allow_domain') });
-    await h.run('browser_allow_domain', { domain: 'evil.test', reason: 'test' });
+    // the owner approved a domain for the task of one page. the address must name the open task.
+    expect(await h.run('browser_allow_domain', { url: site.url('cdn.test'), domain: 'evil.test', reason: 'test' })).toMatchObject({ isError: true, content: expect.stringContaining('was not added') });
+    await h.run('browser_allow_domain', { url: site.url('shop.test'), domain: 'evil.test', reason: 'test' });
     expect((await h.run('browser_open', { url: site.url('evil.test') })).isError).toBe(false);
     expect(site.hitsOn('evil.test').length).toBeGreaterThan(0);
+  });
+
+  it('keeps the task of a session from another session, also when it is idle for more than a minute', async () => {
+    const h = harness();
+    await h.run('browser_open', { url: site.url('shop.test') }, 'main');
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 61_000);
+    try {
+      expect(await h.run('browser_open', { url: site.url('shop.test', '/about') }, 'auto:a:r')).toMatchObject({ isError: true, effect: 'none', content: expect.stringContaining('busy') });
+    } finally {
+      clock.mockRestore();
+    }
+    expect(h.tasks()).toMatchObject([{ sessionKey: 'main', status: 'open' }]);
+  });
+
+  it('sends the form of a page that a child session opened, from the parent, only for the page in the input', async () => {
+    const h = harness();
+    await h.run('browser_open', { url: site.url('shop.test') }, 'sub:browser:x');
+    const before = site.hitsOn('shop.test').filter((hit) => hit.path === '/buy').length;
+    const wrong = await h.run('browser_submit', { url: site.url('shop.test', '/about'), button: 'Buy now', fields: { name: '', size: 'S' } }, 'main');
+    expect(wrong).toMatchObject({ isError: true, content: expect.stringContaining('Nothing was sent') });
+    const sent = await h.run('browser_submit', { url: site.url('shop.test'), button: 'Buy now', fields: { name: '', size: 'S' } }, 'main');
+    expect(sent.isError).toBe(false);
+    expect(site.hitsOn('shop.test').filter((hit) => hit.path === '/buy').length - before).toBe(1);
+    // the other tools of main still act only on a task of main.
+    expect(await h.run('browser_snapshot', {}, 'main')).toMatchObject({ isError: true, content: expect.stringContaining('in this session') });
   });
 
   it('saves a trace zip when the task ends', async () => {

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { listEvents } from '../src/events/log.js';
+import { BUILTIN_RULES } from '../src/policy/policy.js';
 import { textStep, toolStep } from '../src/models/fake.js';
 import { sessionTaint } from '../src/policy/store.js';
 import { createTestApp } from './app-harness.js';
@@ -13,6 +14,24 @@ beforeAll(async () => {
 afterAll(() => site?.close());
 
 const start = '2026-10-13T17:00:00Z';
+
+describe('browser_allow_domain', () => {
+  it('waits for the owner, also when a rule of the owner allows every tool', async () => {
+    const rules = [...BUILTIN_RULES, { id: 'okc.policy.json#1', tool: '*', effect: 'allow' as const }];
+    const t = createTestApp(
+      [toolStep({ id: 'c1', name: 'browser_allow_domain', input: { url: 'https://shop.example/', domain: 'pay.example', reason: 'checkout' } }), textStep('ok')],
+      { start, deps: { rules, web: { egress: fixtureEgress() } } },
+    );
+    await t.app.start();
+    try {
+      await t.say('allow the payment site');
+      expect(t.rows("SELECT status FROM approvals WHERE toolName = 'browser_allow_domain'")).toEqual([{ status: 'pending' }]);
+      expect(t.rows('SELECT decision, rule FROM policy_decisions')).toEqual([{ decision: 'approve', rule: expect.anything() }]);
+    } finally {
+      await t.app.stop();
+    }
+  });
+});
 
 // the acceptance of the milestone, through the whole app: the agent loop, the tool caller, the policy and the
 // approval flow, with a fake model and the real chrome against the local site.
