@@ -7,7 +7,7 @@ import { redact, registerSecret } from '../observability/redact.js';
 import type { Clock } from '../time.js';
 import { errorText } from '../tools/registry.js';
 import type { HttpEntry } from './config.js';
-import type { SecretStore } from './secrets.js';
+import { CredentialStoreError, type SecretStore } from './secrets.js';
 
 export const CALLBACK_PORT = 4318;
 export const CALLBACK_PATH = '/oauth/callback';
@@ -80,9 +80,33 @@ export function createOAuth(deps: OAuthDeps): OAuth {
   let starting: Promise<void> | undefined;
   let closeTimer: NodeJS.Timeout | undefined;
 
+  // the sdk calls the provider inside a request, before the post or after a 401. a failure of the credential manager
+  // gets its own type, so the call can say that the tool did not run.
+  const vault = async <T>(work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work();
+    } catch (err) {
+      throw new CredentialStoreError(`the credential manager failed: ${errorText(err)}`, { cause: err });
+    }
+  };
   const readJson = async <T>(ref: string): Promise<T | undefined> => {
-    const text = await secrets.get(ref);
+    const text = await vault(() => secrets.get(ref));
     return text === undefined ? undefined : (JSON.parse(text) as T);
+  };
+  // new tokens that the credential manager did not take. a server with rotation already spent the old refresh token,
+  // so a lost new set would end the sign-in at the next refresh. the provider uses this copy and saves it again at
+  // each read, until a save works. a restart before that loses it.
+  const unsaved = new Map<string, StoredOAuthTokens>();
+  const saveUnsaved = async (id: string) => {
+    const tokens = unsaved.get(id);
+    if (!tokens) return;
+    try {
+      await secrets.set(tokensRef(id), JSON.stringify(tokens));
+      if (unsaved.get(id) === tokens) unsaved.delete(id);
+      logger.info('oauth tokens saved after an earlier failure', { integration: id });
+    } catch (err) {
+      logger.warn('oauth tokens still not saved', { integration: id, err });
+    }
   };
 
   const prune = () => {
@@ -119,10 +143,11 @@ export function createOAuth(deps: OAuthDeps): OAuth {
         return (await readJson<StoredOAuthClientInformation>(clientRef(id))) ?? (auth?.clientRef ? await readJson(auth.clientRef) : undefined);
       },
       async saveClientInformation(info) {
-        await secrets.set(clientRef(id), JSON.stringify(info));
+        await vault(() => secrets.set(clientRef(id), JSON.stringify(info)));
       },
       async tokens() {
-        const tokens = await readJson<StoredOAuthTokens>(tokensRef(id));
+        await saveUnsaved(id);
+        const tokens = unsaved.get(id) ?? (await readJson<StoredOAuthTokens>(tokensRef(id)));
         // each token is a secret on its own. the redaction of the whole json text would miss a token in a header.
         registerSecret(tokens?.access_token, `${tokensRef(id)}#access`);
         registerSecret(tokens?.refresh_token, `${tokensRef(id)}#refresh`);
@@ -131,8 +156,15 @@ export function createOAuth(deps: OAuthDeps): OAuth {
       async saveTokens(tokens) {
         registerSecret(tokens.access_token, `${tokensRef(id)}#access`);
         registerSecret(tokens.refresh_token, `${tokensRef(id)}#refresh`);
-        const before = await readJson<StoredOAuthTokens>(tokensRef(id));
-        await secrets.set(tokensRef(id), JSON.stringify(tokens));
+        const before = unsaved.get(id) ?? (await readJson<StoredOAuthTokens>(tokensRef(id)).catch(() => undefined));
+        try {
+          await secrets.set(tokensRef(id), JSON.stringify(tokens));
+          unsaved.delete(id);
+        } catch (err) {
+          // the new tokens work. a throw here would lose them, and the request with them.
+          unsaved.set(id, tokens);
+          logger.error('oauth tokens not saved, so the app keeps them in memory and tries again', { integration: id, err });
+        }
         // the sdk also saves the stored tokens again to add the issuer. only new tokens from the server are a sign-in,
         // and only they have a new expiry.
         if (before?.access_token === tokens.access_token) return;
@@ -187,8 +219,11 @@ export function createOAuth(deps: OAuthDeps): OAuth {
         return active.get(id)?.discovery ?? drafts.get(id)?.discovery;
       },
       async invalidateCredentials(scope) {
-        if (scope === 'all' || scope === 'tokens') await secrets.delete(tokensRef(id));
-        if (scope === 'all' || scope === 'client') await secrets.delete(clientRef(id));
+        if (scope === 'all' || scope === 'tokens') {
+          unsaved.delete(id);
+          await vault(() => secrets.delete(tokensRef(id)));
+        }
+        if (scope === 'all' || scope === 'client') await vault(() => secrets.delete(clientRef(id)));
         if (scope === 'all' || scope === 'verifier') drafts.delete(id);
       },
     };
@@ -328,9 +363,13 @@ export function createOAuth(deps: OAuthDeps): OAuth {
     fetchFor: (entry) => singleFlight(observed(entry)),
     serverError: (id) => serverErrors.get(id),
     signInOutage: (id) => outages.get(id),
-    hasTokens: async (id) => (await secrets.get(tokensRef(id))) !== undefined,
+    hasTokens: async (id) => unsaved.has(id) || (await secrets.get(tokensRef(id))) !== undefined,
     closeIfIdle: closeWhenIdle,
     pendingUrl(id) {
+      // the sdk also makes a flow when a sign-in stops in a call or a start that the owner did not begin. the callback
+      // does not listen then, so its link would end in a refused connection after the consent. the page shows Connect
+      // instead, which makes a new flow while the callback listens.
+      if (!server) return undefined;
       prune();
       return [...flows.values()].find((flow) => flow.integrationId === id)?.url;
     },

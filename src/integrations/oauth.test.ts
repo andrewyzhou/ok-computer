@@ -353,6 +353,52 @@ describe('oauth', () => {
     cleanup.push(() => blocker.close());
     expect(await integrations.connect('remote')).toMatchObject({ error: expect.stringContaining('EADDRINUSE') });
   });
+
+  // the server rotates the refresh token at each refresh. a lost new set made the next refresh send a used token, and
+  // the server revoked the whole sign-in.
+  it('keeps refreshed tokens that the credential manager did not take, and saves them later', async () => {
+    const { as, secrets, integrations, needsAuth, advance } = await setup();
+    await integrations.start();
+    await connect(integrations);
+    needsAuth.length = 0;
+    const set = secrets.set.bind(secrets);
+    let fail = true;
+    secrets.set = async (ref, value) => {
+      if (fail && ref === 'remote:oauth-tokens') {
+        fail = false;
+        throw new Error('Platform secure storage failure');
+      }
+      return set(ref, value);
+    };
+    const stored = () => secrets.values.get('remote:oauth-tokens');
+    const before = stored();
+    as.expire();
+    expect(await echo(integrations, 'a')).toMatchObject({ kind: 'result' });
+    // the next read of the tokens saves the copy.
+    expect(stored()).not.toBe(before);
+    // after the time in which a refresh result is shared.
+    advance(60_000);
+    as.expire();
+    expect(await echo(integrations, 'b')).toMatchObject({ kind: 'result' });
+    expect(as.stats).toMatchObject({ refreshGrants: 2, reuse: 0 });
+    expect(needsAuth).toEqual([]);
+  });
+
+  // a sign-in that stops in a call makes a flow, but the callback does not listen then. the page showed its link, and
+  // the consent ended in a refused connection.
+  it('shows a sign-in link only while the callback listens', async () => {
+    const { as, integrations } = await setup();
+    await integrations.start();
+    await connect(integrations);
+    as.revoke();
+    expect(await echo(integrations)).toMatchObject({ kind: 'not_sent' });
+    expect(integrations.status()[0]!).toMatchObject({ state: { status: 'needs_auth' } });
+    expect(integrations.status()[0]!.authUrl).toBeUndefined();
+    const started = await integrations.connect('remote');
+    if (!('url' in started)) throw new Error(`expected a link, got ${JSON.stringify(started)}`);
+    expect(integrations.status()[0]!.authUrl).toBe(started.url);
+    expect((await consent(started.url)).response.status).toBe(200);
+  });
 });
 
 export type { OAuthTestServer };
