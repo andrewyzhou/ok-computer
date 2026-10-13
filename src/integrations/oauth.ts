@@ -124,13 +124,13 @@ export function createOAuth(deps: OAuthDeps): OAuth {
       async tokens() {
         const tokens = await readJson<StoredOAuthTokens>(tokensRef(id));
         // each token is a secret on its own. the redaction of the whole json text would miss a token in a header.
-        registerSecret(tokens?.access_token);
-        registerSecret(tokens?.refresh_token);
+        registerSecret(tokens?.access_token, `${tokensRef(id)}#access`);
+        registerSecret(tokens?.refresh_token, `${tokensRef(id)}#refresh`);
         return tokens;
       },
       async saveTokens(tokens) {
-        registerSecret(tokens.access_token);
-        registerSecret(tokens.refresh_token);
+        registerSecret(tokens.access_token, `${tokensRef(id)}#access`);
+        registerSecret(tokens.refresh_token, `${tokensRef(id)}#refresh`);
         const before = await readJson<StoredOAuthTokens>(tokensRef(id));
         await secrets.set(tokensRef(id), JSON.stringify(tokens));
         // the sdk also saves the stored tokens again to add the issuer. only new tokens from the server are a sign-in,

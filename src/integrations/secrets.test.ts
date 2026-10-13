@@ -120,6 +120,15 @@ describe('parted secret store', () => {
     await createPartedStore(backend).set('t', 'xoxp-secret-token-value');
     expect(redact('token xoxp-secret-token-value')).toBe('token [redacted]');
   });
+
+  // a token set changes at each oauth refresh. the redactor keeps only the newest value of each reference, so its list
+  // does not grow for the life of the process.
+  it('replaces the registered value of a reference when the reference gets a new value', async () => {
+    const store = createPartedStore(fakeKeyring().backend);
+    await store.set('mail:oauth-tokens', 'old-token-set-value-2026');
+    await store.set('mail:oauth-tokens', 'new-token-set-value-2026');
+    expect(redact('old-token-set-value-2026 new-token-set-value-2026')).toBe('old-token-set-value-2026 [redacted]');
+  });
 });
 
 // this test writes to the credential manager of the pc under a random service name and removes its entries. it runs

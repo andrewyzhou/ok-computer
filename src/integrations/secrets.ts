@@ -93,11 +93,11 @@ export function createPartedStore(backend: KeyringBackend): SecretStore {
           value = undefined;
         }
       }
-      registerSecret(value);
+      registerSecret(value, ref);
       return value;
     },
     async set(ref, value) {
-      registerSecret(value);
+      registerSecret(value, ref);
       const old = await backend.get(ref).then((text) => (text === null ? undefined : parseHead(text)));
       if (value.length <= PART_UNITS && !value.startsWith(HEAD)) {
         await backend.set(ref, value);
@@ -138,7 +138,7 @@ export function createMemorySecretStore(initial: Record<string, string> = {}): S
       return values.get(ref);
     },
     async set(ref, value) {
-      registerSecret(value);
+      registerSecret(value, ref);
       values.set(ref, value);
     },
     async delete(ref) {

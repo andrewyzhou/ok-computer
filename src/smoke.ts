@@ -14,7 +14,7 @@ async function smoke(): Promise<void> {
   if (!loaded.ok) throw new Error(loaded.error);
   const config = loaded.value;
   const secrets = loadSecrets();
-  Object.values(secrets).forEach(registerSecret);
+  Object.values(secrets).forEach((value) => registerSecret(value));
 
   const logger = createLogger({ consoleLevel: 'warn' });
   const db = openDb(':memory:');

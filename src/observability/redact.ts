@@ -10,22 +10,32 @@ const PATTERNS = [/sk-ant-[A-Za-z0-9_-]{10,}/g, /(?<![0-9])\d{6,12}:[A-Za-z0-9_-
 let secrets: string[] = [];
 // a model request holds an event that holds a tool result that holds json. four levels cover this.
 const ESCAPE_LEVELS = 4;
+// the forms of each value. a value without a source stays for the life of the process. a value with a source
+// replaces the last value of that source: an oauth refresh gives new tokens each hour, and redact makes one pass for
+// each form, so a list that only grows made each trace write slower (100 refreshes: 15 ms to 488 ms for one list).
+const fixed = new Set<string>();
+const bySource = new Map<string, string[]>();
 
-export function registerSecret(value: string | undefined): void {
+// source names the place that holds the value, for example the reference of a credential. only the newest value of a
+// source stays registered. an old token is not sent again, and it was never in a trace row, because a header is not
+// recorded.
+export function registerSecret(value: string | undefined, source?: string): void {
   // a very short value can match normal text, so the redactor ignores it.
   if (!value || value.length < 8) return;
   // a string inside json text has its quotes and backslashes escaped, so the escaped form is a secret too. json text
   // can contain json text, for example a tool result that is json inside an event. each level escapes the secret
   // again, so each level adds a form.
-  const forms = new Set(secrets);
+  const forms: string[] = [];
   let form = value;
   for (let level = 0; level < ESCAPE_LEVELS; level++) {
-    forms.add(form);
+    forms.push(form);
     const escaped = JSON.stringify(form).slice(1, -1);
     if (escaped === form) break;
     form = escaped;
   }
-  secrets = [...forms].sort((a, b) => b.length - a.length);
+  if (source === undefined) forms.forEach((each) => fixed.add(each));
+  else bySource.set(source, forms);
+  secrets = [...new Set([...fixed, ...[...bySource.values()].flat()])].sort((a, b) => b.length - a.length);
 }
 
 export function redact(text: string): string {

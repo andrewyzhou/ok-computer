@@ -37,7 +37,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   const { telegramOwnerId, ...secrets } = loadSecrets();
-  Object.values(secrets).forEach(registerSecret);
+  Object.values(secrets).forEach((value) => registerSecret(value));
 
   const logger = createLogger({ dir: join(config.paths.data, 'logs'), consoleLevel: chatMode ? 'warn' : 'info' });
   const clients = createClients(config, secrets);
