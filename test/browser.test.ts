@@ -369,6 +369,21 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(wrong).toMatchObject({ isError: true, content: expect.stringContaining('Nothing was sent') });
   });
 
+  // the gate decoded the body as utf-8, so it refused each form of such a page with a value that is not ascii (r7
+  // probe). 日 is not in windows-1252, so the browser sends it as &#26085;.
+  it.each(['application/x-www-form-urlencoded', 'multipart/form-data'])('sends a form of a page in windows-1252 with a value that is not ascii (%s)', async (enctype) => {
+    const h = harness();
+    const url = site.url('shop.test', `/legacy?enctype=${enctype}`);
+    const page = await h.run('browser_open', { url });
+    await h.run('browser_type', { ref: refOf(page.content, /textbox "City"/), element: 'City', text: 'Zürich 日' });
+    site.hits.length = 0;
+    const out = await h.run('browser_submit', { url, button: 'Save', fields: { city: 'Zürich 日' } });
+    expect(out.isError, out.content).toBe(false);
+    const posts = site.hits.filter((hit) => hit.method === 'POST');
+    expect(posts).toHaveLength(1);
+    if (enctype.startsWith('application')) expect(posts[0]!.body).toBe('city=Z%FCrich+%26%2326085%3B');
+  });
+
   it('says that the form was not sent when the gate refused it, also when the page sent a beacon at the click', async () => {
     const h = harness();
     const url = site.url('shop.test', '/script-form?mode=changed');

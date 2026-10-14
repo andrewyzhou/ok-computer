@@ -25,12 +25,16 @@ export interface ApprovedForm {
   skip: string[];
   // the hidden fields that a script of the page may set, for a control that is not a submit button.
   hidden?: string[];
+  // the encoding in which the browser sends the form: the accept-charset of the form, or the encoding of the page.
+  charset?: string;
 }
 
 // a request body, as the layers of the gate read it.
 export interface Body {
   type?: string;
   data?: string;
+  // the bytes of the body. a form of a page in a legacy encoding, such as windows-1252, is not utf-8.
+  bytes?: Buffer;
 }
 
 // the playwright route of the context and the cdp session of the tab.
@@ -122,13 +126,33 @@ export async function judge(check: ReturnType<typeof cachedCheck>, rules: TabRul
   return host.ok ? { ok: true } : { ok: false, reason: host.reason };
 }
 
+// a page in a legacy encoding sends "Zürich" as Z%FCrich, and a utf-8 decoder read the byte as a replacement
+// character, so the gate refused each approved form with such a value (r7 probe). the bytes of a percent escape are
+// decoded in the encoding of the form.
+function percentDecoded(text: string, decoder: InstanceType<typeof TextDecoder>): string {
+  const bytes = text.replace(/\+/g, ' ').replace(/%([0-9a-f]{2})/gi, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+  return decoder.decode(Buffer.from(bytes, 'latin1'));
+}
+
 // the three encodings of a form. another type, or no body, is not a form that the check read.
-export function formPairs(body: Body | undefined): Array<[string, string]> | undefined {
+export function formPairs(body: Body | undefined, charset = 'utf-8'): Array<[string, string]> | undefined {
   if (body?.data === undefined || !body.type) return undefined;
   const type = body.type.toLowerCase();
-  if (type.startsWith('application/x-www-form-urlencoded')) return [...new URLSearchParams(body.data)];
-  if (type.startsWith('text/plain')) {
+  const utf8 = charset === 'utf-8';
+  const decoder = new TextDecoder(charset);
+  if (type.startsWith('application/x-www-form-urlencoded')) {
+    if (utf8) return [...new URLSearchParams(body.data)];
     return body.data
+      .split('&')
+      .filter(Boolean)
+      .map((part): [string, string] => {
+        const at = part.indexOf('=');
+        return at < 0 ? [percentDecoded(part, decoder), ''] : [percentDecoded(part.slice(0, at), decoder), percentDecoded(part.slice(at + 1), decoder)];
+      });
+  }
+  const data = utf8 || !body.bytes ? body.data : decoder.decode(body.bytes);
+  if (type.startsWith('text/plain')) {
+    return data
       .split('\r\n')
       .filter(Boolean)
       .map((line): [string, string] => (line.includes('=') ? [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)] : [line, '']));
@@ -136,7 +160,7 @@ export function formPairs(body: Body | undefined): Array<[string, string]> | und
   const boundary = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(body.type);
   if (!type.startsWith('multipart/form-data') || !boundary) return undefined;
   const pairs: Array<[string, string]> = [];
-  for (const part of body.data.split(`--${boundary[1] ?? boundary[2]}`).slice(1, -1)) {
+  for (const part of data.split(`--${boundary[1] ?? boundary[2]}`).slice(1, -1)) {
     const split = part.indexOf('\r\n\r\n');
     const name = split < 0 ? undefined : /name="([^"]*)"/.exec(part.slice(0, split))?.[1];
     if (name === undefined) return undefined;
@@ -153,9 +177,28 @@ export function formPairs(body: Body | undefined): Array<[string, string]> | und
 // the browser sends a new line in a value as cr lf, and FormData keeps lf.
 const flat = (pairs: Array<[string, string]>) => JSON.stringify(pairs.map((pair) => pair.map((text) => text.replace(/\r\n?/g, '\n'))).sort());
 
+// a legacy encoding cannot hold each character, and the browser sends such a character as a reference, for example
+// &#26085; for 日. the server gets the same bytes for both, so both sides are compared with the references read.
+const references = (pairs: Array<[string, string]>) =>
+  pairs.map((pair) => pair.map((text) => text.replace(/&#(\d{1,7});/g, (all, code: string) => (Number(code) <= 0x10ffff ? String.fromCodePoint(Number(code)) : all))) as [string, string]);
+
+// the browser sends a document form in the encoding of the form. a script sends a FormData or a text in utf-8.
 function sameForm(body: Body | undefined, form: ApprovedForm): boolean {
-  const sent = formPairs(body);
+  const charset = form.charset ?? 'utf-8';
+  return (charset !== 'utf-8' && sameIn(body, form, charset)) || sameIn(body, form, 'utf-8');
+}
+
+function sameIn(body: Body | undefined, form: ApprovedForm, charset: string): boolean {
+  const read = (pairs: Array<[string, string]>) => (charset === 'utf-8' ? pairs : references(pairs));
+  let sent: Array<[string, string]> | undefined;
+  try {
+    sent = formPairs(body, charset);
+  } catch {
+    // node does not know the encoding of the page.
+    return false;
+  }
   if (sent === undefined) return false;
+  sent = read(sent);
   // a page script can add a field with the name of a click position at the click. only one pair of each name leaves.
   for (const name of form.skip) {
     const at = sent.findIndex(([each, value]) => each === name && /^\d+$/.test(value));
@@ -163,7 +206,7 @@ function sameForm(body: Body | undefined, form: ApprovedForm): boolean {
     sent.splice(at, 1);
   }
   const set = (pairs: Array<[string, string]>) => pairs.filter(([name]) => !form.hidden?.includes(name));
-  return flat(set(sent)) === flat(set(form.pairs));
+  return flat(set(sent)) === flat(set(read(form.pairs)));
 }
 
 // both layers can see the same request, so each verdict goes to the tab rules through this one place.
@@ -203,7 +246,8 @@ export async function guardTab(cdp: CDPSession, egress: Egress, rules: TabRules)
       const type = Object.entries(request.headers).find(([name]) => name.toLowerCase() === 'content-type')?.[1];
       // a long body comes only as entries.
       const entries = request.postDataEntries?.map((each) => Buffer.from(each.bytes ?? '', 'base64'));
-      const body = { type, data: request.postData ?? (entries ? Buffer.concat(entries).toString() : undefined) };
+      const bytes = entries ? Buffer.concat(entries) : undefined;
+      const body = { type, data: request.postData ?? bytes?.toString(), bytes };
       const verdict = await judge(check, rules, request.url, document, request.method, body);
       report('cdp', rules, request.url, request.method, document, document &&event.frameId === targetInfo.targetId, verdict, body);
       if (verdict.ok) return cdp.send('Fetch.continueRequest', { requestId: event.requestId });
@@ -243,7 +287,7 @@ export async function guardContext(
       return route.abort('blockedbyclient').catch(() => undefined);
     }
     const document = request.isNavigationRequest();
-    const body = { type: request.headers()['content-type'], data: request.postData() ?? undefined };
+    const body = { type: request.headers()['content-type'], data: request.postData() ?? undefined, bytes: request.postDataBuffer() ?? undefined };
     const verdict = await judge(check, rules, request.url(), document, request.method(), body);
     report('route', rules, request.url(), request.method(), document, document &&request.frame() === page.mainFrame(), verdict, body);
     if (verdict.ok) return route.fallback().catch(() => undefined);

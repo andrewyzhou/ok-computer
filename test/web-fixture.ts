@@ -214,6 +214,12 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
             'Checkout',
           ),
         );
+      case 'shop.test/legacy': {
+        // a page in windows-1252, as older shops have. its browser sends the form in that encoding.
+        const enctype = new URL(path, 'http://x').searchParams.get('enctype') ?? 'application/x-www-form-urlencoded';
+        const form = `<form action="/buy" method="post" enctype="${enctype}"><label>City <input name="city"></label><button>Save</button></form>`;
+        return send(200, html(form, 'Address'), 'text/html; charset=windows-1252');
+      }
       case 'shop.test/framed':
         return send(200, html('<h1>Contact</h1><iframe src="/forms" width="600" height="300"></iframe>', 'Contact'));
       case 'shop.test/send':

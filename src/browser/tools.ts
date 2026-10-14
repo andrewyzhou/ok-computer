@@ -81,6 +81,7 @@ interface PageControl {
 interface PageForm {
   action: string;
   method: string;
+  acceptCharset: string;
   elements: ArrayLike<PageField>;
 }
 interface PageField {
@@ -127,6 +128,8 @@ interface FormState {
   script: boolean;
   // with script, the names of the hidden fields of the form, whose values the script may set before it sends.
   hidden: string[];
+  // the encoding in which the browser sends the form.
+  charset: string;
 }
 
 // a page can send its form some time after the click, for example after a check of its own, with a script post or a
@@ -152,7 +155,7 @@ async function formOf(page: Page, control: ElementHandle): Promise<FormState> {
       // a script can read each field of the page, so a password field with a value anywhere on the page refuses the send.
       const { document } = globalThis as unknown as { document: { querySelectorAll(selector: string): ArrayLike<PageField> } };
       const password = Array.from(document.querySelectorAll('input[type=password]')).some((item) => item.value !== '');
-      return { fields: {}, pairs: [], skip: [], password, method: 'post', script: true, hidden: [] };
+      return { fields: {}, pairs: [], skip: [], password, method: 'post', script: true, hidden: [], charset: 'utf-8' };
     }
     const pairs: Array<[string, string]> = [...(submit ? new FormData(form, button) : new FormData(form))].map(([name, value]) => [name, typeof value === 'string' ? value : value.name]);
     // an image button adds its click position, as name.x and name.y, or as x and y without a name. FormData gives 0
@@ -183,7 +186,19 @@ async function formOf(page: Page, control: ElementHandle): Promise<FormState> {
     // an asp.net postback link puts the name of the control into a hidden field and then sends the form (r7 probe).
     // the script of the page chooses what it sends, and the gate lets its data go only to the sites of the task.
     const hidden = submit ? [] : Array.from(form.elements).filter((item) => item.type === 'hidden' && item.name).map((item) => item.name);
-    return { fields, pairs, skip: image, password, method, script: !submit, hidden };
+    // the browser takes the first encoding of accept-charset that it knows, else the encoding of the page, and utf-8
+    // for utf-16. TextDecoder gives the same names in the page and in node.
+    const { TextDecoder: Decoder, document } = globalThis as unknown as { TextDecoder: new (label: string) => { encoding: string }; document: { characterSet: string } };
+    const known = (label: string) => {
+      try {
+        return new Decoder(label).encoding;
+      } catch {
+        return undefined;
+      }
+    };
+    const chosen = form.acceptCharset.split(/[\s,]+/).map(known).find(Boolean) ?? known(document.characterSet) ?? 'utf-8';
+    const charset = chosen.startsWith('utf-16') ? 'utf-8' : chosen;
+    return { fields, pairs, skip: image, password, method, script: !submit, hidden, charset };
   }, SUBMIT_CONTROL));
 }
 
@@ -354,7 +369,7 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
           if (form.password) throw new Error('the form or the page has a password field. The agent never sends a password. Nothing was sent. The owner signs in with okc browser login');
           if (sortedPairs(fields) !== sortedPairs(form.fields)) throw new Error(`the form now has these fields: ${JSON.stringify(form.fields)}. Nothing was sent. Ask again with these values`);
           // the gate compares the request with this set, so a page script that changes a field at the click sends nothing.
-          tab.setSubmit({ pairs: form.pairs, skip: form.skip, hidden: form.hidden });
+          tab.setSubmit({ pairs: form.pairs, skip: form.skip, hidden: form.hidden, charset: form.charset });
           let outcome: SubmitOutcome = { form: true, refused: false, blocked: 0 };
           try {
             await control.click();
