@@ -11,36 +11,42 @@ import { startDashboard, type RunningDashboard } from './dashboard/server.js';
 import { loadIntegrations } from './integrations/config.js';
 import { createKeyringStore } from './integrations/secrets.js';
 import { createClients } from './models/clients.js';
-import { createLogger } from './observability/logger.js';
+import { exitOnFatal, exitOnUncaught, exitWhenIdle } from './exit.js';
+import { createLogger, pruneLogs, type Logger } from './observability/logger.js';
 import { registerSecret } from './observability/redact.js';
 import { loadPolicy } from './policy/policy.js';
 import { systemClock } from './time.js';
 
+// the handlers of a fatal error use the logger once it exists.
+let fatalLogger: Logger | undefined;
+
 async function main(): Promise<void> {
-  // in chat mode the terminal shows only warnings and errors from the log, so the chat stays readable.
+  exitOnUncaught(() => fatalLogger);
   const chatMode = process.argv.includes('--chat');
 
   loadDotEnv();
   const loaded = loadConfig();
   if (!loaded.ok) {
-    console.error(loaded.error);
-    process.exit(1);
+    exitOnFatal(loaded.error);
   }
   const config = loaded.value;
   const rules = loadPolicy();
   if (!rules.ok) {
-    console.error(rules.error);
-    process.exit(1);
+    exitOnFatal(rules.error);
   }
   const integrations = loadIntegrations();
   if (!integrations.ok) {
-    console.error(integrations.error);
-    process.exit(1);
+    exitOnFatal(integrations.error);
   }
   const { telegramOwnerId, ...secrets } = loadSecrets();
   Object.values(secrets).forEach((value) => registerSecret(value));
 
-  const logger = createLogger({ dir: join(config.paths.data, 'logs'), consoleLevel: chatMode ? 'warn' : 'info' });
+  // the terminal shows only warnings and errors, so the chat stays readable. the supervisor keeps stderr in a file, and
+  // the log file has every line.
+  const logDir = join(config.paths.data, 'logs');
+  const logger = createLogger({ dir: logDir, consoleLevel: 'warn' });
+  fatalLogger = logger;
+  pruneLogs(logDir, new Date());
   const clients = createClients(config, secrets);
   if (!clients.ok) {
     logger.error('model setup failed', { error: clients.error });
@@ -57,7 +63,7 @@ async function main(): Promise<void> {
     await dashboard?.close();
     await app.stop();
     db.close();
-    process.exit(0);
+    exitWhenIdle(0);
   };
 
   const channels: ChannelAdapter[] = [];
@@ -111,7 +117,4 @@ async function main(): Promise<void> {
   if (chatMode) process.stdout.write('ok computer is ready. type a message, /new for a fresh session, ctrl+c to quit.\n');
 }
 
-main().catch((err: unknown) => {
-  console.error(err);
-  process.exit(1);
-});
+main().catch((err: unknown) => exitOnFatal(err, fatalLogger));

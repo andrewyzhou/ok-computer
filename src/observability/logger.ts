@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { redactedJson } from './redact.js';
 
@@ -50,6 +50,17 @@ function serializable(fields: Fields): Fields {
       value instanceof Error ? [key, { name: value.name, message: value.message, stack: value.stack }] : [key, value],
     ),
   );
+}
+
+const KEEP_LOG_DAYS = 30;
+
+// the daily files grow without a limit, so the app keeps only the files of the last 30 days.
+export function pruneLogs(dir: string, now: Date): void {
+  const oldest = new Date(now.getTime() - KEEP_LOG_DAYS * 86_400_000).toISOString().slice(0, 10);
+  for (const name of readdirSync(dir)) {
+    const day = /^okc-(\d{4}-\d{2}-\d{2})\.log$/.exec(name)?.[1];
+    if (day && day < oldest) rmSync(join(dir, name), { force: true });
+  }
 }
 
 export const silentLogger: Logger = createLogger({ consoleLevel: 'off' });
