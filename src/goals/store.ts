@@ -10,6 +10,8 @@ export interface Goal {
   day: string;
   title: string;
   eta: string | null;
+  // the first eta that the goal got. the statistics count a goal as on time only when it was done by this time.
+  firstEta: string | null;
   status: GoalStatus;
   createdAt: string;
   completedAt: string | null;
@@ -24,8 +26,8 @@ export interface GoalPatch {
 
 export function addGoal(db: Db, input: { day: string; title: string; eta?: string }, now: Date): Goal {
   const row = db
-    .prepare('INSERT INTO goals (day, title, eta, status, createdAt) VALUES (?, ?, ?, ?, ?) RETURNING *')
-    .get(input.day, input.title, input.eta ?? null, 'open', now.toISOString());
+    .prepare('INSERT INTO goals (day, title, eta, firstEta, status, createdAt) VALUES (?, ?, ?, ?, ?, ?) RETURNING *')
+    .get(input.day, input.title, input.eta ?? null, input.eta ?? null, 'open', now.toISOString());
   return toGoal(row!);
 }
 
@@ -44,9 +46,10 @@ export function updateGoal(db: Db, id: number, patch: GoalPatch, now: Date): Res
   if (!goal) return { ok: false, error: `no goal has the id ${id}` };
   const status = patch.status ?? goal.status;
   const completedAt = status === 'done' ? (goal.completedAt ?? now.toISOString()) : null;
-  db.prepare('UPDATE goals SET status = ?, eta = ?, note = ?, completedAt = ? WHERE id = ?').run(
+  db.prepare('UPDATE goals SET status = ?, eta = ?, firstEta = ?, note = ?, completedAt = ? WHERE id = ?').run(
     status,
     patch.eta ?? goal.eta,
+    goal.firstEta ?? patch.eta ?? null,
     patch.note ?? goal.note,
     completedAt,
     id,
@@ -120,7 +123,7 @@ export function goalStats(db: Db, from: string, to: string): GoalStats {
     daysWithGoals: byDay.size,
     goals: goals.length,
     done,
-    doneOnTime: goals.filter((goal) => goal.status === 'done' && goal.eta && goal.completedAt! <= goal.eta).length,
+    doneOnTime: goals.filter((goal) => goal.status === 'done' && goal.firstEta && goal.completedAt! <= goal.firstEta).length,
     dropped: count('dropped'),
     open: count('open'),
     hitRate: goals.length ? Math.round((done / goals.length) * 100) / 100 : null,
@@ -143,6 +146,7 @@ function toGoal(row: Record<string, unknown>): Goal {
     day: String(row.day),
     title: String(row.title),
     eta: row.eta === null ? null : String(row.eta),
+    firstEta: row.firstEta === null || row.firstEta === undefined ? null : String(row.firstEta),
     status: row.status as GoalStatus,
     createdAt: String(row.createdAt),
     completedAt: row.completedAt === null ? null : String(row.completedAt),

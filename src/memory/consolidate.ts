@@ -69,7 +69,7 @@ function describeStats(label: string, stats: GoalStats): string {
 // the statistics come from the database only. the model gets them as facts and does not count from the notes.
 export function consolidationStats(db: Db, day: string, timeZone: string): string {
   const month = listGoals(db, addDays(day, -29), day);
-  const slipped = month.filter((goal) => goal.status !== 'done' || (goal.eta !== null && goal.completedAt! > goal.eta));
+  const slipped = month.filter((goal) => goal.status !== 'done' || (goal.firstEta !== null && goal.completedAt! > goal.firstEta));
   return [
     describeStats('last 7 days', goalStats(db, addDays(day, -6), day)),
     describeStats('last 30 days', goalStats(db, addDays(day, -29), day)),

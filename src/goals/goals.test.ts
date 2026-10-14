@@ -135,6 +135,19 @@ describe('goal store', () => {
       allDoneStreak: 1,
     });
   });
+
+  // a new eta replaced the old one, so a goal that slipped and was done by its later eta counted as on time.
+  it('counts a goal as on time only when it was done by its first eta', () => {
+    const db = openDb(':memory:');
+    const goal = addGoal(db, { day: '2026-10-12', title: 'essay', eta: '2026-10-13T04:00:00.000Z' }, new Date('2026-10-13T01:00:00Z'));
+    updateGoal(db, goal.id, { eta: '2026-10-13T06:00:00.000Z' }, new Date('2026-10-13T04:00:00Z'));
+    updateGoal(db, goal.id, { status: 'done' }, new Date('2026-10-13T05:00:00Z'));
+    expect(goalStats(db, '2026-10-12', '2026-10-12')).toMatchObject({ done: 1, doneOnTime: 0 });
+    const late = addGoal(db, { day: '2026-10-12', title: 'gym' }, new Date('2026-10-13T01:00:00Z'));
+    expect(updateGoal(db, late.id, { eta: '2026-10-13T07:00:00.000Z' }, new Date('2026-10-13T01:00:00Z'))).toMatchObject({
+      value: { firstEta: '2026-10-13T07:00:00.000Z' },
+    });
+  });
 });
 
 describe('day results', () => {
