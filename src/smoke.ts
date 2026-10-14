@@ -21,7 +21,7 @@ async function smoke(): Promise<void> {
   let total = 0;
   for (const ref of cheapestModels(config)) {
     const provider = splitModelRef(ref).provider;
-    const slots = everySlot({ chain: [ref], effort: 'low', maxTokens: 1024 });
+    const slots = everySlot({ chain: [ref], effort: 'low', maxTokens: 1024, cacheTtl: '5m' });
     const clients = createClients({ slots }, secrets);
     if (!clients.ok) {
       console.log(`${provider}: skipped (${clients.error})`);

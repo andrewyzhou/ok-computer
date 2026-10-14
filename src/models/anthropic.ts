@@ -58,6 +58,8 @@ export function createAnthropicClient(apiKey: string, options: { fetch?: typeof 
 // the rendered request must stay byte-stable between turns. the prompt cache and the thinking blocks both depend
 // on an unchanged prefix. for this reason the function has no time values and no random values.
 export function toAnthropicParams(call: ModelCall): MessageCreateParamsNonStreaming {
+  // both breakpoints use the same time. the api refuses a 1-hour entry after a 5-minute entry.
+  const cache = call.cacheTtl === '1h' ? { type: 'ephemeral' as const, ttl: '1h' as const } : { type: 'ephemeral' as const };
   return {
     model: call.model,
     max_tokens: call.maxTokens,
@@ -66,7 +68,7 @@ export function toAnthropicParams(call: ModelCall): MessageCreateParamsNonStream
     ...(call.effort ? { output_config: { effort: call.effort } } : {}),
     // the explicit breakpoint keeps the tools and the stable system prompt cached. the top-level breakpoint
     // follows the end of the conversation.
-    ...(call.system ? { system: [{ type: 'text', text: call.system, cache_control: { type: 'ephemeral' } }] } : {}),
+    ...(call.system ? { system: [{ type: 'text', text: call.system, cache_control: cache }] } : {}),
     ...(call.tools.length
       ? {
           tools: call.tools.map(
@@ -78,7 +80,7 @@ export function toAnthropicParams(call: ModelCall): MessageCreateParamsNonStream
           ),
         }
       : {}),
-    cache_control: { type: 'ephemeral' },
+    cache_control: cache,
     messages: call.messages.flatMap(toAnthropicMessage),
   };
 }
@@ -132,6 +134,7 @@ export function fromAnthropicMessage(message: BetaMessage, latencyMs: number): M
       outputTokens: message.usage.output_tokens,
       cacheReadTokens: message.usage.cache_read_input_tokens ?? 0,
       cacheWriteTokens: message.usage.cache_creation_input_tokens ?? 0,
+      cacheWrite1hTokens: message.usage.cache_creation?.ephemeral_1h_input_tokens ?? 0,
     },
     model: message.model,
     latencyMs,

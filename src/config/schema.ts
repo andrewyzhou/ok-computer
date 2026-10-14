@@ -15,12 +15,16 @@ const slotSchema = z.object({
   chain: z.array(modelRef).min(1),
   effort: z.enum(EFFORTS).optional(),
   maxTokens: z.number().int().positive().default(16000),
+  // the time that the provider keeps the prompt cache. a write for 1 hour costs more, so only a slot whose calls
+  // come more than 5 minutes apart gains from it.
+  cacheTtl: z.enum(['5m', '1h']).default('5m'),
 });
 export type SlotConfig = z.infer<typeof slotSchema>;
 
-// the default effort differs between models, so every slot sets it explicitly.
+// the default effort differs between models, so every slot sets it explicitly. the owner's messages come 15 to 75
+// minutes apart, so the main slot keeps its cache for 1 hour.
 const DEFAULT_SLOTS: Record<Slot, z.input<typeof slotSchema>> = {
-  main: { chain: ['anthropic/claude-sonnet-5-5', 'anthropic/claude-opus-5-5'], effort: 'medium' },
+  main: { chain: ['anthropic/claude-sonnet-5-5', 'anthropic/claude-opus-5-5'], effort: 'medium', cacheTtl: '1h' },
   heartbeat: { chain: ['anthropic/claude-haiku-5-5'], effort: 'low' },
   utility: { chain: ['anthropic/claude-haiku-5-5'], effort: 'low' },
   batch: { chain: ['anthropic/claude-haiku-5-5'], effort: 'low' },
@@ -32,16 +36,18 @@ const priceSchema = z.object({
   input: z.number().nonnegative(),
   cachedInput: z.number().nonnegative(),
   cacheWrite: z.number().nonnegative(),
+  // the write rate for the 1-hour cache. without it, the cost uses 1.6 times the 5-minute rate (2x and 1.25x input).
+  cacheWrite1h: z.number().nonnegative().optional(),
   output: z.number().nonnegative(),
 });
 export type Price = z.infer<typeof priceSchema>;
 
-// prices are in us dollars per million tokens. cache writes use the 5-minute rate.
+// prices are in us dollars per million tokens. cacheWrite is the 5-minute rate, cacheWrite1h the 1-hour rate.
 // haiku uses the rate for prompts of 100k tokens or fewer.
 export const DEFAULT_PRICING: Record<string, Price> = {
-  'anthropic/claude-opus-5-5': { input: 4, cachedInput: 0.2, cacheWrite: 5, output: 20 },
-  'anthropic/claude-sonnet-5-5': { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 },
-  'anthropic/claude-haiku-5-5': { input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.5 },
+  'anthropic/claude-opus-5-5': { input: 4, cachedInput: 0.2, cacheWrite: 5, cacheWrite1h: 8, output: 20 },
+  'anthropic/claude-sonnet-5-5': { input: 2, cachedInput: 0.2, cacheWrite: 2.5, cacheWrite1h: 4, output: 10 },
+  'anthropic/claude-haiku-5-5': { input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, cacheWrite1h: 0.2, output: 0.5 },
 };
 
 const timeZone = z.string().refine((tz) => {

@@ -34,6 +34,22 @@ describe('toAnthropicParams', () => {
     expect(params.tool_choice).toBeUndefined();
   });
 
+  // the owner writes 15 to 75 minutes apart, so the 5-minute cache expired between messages and each one paid a write.
+  it('puts the 1-hour time on both breakpoints of a slot that asks for it, and reads the 1-hour writes', () => {
+    const params = toAnthropicParams({ ...call([{ role: 'user', content: [{ type: 'text', text: 'hi' }] }]), cacheTtl: '1h' });
+    expect(params.system).toEqual([{ type: 'text', text: 'stable prompt', cache_control: { type: 'ephemeral', ttl: '1h' } }]);
+    expect(params.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+    const usage = {
+      input_tokens: 1,
+      output_tokens: 1,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 300,
+      cache_creation: { ephemeral_5m_input_tokens: 100, ephemeral_1h_input_tokens: 200 },
+    };
+    const message = { id: 'm', type: 'message', role: 'assistant', model: 'm', content: [], stop_reason: 'end_turn', stop_sequence: null, usage };
+    expect(fromAnthropicMessage(message as unknown as BetaMessage, 1).usage).toMatchObject({ cacheWriteTokens: 300, cacheWrite1hTokens: 200 });
+  });
+
   it('replays assistant blocks of its own provider without a change', () => {
     const params = toAnthropicParams(
       call([
@@ -74,7 +90,7 @@ describe('fromAnthropicMessage', () => {
     expect(response.text).toBe('let me check');
     expect(response.toolCalls).toEqual([{ id: 'toolu_1', name: 'now', input: {} }]);
     expect(response.stopReason).toBe('tool_use');
-    expect(response.usage).toEqual({ inputTokens: 10, outputTokens: 5, cacheReadTokens: 90, cacheWriteTokens: 0 });
+    expect(response.usage).toEqual({ inputTokens: 10, outputTokens: 5, cacheReadTokens: 90, cacheWriteTokens: 0, cacheWrite1hTokens: 0 });
     expect(response.content).toBe(message.content);
     expect(response.warnings).toBeUndefined();
   });

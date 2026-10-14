@@ -62,7 +62,7 @@ export function createSlotRunner(deps: SlotRunnerDeps): SlotRunner {
           logger.warn('model provider missing', { slot, ref });
           continue;
         }
-        const call: ModelCall = { ...request, model, maxTokens: slotConfig.maxTokens, effort: slotConfig.effort };
+        const call: ModelCall = { ...request, model, maxTokens: slotConfig.maxTokens, effort: slotConfig.effort, cacheTtl: slotConfig.cacheTtl };
         for (let attempt = 0; attempt < 2; attempt++) {
           const started = performance.now();
           // a retry, a refusal or the next model throws the old text away, so the draft of the owner clears too.

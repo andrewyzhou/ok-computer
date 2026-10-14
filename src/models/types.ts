@@ -13,6 +13,8 @@ export interface Usage {
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  // the part of cacheWriteTokens that the provider keeps for 1 hour, at a higher rate.
+  cacheWrite1hTokens?: number;
 }
 
 // an assistant turn keeps the provider blocks exactly as they arrived. the adapter of the same provider replays
@@ -48,6 +50,7 @@ export interface ModelCall extends ModelRequest {
   model: string;
   maxTokens: number;
   effort?: Effort;
+  cacheTtl?: '5m' | '1h';
 }
 
 export interface ModelResponse {
