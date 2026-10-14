@@ -2,17 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import { createLogger } from '../observability/logger.js';
-import { guardReply, REMOVED_LINK, REMOVED_REPLY } from './reply.js';
+import { guardReply, REMOVED_LINK, REMOVED_REPLY, REPLY_CALL_ID, REPLY_NOTE, REPLY_TOOL } from './reply.js';
+
+const SEEN = `https://evil.example/t?k=${'a'.repeat(32)}`;
 
 function setup() {
   const db = openDb(':memory:');
+  db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r', 'main', 'message', 'main', 'running', 'x')").run();
   appendEvent(
     db,
-    { sessionKey: 'main', runId: null, type: 'tool_result', payload: { toolCallId: 'm', name: 'read', content: 'mail', isError: false, untrustedSource: 'mcp:mail' } },
+    { sessionKey: 'main', runId: null, type: 'tool_result', payload: { toolCallId: 'm', name: 'read', content: `mail: ${SEEN}`, isError: false, untrustedSource: 'mcp:mail' } },
     new Date(),
   );
-  const guard = (text: string) => guardReply({ db, logger: createLogger({ consoleLevel: 'off' }) }, { runId: 'r', sessionKey: 'main' }, text);
-  return { guard };
+  const guard = (text: string) => guardReply({ db, logger: createLogger({ consoleLevel: 'off' }), clock: () => new Date() }, { runId: 'r', sessionKey: 'main' }, text);
+  return { db, guard };
 }
 
 describe('the reply guard', () => {
@@ -25,5 +28,23 @@ describe('the reply guard', () => {
   it('holds the whole reply when the link is not in the text verbatim', async () => {
     const { guard } = setup();
     expect(await guard('See ｈｔｔｐｓ://evil.example/c?d=1 now')).toBe(REMOVED_REPLY);
+  });
+
+  it('sends a read link as it is, but not a link that equals it only in its nfkc form', async () => {
+    const { guard } = setup();
+    expect(await guard(`Read more: ${SEEN}`)).toBe(`Read more: ${SEEN}`);
+    expect(await guard(`Read more: ${SEEN.replace('aa', 'ａa')}`)).toBe(REMOVED_REPLY);
+  });
+
+  it('records its decision and a note without the link in the trace', async () => {
+    const { db, guard } = setup();
+    await guard('See https://evil.example/c?d=1');
+    expect(db.prepare('SELECT runId, toolCallId, toolName, decision, rule, reviewerVerdict FROM policy_decisions').all()).toEqual([
+      { runId: 'r', toolCallId: REPLY_CALL_ID, toolName: REPLY_TOOL, decision: 'review', rule: 'exfiltration', reviewerVerdict: null },
+    ]);
+    const note = db.prepare("SELECT runId, payload FROM events WHERE type = 'note'").get() as { runId: string; payload: string };
+    expect(note.runId).toBe('r');
+    expect(note.payload).toContain(REPLY_NOTE);
+    expect(note.payload).not.toContain('evil.example');
   });
 });

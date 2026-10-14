@@ -2,6 +2,7 @@ import type { Config } from '../config/schema.js';
 import type { Db } from '../db/index.js';
 import { goalStats, listGoals, type Goal } from '../goals/store.js';
 import { redact, redactValue } from '../observability/redact.js';
+import { REPLY_CALL_ID, REPLY_NOTE, REPLY_TOOL } from '../policy/reply.js';
 import { REVIEW_TOOL } from '../policy/reviewer.js';
 import { outcomeOf } from './outcome.js';
 import { getChecklist, inActiveHours } from '../scheduler/heartbeat.js';
@@ -297,7 +298,46 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
     }
   }
   const events = db.prepare('SELECT * FROM events WHERE runId = ? ORDER BY id').all(id).map(toEventRow);
+  const reply = decisionOf(REPLY_CALL_ID);
+  if (reply) timeline.push({ kind: 'tool', call: replyCheck(id, run.status === 'running', reply, events) });
   return { run, parent: subagentLinks(db, 'subagent_runs.childRunId = ?', id)[0] ?? null, timeline, events };
+}
+
+// the reply guard has no tool call, so its decision shows as a call of reply_to_owner. the item holds the reviewer call
+// and says what went to the chat, because the log keeps the full reply.
+function replyCheck(runId: string, live: boolean, policy: PolicyDecisionRow, events: EventRow[]): ToolCallRow {
+  const reply = events.findLast((event) => event.type === 'assistant_message');
+  const note = events.findLast((event) => event.type === 'note' && String(event.payload.text).startsWith(REPLY_NOTE));
+  const allowed = policy.reviewerVerdict === 'allow';
+  const content = note
+    ? String(note.payload.text)
+    : allowed
+      ? 'The reviewer allowed the links, so the reply went to the chat as it is.'
+      : live
+        ? 'The reviewer checks the links in the reply. The reply goes to the chat after the check.'
+        : 'The app stopped while the reviewer checked the reply, so the reply did not go to the chat.';
+  return {
+    id: -1_000_000,
+    runId,
+    toolCallId: REPLY_CALL_ID,
+    name: REPLY_TOOL,
+    input: { text: reply ? String(reply.payload.text) : '' },
+    output: { content },
+    isError: !allowed && !live && !note,
+    durationMs: 0,
+    createdAt: policy.createdAt,
+    source: 'builtin',
+    riskLevel: 'write',
+    tainted: true,
+    untrustedSource: null,
+    truncated: false,
+    resultHandle: null,
+    rawResultBlob: null,
+    outcome: note ? 'held' : allowed ? 'ran' : live ? 'running' : 'interrupted',
+    policy,
+    serverId: null,
+    mcpMessages: [],
+  };
 }
 
 // the call has no tool_calls row yet, so its id is negative and unique in the run.

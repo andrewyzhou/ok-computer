@@ -236,15 +236,15 @@ export function createApp(deps: AppDeps): App {
     ...ids,
   };
   const agent = async (input: Parameters<typeof runAgent>[1]) => {
-    const result = await runAgent(agentDeps, { ...input, allowedTools: withIntegrations(input.sessionKey, input.allowedTools) });
+    // the router and the automation runner send the final text to the owner's chat, so it goes through the guard.
+    const guard = (text: string, run: { runId: string; signal: AbortSignal }) =>
+      guardReply({ db, reviewer, logger, clock }, { ...run, sessionKey: input.sessionKey }, text);
+    const result = await runAgent(agentDeps, { ...input, allowedTools: withIntegrations(input.sessionKey, input.allowedTools), guardReply: guard });
     // the router tells the owner about a stopped message run in its reply. a background run has no reply, so the owner gets a message here.
     if (result.stoppedAtLimit && input.trigger !== 'message') {
       await owner.send(`The ${input.trigger} run did not finish: ${result.error}.`);
     }
-    // the router and the automation runner send the final text to the owner's chat, so it goes through the guard.
-    if (result.status !== 'completed') return result;
-    const run = { runId: result.runId, sessionKey: input.sessionKey, signal: input.signal };
-    return { ...result, text: await guardReply({ db, reviewer, logger }, run, result.text) };
+    return result;
   };
 
   const heartbeat = createHeartbeat({ db, clock, logger, config, queue, owner, agent, signal: shutdown.signal, ...ids });

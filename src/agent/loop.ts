@@ -47,6 +47,9 @@ export interface RunInput {
   noCompaction?: boolean;
   // a sub-agent profile sets its own limit of model calls.
   maxIterations?: number;
+  // the guard gives the final text that goes to the owner's chat. it runs before the run ends, so a crash during its
+  // review leaves a run that the sweep closes, and not a completed run whose reply never came to the chat.
+  guardReply?: (text: string, run: { runId: string; signal: AbortSignal }) => Promise<string>;
 }
 
 export interface RunResult {
@@ -165,7 +168,8 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
       });
       if (!response.toolCalls.length) {
         if (response.stopReason === 'max_tokens') logger.warn('reply was cut at the token limit');
-        return finish('completed', response.text);
+        const text = input.guardReply ? await input.guardReply(response.text, { runId, signal: abort.signal }) : response.text;
+        return finish('completed', text);
       }
 
       // every tool call gets a result, also when the reply was cut. a call without a result makes the next request fail.

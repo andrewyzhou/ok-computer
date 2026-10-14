@@ -3,7 +3,7 @@ import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
 import { redactedJson } from '../observability/redact.js';
-import { SOURCE_LIMIT, SOURCE_NAME_LIMIT, type TaintSource } from '../policy/policy.js';
+import { dataUrls, SOURCE_LIMIT, SOURCE_NAME_LIMIT, type TaintSource } from '../policy/policy.js';
 import { decisionForApproval } from '../policy/store.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
 import type { RunQueue } from '../sessions/queue.js';
@@ -214,11 +214,31 @@ export function approvalNote(db: Db, approval: Approval, text: (summary: string)
 
 function cardText(approval: Approval, reason: string, taint: TaintSource[], timeZone: string): string {
   const lines = [`Approval needed (#${approval.id}): ${approval.summary}`, `Why: ${reason}.`];
-  if (taint.length) {
-    const more = taint.length > SOURCE_LIMIT ? `; and ${taint.length - SOURCE_LIMIT} more` : '';
-    lines.push(`Untrusted content in this session: ${taint.slice(0, SOURCE_LIMIT).map((each) => taintText(each, timeZone)).join('; ')}${more}.`);
-  }
-  return lines.join('\n');
+  if (!taint.length) return lines.join('\n');
+  const more = taint.length > SOURCE_LIMIT ? `; and ${taint.length - SOURCE_LIMIT} more` : '';
+  lines.push(`Untrusted content in this session: ${taint.slice(0, SOURCE_LIMIT).map((each) => taintText(each, timeZone)).join('; ')}${more}.`);
+  const card = lines.join('\n');
+  const safe = withoutLiveLinks(card);
+  return safe === card ? card : `${safe}\n${BROKEN_LINKS}`;
+}
+
+// in a tainted session the model can put data in a link in a field, and the reason repeats the link. a chat app
+// fetches a link preview of the card before the owner decides, so the data leaves the pc also when the owner denies
+// the call. so the card shows each link with data with "[.]" and "[:]", and no chat app makes a link of it.
+export const BROKEN_LINKS = 'Links that can carry data show with [.] and [:], so that the chat app does not open them. The dashboard shows them as they are.';
+const LINK_MARKS = /[.:．。｡：]/g;
+const broken = (text: string) => text.replace(LINK_MARKS, (mark) => `[${mark}]`);
+
+export function withoutLiveLinks(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => {
+      const links = [...new Set(dataUrls(line).map((each) => each.url.split(/[\s"'<>]/)[0]!))].sort((a, b) => b.length - a.length);
+      // the finder reads the nfkc form. a link that the line does not hold verbatim makes the marks break in all of it.
+      if (links.some((link) => !line.includes(link))) return broken(line);
+      return links.reduce((out, link) => out.split(link).join(broken(link)), line);
+    })
+    .join('\n');
 }
 
 const buttonsFor = (id: number): Button[][] => [
