@@ -79,7 +79,7 @@ describe('the dashboard api on a seeded database', () => {
       stopReason: 'tool_use',
       costUsd: expect.any(Number),
       toolCatalogHash: expect.stringMatching(/^[0-9a-f]{64}$/),
-      toolCount: 15,
+      toolCount: 27,
     });
     const [set, bad] = first?.kind === 'model' ? first.tools : [];
     expect(set?.policy).toMatchObject({ decision: 'allow', rule: 'builtin:goals_set' });

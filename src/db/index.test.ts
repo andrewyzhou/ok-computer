@@ -76,7 +76,9 @@ describe('migrations 006 and 007', () => {
     expect(columns('policy_decisions')).toContain('taint');
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name);
     // 008 creates integration_events again for the slack poll, and 010 builds it again with the columns of the google sync.
-    for (const dropped of ['browser_steps', 'sandbox_execs', 'subagent_runs']) expect(tables).not.toContain(dropped);
+    // 014 creates browser_steps again, with the shape that the browser milestone writes.
+    for (const dropped of ['sandbox_execs', 'subagent_runs']) expect(tables).not.toContain(dropped);
+    expect(columns('browser_steps')).toContain('error');
     expect(db.prepare('SELECT COUNT(*) AS n FROM mcp_messages').get()).toEqual({ n: 1 });
 
     expect(db.prepare('SELECT toolCallId, rawResultBlob, resultHandle, outcome, policyDecisionId FROM tool_calls').all()).toEqual([

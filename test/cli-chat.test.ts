@@ -61,6 +61,16 @@ describe('cli chat through the full loop', () => {
       'automations_delete',
       'automations_list',
       'automations_update',
+      'browser_allow_domain',
+      'browser_back',
+      'browser_click',
+      'browser_close',
+      'browser_extract',
+      'browser_open',
+      'browser_select',
+      'browser_snapshot',
+      'browser_submit',
+      'browser_type',
       'goal_update',
       'goals_list',
       'goals_set',
@@ -72,6 +82,8 @@ describe('cli chat through the full loop', () => {
       'now',
       'result_read',
       'skill_read',
+      'web_fetch',
+      'web_search',
     ]);
 
     const before = printed();

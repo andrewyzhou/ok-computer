@@ -30,7 +30,7 @@ It runs on this PC. Its persona files (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, an
 | `okc logs` | Follow the agent log |
 | `okc open` | Open the dashboard at http://127.0.0.1:4317 |
 
-To connect MCP servers (optional), see [docs/setup/integrations.md](docs/setup/integrations.md). For Slack, see [docs/setup/slack.md](docs/setup/slack.md).
+To connect MCP servers (optional), see [docs/setup/integrations.md](docs/setup/integrations.md). For Slack, see [docs/setup/slack.md](docs/setup/slack.md). To sign the agent's browser in to sites, see [docs/setup/browser.md](docs/setup/browser.md).
 
 To open the dashboard from your phone or laptop (optional), see [docs/setup/tailscale.md](docs/setup/tailscale.md).
 

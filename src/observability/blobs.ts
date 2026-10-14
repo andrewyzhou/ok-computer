@@ -16,7 +16,7 @@ const HASH = /^[0-9a-f]{64}$/;
 
 export const blobPath = (dir: string, hash: string) => join(dir, hash.slice(0, 2), hash.slice(2, 4), hash);
 
-const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
+export const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
 
 function readBytes(path: string): Buffer | undefined {
   try {
@@ -29,7 +29,7 @@ function readBytes(path: string): Buffer | undefined {
 
 // the file gets all its bytes before it gets its final name. a crash leaves a complete file or a temporary file,
 // never a short file under the hash.
-function writeAtomic(path: string, text: string, hash: string): void {
+export function writeAtomic(path: string, text: string | Buffer, hash: string): void {
   mkdirSync(join(path, '..'), { recursive: true });
   const temp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   writeFileSync(temp, text, { flag: 'wx' });

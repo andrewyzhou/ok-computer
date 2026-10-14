@@ -1,8 +1,10 @@
 # this script controls the agent from any terminal.
-# commands: start, stop, restart, status, open, logs, install, uninstall.
+# commands: start, stop, restart, status, open, logs, browser login [url], install, uninstall.
 
 param(
   [Parameter(Position = 0)][string]$Command = 'start',
+  [Parameter(Position = 1)][string]$Sub,
+  [Parameter(Position = 2)][string]$Target,
   [switch]$NoOpen
 )
 
@@ -81,6 +83,18 @@ function Show-Logs {
   if ($latest) { Get-Content $latest.FullName -Tail 40 -Wait } else { Write-Host 'no logs yet.' }
 }
 
+# the owner signs in to sites in the agent's own chrome profile. the window is plain chrome, and the agent cannot use
+# the profile while it is open.
+function Start-BrowserLogin {
+  if ($Sub -ne 'login') { Write-Host 'usage: okc browser login [url]'; return }
+  Push-Location $root
+  try {
+    if (Test-BuildIsOld) { npm run build --silent | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'the build failed. run npm run build to see why.' } }
+    if ($Target) { node dist/browser/login.js $Target } else { node dist/browser/login.js }
+  }
+  finally { Pop-Location }
+}
+
 function Install-Agent {
   # a command on the path, a desktop shortcut, and a task that starts the agent at logon.
   $bin = Join-Path $env:USERPROFILE '.local\bin'
@@ -119,7 +133,8 @@ switch ($Command) {
   'status' { Show-Status }
   'open' { Open-Dashboard }
   'logs' { Show-Logs }
+  'browser' { Start-BrowserLogin }
   'install' { Install-Agent }
   'uninstall' { Uninstall-Agent }
-  default { Write-Host 'usage: okc [start|stop|restart|status|open|logs|install|uninstall] [-NoOpen]' }
+  default { Write-Host 'usage: okc [start|stop|restart|status|open|logs|browser login [url]|install|uninstall] [-NoOpen]' }
 }

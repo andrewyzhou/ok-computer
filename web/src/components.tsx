@@ -37,6 +37,7 @@ const STATUS_TONE: Record<string, string> = {
   connecting: 'info',
   needs_auth: 'warning',
   paused: 'muted',
+  ready: 'good',
   stopped: 'muted',
   read: 'muted',
   write: 'warning',

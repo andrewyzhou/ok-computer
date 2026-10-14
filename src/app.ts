@@ -64,6 +64,7 @@ import { createMessageOwnerTool } from './tools/message-owner.js';
 import { nowTool } from './tools/now.js';
 import { createToolRegistry } from './tools/registry.js';
 import { createResultReadTool } from './tools/result-read.js';
+import { createWeb, type WebOptions } from './web/web.js';
 
 export interface AppDeps {
   config: Config;
@@ -83,7 +84,7 @@ export interface AppDeps {
   secrets?: SecretStore;
   // tests connect in-memory servers. the app starts stdio processes and http connections.
   mcpTransport?: IntegrationsDeps['transport'];
-  // false in npm run chat. see start().
+  // false in npm run chat. see start(). the browser follows the same switch: one chrome can use its profile.
   connectIntegrations?: boolean;
   // false in npm run chat. background jobs that message the owner, such as the skill review, run only in the service.
   background?: boolean;
@@ -94,6 +95,8 @@ export interface AppDeps {
   loginCodes?: LoginCodes;
   // tests point the google integration at a local fake.
   googleEndpoints?: GoogleEndpoints;
+  // tests point the web tools at a local fixture site.
+  web?: WebOptions;
 }
 
 export interface App {
@@ -177,10 +180,12 @@ export function createApp(deps: AppDeps): App {
         ...ids,
       })
     : undefined;
+  const web = createWeb({ db, blobs, logger, clock, config, enabled: deps.connectIntegrations !== false, ...deps.web });
   // each run gets the integration tools of its session. the list comes from the config, not from a catalog, so the
   // tools parameter of a session never changes when a server changes its tools.
   const withIntegrations = (sessionKey: string, base: readonly string[]) => [
     ...base,
+    ...web.toolsFor(sessionKey),
     ...integrations.allowedNames(sessionKey),
     ...(google?.toolNames(sessionProfile(sessionKey)) ?? []),
   ];
@@ -230,6 +235,7 @@ export function createApp(deps: AppDeps): App {
       ...createSkillTools({ skillsDir: config.paths.skills }),
       createSkillWriteTool({ skillsDir: config.paths.skills }),
       createResultReadTool({ db, blobs }),
+      ...web.tools,
       ...integrations.tools,
       ...(google?.tools ?? []),
     ],
@@ -430,6 +436,7 @@ export function createApp(deps: AppDeps): App {
     scheduler,
     async start() {
       sweep(clock());
+      web.start();
       for (const channel of channels.values()) {
         // node stops the process on an unhandled rejection. a failed write in the reply to one message must not stop
         // the service.
@@ -460,6 +467,7 @@ export function createApp(deps: AppDeps): App {
       await integrations.stop();
       await oauth?.close();
       await google?.close();
+      await web.stop();
     },
     integrations,
     ...(google ? { google } : {}),

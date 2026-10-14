@@ -40,6 +40,7 @@ import {
 import { googleRoutes } from './google.js';
 import { integrationDetail, summaryOf } from './integrations.js';
 import { createSessions, LOCAL_SESSION_MS, LOGIN_PAGE, REMOTE_SESSION_MS, type LoginCodes } from './login.js';
+import { mountBrowser } from './browser.js';
 import { createFeed } from './stream.js';
 import type { ContextView, MemoryFile, Meta } from './types.js';
 
@@ -188,6 +189,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
       return c.json({ error: (err as Error).message }, 500);
     }
   });
+  mountBrowser(server, { db, dataDir: config.paths.data, clock });
   server.get('/api/tool-catalogs/:hash', (c) => {
     const catalog = getToolCatalog(db, c.req.param('hash'));
     return catalog ? c.json(catalog) : notFound(c, 'tool catalog');

@@ -8,6 +8,7 @@ import { Automations } from './pages/Automations';
 import { Cost } from './pages/Cost';
 import { Goals } from './pages/Goals';
 import { Google, Signals } from './pages/Google';
+import { BrowserTask, BrowserTasks } from './pages/Browser';
 import { IntegrationDetail, Integrations } from './pages/Integrations';
 import { Logs } from './pages/Logs';
 import { Memory } from './pages/Memory';
@@ -27,6 +28,7 @@ const NAV = [
   ['integrations', 'Integrations'],
   ['google', 'Google'],
   ['signals', 'Signals'],
+  ['browser', 'Browser'],
   ['cost', 'Cost'],
   ['logs', 'Logs'],
 ] as const;
@@ -66,6 +68,8 @@ export function route(path: string): ReactNode {
       return <Google />;
     case 'signals':
       return <Signals />;
+    case 'browser':
+      return param ? <BrowserTask key={param} id={param} /> : <BrowserTasks />;
     case 'cost':
       return <Cost />;
     case 'logs':
