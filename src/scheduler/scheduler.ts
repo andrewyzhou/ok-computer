@@ -128,12 +128,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const result = await execute(automation);
     recordRun(automation, now, result);
     if (result.status !== 'failed') {
+      db.prepare('UPDATE automations SET consecutiveFailures = 0 WHERE id = ?').run(automation.id);
+      // the run can give the one-shot job a new time, for example a reminder that moves itself. that job stays on.
       if (automation.schedule.kind === 'at') {
-        db.prepare('UPDATE automations SET enabled = 0, nextRunAt = NULL, consecutiveFailures = 0 WHERE id = ?').run(
-          automation.id,
-        );
-      } else {
-        db.prepare('UPDATE automations SET consecutiveFailures = 0 WHERE id = ?').run(automation.id);
+        db.prepare('UPDATE automations SET enabled = 0 WHERE id = ? AND nextRunAt IS NULL').run(automation.id);
       }
       return;
     }

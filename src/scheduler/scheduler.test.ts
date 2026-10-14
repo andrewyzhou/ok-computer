@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { openDb } from '../db/index.js';
+import { openDb, type Db } from '../db/index.js';
 import { silentLogger } from '../observability/logger.js';
 import { describeSchedule, nextRun, scheduleSchema } from './schedule.js';
 import { createScheduler, type JobResult } from './scheduler.js';
-import { createAutomation, getAutomation, updateAutomation, type NewAutomation } from './store.js';
+import { createAutomation, getAutomation, updateAutomation, type Automation, type NewAutomation } from './store.js';
 
 const TZ = 'America/Los_Angeles';
 const MIN = 60_000;
 
-function setup(results: Array<JobResult['status']> = []) {
+function setup(results: Array<JobResult['status']> = [], during?: (db: Db, automation: Automation, now: Date) => void) {
   const db = openDb(':memory:');
   let now = new Date('2026-10-12T17:00:00Z');
   const clock = () => now;
@@ -25,6 +25,7 @@ function setup(results: Array<JobResult['status']> = []) {
     async execute(automation) {
       executed.push(automation.name);
       planned.push(automation.nextRunAt);
+      during?.(db, automation, now);
       const status = results.shift() ?? 'completed';
       return status === 'failed' ? { status, error: 'boom' } : { status };
     },
@@ -170,6 +171,19 @@ describe('scheduler', () => {
     await scheduler.tick();
     expect(executed).toEqual(['job']);
     expect(getAutomation(db, job.id)).toMatchObject({ enabled: false, nextRunAt: null });
+  });
+
+  it('keeps a one-shot job on when its run gives it a new time', async () => {
+    const { db, scheduler, create, advance, executed } = setup([], (db, automation, now) => {
+      updateAutomation(db, automation.id, { schedule: { kind: 'at', at: '2026-10-12T18:00:00Z' } }, now, TZ);
+    });
+    const job = create({ schedule: { kind: 'at', at: '2026-10-12T17:10:00Z' } });
+    advance(10 * MIN);
+    await scheduler.tick();
+    expect(getAutomation(db, job.id)).toMatchObject({ enabled: true, nextRunAt: '2026-10-12T18:00:00.000Z' });
+    advance(50 * MIN);
+    await scheduler.tick();
+    expect(executed).toEqual(['job', 'job']);
   });
 
   it('refuses a one-shot job in the past', () => {
