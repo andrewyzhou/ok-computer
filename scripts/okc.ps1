@@ -55,6 +55,16 @@ function Stop-Agent {
   Stop-Process -Id $sup.Id -Force
   if (Test-Path $nodePidFile) {
     $nodeId = [int](Get-Content $nodePidFile -Raw)
+    # a forced stop skips the end of the runs, so the agent first gets 10 seconds to stop by itself.
+    $tokenFile = Join-Path $data 'okc.stop-token'
+    if (Test-Path -LiteralPath $tokenFile) {
+      try {
+        $body = @{ token = (Get-Content -LiteralPath $tokenFile -Raw).Trim() } | ConvertTo-Json
+        Invoke-RestMethod -Method Post -Uri "$url/api/shutdown" -Body $body -ContentType 'application/json' -TimeoutSec 5 | Out-Null
+        Wait-Process -Id $nodeId -Timeout 10 -ErrorAction SilentlyContinue
+      }
+      catch { Write-Host 'the agent did not stop by itself, so windows stops it.' }
+    }
     Stop-Process -Id $nodeId -Force -ErrorAction SilentlyContinue
   }
   Remove-Item $pidFile, $nodePidFile -ErrorAction SilentlyContinue

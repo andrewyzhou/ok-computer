@@ -56,6 +56,8 @@ export interface DashboardDeps {
   token?: string;
   // the codes that /dashboard sends. without them, only the token signs in.
   codes?: LoginCodes;
+  // okc stop asks the app to stop with this token. without it, the dashboard has no shutdown request.
+  shutdown?: { token: string; stop(): void };
   pollMs?: number;
   webDir?: string;
 }
@@ -74,7 +76,8 @@ function same(given: string | undefined, expected: string | undefined): boolean 
 
 // a login gives a code from /dashboard or the token. the body is json, so a form on another site cannot send it.
 const loginBody = z.union([z.object({ code: z.string().min(1).max(64) }).strict(), z.object({ token: z.string().min(1).max(512) }).strict()]);
-const enabledBody = z.object({ enabled: z.boolean() });
+const shutdownBody = z.object({ token: z.string().min(1).max(512) }).strict();
+const enabledBody =z.object({ enabled: z.boolean() });
 const checklistBody = z.object({ checklist: z.string().max(10_000) });
 const decisionBody = z.object({ decision: z.enum(['approve', 'deny']) });
 const pausedBody = z.object({ paused: z.boolean() });
@@ -106,8 +109,8 @@ export function createDashboard(deps: DashboardDeps): Hono {
     const host = new URL(c.req.url).hostname;
     if (!LOOPBACK.has(host) && host !== remoteHost) return c.text('forbidden', 403);
     if (c.req.path.startsWith('/api/')) {
-      // the login is the one api request that comes before a sign-in. it checks its own code or token.
-      const open = c.req.path === '/api/login';
+      // the login and the shutdown come before a sign-in. each checks its own code or token.
+      const open = c.req.path === '/api/login' || c.req.path === '/api/shutdown';
       const given = c.req.header('authorization')?.replace(/^Bearer /, '') ?? c.req.query('token');
       const cookie = getCookie(c, SESSION_COOKIE);
       const signedIn = (given !== undefined && same(given, deps.token)) || (host === remoteHost ? remoteSessions : localSessions).valid(cookie);
@@ -129,6 +132,17 @@ export function createDashboard(deps: DashboardDeps): Hono {
   // the owner signs in one time with a code or the token. the token then never goes into a url, a bookmark or the
   // history.
   server.get('/login', (c) => (deps.token ? c.html(LOGIN_PAGE) : c.redirect('/')));
+
+  // windows has no signal that okc can send to the hidden agent, and a forced stop skips the end of the runs. so okc
+  // asks here first. the token is in a file in the data folder, which only the owner's account can read.
+  server.post('/api/shutdown', async (c) => {
+    const given = await body(c, shutdownBody);
+    if (!deps.shutdown || !given || !same(given.token, deps.shutdown.token)) return c.json({ error: 'unauthorized' }, 401);
+    logger.info('shutdown requested');
+    // the stop closes this server, so it starts after the response.
+    setImmediate(deps.shutdown.stop);
+    return c.json({ ok: true }, 202);
+  });
   server.post('/api/login', async (c) => {
     const given = await body(c, loginBody);
     const host = new URL(c.req.url).hostname;

@@ -150,3 +150,29 @@ describe('dashboard login', () => {
     expect(parseConfig({ dashboard: { publicUrl: REMOTE } }).ok).toBe(true);
   });
 });
+
+// windows has no signal for the hidden agent, so okc stop asks for a graceful stop with the token from the data folder.
+describe('dashboard shutdown request', () => {
+  const shutdown = (server: ReturnType<typeof createDashboard>, body: unknown, contentType = 'application/json') =>
+    server.request('http://127.0.0.1/api/shutdown', { method: 'POST', headers: { 'content-type': contentType }, body: JSON.stringify(body) });
+
+  it('stops the app only with the stop token, also when the dashboard has a token of its own', async () => {
+    let stops = 0;
+    const server = createDashboard({ ...dashboardDeps({ token: 'secret-token' }), shutdown: { token: 'stop-token', stop: () => stops++ } });
+    expect((await shutdown(server, { token: 'wrong' })).status).toBe(401);
+    // the dashboard token is not the stop token.
+    expect((await shutdown(server, { token: 'secret-token' })).status).toBe(401);
+    expect((await shutdown(server, { token: 'stop-token' }, 'text/plain')).status).toBe(415);
+    await new Promise((done) => setImmediate(done));
+    expect(stops).toBe(0);
+
+    expect((await shutdown(server, { token: 'stop-token' })).status).toBe(202);
+    await new Promise((done) => setImmediate(done));
+    expect(stops).toBe(1);
+  });
+
+  it('refuses each request when the app gives no stop token', async () => {
+    const server = dashboard({});
+    expect((await shutdown(server, { token: 'stop-token' })).status).toBe(401);
+  });
+});

@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Bot } from 'grammy';
 import { createApp } from './app.js';
@@ -108,7 +110,10 @@ async function main(): Promise<void> {
   if (!chatMode) {
     try {
       const token = secrets.dashboardToken ? { token: secrets.dashboardToken, ...(loginCodes ? { codes: loginCodes } : {}) } : {};
-      dashboard = await startDashboard({ db, config, clock: systemClock, logger, app, port: config.dashboard.port, ...token });
+      // okc stop reads this token from the data folder and asks for a graceful stop (see the shutdown request).
+      const shutdown = { token: randomBytes(32).toString('hex'), stop: () => void stop('okc stop') };
+      dashboard = await startDashboard({ db, config, clock: systemClock, logger, app, port: config.dashboard.port, shutdown, ...token });
+      writeFileSync(join(config.paths.data, 'okc.stop-token'), shutdown.token);
       logger.info('dashboard started', { url: `http://127.0.0.1:${dashboard.port}` });
     } catch (err) {
       logger.error('dashboard did not start', { port: config.dashboard.port, err });
