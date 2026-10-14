@@ -55,8 +55,20 @@ export function planUnsubscribe(message: gmail_v1.Schema$Message, sender: string
   });
   if (!covered) return { way: 'refused', text: 'the dkim signature of the from domain does not cover the unsubscribe headers, so they can be forged. The owner can unsubscribe by hand' };
   if (!mail) return { way: 'one-click' };
+  // the signature proves only that the sender wrote the header. a sender that signs its own domain still chooses the
+  // recipient, the subject and the body, and the card shows the target percent-encoded. so the mail goes only to one
+  // address in the domain of the sender: the owner's account never sends the sender's text to a third party.
   const mailto = new URL(target);
-  return { way: 'mailto', to: decodeURIComponent(mailto.pathname), subject: mailto.searchParams.get('subject') ?? 'unsubscribe', body: mailto.searchParams.get('body') ?? 'unsubscribe' };
+  let to: string | undefined;
+  try {
+    to = fromAddress(decodeURIComponent(mailto.pathname));
+  } catch {
+    to = undefined;
+  }
+  if (!to || !aligned(to.slice(to.lastIndexOf('@') + 1), domain)) {
+    return { way: 'refused', text: 'the unsubscribe address is not one address in the domain of the sender. The owner can unsubscribe by hand' };
+  }
+  return { way: 'mailto', to, subject: mailto.searchParams.get('subject') ?? 'unsubscribe', body: mailto.searchParams.get('body') ?? 'unsubscribe' };
 }
 
 // the passing dkim results in the authentication-results header that gmail added. gmail puts its header on top. a
