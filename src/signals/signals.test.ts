@@ -60,7 +60,7 @@ describe('date_not_on_calendar', () => {
   it('fires when no event of that day shares a word with the subject', () => {
     const events = [timed('d', 'Dentist', '2026-10-20T16:00:00.000Z')];
     expect(dateHits(item('Essay due Oct 20'), events, TZ)).toEqual([
-      { name: 'date_not_on_calendar', detail: 'mentions "Oct 20" (2026-10-20); the calendars have 1 events that day and none about "Essay due Oct 20"' },
+      { name: 'date_not_on_calendar', detail: 'mentions "Oct 20" (2026-10-20); the primary calendars have 1 events that day and none about "Essay due Oct 20"' },
     ]);
     expect(dateHits(item('Dentist on Oct 20'), events, TZ)).toEqual([]);
   });

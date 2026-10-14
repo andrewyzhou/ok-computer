@@ -104,7 +104,7 @@ export function dateHits(mail: MailItem, events: CalendarItem[], timeZone: strin
   return mentionedDates(mail.text, mail.arrived, timeZone).flatMap(({ day, phrase }) => {
     const sameDay = events.filter((event) => dayOf(event, timeZone) === day);
     if (sameDay.some((event) => keywords(event.summary).some((word) => words.includes(word)))) return [];
-    return [{ name: 'date_not_on_calendar', detail: cleanLine(`mentions "${phrase}" (${day}); the calendars have ${sameDay.length} events that day and none about "${mail.subject}"`) }];
+    return [{ name: 'date_not_on_calendar', detail: cleanLine(`mentions "${phrase}" (${day}); the primary calendars have ${sameDay.length} events that day and none about "${mail.subject}"`) }];
   });
 }
 
