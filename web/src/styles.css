@@ -580,6 +580,11 @@ pre {
   .main {
     padding: 16px;
   }
+  /* a wide table scrolls by itself, so the page does not scroll sideways on a phone. */
+  table {
+    display: block;
+    overflow-x: auto;
+  }
   .browser {
     grid-template-columns: 1fr;
   }

@@ -37,7 +37,7 @@ describe('the google page', () => {
     open('#/google');
     const personal = (await screen.findByText('personal')).closest('tr')!;
     expect(within(personal).getByText('needs_auth')).toBeTruthy();
-    expect(within(personal).getByText(/It stopped working: sign-in refused: .*Connect it again\./)).toBeTruthy();
+    expect(within(personal).getByText(/It stopped working: sign-in refused: .*revoked\. Connect it again\./)).toBeTruthy();
     expect(within(personal).getByText(/told you at/)).toBeTruthy();
     expect(within(personal).getByText('Connect')).toBeTruthy();
     const school = screen.getByText('school').closest('tr')!;

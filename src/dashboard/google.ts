@@ -10,11 +10,14 @@ const text = (value: unknown) => (value === null || value === undefined ? null :
 const num = (value: unknown) => (value === null || value === undefined ? null : Number(value));
 const DAY_MS = 24 * 60 * 60_000;
 
+// an error from google can end with a period, and the sentence adds its own.
+const reason = (error: string | null) => (error ?? 'unknown reason').replace(/\.$/, '');
+
 // the page leads with what the owner must do. the details below it say why.
 function nextStep(account: Omit<GoogleAccountView, 'nextStep'>): string | null {
   if (account.status === 'signed_out') return `Connect ${account.alias}${account.expected ? ` and pick ${account.expected}` : ''}.`;
-  if (account.status === 'needs_auth') return `It stopped working: ${account.lastError ?? 'unknown reason'}. Connect it again.`;
-  if (account.failures) return `The last ${account.failures} polls failed: ${account.lastError ?? 'unknown reason'}. The next poll tries again.`;
+  if (account.status === 'needs_auth') return `It stopped working: ${reason(account.lastError)}. Connect it again.`;
+  if (account.failures) return `The last ${account.failures} polls failed: ${reason(account.lastError)}. The next poll tries again.`;
   return null;
 }
 
