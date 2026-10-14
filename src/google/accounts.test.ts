@@ -1,4 +1,6 @@
+import { readdirSync, readFileSync } from 'node:fs';
 import { request } from 'node:http';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CLIENT_ID, createGoogleHarness, type GoogleHarness } from '../../test/google-harness.js';
 import { SCOPES } from './config.js';
@@ -46,6 +48,27 @@ describe('google sign-in', () => {
     // the state works once, and the callback listens only while a flow waits.
     expect(await h.accounts.finishSignIn(state, 'good-code')).toEqual({ error: expect.stringContaining('unknown or expired') });
     await expect(visit(callback, `code=good-code&state=${state}`)).rejects.toThrow();
+  });
+
+  // a token endpoint can quote its form body in an error. the code and the pkce verifier must not reach the trace,
+  // the log or the page in the browser.
+  it('keeps the code and the verifier out of the trace, the log and the page when the exchange echoes its body', async () => {
+    h = await createGoogleHarness({ accounts: ['school'] });
+    const code = '4/0AeaYSHprobe-auth-code-0123456789abcdef';
+    const { state, callback } = await begin('school');
+    h.fake.fault({ route: 'POST /token', status: 500, times: 1, echoAuth: true });
+    const page = await visit(callback, `code=${encodeURIComponent(code)}&state=${state}`);
+    expect(page).toContain('The sign-in did not work');
+    const body = h.fake.requests.find((each) => each.path === '/token')!.body;
+    const verifier = new URLSearchParams(body).get('code_verifier')!;
+    expect(verifier.length).toBeGreaterThan(40);
+    const logs = readdirSync(join(h.dir, 'logs')).map((name) => readFileSync(join(h.dir, 'logs', name), 'utf8'));
+    const written = [JSON.stringify(h.rows('SELECT * FROM google_requests')), ...logs, page].join('\n');
+    // the echo is in the trace, so the check below looks at the right text.
+    expect(written).toContain('injected fault');
+    for (const secret of [code, verifier]) {
+      for (const form of [secret, encodeURIComponent(secret), new URLSearchParams({ v: secret }).toString().slice(2)]) expect(written).not.toContain(form);
+    }
   });
 
   it('refuses a sign-in without every scope, and revokes its token at google', async () => {

@@ -273,6 +273,9 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
     flows.delete(state);
     try {
       if (!flow || flow.expiresAt < clock().getTime()) return { error: 'the sign-in link is unknown or expired. Press Connect again.' };
+      // a token endpoint that quotes its form body in an error puts the code and the verifier in the trace and the log.
+      registerSecret(code, `google:${flow.alias}:code`);
+      registerSecret(flow.verifier, `google:${flow.alias}:verifier`);
       const auth = await oauthClient(flow.redirectUri);
       const { tokens } = await auth.getToken({ code, codeVerifier: flow.verifier, redirect_uri: flow.redirectUri });
       registerSecret(tokens.access_token ?? undefined, `google:${flow.alias}:access`);
