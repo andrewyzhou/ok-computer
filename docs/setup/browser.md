@@ -29,7 +29,7 @@ A normal Chrome window opens on the agent profile. Sign in to the sites that the
 
 Everything a page or a search shows is outside text: it taints the session, so a later `external` action always asks you.
 
-One browser task runs at a time. Another conversation that wants the browser gets "busy" until the task ends (`browser_close`, or 10 minutes without an action).
+One browser task runs at a time. Another conversation that wants the browser gets "busy" until the task ends (`browser_close`, or 10 minutes without an action). A task that waits for you to approve a submit or a new domain stays open until you answer.
 
 ## 3. Clicks and typing
 
@@ -66,7 +66,7 @@ A finished task has a Playwright trace zip. Open it with `npx playwright-core sh
 - **The trace leaves out** cookies and request headers, the network log, response bodies, the page HTML and DOM, and password values, unless the page writes them to its console.
 - **Screenshots are not redacted.** A screenshot shows the page as it was: your account name, an order, a message. A password field shows dots. Keep `DASHBOARD_TOKEN` set when the dashboard is reachable from another device.
 
-Screenshots and traces stay until a later `okc prune`.
+Nothing removes screenshots and traces yet. Screenshots grow in `data/blobs`, and trace zips in `data/browser/traces`. A prune command is planned (DESIGN-NEXT 2.1).
 
 ## 6. When something goes wrong
 
@@ -79,6 +79,6 @@ Screenshots and traces stay until a later `okc prune`.
 | A submit you approved says "the form was not sent" | The page did not send the form, for example because it opens a new tab, a script changed a field at the click, or the page sent its data to a site off the allowlist | Look at the blocked and sent requests of the step on the Browser page. The form was not sent; a request marked "sent by the page" did leave. |
 | A submit you approved says "the form was sent, but the gate refused ... later requests" | The page sent the form, then something more that was blocked, for example a post to a site off the allowlist or a post more than a second later | Look at the step on the Browser page, and check on the site whether the order or message went through. |
 | A step has no snapshot: "more than 200" password fields | A page with that many filled password fields is not a page a person uses | Nothing. The screenshot is still kept. |
-| A submit you approved says "No page is open" | The task ended (10 minutes idle, or a restart) before you approved | Ask the agent to open the page again; it asks you again. |
+| A submit you approved says "No page is open" | The task ended (`browser_close`, 10 minutes idle before the agent asked you, or a restart) before you approved | Ask the agent to open the page again; it asks you again. |
 | A task is `interrupted` | The app stopped during the task | Nothing. Its steps are kept. Its trace is lost. |
 | A task is `crashed` | Chrome or the tab stopped, or the page hung | Nothing. The next `browser_open` starts a new task. |

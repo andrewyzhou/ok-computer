@@ -313,7 +313,7 @@ describe('mcp acceptance', () => {
     expect(t.rows('SELECT toolName, status FROM approvals')).toEqual([{ toolName: 'mail__add_note', status: 'pending' }]);
   });
 
-  // Pause during a Reconnect was undone: the reconnect started the connection after its stop, so the page said paused
+  // a pause during a reconnect was undone: the reconnect started the connection after its stop, so the page said paused
   // while the server ran.
   it('keeps an integration paused when the owner pauses it while a reconnect closes the old connection', async () => {
     let live = 0;
