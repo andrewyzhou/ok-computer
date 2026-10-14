@@ -49,6 +49,9 @@ export function createSlotRunner(deps: SlotRunnerDeps): SlotRunner {
   const { db, config, clients, logger } = deps;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const clock = deps.clock ?? (() => new Date());
+  // after a change of the stable prompt the provider drops the same old thinking blocks on each call until the next
+  // compaction, so the log keeps a warning only when it differs from the last one of the slot.
+  const lastWarning = new Map<string, string>();
 
   return {
     async call(slot, request, { runId, signal, onText }) {
@@ -71,7 +74,9 @@ export function createSlotRunner(deps: SlotRunnerDeps): SlotRunner {
             const response = await client.complete(call, signal, onText);
             const cost = costUsd(config.pricing, ref, response.usage);
             const modelCallId = record(db, { runId, slot, provider, model, call, response, cost, latencyMs: response.latencyMs }, clock());
-            if (response.warnings) logger.warn('provider changed the input', { slot, ref, runId, warnings: response.warnings });
+            const warning = response.warnings?.join('\n') ?? '';
+            if (warning && lastWarning.get(slot) !== warning) logger.warn('provider changed the input', { slot, ref, runId, warnings: response.warnings });
+            lastWarning.set(slot, warning);
             if (response.stopReason === 'refusal') {
               lastError = `${ref} refused the request`;
               logger.warn('model refused, trying the next model', { slot, ref, runId });

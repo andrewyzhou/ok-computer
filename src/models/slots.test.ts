@@ -161,3 +161,18 @@ describe('costUsd', () => {
     expect(costUsd(pricing, 'p/unknown', usage)).toBeNull();
   });
 });
+
+describe('the warnings of the provider', () => {
+  // after a change of the stable prompt the same thinking blocks were dropped on each call, and the log warned each time.
+  it('logs a warning only when it differs from the last one of the slot', async () => {
+    const parsed = parseConfig({ slots: { main: { chain: ['fake/m'], effort: 'low' } } });
+    if (!parsed.ok) throw new Error(parsed.error);
+    const warned = fakeResponse({ text: 'ok', warnings: ['drop_block at messages.1: prefix changed'] });
+    const client = createFakeClient([warned, warned, fakeResponse({ text: 'ok' }), warned], 'fake');
+    const warn = vi.fn();
+    const logger = { ...silentLogger, warn };
+    const runner = createSlotRunner({ db: openDb(':memory:'), config: parsed.value, clients: { fake: client }, logger });
+    for (let i = 0; i < 4; i++) await runner.call('main', request, { runId: null });
+    expect(warn.mock.calls.filter(([message]) => message === 'provider changed the input')).toHaveLength(2);
+  });
+});

@@ -44,6 +44,7 @@ export function fakeResponse(partial: Partial<ModelResponse>): ModelResponse {
     usage: partial.usage ?? { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
     model: partial.model ?? 'fake-model',
     latencyMs: partial.latencyMs ?? 1,
+    ...(partial.warnings ? { warnings: partial.warnings } : {}),
   };
 }
 
