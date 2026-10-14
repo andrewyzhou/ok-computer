@@ -76,6 +76,13 @@ describe('schedules', () => {
     expect(scheduleSchema.safeParse({ kind: 'every', everyMs: 1000 }).success).toBe(false);
   });
 
+  // croner reads a sixth field as seconds, so this cron would run each five seconds.
+  it('accepts a cron with five fields only', () => {
+    expect(scheduleSchema.safeParse({ kind: 'cron', expr: ' */5 * * * * ' }).success).toBe(true);
+    expect(scheduleSchema.safeParse({ kind: 'cron', expr: '*/5 * * * * *' }).success).toBe(false);
+    expect(scheduleSchema.safeParse({ kind: 'cron', expr: '0 0 9 * * * 2027' }).success).toBe(false);
+  });
+
   // "+255536-..." sorts before "2026-..." in the store, so a job past the year 9999 was due on each tick.
   it('refuses a time past the year 9999, and never plans a run past it', () => {
     const after = new Date('2026-10-12T17:00:00Z');

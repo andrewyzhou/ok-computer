@@ -13,14 +13,17 @@ const isoWithOffset = z
   .refine((value) => !Number.isNaN(Date.parse(value)), 'not a valid iso time')
   .refine((value) => Date.parse(value) <= LAST_TIME, 'give a time before the year 10000');
 
+// a sixth field gives seconds, so a cron could run each second and get past the one-minute minimum of an interval.
+// the schema accepts only the five fields of minute, hour, day of month, month and day of week.
 const cronExpr = z.string().refine((expr) => {
+  if (expr.trim().split(/\s+/).length !== 5) return false;
   try {
     new Cron(expr, { paused: true });
     return true;
   } catch {
     return false;
   }
-}, 'not a valid cron expression');
+}, 'not a valid cron expression with five fields: minute, hour, day of month, month, day of week');
 
 export const scheduleSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('at'), at: isoWithOffset }),
