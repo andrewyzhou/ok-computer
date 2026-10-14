@@ -327,10 +327,10 @@ Payloads:
 Behavior:
 - The scheduler computes `nextRunAt` for all enabled automations and sleeps until the earliest one, but never more than one minute, because a timer can fire late after the PC sleeps. It re-plans when automations change.
 - Before a job starts, the scheduler moves `nextRunAt` to the next time ("claims" the job), so a second tick during a long job does not run it again.
-- Missed runs (the PC was off): run once if missed by less than a configurable grace period (default 2 hours), then plan the next time from now. Do not replay every missed slot. A miss outside the grace period writes a `skipped` run.
+- Missed runs (the PC was off): run once if missed by less than a configurable grace period (default 2 hours), then plan the next time from now. Do not replay every missed slot. A miss outside the grace period writes a `skipped` run. (Changed by DESIGN-NEXT 10.4: the consolidation and the day results have a grace period of one day.)
 - Each run writes an `automation_runs` row: `automationId, runId, status (completed | failed | skipped), startedAt, endedAt, error`.
-- Failures back off: 30s, 1m, 5m, 15m. A retry never comes later than the next normal run. After 5 consecutive failures, disable the automation and tell the owner.
-- An `every` interval must be at least one minute. A one-shot time in the past is refused.
+- Failures back off: 30s, 1m, 5m, 15m. A retry never comes later than the next normal run. After 5 consecutive failures, disable the automation and tell the owner. (Changed by DESIGN-NEXT 10.4: only a one-shot job is disabled; a recurring job stays on at its normal times.)
+- An `every` interval must be at least one minute, and a cron has exactly five fields (a sixth field gives seconds). A one-shot time in the past is refused.
 - Text from an isolated run goes to the owner and is also appended to the main session as a `system_event`, so the main conversation knows what the owner answers to.
 - Automations that the agent creates through tools have `createdBy: 'agent'`. `automations_list` leaves out one-shot automations that already ran.
 
