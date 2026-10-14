@@ -32,7 +32,7 @@ It runs on this PC. Its persona files (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, an
 
 A small supervisor restarts the agent if it stops. The logon task means it runs whenever you are signed in to Windows.
 
-`npm run chat` uses the same database as the background agent. That is fine, but do not chat with it while the agent is answering you in Telegram at the same moment: two processes in one conversation can give the same tool call two results. `npm run chat` never connects to MCP servers: only the background agent does, so each server runs once and an OAuth token is refreshed by one process.
+`npm run chat` uses the same database as the background agent. That is fine, but do not chat with it while the agent is answering you in Telegram at the same moment: two processes in one conversation can give the same tool call two results. `npm run chat` never connects to MCP servers and runs no automations: only the background agent does, so each server runs once, an OAuth token is refreshed by one process, and reminders always come to Telegram. A second background agent on the same `data` folder (for example `npm start` while the service runs) stops at once with a message.
 
 ## What works now and how to turn each part on
 
