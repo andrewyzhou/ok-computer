@@ -14,7 +14,7 @@ afterEach(async () => fake?.close());
 
 type Outcome = 'refuse' | 'outage' | 'reject' | 'cut' | 'ok';
 
-async function scenario(heartbeat: (input: string, model: string) => Outcome, chain = ['fake/m']) {
+async function scenario(heartbeat: (input: string, model: string) => Outcome, chain = ['fake/m'], outageError = new ModelError('transient', 'overloaded', 529)) {
   const seen: string[] = [];
   const answer = async (call: ModelCall) => {
     const last = JSON.stringify(call.messages.at(-1));
@@ -25,7 +25,7 @@ async function scenario(heartbeat: (input: string, model: string) => Outcome, ch
     if (call.system.includes('This is a heartbeat run.')) {
       if (last.includes('tool_result')) return fakeResponse({ text: 'NO_REPLY' });
       const what = heartbeat(last, call.model);
-      if (what === 'outage') throw new ModelError('transient', 'overloaded', 529);
+      if (what === 'outage') throw outageError;
       if (what === 'reject') throw new ModelError('request', 'Output blocked by content filtering policy', 400);
       seen.push(last);
       if (what === 'refuse') return fakeResponse({ stopReason: 'refusal', text: '' });
@@ -121,19 +121,28 @@ it('counts a run that ends without heartbeat_respond', async () => {
   await expectPoisonHeld(t, seen, 6);
 }, 120_000);
 
-// an outage of the model is not about the text, so it does not count against the signals.
-it('keeps the text of the signals through an outage of the model', async () => {
-  let outage = true;
-  const { t, seen } = await scenario(() => (outage ? 'outage' : 'ok'));
-  fake.deliver('school', essay);
-  await t.at(pdt('08:30'));
-  await t.at(pdt('09:00'));
-  await t.at(pdt('09:01'));
-  await t.at(pdt('09:03'));
-  expect(t.rows("SELECT heartbeatFailures FROM integration_events WHERE source = 'gmail'")).toEqual([{ heartbeatFailures: 0 }]);
-  outage = false;
-  for (let minute = 64; minute <= 60 * 3; minute += 5) await t.at(minutesAfter(minute));
-  expect(t.rows("SELECT handledAs, heartbeatFailures FROM integration_events WHERE source = 'gmail'")).toEqual([{ handledAs: 'seen', heartbeatFailures: 0 }]);
-  expect(seen.at(-1)).toContain('Oct 20');
-  await t.app.stop();
-}, 120_000);
+// an outage of the model is not about the text, so it does not count against the signals. verification round 3 after
+// the merge: a bad key, a retired model or an empty credit balance is a request error too, but it comes from the
+// setup of the owner. it counted, so two failed heartbeats held back the text of a real deadline.
+for (const [label, error] of [
+  ['an overload', new ModelError('transient', 'overloaded', 529)],
+  ['a bad key', new ModelError('request', 'invalid x-api-key', 401)],
+  ['a retired model', new ModelError('request', 'model: not_found', 404)],
+  ['an empty credit balance', new ModelError('request', 'Your credit balance is too low to access the Anthropic API.', 400)],
+] as const) {
+  it(`keeps the text of the signals through ${label}`, async () => {
+    let outage = true;
+    const { t, seen } = await scenario(() => (outage ? 'outage' : 'ok'), ['fake/m'], error);
+    fake.deliver('school', essay);
+    await t.at(pdt('08:30'));
+    await t.at(pdt('09:00'));
+    await t.at(pdt('09:01'));
+    await t.at(pdt('09:03'));
+    expect(t.rows("SELECT heartbeatFailures FROM integration_events WHERE source = 'gmail'")).toEqual([{ heartbeatFailures: 0 }]);
+    outage = false;
+    for (let minute = 64; minute <= 60 * 3; minute += 5) await t.at(minutesAfter(minute));
+    expect(t.rows("SELECT handledAs, heartbeatFailures FROM integration_events WHERE source = 'gmail'")).toEqual([{ handledAs: 'seen', heartbeatFailures: 0 }]);
+    expect(seen.at(-1)).toContain('Oct 20');
+    await t.app.stop();
+  }, 120_000);
+}

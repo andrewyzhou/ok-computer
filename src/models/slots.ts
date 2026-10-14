@@ -16,7 +16,7 @@ import {
 export type SlotResult =
   // modelCallId is the model_calls row of the answer, so a caller can link a label or a verdict to its call.
   | { ok: true; response: ModelResponse; provider: string; model: string; modelCallId: number }
-  // rejected is a request error: the provider refused the request itself, for example its content filter.
+  // rejected is a request error that the input can cause, for example a content filter of the provider.
   | { ok: false; error: string; aborted: boolean; rejected?: true };
 
 export interface SlotRunner {
@@ -90,7 +90,7 @@ export function createSlotRunner(deps: SlotRunnerDeps): SlotRunner {
             if (err.kind === 'aborted') return { ok: false, error: 'the run was aborted', aborted: true };
             if (err.kind === 'request') {
               logger.error('model request failed', { slot, ref, runId, status: err.status, err });
-              return { ok: false, error: `${ref} rejected the request: ${message}`, aborted: false, rejected: true };
+              return { ok: false, error: `${ref} rejected the request: ${message}`, aborted: false, ...(fromInput(err) ? { rejected: true as const } : {}) };
             }
             lastError = `${ref} failed: ${message}`;
             logger.warn('transient model error', { slot, ref, runId, attempt, status: err.status, err });
@@ -101,6 +101,13 @@ export function createSlotRunner(deps: SlotRunnerDeps): SlotRunner {
       return { ok: false, error: lastError, aborted: false };
     },
   };
+}
+
+// a request error can come from the text of the input: a content filter, or an input that is too large or not valid.
+// a bad key (401, 403), a missing model (404) and an empty credit balance (a 400) come from the setup of the owner, so
+// they are like an outage. an error event inside a stream has no status.
+function fromInput(err: ModelError): boolean {
+  return [undefined, 0, 400, 413, 422].includes(err.status) && !/credit balance|billing|quota/i.test(err.message);
 }
 
 interface CallRecord {

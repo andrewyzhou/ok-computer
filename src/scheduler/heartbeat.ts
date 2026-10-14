@@ -93,6 +93,18 @@ export function recentNotifications(db: Db): Array<{ text: string; runId: string
     .map((row) => ({ text: (JSON.parse(String(row.input)) as Respond).text ?? '', runId: String(row.runId) }));
 }
 
+// the taint that a heartbeat run read itself: its checklist and its digest. a run from before readTaint has only
+// its whole taint.
+function readTaint(db: Db, runId: string): TaintSource[] {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(json_extract(payload, '$.readTaint'), json_extract(payload, '$.taint')) AS taint FROM events
+       WHERE sessionKey = ? AND type = 'system_event' ORDER BY seq LIMIT 1`,
+    )
+    .get(`${HEARTBEAT_PREFIX}${runId}`);
+  return row?.taint ? (JSON.parse(String(row.taint)) as TaintSource[]) : [];
+}
+
 // a refusal, the step limit and a request that the provider rejected (for example its content filter) can come from
 // the text of the input. a refusal counts also when the next model of the chain then failed. a transient error or a
 // crash comes from the model or the app.
@@ -177,8 +189,10 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
 
     const recent = recentNotifications(db);
     // a recent notification can repeat a mail that its heartbeat read. it keeps the taint of that run, so the mail
-    // cannot change the checklist one heartbeat later through it.
-    const recentTaint = recent.flatMap((each) => sessionTaint(db, `${HEARTBEAT_PREFIX}${each.runId}`));
+    // cannot change the checklist one heartbeat later through it. only the taint that the run read itself counts, not
+    // the taint of the recent notifications that it read. else each notification gives the taint to the next ones, and
+    // one mail taints every later heartbeat and the main session for ever.
+    const recentTaint = recent.flatMap((each) => readTaint(db, each.runId));
     const text = [
       'Heartbeat check.',
       '',
@@ -197,7 +211,8 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
     ].join('\n');
     // the digest and the recent notifications can quote outside text, so the run starts with their taint. the
     // heartbeat has no external tools.
-    const inherited = [...checklistTaint(db), ...(digest?.taint ?? []), ...recentTaint];
+    const read = [...checklistTaint(db), ...(digest?.taint ?? [])];
+    const inherited = [...read, ...recentTaint];
     const runId = newId();
     const sessionKey = `${HEARTBEAT_PREFIX}${runId}`;
     const result = await queue.enqueue(sessionKey, () =>
@@ -208,7 +223,7 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
         slot: automation.slot,
         channel: owner.chat()?.channel ?? 'cli',
         allowedTools: HEARTBEAT_TOOLS,
-        events: [{ type: 'system_event', payload: { text, ...(inherited.length ? { taint: inherited } : {}) } }],
+        events: [{ type: 'system_event', payload: { text, ...(inherited.length ? { taint: inherited, readTaint: read } : {}) } }],
         signal: deps.signal,
       }),
     );
