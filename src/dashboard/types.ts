@@ -130,6 +130,7 @@ export interface IntegrationSummary {
   tokenExpiresAt: string | null;
   lastError: string | null;
   lastErrorAt: string | null;
+  withheldScopes?: string[];
   authUrl?: string;
   oauthApp?: { redirectUrl: string; callback: 'loopback' | 'paste'; clientRef?: string };
   catalogHash?: string;

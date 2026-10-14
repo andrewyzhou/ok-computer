@@ -240,6 +240,15 @@ function Facts({ integration }: { integration: Detail }) {
           </>
         ) : null}
       </dd>
+      {integration.withheldScopes?.length ? (
+        <>
+          <dt>Not granted</dt>
+          <dd className="error-text">
+            The token does not hold {integration.withheldScopes.join(', ')}, so tools that need them fail with missing_scope. When
+            the admin allows them, press Connect to sign in again.
+          </dd>
+        </>
+      ) : null}
       {integration.lastError ? (
         <>
           <dt>Last error</dt>

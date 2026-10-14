@@ -255,6 +255,56 @@ describe('slack sign-in with a pre-registered client', () => {
     expect(t.needsAuth).toEqual([]);
   });
 
+  it('signs in again when the owner presses Connect and the token lacks a configured scope, and a start keeps the token', async () => {
+    const t = await setup({ withhold: ['users:read'] });
+    await t.integrations.start();
+    const started = await t.integrations.connect('slack-work');
+    if (!('url' in started)) throw new Error('expected a link');
+    expect(await t.integrations.finishSignIn(await consent(t.slack, started.url))).toMatchObject({ ok: true });
+    await expect.poll(() => t.state().status).toBe('connected');
+    expect(t.integrations.status()[0]!.withheldScopes).toEqual(['users:read']);
+    // a start by itself keeps the smaller grant, so no sign-in link waits while the admin does not allow the scope.
+    await t.integrations.stop();
+    await t.integrations.start();
+    await expect.poll(() => t.state().status).toBe('connected');
+    expect(t.slack.stats.codeGrants).toBe(1);
+    // the admin allows the scope, and the owner presses Connect.
+    t.slack.options.withhold = [];
+    const again = await t.integrations.connect('slack-work');
+    if (!('url' in again)) throw new Error(`expected a link, got ${JSON.stringify(again)}`);
+    expect(await t.integrations.finishSignIn(await consent(t.slack, again.url))).toEqual({ ok: true, text: 'Connected. You can close this tab.' });
+    await expect.poll(() => t.state().status).toBe('connected');
+    expect(t.slack.stats.codeGrants).toBe(2);
+    const stored = JSON.parse((await t.secrets.get('slack-work:oauth-tokens'))!) as { scope: string };
+    expect(stored.scope.split(',')).toContain('users:read');
+    expect(t.integrations.status()[0]!.withheldScopes).toBeUndefined();
+    expect(await t.integrations.connect('slack-work')).toEqual({ connected: true });
+  });
+
+  it('names the withheld scopes on the page after a later error overwrites lastError', async () => {
+    const t = await setup({ withhold: ['users:read'] });
+    await t.integrations.start();
+    const started = await t.integrations.connect('slack-work');
+    if (!('url' in started)) throw new Error('expected a link');
+    expect(await t.integrations.finishSignIn(await consent(t.slack, started.url))).toMatchObject({ ok: true });
+    await expect.poll(() => t.state().status).toBe('connected');
+    expect(lastError(t)).toContain('users:read');
+    await t.integrations.stop();
+    const get = t.secrets.get.bind(t.secrets);
+    t.secrets.get = async (ref: string) => {
+      if (ref === 'slack-work:oauth-tokens') throw new Error('the credential manager is busy');
+      return get(ref);
+    };
+    await t.integrations.start();
+    await expect.poll(() => lastError(t)).not.toContain('users:read');
+    t.secrets.get = get;
+    await t.integrations.stop();
+    await t.integrations.start();
+    await expect.poll(() => t.state().status).toBe('connected');
+    expect(lastError(t)).not.toContain('users:read');
+    expect(t.integrations.status()[0]!.withheldScopes).toEqual(['users:read']);
+  });
+
   it('uses a client that the owner stores again after the first sign-in', async () => {
     const t = await setup();
     await t.integrations.start();

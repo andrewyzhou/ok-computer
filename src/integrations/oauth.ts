@@ -62,6 +62,12 @@ export interface OAuth {
   // errors server_error and temporarily_unavailable. the tokens are not known to be bad then.
   signInOutage(integrationId: string): string | undefined;
   hasTokens(integrationId: string): Promise<boolean>;
+  // the configured scopes that the stored token of an integration does not hold, as of the last read or save of the
+  // token. the server did not grant them, so tools that need them fail with missing_scope.
+  withheld(integrationId: string): string[];
+  // while the owner presses Connect, a stored token that lacks a configured scope is not used, so the sdk starts a new
+  // sign-in. an admin can allow a scope after the sign-in, and the owner has no other way to get it.
+  askAgain(integrationId: string, on: boolean): void;
   // closeIfIdle closes the callback port when no flow waits, for example after a connect with working tokens.
   closeIfIdle(): Promise<void>;
   // the authorization link of the last flow of an integration that has not ended, for the dashboard.
@@ -123,6 +129,8 @@ export function createOAuth(deps: OAuthDeps): OAuth {
   // them would otherwise save the new tokens without it. a server that granted fewer scopes would then make the next
   // read refuse the new, working token.
   const requestedById = new Map<string, string>();
+  const withheldById = new Map<string, string[]>();
+  const askingAgain = new Set<string>();
   const saveUnsaved = async (id: string) => {
     const tokens = unsaved.get(id);
     if (!tokens) return;
@@ -148,6 +156,17 @@ export function createOAuth(deps: OAuthDeps): OAuth {
     // that holds a list must thus be split the same way, or it can never match the record.
     const scopes = auth?.scopes?.flatMap((scope) => scope.split(/[\s,]+/)).filter(Boolean);
     const redirectUrl = redirectFor(entry);
+    // the record of the withheld scopes is kept apart from lastError, because the next error overwrites lastError.
+    const notGranted = (tokens: Tokens | undefined): string[] => {
+      if (!tokens?.scope || !scopes) {
+        withheldById.delete(id);
+        return [];
+      }
+      const granted = new Set(tokens.scope.split(/[\s,]+/));
+      const missing = scopes.filter((scope) => !granted.has(scope));
+      withheldById.set(id, missing);
+      return missing;
+    };
     const metadata: OAuthClientMetadata = {
       client_name: 'OK Computer',
       redirect_uris: [redirectUrl],
@@ -205,6 +224,13 @@ export function createOAuth(deps: OAuthDeps): OAuth {
           logger.warn('a configured scope is new since the last sign-in, so a new sign-in starts', { integration: id, missing });
           return undefined;
         }
+        const withheld = notGranted(tokens);
+        // only a connect that the owner starts asks again. a start or a call by itself keeps the smaller grant, or each
+        // start would make a new sign-in link while the admin still does not allow the scope.
+        if (withheld.length && askingAgain.has(id)) {
+          logger.warn('the stored token lacks a configured scope, so the connect of the owner starts a new sign-in', { integration: id, withheld });
+          return undefined;
+        }
         return tokens;
       },
       async saveTokens(given) {
@@ -217,11 +243,8 @@ export function createOAuth(deps: OAuthDeps): OAuth {
         const requested = flow ? scopes?.join(' ') : (before?.requested ?? requestedById.get(id));
         if (requested !== undefined) requestedById.set(id, requested);
         const tokens: Tokens = requested === undefined ? given : { ...given, requested };
-        if (flow && scopes && given.scope) {
-          const granted = new Set(given.scope.split(/[\s,]+/));
-          const missing = scopes.filter((scope) => !granted.has(scope));
-          if (missing.length) flow.missing = missing;
-        }
+        const missing = notGranted(tokens);
+        if (flow && missing.length) flow.missing = missing;
         try {
           await secrets.set(tokensRef(id), JSON.stringify(tokens));
           unsaved.delete(id);
@@ -289,6 +312,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
       async invalidateCredentials(scope) {
         if (scope === 'all' || scope === 'tokens') {
           unsaved.delete(id);
+          withheldById.delete(id);
           await vault(() => secrets.delete(tokensRef(id)));
         }
         if (scope === 'all' || scope === 'client') {
@@ -453,6 +477,11 @@ export function createOAuth(deps: OAuthDeps): OAuth {
     serverError: (id) => serverErrors.get(id),
     signInOutage: (id) => outages.get(id),
     hasTokens: async (id) => unsaved.has(id) || (await secrets.get(tokensRef(id))) !== undefined,
+    withheld: (id) => withheldById.get(id) ?? [],
+    askAgain(id, on) {
+      if (on) askingAgain.add(id);
+      else askingAgain.delete(id);
+    },
     closeIfIdle: closeWhenIdle,
     pendingUrl(id) {
       // the sdk also makes a flow when a sign-in stops in a call or a start that the owner did not begin. the callback
