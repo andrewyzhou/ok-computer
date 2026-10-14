@@ -575,7 +575,16 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
 
   async function startTab(ctx: BrowserContext, kind: Tab['kind'], step: StepInput, allowlist: string[]): Promise<Tab | BrowserRefusal> {
     try {
-      return await newTab(ctx, kind, step, allowlist);
+      // the start of a tab has no timeout of its own. a chrome that gave no answer held each later open and search
+      // behind it until the app restarted (r8 probe). that chrome closes, and the next call starts a new one.
+      const work = newTab(ctx, kind, step, allowlist);
+      const tab = await within(work, t.navigation);
+      if (tab !== TIMED_OUT) return tab;
+      logger.error('the browser tab did not start in time', { kind });
+      void work.then((late) => endTab(late, 'crashed', 'the browser gave no answer'), () => undefined);
+      if (context === ctx) context = undefined;
+      idleClose = within(ctx.close(), t.navigation).catch(() => undefined);
+      return { refused: `The browser gave no answer within ${t.navigation / 1000} s, so it closes. Nothing was opened. Try again.` };
     } catch (err) {
       logger.error('the browser tab did not start', { err });
       return { refused: `The browser tab did not start: ${errorText(err).split('\n')[0]}. Nothing was opened.` };

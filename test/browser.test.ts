@@ -933,6 +933,30 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(h.tasks().map((task) => task.status)).toEqual(['crashed', 'open']);
   });
 
+  // the start of a tab had no time limit, so a chrome that gave no answer held each later open of every session (r8
+  // probe).
+  it('refuses an open when chrome gives no new tab in time, and the next open starts chrome again', async () => {
+    const h = harness();
+    await h.run('browser_open', { url: site.url('shop.test') });
+    await h.run('browser_close', {});
+    const spare = await chromium.launchPersistentContext(mkdtempSync(join(tmpdir(), 'okc-spare-')), { channel: 'chrome', headless: true });
+    const proto = Object.getPrototypeOf(spare) as { newPage: () => Promise<unknown> };
+    await spare.close();
+    const original = proto.newPage;
+    proto.newPage = () => {
+      proto.newPage = original;
+      return new Promise(() => undefined);
+    };
+    try {
+      const out = await h.run('browser_open', { url: site.url('shop.test') });
+      expect(out).toMatchObject({ isError: true, content: expect.stringContaining('The browser gave no answer within 5 s') });
+      const next = await h.run('browser_open', { url: site.url('shop.test') }, 'other');
+      expect(next.isError, next.content).toBe(false);
+    } finally {
+      proto.newPage = original;
+    }
+  });
+
   it('closes a hung tab, and the next open works', async () => {
     const h = harness();
     const out = await h.run('browser_open', { url: site.url('shop.test', '/hang') });
