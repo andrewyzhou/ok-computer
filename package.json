@@ -12,7 +12,7 @@
     "dev:web": "vite web",
     "start": "node dist/main.js",
     "chat": "tsx src/main.ts --chat",
-    "build": "tsc -p tsconfig.build.json && node -e \"require('node:fs').cpSync('src/db/migrations','dist/db/migrations',{recursive:true})\" && vite build web",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node -e \"require('node:fs').cpSync('src/db/migrations','dist/db/migrations',{recursive:true})\" && vite build web && node -e \"require('node:fs').writeFileSync('dist/.build-ok','')\"",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "test": "vitest run",
     "smoke": "tsx src/smoke.ts",

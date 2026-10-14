@@ -39,13 +39,17 @@ function Get-AgentProcess([int]$supervisorId) {
   return Get-Checked $nodePidFile ({ param($p) $p.ParentProcessId -eq $supervisorId -and $p.CommandLine -like '*dist/main.js*' }.GetNewClosure())
 }
 
+# the build writes dist/.build-ok as its last step, so a failed build leaves no stamp. folders count too, because a
+# deleted or renamed file changes only the time of its folder. a folder list can show an old time for some seconds, so
+# each item reads its time again.
 function Test-BuildIsOld {
-  $main = Join-Path $root 'dist/main.js'
-  if (-not (Test-Path $main)) { return $true }
-  $built = (Get-Item $main).LastWriteTime
-  $newest = Get-ChildItem -Path (Join-Path $root 'src'), (Join-Path $root 'web/src') -Recurse -File |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-  return $newest.LastWriteTime -gt $built
+  $stamp = Join-Path $root 'dist/.build-ok'
+  if (-not (Test-Path -LiteralPath $stamp)) { return $true }
+  $built = (Get-Item -LiteralPath $stamp).LastWriteTime
+  $inputs = 'src', 'web/src', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.build.json', 'web/index.html',
+    'web/vite.config.ts', 'web/tsconfig.json' | ForEach-Object { Join-Path $root $_ } | Where-Object { Test-Path -LiteralPath $_ }
+  $items = @(Get-Item -LiteralPath $inputs) + @(Get-ChildItem -LiteralPath $inputs -Recurse)
+  return [bool]($items | Where-Object { $_.Refresh(); $_.LastWriteTime -gt $built } | Select-Object -First 1)
 }
 
 function Start-Agent {

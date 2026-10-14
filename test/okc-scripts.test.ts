@@ -1,10 +1,11 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-const scripts = join(import.meta.dirname, '..', 'scripts');
+const repo = join(import.meta.dirname, '..');
+const scripts = join(repo, 'scripts');
 
 // each case has its own root with a copy of run.ps1 and a fake agent that ends by itself after a few seconds. the
 // functions of okc.ps1 load from the syntax tree of the script, so its commands do not run.
@@ -113,5 +114,38 @@ describe.runIf(process.platform === 'win32')('the okc scripts', { timeout: 90_00
     await waitFor(() => readFileSync(pidFile, 'utf8').trim() === String(next.pid));
     await waitFor(() => existsSync(nodePidFile) && Number(readFileSync(nodePidFile, 'utf8')) !== agents[0]);
     agents.push(Number(readFileSync(nodePidFile, 'utf8')));
+  });
+
+  // tsc writes its output also when the types are wrong, so the next start saw a new dist/main.js and ran the broken
+  // build. a deleted migration matters because the app applies each migration file that is in dist.
+  it('builds again after a failed build and after a change of any build input', () => {
+    const root = makeRoot();
+    const past = new Date(Date.now() - 3_600_000);
+    mkdirSync(join(root, 'src', 'db', 'migrations'), { recursive: true });
+    const inputs = ['src/main.ts', 'src/db/migrations/001_a.sql', 'src/db/migrations/002_b.sql', 'package-lock.json'];
+    for (const file of inputs) writeFileSync(join(root, file), 'x');
+    for (const path of [...inputs, 'src/db/migrations', 'src/db', 'src']) utimesSync(join(root, path), past, past);
+    const old = () => okc(root, 'Test-BuildIsOld');
+
+    expect(old()).toBe('True');
+    writeFileSync(join(root, 'dist', '.build-ok'), '');
+    expect(old()).toBe('False');
+    writeFileSync(join(root, 'package-lock.json'), 'y');
+    expect(old()).toBe('True');
+    utimesSync(join(root, 'package-lock.json'), past, past);
+    expect(old()).toBe('False');
+    rmSync(join(root, 'src/db/migrations/002_b.sql'));
+    expect(old()).toBe('True');
+  });
+
+  it('writes no build output when the types are wrong', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'okc-tsc-'));
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'main.ts'), 'export const n: number = "text";\n');
+    const options = { rootDir: 'src', outDir: 'out', types: [] };
+    writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({ extends: join(repo, 'tsconfig.build.json'), compilerOptions: options, include: ['src'] }));
+    const result = spawnSync(process.execPath, [join(repo, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', dir], { encoding: 'utf8' });
+    expect(result.status).not.toBe(0);
+    expect(existsSync(join(dir, 'out', 'main.js'))).toBe(false);
   });
 });
