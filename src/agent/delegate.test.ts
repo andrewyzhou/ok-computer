@@ -8,7 +8,7 @@ import type { RunInput, RunResult } from './loop.js';
 
 const clock = () => new Date('2026-10-13T16:00:00Z');
 
-function setup(runChild: (input: RunInput) => Promise<RunResult>, toolsOf = (profile: ProfileName) => (profile === 'research' ? ['memory_search'] : [])) {
+function setup(runChild: (input: RunInput) => Promise<RunResult>, toolsOf = (profile: ProfileName) => (profile === 'research' ? ['memory_search', 'result_read'] : ['result_read'])) {
   const db = openDb(':memory:');
   db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('p', 'main', 'message', 'main', 'running', 'x')").run();
   let ids = 0;
@@ -35,7 +35,7 @@ describe('delegate', () => {
   it('lists each profile with its tools when the app starts', () => {
     const { tool } = setup(async () => done('x', ''));
     expect(tool.description).toContain('- research: Searches the web');
-    expect(tool.description).toContain('Tools: memory_search.');
+    expect(tool.description).toContain('Tools: memory_search, result_read.');
     expect(tool.description).toContain('- inbox: Reads, labels and archives mail in bulk, and reports what it did. Tools: none in this app yet.');
   });
 
@@ -59,7 +59,7 @@ describe('delegate', () => {
       sessionKey: 'sub:research:c1',
       trigger: 'subagent',
       slot: 'main',
-      allowedTools: ['memory_search'],
+      allowedTools: ['memory_search', 'result_read'],
       maxIterations: PROFILES.research.maxIterations,
       events: [{ type: 'system_event', payload: { text: 'Your task from the parent agent:\nFind it.', taint } }],
     });
@@ -115,6 +115,7 @@ describe('delegate', () => {
     expect((await Promise.all([...running.slice(1), next])).map((output) => output.content)).toEqual(['done c2', 'done c3', 'done c4']);
   });
 
+  // result_read is always in the app, so a profile with only result_read counts as a profile without tools.
   it('refuses in a child session and for a profile without tools', async () => {
     const { db, tool, ctx } = setup(() => {
       throw new Error('no child may start');

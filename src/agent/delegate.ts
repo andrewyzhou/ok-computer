@@ -51,6 +51,10 @@ export const SUBAGENT_INSTRUCTIONS = `You are a sub-agent. The parent agent gave
 
 export const MAX_CHILDREN = 3;
 
+// result_read only reads a long result of another tool. a profile with only this tool cannot do its task.
+const HELPERS: ReadonlySet<string> = new Set(['result_read']);
+const canWork = (tools: string[]) => tools.some((name) => !HELPERS.has(name));
+
 export const profileOf = (sessionKey: string): Profile | undefined =>
   sessionKey.startsWith(SUBAGENT_PREFIX) ? (PROFILES as Record<string, Profile>)[sessionKey.split(':')[1] ?? ''] : undefined;
 
@@ -71,7 +75,7 @@ export function createDelegateTool(deps: DelegateDeps): Tool {
   const running = new Map<string, number>();
   const lines = NAMES.map((name) => {
     const tools = deps.toolsOf(name);
-    return `- ${name}: ${PROFILES[name].description} Tools: ${tools.length ? tools.join(', ') : 'none in this app yet'}.`;
+    return `- ${name}: ${PROFILES[name].description} Tools: ${canWork(tools) ? tools.join(', ') : 'none in this app yet'}.`;
   });
   return defineTool({
     name: 'delegate',
@@ -86,7 +90,7 @@ export function createDelegateTool(deps: DelegateDeps): Tool {
       if (ctx.sessionKey.startsWith(SUBAGENT_PREFIX)) return { content: 'A sub-agent cannot start another sub-agent.', isError: true };
       const chosen = PROFILES[profile];
       const tools = deps.toolsOf(profile);
-      if (!tools.length) return { content: `The ${profile} profile has no tools in this app yet, so no sub-agent started.`, isError: true };
+      if (!canWork(tools)) return { content: `The ${profile} profile has no tools in this app yet, so no sub-agent started.`, isError: true };
       const count = running.get(ctx.runId) ?? 0;
       // a wait would hold the turn of the parent with no result, so a fourth child gets an answer at once.
       if (count >= MAX_CHILDREN) return { content: `${MAX_CHILDREN} sub-agents of this run already work. Wait for a result, then try again.`, isError: true };
