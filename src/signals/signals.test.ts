@@ -218,7 +218,7 @@ describe('heartbeat with signals', () => {
   const heartbeat = (
     status: 'completed' | 'failed' | 'aborted',
     finished: Finished,
-    options: { notify?: boolean; shown?: number[]; send?: (text: string) => Promise<boolean>; failed?: number[][] } = {},
+    options: { notify?: boolean; shown?: number[]; send?: (text: string) => Promise<boolean>; failed?: number[][]; limit?: boolean } = {},
   ) => {
     const db = openDb(':memory:');
     return createHeartbeat({
@@ -235,7 +235,7 @@ describe('heartbeat with signals', () => {
           appendEvent(db, { sessionKey: input.sessionKey, runId: input.runId!, type: 'assistant_message', payload: { toolCalls: [call] } } as never, NOW);
           appendEvent(db, { sessionKey: input.sessionKey, runId: input.runId!, type: 'tool_result', payload: { toolCallId: 'h1', name: 'heartbeat_respond', content: 'ok' } } as never, NOW);
         }
-        return { runId: input.runId ?? 'r', status, text: 'NO_REPLY', ...(status === 'failed' ? { error: 'model down' } : {}) } as never;
+        return { runId: input.runId ?? 'r', status, text: 'NO_REPLY', ...(status === 'failed' ? { error: 'model down' } : {}), ...(options.limit ? { stoppedAtLimit: true } : {}) } as never;
       },
       signal: new AbortController().signal,
       newId: () => 'r1',
@@ -253,7 +253,10 @@ describe('heartbeat with signals', () => {
     const failed: number[][] = [];
     expect(await heartbeat('failed', finished, { failed })(automation)).toMatchObject({ status: 'failed' });
     expect(finished).toEqual([]);
-    // the failure counts against the shown signals. a stop of the app does not.
+    // an outage of the model is not about the text, so it does not count against the shown signals.
+    expect(failed).toEqual([]);
+    // the step limit can come from the text, so it counts. a stop of the app does not.
+    await heartbeat('failed', finished, { failed, limit: true })(automation);
     expect(failed).toEqual([[7]]);
     await heartbeat('aborted', finished, { failed })(automation);
     expect(failed).toEqual([[7]]);

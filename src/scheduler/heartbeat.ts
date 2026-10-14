@@ -99,6 +99,16 @@ export function recentNotifications(db: Db): string[] {
   ).map((respond) => respond.text ?? '');
 }
 
+// a refusal and the step limit can come from the text of the input. a transient error, a rejected request or a crash
+// comes from the model or the app.
+function inputCanCause(db: Db, result: RunResult): boolean {
+  if (result.stoppedAtLimit) return true;
+  const last = db.prepare('SELECT stopReason FROM model_calls WHERE runId = ? ORDER BY id DESC LIMIT 1').get(result.runId) as
+    | { stopReason: string | null }
+    | undefined;
+  return last?.stopReason === 'refusal';
+}
+
 export function createHeartbeatTools(deps: { db: Db }): Tool[] {
   const respond = defineTool({
     name: 'heartbeat_respond',
@@ -108,7 +118,14 @@ export function createHeartbeatTools(deps: { db: Db }): Tool[] {
     risk: 'write',
     async run(input, ctx) {
       if (input.notify && !input.text?.trim()) return { content: 'notify true needs a text', isError: true };
-      if (input.checklist !== undefined) setChecklist(deps.db, input.checklist, ctx.clock(), sessionTaint(deps.db, ctx.sessionKey));
+      if (input.checklist === undefined) return { content: 'recorded' };
+      // a heartbeat run that read outside text (a mail in the digest, or a checklist that a tainted session wrote)
+      // must not change the checklist. the owner does not see this session, and a new checklist drives every later
+      // heartbeat. the answer itself still counts, so a notification is not lost. the main session can change the
+      // checklist with heartbeat_checklist_set, where the owner sees it.
+      const taint = sessionTaint(deps.db, ctx.sessionKey);
+      if (taint.length) return { content: 'recorded, but the checklist did not change, because this run read outside text' };
+      setChecklist(deps.db, input.checklist, ctx.clock());
       return { content: 'recorded' };
     },
   });
@@ -199,11 +216,12 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
         signal: deps.signal,
       }),
     );
-    // a failed run leaves the signals unhandled, so the next heartbeat shows them again. a failure counts against the
-    // shown signals, so a signal whose text makes every run fail loses that text, and the scheduler does not turn the
-    // heartbeat off. an aborted run (a stop of the app) does not count.
+    // a failed run leaves the signals unhandled, so the next heartbeat shows them again. a failure that the input can
+    // cause counts against the shown signals, so a signal whose text makes every run fail loses that text, and the
+    // scheduler does not turn the heartbeat off. an outage of the model or an aborted run (a stop of the app) does not
+    // count, because the text would else be lost for a failure that the text did not cause.
     if (result.status !== 'completed') {
-      if (result.status === 'failed' && digest?.shown.length) deps.signals!.failed(digest);
+      if (result.status === 'failed' && digest?.shown.length && inputCanCause(db, result)) deps.signals!.failed(digest);
       return { status: 'failed', runId, error: result.error ?? result.status };
     }
 

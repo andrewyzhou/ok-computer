@@ -9,7 +9,7 @@ const DIGEST_LIMIT = 20;
 const STALE_MS = 3 * 24 * 60 * 60_000;
 // after this many failed heartbeat runs that showed a signal, the digest shows it without its outside text. a text
 // that makes each run fail (for example a refusal of the model) would else fail every heartbeat until the scheduler
-// turns the heartbeat off. two runs, so one failure of the model or the network keeps the text.
+// turns the heartbeat off. two runs, so one chance refusal keeps the text.
 const HOLD_AFTER_FAILURES = 2;
 
 export interface Digest {
@@ -60,7 +60,19 @@ export function signalDigest(db: Db, now: Date, timeZone: string): Digest | unde
     )
     .all() as unknown as Row[];
   const filtered = open.filter((row) => quiet(row, now));
-  const shown = open.filter((row) => !quiet(row, now)).slice(0, DIGEST_LIMIT);
+  // a failed run counts against all the signals that it showed, but usually only one of them made it fail. the next
+  // runs therefore show one such suspect at a time, and the others wait. a good signal next to a bad one then gets a
+  // run of its own, and it does not lose its text.
+  let suspect = false;
+  const shown = open
+    .filter((row) => !quiet(row, now))
+    .filter((row) => {
+      if (row.heartbeatFailures === 0 || row.heartbeatFailures >= HOLD_AFTER_FAILURES) return true;
+      if (suspect) return false;
+      suspect = true;
+      return true;
+    })
+    .slice(0, DIGEST_LIMIT);
   if (!shown.length && !filtered.length) return undefined;
   const when = (iso: string) => new Date(iso).toLocaleString('en-US', { timeZone, dateStyle: 'medium', timeStyle: 'short' });
   const lines = shown.map((row) => {
@@ -99,8 +111,8 @@ export function finishDigest(db: Db, digest: Digest, runId: string | null, notif
   for (const id of digest.filtered) mark.run(at, 'filtered', runId, id);
 }
 
-// a failed heartbeat run leaves its signals open. each shown signal counts the failure, so a signal whose text makes
-// the runs fail loses its text after two runs, and the next run can finish.
+// a failed heartbeat run leaves its signals open. when the failure can come from the input, each shown signal counts
+// it, so a signal whose text makes the runs fail loses its text after two runs, and the next run can finish.
 export function noteFailedDigest(db: Db, digest: Digest): void {
   const note = db.prepare('UPDATE integration_events SET heartbeatFailures = heartbeatFailures + 1 WHERE id = ? AND handledAt IS NULL');
   for (const id of digest.shown) note.run(id);
