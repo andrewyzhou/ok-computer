@@ -5,7 +5,8 @@ import { findIdentifiers, SUMMARY_HEADINGS, SUMMARY_PROMPT, transcript, validate
 const event = (type: string, payload: object) => ({ id: 1, sessionKey: 'main', runId: 'r', seq: 1, type, payload, createdAt: '' }) as StoredEvent;
 
 describe('summary identifiers', () => {
-  it('finds dates, times, ids, paths, urls and numbers, but not the clock of context events', () => {
+  // bare numbers made real summaries fail on every attempt, so a count or an amount is not an identifier.
+  it('finds dates, times, ids, paths and urls, but not bare numbers or the clock of context events', () => {
     const events = [
       event('user_message', { text: 'Fly on 2026-11-02 at 07:45, booking #4417, see https://example.com/trip?a=1. Notes in data/memory/trip.md.', channel: 'cli', chatId: 'l' }),
       event('context', { text: '<context>current time: 2026-10-12 20:15</context>' }),
@@ -20,9 +21,6 @@ describe('summary identifiers', () => {
       '#4417',
       '2026-10-13',
       'a1b2c3d4',
-      '0.67',
-      '12',
-      '1234',
     ]);
   });
 

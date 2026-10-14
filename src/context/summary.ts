@@ -11,6 +11,7 @@ export const SUMMARY_HEADINGS = [
   '## recent progress',
 ] as const;
 export const DROPPED_HEADING = '## dropped identifiers';
+export const LEFT_OUT_HEADING = '## identifiers the summary left out';
 export const SUMMARY_ATTEMPTS = 3;
 const LISTED_FAILURES = 100;
 
@@ -59,11 +60,11 @@ const IDENTIFIER_PATTERNS: RegExp[] = [
   /\b(?:[01]\d|2[0-3]):[0-5]\d\b/g,
   /#\d+\b/g,
   /\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{8}\b/g,
-  /\b\d+(?:\.\d+)?\b/g,
 ];
 const ISO_TIMESTAMP = /\b(\d{4}-\d{2}-\d{2})T[\d:.]+(?:Z|[+-]\d{2}:\d{2})?/g;
 
-// context events repeat the clock in each run, so their values are not identifiers of the conversation.
+// context events repeat the clock in each run, so their values are not identifiers of the conversation. a bare number
+// is not an identifier: real sessions have too many counts and amounts, and summaries did not keep all of them.
 export function findIdentifiers(events: StoredEvent[], previousSummary?: string): string[] {
   const texts = events.flatMap((event): string[] => {
     switch (event.type) {
@@ -87,8 +88,7 @@ export function findIdentifiers(events: StoredEvent[], previousSummary?: string)
     let text = original.replace(ISO_TIMESTAMP, (_match, date: string) => ` ${date} `);
     for (const pattern of IDENTIFIER_PATTERNS) {
       text = text.replace(pattern, (match) => {
-        // one digit is too common to check, for example in "1 of 3 goals".
-        if (!/^\d$/.test(match)) found.add(match);
+        found.add(match);
         return ' ';
       });
     }
@@ -96,12 +96,16 @@ export function findIdentifiers(events: StoredEvent[], previousSummary?: string)
   return [...found];
 }
 
+const missingHeadings = (summary: string) =>
+  SUMMARY_HEADINGS.filter((heading) => !summary.split(/\r?\n/).some((line) => line.trim() === heading));
+const missingIdentifiers = (summary: string, identifiers: string[]) =>
+  identifiers.filter((id) => !summary.toLowerCase().includes(id.toLowerCase()));
+
 export function validateSummary(summary: string, identifiers: string[]): string[] {
   const failures: string[] = [];
-  const lower = summary.toLowerCase();
-  const missingHeadings = SUMMARY_HEADINGS.filter((heading) => !summary.split(/\r?\n/).some((line) => line.trim() === heading));
-  if (missingHeadings.length) failures.push(`These headings are missing: ${missingHeadings.join(', ')}.`);
-  const missing = identifiers.filter((id) => !lower.includes(id.toLowerCase()));
+  const headings = missingHeadings(summary);
+  if (headings.length) failures.push(`These headings are missing: ${headings.join(', ')}.`);
+  const missing = missingIdentifiers(summary, identifiers);
   if (missing.length) {
     const listed = missing.slice(0, LISTED_FAILURES).join(', ');
     const more = missing.length > LISTED_FAILURES ? ` and ${missing.length - LISTED_FAILURES} more` : '';
@@ -124,6 +128,7 @@ export async function summarize(
     { role: 'user', content: [{ type: 'text', text: `${previous}<conversation>\n${transcript(input.events)}\n</conversation>` }] },
   ];
   let failures: string[] = [];
+  let last: { summary: string; model: string } | undefined;
   for (let attempt = 1; attempt <= SUMMARY_ATTEMPTS; attempt++) {
     const result = await deps.slots.call(
       'compaction',
@@ -134,6 +139,7 @@ export async function summarize(
     const summary = result.response.text.trim();
     failures = validateSummary(summary, identifiers);
     if (!failures.length) return { ok: true, summary, model: result.model };
+    last = { summary, model: result.model };
     deps.logger.warn('compaction summary failed validation', { runId: input.runId, attempt, failures });
     // the next attempt sees its earlier summary and the failures, so it can fix only what is wrong.
     messages.push(
@@ -148,6 +154,13 @@ export async function summarize(
       },
       { role: 'user', content: [{ type: 'text', text: `${failures.join('\n')}\nWrite the full summary again.` }] },
     );
+  }
+  // a summary with every heading that only left out identifiers is still good. the code adds the identifiers, so none
+  // is lost, and the session does not pay for a failed compaction again on each later run.
+  if (last && !missingHeadings(last.summary).length) {
+    const left = missingIdentifiers(last.summary, identifiers);
+    deps.logger.warn('compaction summary left out identifiers, so the code adds them', { runId: input.runId, count: left.length });
+    return { ok: true, summary: `${last.summary}\n${LEFT_OUT_HEADING}\n${left.map((id) => `- ${id}`).join('\n')}`, model: last.model };
   }
   return { ok: false, error: `the summary failed validation ${SUMMARY_ATTEMPTS} times: ${failures.join(' ')}` };
 }

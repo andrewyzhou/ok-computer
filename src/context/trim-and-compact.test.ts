@@ -16,7 +16,7 @@ import { silentLogger } from '../observability/logger.js';
 import { nowTool } from '../tools/now.js';
 import { createToolRegistry } from '../tools/registry.js';
 import { fullHistory, renderEvents } from './full-history.js';
-import { DROPPED_HEADING, findIdentifiers, SUMMARY_HEADINGS, SUMMARY_PROMPT } from './summary.js';
+import { DROPPED_HEADING, findIdentifiers, LEFT_OUT_HEADING, SUMMARY_HEADINGS, SUMMARY_PROMPT } from './summary.js';
 import { chooseBoundary, createTrimAndCompact, FLUSH_DONE, FLUSH_PROMPT } from './trim-and-compact.js';
 
 const WINDOW = 3000;
@@ -59,7 +59,7 @@ function setup(steps: FakeStep[], options: { tools?: string[] } = {}) {
       events: [{ type: 'user_message', payload: { text, channel: 'cli', chatId: 'local' } }],
     });
   const rows = () => db.prepare('SELECT id, sessionKey, runId, seq, type, payload, createdAt FROM events ORDER BY id').all();
-  return { db, model, memoryDir, add, run, rows, events: () => listEvents(db, 'main') };
+  return { db, model, slots, memoryDir, add, run, rows, events: () => listEvents(db, 'main') };
 }
 
 const user = (text: string): EventInput => ({ type: 'user_message', payload: { text, channel: 'cli', chatId: 'local' } });
@@ -246,6 +246,52 @@ describe('trim-and-compact strategy', () => {
       'main',
       'main',
     ]);
+  });
+
+  it('keeps a summary that has every heading but left out identifiers, and adds them in code', async () => {
+    const noIds = textStep(SUMMARY_HEADINGS.join('\n- x\n') + '\n- x');
+    const t = setup([...flushSteps, noIds, noIds, noIds, textStep('Next is packing.')]);
+    seed(t.add);
+    await t.run('What is next?');
+    const compaction = t.events().find((e) => e.type === 'compaction');
+    if (compaction?.type !== 'compaction') throw new Error('no compaction');
+    expect(compaction.payload.summary).toContain(`${LEFT_OUT_HEADING}\n- `);
+    for (const id of ['2026-11-02', '07:45', '#4417', 'https://example.com/trip', 'data/memory/trip.md']) {
+      expect(compaction.payload.summary).toContain(id);
+    }
+  });
+
+  // a failed compaction cost a flush and three summary calls, and the next run of the session paid it again.
+  it('tries again after a failed compaction only when the session grew by a quarter, and compacts once in a run', async () => {
+    const bad = textStep('## decisions\n- the trip');
+    const good: FakeStep = async () => fakeResponse({ text: `${validSummary}\n${DROPPED_HEADING}\n${findIdentifiers(t.events()).join(', ')}` });
+    // the build gets no memory_write tool, so it does not flush.
+    const t = setup([bad, bad, bad, good]);
+    seed(t.add);
+    const strategy = createTrimAndCompact({ db: t.db, slots: t.slots, logger: silentLogger, clock: () => new Date(), windowTokens: WINDOW });
+    const hooks = (runId: string) => ({ runId, signal: new AbortController().signal, flush: async () => ({ status: 'completed', text: 'NO_REPLY' }) });
+    const build = (runId: string) => strategy.build({ sessionKey: 'main', events: t.events(), system: 's', tools: [], compaction: hooks(runId) });
+    const summaries = () => t.db.prepare("SELECT count(*) AS n FROM model_calls WHERE slot = 'compaction'").get()!.n;
+    for (const id of ['r1', 'r2', 'r3']) {
+      t.db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES (?, 'main', 'message', 'main', 'running', '')").run(id);
+    }
+
+    await build('r1');
+    expect(summaries()).toBe(3);
+    await build('r2');
+    expect(summaries()).toBe(3);
+
+    // the session grows by more than a quarter, so the next run tries again, and this time the summary is good.
+    t.add([user(`More. ${'blah '.repeat(800)}`), assistant('Noted.'), user('Go on.')]);
+    await build('r3');
+    expect(summaries()).toBe(4);
+    expect(t.events().filter((e) => e.type === 'compaction')).toHaveLength(1);
+
+    // the same run goes over the trigger again, but it uses trimming and does not compact a second time.
+    t.add([user(`Even more. ${'blah '.repeat(1500)}`)]);
+    const again = await build('r3');
+    expect(summaries()).toBe(4);
+    expect(JSON.stringify(again.messages)).not.toContain(BIG);
   });
 
   it('skips the flush when the session cannot write memory', async () => {

@@ -87,8 +87,10 @@ export function createTrimAndCompact(deps: TrimAndCompactDeps): ContextStrategy 
   const { db, logger, clock, windowTokens } = deps;
   const reserve = Math.min(RESERVE_TOKENS, Math.floor(windowTokens / 4));
   const keep = Math.min(KEEP_TOKENS, Math.floor(windowTokens / 4));
-  // a run with a failed compaction does not try again. each attempt costs up to three summary calls.
-  const failedRuns = new Set<string>();
+  // each attempt costs a flush and up to three summary calls. so a run tries at most once, and after a failure the
+  // session tries again only when it is a quarter larger. a second trigger in a run that compacted uses trimming.
+  const triedRuns = new Set<string>();
+  const failedAt = new Map<string, number>();
 
   const request = (system: string, tools: ToolSpec[], messages: ModelMessage[]): ModelRequest => ({ system, tools, messages });
 
@@ -165,11 +167,14 @@ export function createTrimAndCompact(deps: TrimAndCompactDeps): ContextStrategy 
       const hooks = input.compaction;
       const tokens = estimateTokens(full);
       if (!hooks || tokens <= windowTokens - reserve) return full;
-      if (failedRuns.has(hooks.runId)) return trimmedFallback(input, input.events);
+      const failed = failedAt.get(input.sessionKey);
+      if (triedRuns.has(hooks.runId) || (failed !== undefined && tokens < failed * 1.25)) return trimmedFallback(input, input.events);
+      triedRuns.add(hooks.runId);
       if (await compact(input, hooks, tokens)) {
+        failedAt.delete(input.sessionKey);
         return request(input.system, input.tools, render(currentView(listEvents(db, input.sessionKey))));
       }
-      failedRuns.add(hooks.runId);
+      failedAt.set(input.sessionKey, tokens);
       return trimmedFallback(input, listEvents(db, input.sessionKey));
     },
   };
