@@ -517,6 +517,12 @@ Three designs were built and judged (minimal, failure modes first, owner experie
 - **The sign-in code and the PKCE verifier are secrets.** `exchange()` registers both before the token request, and the redactor also hides the form-encoded form of each secret (`~` is `%7E` there).
 - **`all` is not an alias.** The read tools take `all` for every account.
 
+### 4.13 Decisions from phase 2 M3, verification round 4 after the merge
+
+- **A rejected heartbeat counts only when the same check without signals completes** (this replaces the status filter of 4.12 as the deciding test; the filter stays as a cheap first step). Setup errors are also a 400: a max_tokens or an effort that the model does not take, or a model without tools. No error text tells them from a content filter, and an allow list of input errors would let a mail that fails every run in a way not on the list stop the heartbeat for days. So after a rejected run that showed signals, the heartbeat runs once more with the same checklist, notifications, slot and tools, but without the signals and without `heartbeat_respond`. Only when that run completes do the signals count the failure. Tried and not taken: matching the error text (a new provider message breaks it), and counting only after an earlier run without signals succeeded (with open signals no such run happens). The cost: one more model call for each rejected heartbeat with signals, also while a setup error lasts.
+- **An error event inside an Anthropic stream gets the status of its type** (`rate_limit_error` 429, `authentication_error` 401, `request_too_large` 413, and so on). Before, every type other than an overload or an api error was a request error with status 0: a rate limit was not retried, and it counted as an input error.
+- **The recipient of a mailto unsubscribe is in the From domain or a child of it** (this narrows 4.12). The relaxed alignment of the DKIM check also let the recipient be a parent domain, which can be another organisation that gave the sender its subdomain. The cost: a list that sends from a subdomain and unsubscribes at its parent domain is refused; one-click or a manual unsubscribe still work.
+
 ## 5. Permissions, review, and sandboxing
 
 ### 5.1 Policy engine

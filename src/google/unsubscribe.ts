@@ -65,7 +65,10 @@ export function planUnsubscribe(message: gmail_v1.Schema$Message, sender: string
   } catch {
     to = undefined;
   }
-  if (!to || !aligned(to.slice(to.lastIndexOf('@') + 1), domain)) {
+  // the recipient is in the from domain or in a child of it. a parent can be another organisation that gave the
+  // sender its subdomain, for example a university to a club, so the sender cannot choose it.
+  const toDomain = to?.slice(to.lastIndexOf('@') + 1);
+  if (!to || !toDomain || (toDomain !== domain && !toDomain.endsWith(`.${domain}`))) {
     return { way: 'refused', text: 'the unsubscribe address is not one address in the domain of the sender. The owner can unsubscribe by hand' };
   }
   return { way: 'mailto', to, subject: mailto.searchParams.get('subject') ?? 'unsubscribe', body: mailto.searchParams.get('body') ?? 'unsubscribe' };
