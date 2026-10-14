@@ -293,6 +293,18 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   let context: BrowserContext | undefined;
   let launching: Promise<BrowserContext> | undefined;
   let closing = false;
+  let idleClose: Promise<unknown> = Promise.resolve();
+  // the work that starts or ends a tab. the idle close waits for it: a close while a tab was made left newPage pending
+  // for ever, and each later open and search waited behind it (r6 probe).
+  let busy = 0;
+  const inUse = async <T>(work: () => Promise<T>): Promise<T> => {
+    busy++;
+    try {
+      return await work();
+    } finally {
+      busy--;
+    }
+  };
   let tracing: string | undefined;
   let userAgent: string | undefined;
   // the --disable-features of playwright, read at the first launch. empty when playwright gives none.
@@ -315,11 +327,13 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   // chrome stopped: every tab is gone, and a trace that was not saved is lost. the steps are already in the store.
   const onContextClosed = () => {
     context = undefined;
-    if (closing) return;
-    logger.warn('the browser stopped', { tasks: [...tasks.keys()] });
-    for (const tab of tabs.values()) endRow(tab.id, 'crashed', 'the browser stopped', tab.id === tracing ? { error: 'the browser stopped before the trace was saved' } : {});
-    tabs.clear();
-    tasks.clear();
+    if (!closing) {
+      logger.warn('the browser stopped', { tasks: [...tasks.keys()] });
+      for (const tab of tabs.values()) endRow(tab.id, 'crashed', 'the browser stopped', tab.id === tracing ? { error: 'the browser stopped before the trace was saved' } : {});
+      tabs.clear();
+      tasks.clear();
+    }
+    // the trace belongs to the context. a task id that stayed here gave no later task a trace until the app restarted.
     tracing = undefined;
   };
 
@@ -407,6 +421,10 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   const owned = new WeakSet<Page>();
   async function contextOrRefusal(): Promise<BrowserContext | BrowserRefusal> {
     if (!deps.enabled) return { refused: 'The browser runs only in the background app, not in this chat process.' };
+    if (context) return context;
+    // the chrome of the idle close holds the profile until it ends. a launch before that failed, and the refusal
+    // blamed another chrome window (r6 probe).
+    await idleClose;
     if (context) return context;
     launching ??= launch().finally(() => (launching = undefined));
     try {
@@ -513,7 +531,12 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     }
   }
 
-  async function endTab(tab: Tab, status: 'closed' | 'crashed', reason: string): Promise<void> {
+  // the idle close waits for a tab that ends. a close in that moment lost the trace of the task, and its row said that
+  // the app had stopped (r6 probe).
+  const endTab = (tab: Tab, status: 'closed' | 'crashed', reason: string) => inUse(() => closeTab(tab, status, reason));
+
+  async function closeTab(tab: Tab, status: 'closed' | 'crashed', reason: string): Promise<void> {
+    const traced = tracing === tab.id;
     // a page can send data in its pagehide and unload handlers, for example a beacon with text that the agent typed. a
     // close runs them after the page layers of the gate stop, and the proxy checks only the address, so a probe got
     // every post out. the tab first goes to an empty page while the gate still holds, and the gate blocks and records
@@ -535,7 +558,8 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     // ever.
     await within(tab.page.close({ runBeforeUnload: false }), t.capture);
     let trace: { path?: string; bytes?: number; error?: string } = {};
-    if (tracing === tab.id && context) {
+    if (traced && !context) trace = { error: 'the browser stopped before the trace was saved' };
+    if (traced && context) {
       tracing = undefined;
       mkdirSync(traces, { recursive: true });
       const path = join(traces, `${tab.id}.zip`);
@@ -744,11 +768,11 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   // can open the profile with okc browser login.
   const timer = setInterval(() => {
     for (const tab of tasks.values()) if (performance.now() - tab.lastUsed > idleMs) void serial(tab, () => endTab(tab, 'closed', 'no browser action for a while'));
-    if (context && !tabs.size && performance.now() - lastActivity > idleMs) {
+    if (context && !tabs.size && !busy && performance.now() - lastActivity > idleMs) {
       closing = true;
       const ctx = context;
       context = undefined;
-      void ctx.close().finally(() => (closing = false));
+      idleClose = ctx.close().catch(() => undefined).finally(() => (closing = false));
     }
   }, Math.min(60_000, idleMs));
   timer.unref();
@@ -770,9 +794,10 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     if (other) {
       return { refused: `The browser is busy with a task of another session (${other.sessionKey}). That task ends after ${Math.round(idleMs / 60_000)} minutes without an action. Try again later.` };
     }
-    const ctx = await contextOrRefusal();
-    if ('refused' in ctx) return ctx;
-    const created = await startTab(ctx, 'task', input, [siteOf(host)]);
+    const created = await inUse(async () => {
+      const ctx = await contextOrRefusal();
+      return 'refused' in ctx ? ctx : startTab(ctx, 'task', input, [siteOf(host)]);
+    });
     if ('refused' in created) return created;
     tasks.set(input.sessionKey, created);
     return created;
@@ -826,9 +851,10 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       );
     },
     async inTab(input, hosts, work) {
-      const ctx = await contextOrRefusal();
-      if ('refused' in ctx) return ctx;
-      const tab = await startTab(ctx, 'search', input, hosts.map(siteOf));
+      const tab = await inUse(async () => {
+        const ctx = await contextOrRefusal();
+        return 'refused' in ctx ? ctx : startTab(ctx, 'search', input, hosts.map(siteOf));
+      });
       if ('refused' in tab) return tab;
       let value: Awaited<ReturnType<typeof work>> | undefined;
       let error: string | undefined;
