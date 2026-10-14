@@ -31,6 +31,20 @@ function Get-Checked([string]$file, [scriptblock]$check) {
   return $found
 }
 
+# the agent writes its stop token to the data folder of its config. the live folder points that at the data folder of
+# the repository, while the pid files and the launcher log stay in the data folder of this root.
+function Get-AgentDataPath {
+  $configFile = Join-Path $root 'okc.config.json'
+  if (Test-Path -LiteralPath $configFile) {
+    try {
+      $configured = (Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json).paths.data
+      if ($configured) { return [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($root, $configured)) }
+    }
+    catch { Write-Host "okc.config.json is not valid json, so the stop token is read from $data." }
+  }
+  return $data
+}
+
 function Get-Supervisor {
   return Get-Checked $pidFile { param($p) $p.CommandLine.IndexOf($supervisorScript, [StringComparison]::OrdinalIgnoreCase) -ge 0 }
 }
@@ -98,7 +112,7 @@ function Stop-Agent {
   if ($agent) {
     $nodeId = $agent.Id
     # a forced stop skips the end of the runs, so the agent first gets 10 seconds to stop by itself.
-    $tokenFile = Join-Path $data 'okc.stop-token'
+    $tokenFile = Join-Path (Get-AgentDataPath) 'okc.stop-token'
     if (Test-Path -LiteralPath $tokenFile) {
       try {
         $body = @{ token = (Get-Content -LiteralPath $tokenFile -Raw).Trim() } | ConvertTo-Json

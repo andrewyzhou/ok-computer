@@ -107,6 +107,18 @@ describe.runIf(process.platform === 'win32')('the okc scripts', { timeout: 90_00
     expect(okc(root, `if (Get-AgentProcess) { 'agent' } else { 'none' }`)).toBe('none');
   });
 
+  // the live folder points its data at the repository, and the agent writes the stop token there. okc stop read the
+  // token from the data folder of its own root, did not find it, and always ended the agent by force.
+  it('reads the stop token from the data folder of the config', () => {
+    const root = makeRoot();
+    expect(okc(root, 'Get-AgentDataPath')).toBe(join(root, 'data'));
+    const elsewhere = mkdtempSync(join(tmpdir(), 'okc-data-'));
+    writeFileSync(join(root, 'okc.config.json'), JSON.stringify({ paths: { data: elsewhere.replaceAll('\\', '/') } }));
+    expect(okc(root, 'Get-AgentDataPath')).toBe(elsewhere);
+    writeFileSync(join(root, 'okc.config.json'), JSON.stringify({ paths: { data: 'state' } }));
+    expect(okc(root, 'Get-AgentDataPath')).toBe(join(root, 'state'));
+  });
+
   it('runs one supervisor for each root, also after a crash of the first one', async () => {
     const root = makeRoot();
     const pidFile = join(root, 'data', 'okc.pid');
