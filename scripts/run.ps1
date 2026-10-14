@@ -16,24 +16,30 @@ Set-Content -Path (Join-Path $data 'okc.pid') -Value $PID
 $delay = 5
 while ($true) {
   $started = Get-Date
-  # each start gets its own output files, so the next start does not overwrite the output of a crash. the files of
-  # the last 10 starts stay.
-  Get-ChildItem -LiteralPath $logs -Filter 'service-*.log' | Sort-Object Name -Descending | Select-Object -Skip 18 |
-    Remove-Item -ErrorAction SilentlyContinue
-  $stamp = $started.ToString('yyyyMMdd-HHmmss')
-  $out = Join-Path $logs "service-$stamp.out.log"
-  $err = Join-Path $logs "service-$stamp.err.log"
-  $node = Start-Process -FilePath 'node' -ArgumentList 'dist/main.js' -WorkingDirectory $root `
-    -RedirectStandardOutput $out -RedirectStandardError $err -WindowStyle Hidden -PassThru
-  # without an open handle, ExitCode stays empty when the output goes to files.
-  $null = $node.Handle
-  Set-Content -Path (Join-Path $data 'okc.node.pid') -Value $node.Id
-  $node.WaitForExit()
+  # an error in one start must not end the supervisor, because nothing starts it again before the next logon. the
+  # error goes to the restart log, and the next start comes after the usual wait.
+  try {
+    # each start gets its own output files, so the next start does not overwrite the output of a crash. the files of
+    # the last 10 starts stay.
+    Get-ChildItem -LiteralPath $logs -Filter 'service-*.log' | Sort-Object Name -Descending | Select-Object -Skip 18 |
+      Remove-Item -ErrorAction SilentlyContinue
+    $stamp = $started.ToString('yyyyMMdd-HHmmss')
+    $out = Join-Path $logs "service-$stamp.out.log"
+    $err = Join-Path $logs "service-$stamp.err.log"
+    $node = Start-Process -FilePath 'node' -ArgumentList 'dist/main.js' -WorkingDirectory $root `
+      -RedirectStandardOutput $out -RedirectStandardError $err -WindowStyle Hidden -PassThru
+    # without an open handle, ExitCode stays empty when the output goes to files.
+    $null = $node.Handle
+    Set-Content -Path (Join-Path $data 'okc.node.pid') -Value $node.Id
+    $node.WaitForExit()
+    # a windows crash code such as 0xC0000409 is easy to find in hex.
+    $result = 'exit=0x{0:X8}' -f $node.ExitCode
+  }
+  catch { $result = "supervisor error: $($_.Exception.Message)" }
 
   # a crash soon after start can repeat, so the wait grows to one minute. a long run resets the wait.
   if (((Get-Date) - $started).TotalMinutes -gt 10) { $delay = 5 } else { $delay = [Math]::Min($delay * 2, 60) }
-  # a windows crash code such as 0xC0000409 is easy to find in hex.
-  $code = '0x{0:X8}' -f $node.ExitCode
-  Add-Content -Path (Join-Path $logs 'service.restarts.log') -Value "$(Get-Date -Format o) exit=$code next start in ${delay}s"
+  Add-Content -Path (Join-Path $logs 'service.restarts.log') -Value "$(Get-Date -Format o) $result next start in ${delay}s" `
+    -ErrorAction SilentlyContinue
   Start-Sleep -Seconds $delay
 }

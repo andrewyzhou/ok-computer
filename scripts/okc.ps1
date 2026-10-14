@@ -35,8 +35,12 @@ function Get-Supervisor {
   return Get-Checked $pidFile { param($p) $p.CommandLine.IndexOf($supervisorScript, [StringComparison]::OrdinalIgnoreCase) -ge 0 }
 }
 
-function Get-AgentProcess([int]$supervisorId) {
-  return Get-Checked $nodePidFile ({ param($p) $p.ParentProcessId -eq $supervisorId -and $p.CommandLine -like '*dist/main.js*' }.GetNewClosure())
+# the agent can live on after its supervisor ends, so the check does not use the parent. run.ps1 writes the file just
+# after the start of the agent, and a process that got the same pid later started after the file.
+function Get-AgentProcess {
+  if (-not (Test-Path -LiteralPath $nodePidFile)) { return $null }
+  $written = (Get-Item -LiteralPath $nodePidFile).LastWriteTime
+  return Get-Checked $nodePidFile ({ param($p) $p.CommandLine -like '*dist/main.js*' -and $p.CreationDate -le $written }.GetNewClosure())
 }
 
 # the build writes dist/.build-ok as its last step, so a failed build leaves no stamp. folders count too, because a
@@ -55,15 +59,16 @@ function Test-BuildIsOld {
 function Start-Agent {
   if (Get-Supervisor) { Write-Host 'ok computer is already running.' }
   else {
+    # an agent without its supervisor holds the data folder, so a new agent cannot start next to it.
+    if (Get-AgentProcess) { Stop-Agent }
     if (Test-BuildIsOld) {
       Write-Host 'building...'
       Push-Location $root
       try { npm run build --silent | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'the build failed. run npm run build to see why.' } }
       finally { Pop-Location }
     }
-    $script = Join-Path $PSScriptRoot 'run.ps1'
     Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden `
-      -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$script`""
+      -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$supervisorScript`""
     Write-Host 'ok computer started.'
   }
   if (-not $NoOpen) { Open-Dashboard }
@@ -71,10 +76,10 @@ function Start-Agent {
 
 function Stop-Agent {
   $sup = Get-Supervisor
-  if (-not $sup) { Write-Host 'ok computer is not running.'; return }
-  $agent = Get-AgentProcess $sup.Id
+  $agent = Get-AgentProcess
+  if (-not $sup -and -not $agent) { Write-Host 'ok computer is not running.'; return }
   # the supervisor stops first, so it cannot start the agent again.
-  Stop-Process -Id $sup.Id -Force
+  if ($sup) { Stop-Process -Id $sup.Id -Force }
   if ($agent) {
     $nodeId = $agent.Id
     # a forced stop skips the end of the runs, so the agent first gets 10 seconds to stop by itself.

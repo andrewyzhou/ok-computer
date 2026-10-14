@@ -43,8 +43,10 @@ function okc(root: string, body: string): string {
 const supervisors: ChildProcess[] = [];
 // the pids of the fake agents that the supervisors started.
 const agents: number[] = [];
-function startSupervisor(root: string): ChildProcess {
-  const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(root, 'scripts', 'run.ps1')], { stdio: 'ignore' });
+const system32 = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32');
+const powershell = join(system32, 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+function startSupervisor(root: string, env = process.env): ChildProcess {
+  const child = spawn(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(root, 'scripts', 'run.ps1')], { stdio: 'ignore', env });
   supervisors.push(child);
   return child;
 }
@@ -52,6 +54,20 @@ const exited = (child: ChildProcess) => new Promise<number | null>((done) => (ch
 async function waitFor(condition: () => boolean, ms = 20_000) {
   for (const end = Date.now() + ms; Date.now() < end; await new Promise((resolve) => setTimeout(resolve, 100))) if (condition()) return;
   throw new Error('the condition did not become true');
+}
+
+// a fake agent that starts a child process, as the real agent starts mcp servers and chrome. a crash ends it soon; a
+// second start only waits, so a supervisor that starts it again makes no new child.
+function fakeAgentWithChild(crash: boolean): string {
+  return [
+    `const fs = require('node:fs');`,
+    `if (fs.existsSync('data/child.pid')) setTimeout(() => {}, 3000);`,
+    `else {`,
+    `  const child = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 15000)'], { stdio: 'ignore' });`,
+    `  fs.writeFileSync('data/child.pid', String(child.pid));`,
+    crash ? `  setTimeout(() => process.exit(1), 300);` : `  setTimeout(() => {}, 15000);`,
+    `}`,
+  ].join('\n');
 }
 
 const alive = (pid: number) => {
@@ -88,7 +104,7 @@ describe.runIf(process.platform === 'win32')('the okc scripts', { timeout: 90_00
       expect(existsSync(pidFile)).toBe(false);
     }
     writeFileSync(join(root, 'data', 'okc.node.pid'), String(process.pid));
-    expect(okc(root, `if (Get-AgentProcess ${process.pid}) { 'agent' } else { 'none' }`)).toBe('none');
+    expect(okc(root, `if (Get-AgentProcess) { 'agent' } else { 'none' }`)).toBe('none');
   });
 
   it('runs one supervisor for each root, also after a crash of the first one', async () => {
@@ -99,7 +115,7 @@ describe.runIf(process.platform === 'win32')('the okc scripts', { timeout: 90_00
     await waitFor(() => existsSync(nodePidFile));
     agents.push(Number(readFileSync(nodePidFile, 'utf8')));
     expect(readFileSync(pidFile, 'utf8').trim()).toBe(String(first.pid));
-    const found = okc(root, `$s = Get-Supervisor; $a = Get-AgentProcess $s.Id; "$($s.Id) $($a.Id)"`);
+    const found = okc(root, `$s = Get-Supervisor; $a = Get-AgentProcess; "$($s.Id) $($a.Id)"`);
     expect(found).toBe(`${first.pid} ${readFileSync(nodePidFile, 'utf8').trim()}`);
 
     // a second start at the same time ends at once and leaves the first one alone.
@@ -147,5 +163,71 @@ describe.runIf(process.platform === 'win32')('the okc scripts', { timeout: 90_00
     const result = spawnSync(process.execPath, [join(repo, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', dir], { encoding: 'utf8' });
     expect(result.status).not.toBe(0);
     expect(existsSync(join(dir, 'out', 'main.js'))).toBe(false);
+  });
+
+  // a terminating error in the loop, here a missing node, ended the supervisor for good.
+  it('keeps the supervisor running when a start of the agent fails', async () => {
+    const root = makeRoot();
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'path'));
+    const supervisor = startSupervisor(root, { ...env, Path: system32 });
+    const log = join(root, 'data', 'logs', 'service.restarts.log');
+    const logged = () => existsSync(log) && readFileSync(log, 'utf8').includes('supervisor error');
+    await waitFor(() => supervisor.exitCode !== null || logged());
+    expect(supervisor.exitCode).toBeNull();
+    expect(logged()).toBe(true);
+  });
+
+  // okc stop said "not running" when the supervisor was gone, and left the agent with the data folder and the port.
+  it('stops an agent without its supervisor, with its child processes, but not a process that reused its pid', async () => {
+    const root = makeRoot();
+    const nodePidFile = join(root, 'data', 'okc.node.pid');
+    writeFileSync(join(root, 'dist', 'main.js'), fakeAgentWithChild(false));
+    const agent = spawn(process.execPath, ['dist/main.js'], { cwd: root, stdio: 'ignore' });
+    agents.push(agent.pid!);
+    await waitFor(() => existsSync(join(root, 'data', 'child.pid')));
+    const child = Number(readFileSync(join(root, 'data', 'child.pid'), 'utf8'));
+    agents.push(child);
+
+    // a pid file that is older than the process came from an earlier process with the same pid.
+    const past = new Date(Date.now() - 60_000);
+    writeFileSync(nodePidFile, String(agent.pid));
+    utimesSync(nodePidFile, past, past);
+    expect(okc(root, `if (Get-AgentProcess) { 'agent' } else { 'none' }`)).toBe('none');
+
+    writeFileSync(nodePidFile, String(agent.pid));
+    expect(okc(root, 'Stop-Agent')).toBe('ok computer stopped.');
+    await waitFor(() => !alive(agent.pid!) && !alive(child));
+  });
+
+  it('starts a supervisor in place of an agent that lost its supervisor', async () => {
+    const root = makeRoot();
+    writeFileSync(join(root, 'dist', '.build-ok'), '');
+    writeFileSync(join(root, 'dist', 'main.js'), fakeAgentWithChild(false));
+    const agent = spawn(process.execPath, ['dist/main.js'], { cwd: root, stdio: 'ignore' });
+    agents.push(agent.pid!);
+    await waitFor(() => existsSync(join(root, 'data', 'child.pid')));
+    agents.push(Number(readFileSync(join(root, 'data', 'child.pid'), 'utf8')));
+    writeFileSync(join(root, 'data', 'okc.node.pid'), String(agent.pid));
+
+    const pidFile = join(root, 'data', 'okc.pid');
+    const nodePidFile = join(root, 'data', 'okc.node.pid');
+    okc(root, '$NoOpen = $true; Start-Agent');
+    await waitFor(() => existsSync(pidFile) && existsSync(nodePidFile));
+    const supervisor = Number(readFileSync(pidFile, 'utf8'));
+    agents.push(Number(readFileSync(nodePidFile, 'utf8')));
+    process.kill(supervisor);
+    await waitFor(() => !agents.slice(0, 2).some(alive));
+  });
+
+  // node on windows puts each child process that is not detached in a job that windows ends with node. so a crash or a
+  // forced stop of the agent also ends its stdio mcp servers and its chrome, and the scripts need no tree kill.
+  it('leaves no child process of an agent that crashed', async () => {
+    const root = makeRoot();
+    writeFileSync(join(root, 'dist', 'main.js'), fakeAgentWithChild(true));
+    startSupervisor(root);
+    await waitFor(() => existsSync(join(root, 'data', 'child.pid')));
+    const child = Number(readFileSync(join(root, 'data', 'child.pid'), 'utf8'));
+    agents.push(child);
+    await waitFor(() => !alive(child));
   });
 });
