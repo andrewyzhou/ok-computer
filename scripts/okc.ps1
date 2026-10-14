@@ -13,13 +13,30 @@ $root = Split-Path -Parent $PSScriptRoot
 $data = Join-Path $root 'data'
 $pidFile = Join-Path $data 'okc.pid'
 $nodePidFile = Join-Path $data 'okc.node.pid'
+$supervisorScript = Join-Path $PSScriptRoot 'run.ps1'
 $url = 'http://127.0.0.1:4317'
 $taskName = 'OK Computer'
 
+# a pid file stays after a crash, a logoff or a reboot, and windows then gives its id to other processes. so a process
+# counts only when its command line matches. a file that does not match is deleted.
+function Get-Checked([string]$file, [scriptblock]$check) {
+  if (-not (Test-Path -LiteralPath $file)) { return $null }
+  $text = Get-Content -LiteralPath $file -Raw
+  $found = $null
+  if ($text -match '^\s*(\d+)\s*$') {
+    $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$Matches[1])"
+    if ($cim -and $cim.CommandLine -and (& $check $cim)) { $found = Get-Process -Id $cim.ProcessId -ErrorAction SilentlyContinue }
+  }
+  if (-not $found) { Remove-Item -LiteralPath $file -ErrorAction SilentlyContinue }
+  return $found
+}
+
 function Get-Supervisor {
-  if (-not (Test-Path $pidFile)) { return $null }
-  $id = [int](Get-Content $pidFile -Raw)
-  return Get-Process -Id $id -ErrorAction SilentlyContinue
+  return Get-Checked $pidFile { param($p) $p.CommandLine.IndexOf($supervisorScript, [StringComparison]::OrdinalIgnoreCase) -ge 0 }
+}
+
+function Get-AgentProcess([int]$supervisorId) {
+  return Get-Checked $nodePidFile ({ param($p) $p.ParentProcessId -eq $supervisorId -and $p.CommandLine -like '*dist/main.js*' }.GetNewClosure())
 }
 
 function Test-BuildIsOld {
@@ -51,10 +68,11 @@ function Start-Agent {
 function Stop-Agent {
   $sup = Get-Supervisor
   if (-not $sup) { Write-Host 'ok computer is not running.'; return }
+  $agent = Get-AgentProcess $sup.Id
   # the supervisor stops first, so it cannot start the agent again.
   Stop-Process -Id $sup.Id -Force
-  if (Test-Path $nodePidFile) {
-    $nodeId = [int](Get-Content $nodePidFile -Raw)
+  if ($agent) {
+    $nodeId = $agent.Id
     # a forced stop skips the end of the runs, so the agent first gets 10 seconds to stop by itself.
     $tokenFile = Join-Path $data 'okc.stop-token'
     if (Test-Path -LiteralPath $tokenFile) {

@@ -6,6 +6,11 @@ $root = Split-Path -Parent $PSScriptRoot
 $data = Join-Path $root 'data'
 $logs = Join-Path $data 'logs'
 New-Item -ItemType Directory -Force -Path $logs | Out-Null
+# two starts at the same moment, for example the logon task and the desktop shortcut, both see no supervisor. the
+# mutex lets one supervisor run for each folder. windows releases it when the process ends, also after a crash.
+$mutex = [System.Threading.Mutex]::new($false, 'Local\OkComputerSupervisor:' + $root.ToLowerInvariant().Replace('\', '/'))
+try { $owned = $mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
+if (-not $owned) { exit 0 }
 Set-Content -Path (Join-Path $data 'okc.pid') -Value $PID
 
 $delay = 5
