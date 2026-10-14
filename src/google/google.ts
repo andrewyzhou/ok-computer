@@ -120,7 +120,7 @@ export function createGoogle(deps: GoogleDeps): Google {
          WHERE source = 'gmail' AND state = 'ready' AND detectors IS NULL AND handledAt IS NULL AND seenAt >= ?`,
       )
       .all(new Date(clock().getTime() - CHECK_WINDOW_MS).toISOString());
-    for (const row of rows) saveHits(db, Number(row.id), dateHits(mailItem(row), events, deps.timeZone));
+    for (const row of rows) saveHits(db, Number(row.id), dateHits(mailItem(row), events, deps.timeZone, clock()));
   };
 
   // the subject names the matter of a mail. it is in the payload blob. without the blob the summary stands in.

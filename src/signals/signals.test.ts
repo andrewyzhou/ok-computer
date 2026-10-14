@@ -59,22 +59,32 @@ describe('date_not_on_calendar', () => {
 
   it('fires when no event of that day shares a word with the subject', () => {
     const events = [timed('d', 'Dentist', '2026-10-20T16:00:00.000Z')];
-    expect(dateHits(item('Essay due Oct 20'), events, TZ)).toEqual([
+    expect(dateHits(item('Essay due Oct 20'), events, TZ, NOW)).toEqual([
       { name: 'date_not_on_calendar', detail: 'mentions "Oct 20" (2026-10-20); the primary calendars have 1 events that day and none about "Essay due Oct 20"' },
     ]);
-    expect(dateHits(item('Dentist on Oct 20'), events, TZ)).toEqual([]);
+    expect(dateHits(item('Dentist on Oct 20'), events, TZ, NOW)).toEqual([]);
   });
 
   // an all-day event has a date only. its day is that date, not the day before in the owner's zone.
   it('counts an all-day event on its own date', () => {
     const allDay: CalendarItem = { account: 'personal', id: 'a', summary: 'Essay deadline', start: '2026-10-22', allDay: true };
-    expect(dateHits(item('Essay due Oct 22'), [allDay], TZ)).toEqual([]);
-    expect(dateHits(item('Essay due Oct 21'), [allDay], TZ)).toHaveLength(1);
+    expect(dateHits(item('Essay due Oct 22'), [allDay], TZ, NOW)).toEqual([]);
+    expect(dateHits(item('Essay due Oct 21'), [allDay], TZ, NOW)).toHaveLength(1);
+  });
+
+  // a poll can find a mail days after it arrived, for example after the computer was off. a day that has passed is not
+  // a deadline, and the live read of the calendar does not hold its events.
+  it('skips a day before the day of the poll', () => {
+    const saturday = { id: 1, subject: 'Essay due tomorrow', text: 'Essay due tomorrow', arrived: new Date('2026-10-10T17:00:00Z') };
+    expect(dateHits(saturday, [], TZ, NOW)).toEqual([]);
+    expect(dateHits({ ...saturday, text: 'Essay due tomorrow, final copy Oct 20' }, [], TZ, NOW).map((hit) => hit.detail)).toEqual([
+      'mentions "Oct 20" (2026-10-20); the primary calendars have 0 events that day and none about "Essay due tomorrow"',
+    ]);
   });
 
   // a timed event late in the evening is on the day of the owner's zone, not on the utc day.
   it('counts a timed event on its day in the owner zone', () => {
-    expect(dateHits(item('Essay due Oct 20'), [timed('e', 'essay review', '2026-10-21T04:00:00.000Z')], TZ)).toEqual([]);
+    expect(dateHits(item('Essay due Oct 20'), [timed('e', 'essay review', '2026-10-21T04:00:00.000Z')], TZ, NOW)).toEqual([]);
   });
 });
 
