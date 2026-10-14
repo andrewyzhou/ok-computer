@@ -18,7 +18,7 @@ const json = <T>(text: unknown, fallback: T): T => {
 };
 
 const SUMMARY = `SELECT t.*, (SELECT COUNT(*) FROM browser_steps s WHERE s.taskId = t.id) AS steps,
-  (SELECT COUNT(*) FROM browser_steps s WHERE s.taskId = t.id AND s.blockedRequests IS NOT NULL) AS blocked,
+  (SELECT COALESCE(SUM(json_array_length(s.blockedRequests)), 0) FROM browser_steps s WHERE s.taskId = t.id AND s.blockedRequests IS NOT NULL) AS blocked,
   (SELECT COALESCE(SUM(json_array_length(s.sent)), 0) FROM browser_steps s WHERE s.taskId = t.id AND s.sent IS NOT NULL) AS sent
   FROM browser_tasks t`;
 

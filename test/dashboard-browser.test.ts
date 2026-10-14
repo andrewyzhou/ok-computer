@@ -15,6 +15,17 @@ describe('the browser api', () => {
     expect(overview.profileInUse).toBe(false);
   });
 
+  // the count was of the steps with a block, next to a count of the sent requests (r7 probe).
+  it('counts the blocked requests of a task, not its steps with a block', async () => {
+    const { t, dashboard } = seedBrowser();
+    const blocked = (n: number) => JSON.stringify(Array.from({ length: n }, (_, i) => ({ url: `https://evil.example/${i}`, reason: 'blocked' })));
+    for (const n of [5, 1]) {
+      t.db.prepare('INSERT INTO browser_steps (taskId, runId, action, urlBefore, urlAfter, blockedRequests, durationMs, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run('bt_2', 'run-1', 'open', '', '', blocked(n), 1, '2026-10-13T17:02:01Z');
+    }
+    const overview = (await (await dashboard.request('/api/browser')).json()) as BrowserOverview;
+    expect(overview.tasks[0]).toMatchObject({ id: 'bt_2', steps: 2, blocked: 6 });
+  });
+
   it('gives the steps of a task, each joined to the risk and the policy decision of its tool call', async () => {
     const { dashboard, snapshot, shot } = seedBrowser();
     const detail = (await (await dashboard.request('/api/browser/tasks/bt_1')).json()) as BrowserTaskDetail;

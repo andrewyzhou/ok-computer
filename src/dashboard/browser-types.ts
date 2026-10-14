@@ -14,7 +14,8 @@ export interface BrowserTaskSummary {
   startedAt: string;
   endedAt: string | null;
   steps: number;
-  // the steps that blocked a request, and the requests that approved submits sent.
+  // the blocked requests, and the requests that approved submits sent. a full list of a step ends with one entry for
+  // the requests that it did not keep, and that entry counts as one.
   blocked: number;
   sent: number;
 }
