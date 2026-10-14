@@ -620,6 +620,12 @@ Three designs were built and judged (minimal, failure modes first, owner experie
 - **An error event inside an Anthropic stream gets the status of its type** (`rate_limit_error` 429, `authentication_error` 401, `request_too_large` 413, and so on). Before, every type other than an overload or an api error was a request error with status 0: a rate limit was not retried, and it counted as an input error.
 - **The recipient of a mailto unsubscribe is in the From domain or a child of it** (this narrows 4.12). The relaxed alignment of the DKIM check also let the recipient be a parent domain, which can be another organisation that gave the sender its subdomain. The cost: a list that sends from a subdomain and unsubscribes at its parent domain is refused; one-click or a manual unsubscribe still work.
 
+### 4.14 Decisions from the final review of the phases
+
+- **`/status` names each Google account** with the state of its sign-in (`google:<alias> ok`, `needs auth` or `signed out`), after the MCP integrations. Before, the owner could not see on the phone that Gmail and Calendar work; the alerts only say when they stop.
+- **The one-click post of an unsubscribe has its account in the trace.** It runs outside `accounts.run`, so its `google_requests` row had no account and the counts of the Google page missed it.
+- **Not changed: the polled Slack DMs.** They still wait for the decision of 4.9; the guide now says that nothing shows them yet.
+
 ## 5. Permissions, review, and sandboxing
 
 ### 5.1 Policy engine
