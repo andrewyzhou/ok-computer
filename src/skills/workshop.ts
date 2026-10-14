@@ -7,6 +7,7 @@ import { getSetting, setSetting } from '../db/settings.js';
 import { listEvents, type StoredEvent } from '../events/log.js';
 import { dailyCron } from '../goals/routine.js';
 import type { TaintSource } from '../policy/policy.js';
+import { sessionTaint } from '../policy/store.js';
 import type { JobResult } from '../scheduler/scheduler.js';
 import { createAutomation, type Automation } from '../scheduler/store.js';
 import type { RunQueue } from '../sessions/queue.js';
@@ -34,11 +35,13 @@ const INPUT_CHARS = 500;
 const RESULT_CHARS = 300;
 const INSTALLED = 'workshop_installed';
 
-// a correction starts the message, or the owner teaches a rule anywhere in it. the match only makes the task a
+// a correction starts the message after a short lead-in such as "wait," a quote or a dash, or the message says
+// anywhere that something is wrong, or the owner teaches a rule anywhere in it. the match only makes the task a
 // candidate. the review model decides if a skill helps, so a false match costs only some input of the daily review.
 const CORRECTION_START =
-  /^\s*(no\b|nope\b|wrong\b|not quite\b|not that\b|that'?s not\b|that is not\b|actually\b|i said\b|i meant\b|i asked\b|you forgot\b|you missed\b|you should(?:n'?t| not)? have\b|don'?t\b|do not\b|stop\b|instead\b|why did you\b)/i;
-const CORRECTION_ANYWHERE = /\b(next time|from now on|in the future|remember to|always use|never use)\b/i;
+  /^[\s"'“”*>\-–—]*(?:(?:wait|hmm+|ugh+|ok(?:ay)?|oh|um+|well|sorry)\b[\s,.!?:;"'“”\-–—]*)*(no\b|nope\b|wrong\b|not quite\b|not that\b|that'?s not\b|that is not\b|actually\b|i said\b|i meant\b|i asked\b|you forgot\b|you missed\b|you should(?:n'?t| not)? have\b|don'?t\b|do not\b|stop\b|instead\b|why did you\b)/i;
+const CORRECTION_ANYWHERE =
+  /\b(next time|from now on|in the future|remember to|always use|never use|wrong|incorrect|(?:isn'?t|not) what (?:i|you)|instead(?=[\s.!]*$))\b/i;
 
 // a phone keyboard often types a curly apostrophe, so it counts as a straight one.
 export function correctionIn(text: string): string | undefined {
@@ -74,6 +77,8 @@ export function installWorkshop(db: Db, config: Pick<Config, 'timeZone'>, now: D
 export interface Window {
   start: Date;
   end: Date;
+  // set when a lost draft moved the start before the mark of the last finished review.
+  reopened?: true;
 }
 
 // the window starts where the last finished review stopped and ends at the start of today. without a mark it starts
@@ -92,32 +97,45 @@ export function reviewWindow(db: Db, now: Date, timeZone: string): Window {
     .filter((mark) => mark <= end.getTime());
   const start = marks.length ? Math.max(...marks, floor) : yesterday.getTime();
   // a lost draft opens the window of its review again, also when a later mark is after it.
-  const lost = reviews.filter((review) => review.lost).map((review) => Date.parse(review.start));
-  return { start: new Date(Math.max(Math.min(start, ...lost), floor)), end };
+  const lost = reviews.filter((review) => review.lost.length).map((review) => Date.parse(review.start));
+  const opened = Math.max(Math.min(start, ...lost), floor);
+  return { start: new Date(opened), end, ...(opened < start ? { reopened: true as const } : {}) };
 }
 
 // a draft is lost when it expired before it ran, and the owner approved it or never got its card. the app stopped
 // before the approved draft ran, or the network was down when the review sent the card.
 const LOST = "status = 'expired' AND startedAt IS NULL AND (resolvedBy IS NOT NULL OR unsentAt IS NOT NULL)";
 
-interface DraftReview {
-  runId: string;
+interface StoredWindow {
   start: string;
   end: string;
-  lost: boolean;
+  // the lost drafts of this review that a later review saw already.
+  covered?: number[];
+}
+
+interface DraftReview extends StoredWindow {
+  runId: string;
+  // the lost drafts that no later review saw yet.
+  lost: number[];
 }
 
 // a review that sent a draft to the owner counts as done for its window, also when it failed or the app stopped
 // after the draft. a second review of the same window would send a second draft for the same task. the mark is the
 // window that the review stored, because the time zone can change after the review. each review gives its own mark,
 // so the caller can ignore one that a clock ahead gave. a review with a lost draft gives the start of its window, so
-// the next review sees its tasks again. the next finished review removes that mark.
+// the next review sees its tasks again. the record is for each draft, because two drafts of one review can get lost
+// on different days: an approved draft gets lost 35 minutes after the approval, an unsent card after 24 hours.
 function draftReviews(db: Db): DraftReview[] {
-  const rows = db.prepare(`SELECT runId, MAX(${LOST}) AS lost FROM approvals WHERE toolName = 'skill_write' GROUP BY runId`).all();
-  return rows.flatMap((row) => {
-    const runId = String(row.runId);
-    const window = getSetting<{ start: string; end: string }>(db, `${WINDOW_OF}${runId}`);
-    return window ? [{ runId, start: window.start, end: window.end, lost: Number(row.lost) === 1 }] : [];
+  const rows = db.prepare(`SELECT runId, id, ${LOST} AS lost FROM approvals WHERE toolName = 'skill_write' ORDER BY id`).all();
+  const lostOf = new Map<string, number[]>();
+  for (const row of rows) {
+    const list = lostOf.get(String(row.runId)) ?? [];
+    if (Number(row.lost) === 1) list.push(Number(row.id));
+    lostOf.set(String(row.runId), list);
+  }
+  return [...lostOf].flatMap(([runId, lost]) => {
+    const window = getSetting<StoredWindow>(db, `${WINDOW_OF}${runId}`);
+    return window ? [{ ...window, runId, lost: lost.filter((id) => !window.covered?.includes(id)) }] : [];
   });
 }
 
@@ -125,16 +143,19 @@ const DRAFT_STATES: Record<string, string> = {
   pending: 'waits for the owner',
   approved: 'approved by the owner',
   denied: 'denied by the owner',
-  expired: 'the owner did not answer in 24 hours',
+  expired: 'the owner let it expire without an answer',
 };
 
 // a lost draft opens its window again, so the review sees the tasks of the other drafts of that window again. it must
-// not send a draft again that the owner denied or that waits for the owner.
-function draftsText(db: Db, since: Date): string | undefined {
+// not send a draft again that the owner denied, let expire, or did not answer yet. a draft that expired without an
+// answer is not lost, so the owner saw its card.
+// the names are model text of earlier reviews, so the taint of those reviews goes with the list.
+function draftsText(db: Db, since: Date): { text: string; taint: TaintSource[] } | undefined {
   const rows = db
-    .prepare(`SELECT input, status, resolvedBy, ${LOST} AS lost FROM approvals WHERE toolName = 'skill_write' AND requestedAt >= ? ORDER BY id`)
+    .prepare(`SELECT runId, input, status, resolvedBy, ${LOST} AS lost FROM approvals WHERE toolName = 'skill_write' AND requestedAt >= ? ORDER BY id`)
     .all(since.toISOString());
   if (!rows.length) return undefined;
+  const taint = [...new Set(rows.map((row) => String(row.runId)))].flatMap((runId) => sessionTaint(db, `${WORKSHOP_PREFIX}${runId}`));
   const lines = rows.map((row) => {
     const input = JSON.parse(String(row.input)) as { name?: unknown; replaces?: unknown };
     const name = typeof input.name === 'string' ? JSON.stringify(headOf(input.name, 64)) : 'a draft without a name';
@@ -145,13 +166,18 @@ function draftsText(db: Db, since: Date): string | undefined {
         : 'its card did not reach the owner, so it is not written';
     return `- ${name}${input.replaces === true ? ' (a change)' : ''}: ${state}`;
   });
-  return `Skill drafts since the start of this window. Do not propose again a draft that the owner denied or that waits for the owner:\n${lines.join('\n')}`;
+  return {
+    text: `Skill drafts since the start of this window. Do not propose again a draft that the owner denied, let expire, or that waits for the owner:\n${lines.join('\n')}`,
+    taint,
+  };
 }
 
 export const SKILL_LOST_TEXT = 'The next skill review looks at that task again and can propose the skill again.';
 
 export interface Task {
   runIds: string[];
+  // the start of the first run of the task.
+  startedAt: string;
   reasons: string[];
   events: StoredEvent[];
   taint: TaintSource[];
@@ -212,7 +238,7 @@ export function findTasks(db: Db, window: Window): Task[] {
   const tasks: Task[] = [];
   let group: number[] = [];
   const close = () => {
-    if (group.length) tasks.push(taskOf(events, group.map((i) => runs[i]!.id), group.flatMap((i) => reasons.get(i)!)));
+    if (group.length) tasks.push(taskOf(events, group.map((i) => runs[i]!), group.flatMap((i) => reasons.get(i)!)));
     group = [];
   };
   runs.forEach((_, i) => {
@@ -224,7 +250,8 @@ export function findTasks(db: Db, window: Window): Task[] {
   return tasks;
 }
 
-function taskOf(events: StoredEvent[], runIds: string[], reasons: string[]): Task {
+function taskOf(events: StoredEvent[], runs: MainRun[], reasons: string[]): Task {
+  const runIds = runs.map((run) => run.id);
   const seqs = events.filter((event) => event.runId !== null && runIds.includes(event.runId)).map((event) => event.seq);
   const first = Math.min(...seqs);
   const last = Math.max(...seqs);
@@ -241,7 +268,7 @@ function taskOf(events: StoredEvent[], runIds: string[], reasons: string[]): Tas
     if (event.type === 'system_event') for (const each of event.payload.taint ?? []) if (!taint.has(each.source)) taint.set(each.source, each);
   }
   const shown = events.filter((event) => event.seq >= first && event.seq <= last);
-  return { runIds, reasons: [...new Set(reasons)], events: shown, taint: [...taint.values()] };
+  return { runIds, startedAt: runs[0]!.startedAt, reasons: [...new Set(reasons)], events: shown, taint: [...taint.values()] };
 }
 
 const indent = (entry: string) => entry.replace(/\r\n|[\n\r\v\f\u0085\u2028\u2029]/g, '\n    ');
@@ -346,32 +373,46 @@ export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => 
     const span = `from ${local(window.start)} to ${local(window.end)}`;
     if (window.start >= window.end) return { status: 'skipped', error: `the main session is already reviewed until ${local(window.start)}` };
     // this review covers the windows of the lost drafts that it knows now. a draft that gets lost later opens its
-    // window for the next review.
-    const lost = draftReviews(db).filter((each) => each.lost && Date.parse(each.end) <= window.end.getTime());
-    const covered = () => {
-      for (const each of lost) db.prepare('DELETE FROM settings WHERE key = ?').run(`${WINDOW_OF}${each.runId}`);
+    // window for the next review. when the task limit cuts the window, a lost draft whose window goes past the cut
+    // stays lost, and its window starts again at the cut. the next review then starts at the first task that this
+    // review left out, and does not show the same tasks each day.
+    const lost = draftReviews(db).filter((each) => each.lost.length);
+    const covered = (until: Date) => {
+      for (const { runId, lost: ids, ...stored } of lost) {
+        const key = `${WINDOW_OF}${runId}`;
+        if (Date.parse(stored.end) <= until.getTime()) setSetting(db, key, { ...stored, covered: [...new Set([...(stored.covered ?? []), ...ids])] }, clock());
+        else if (Date.parse(stored.start) < until.getTime()) setSetting(db, key, { ...stored, start: until.toISOString() }, clock());
+      }
     };
     const tasks = findTasks(db, window);
     if (!tasks.length) {
       setSetting(db, REVIEWED_UNTIL, window.end.toISOString(), clock());
-      covered();
+      covered(window.end);
       return { status: 'skipped', error: `no long or corrected task ${span}` };
     }
     const shown = tasks.slice(0, MAX_TASKS);
     const left = tasks.length - shown.length;
+    // a window that a lost draft opened again shows its old tasks first. so in that window the tasks after the limit
+    // go to the next review: this review covers only the time up to the first of them. the next window then starts at
+    // the mark and covers the rest. in a normal window the tasks after the limit are left out. if they also went to
+    // the next review, each day with more than 5 tasks would push the reviews one day further back, until the floor
+    // of a week drops the old tasks without a note.
+    const next = window.reopened && tasks[MAX_TASKS] ? new Date(tasks[MAX_TASKS].startedAt) : undefined;
+    const end = next && next > window.start ? next : window.end;
+    const drafts = draftsText(db, window.start);
     const text = [
-      `Skill review of the main session ${span}: ${tasks.length} long or corrected ${tasks.length === 1 ? 'task' : 'tasks'}.${left ? ` The last ${left} are left out.` : ''}`,
+      `Skill review of the main session ${span}: ${tasks.length} long or corrected ${tasks.length === 1 ? 'task' : 'tasks'}.${left ? ` The last ${left} are left out of this review.` : ''}`,
       skillsText(config.paths.skills),
-      ...[draftsText(db, window.start)].filter((each) => each !== undefined),
+      ...(drafts ? [drafts.text] : []),
       ...shown.map((task, i) => taskText(task, i + 1)),
     ].join('\n\n');
-    const taint = [...new Map(shown.flatMap((task) => task.taint).map((each) => [each.source, each])).values()];
+    const taint = [...new Map([...shown.flatMap((task) => task.taint), ...(drafts?.taint ?? [])].map((each) => [each.source, each])).values()];
 
     const runId = (deps.newId ?? randomUUID)();
     const sessionKey = `${WORKSHOP_PREFIX}${runId}`;
     // the key is written before the run, so no draft is without its mark.
     const windowKey = `${WINDOW_OF}${runId}`;
-    setSetting(db, windowKey, { start: window.start.toISOString(), end: window.end.toISOString() }, clock());
+    setSetting(db, windowKey, { start: window.start.toISOString(), end: end.toISOString() }, clock());
     const result = await deps.queue.enqueue(sessionKey, () =>
       deps.agent({
         runId,
@@ -387,11 +428,11 @@ export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => 
       }),
     );
     // a review with a draft covers its window, so a lost draft of that window does not open it again.
-    if (db.prepare("SELECT 1 FROM approvals WHERE runId = ? AND toolName = 'skill_write'").get(runId)) covered();
+    if (db.prepare("SELECT 1 FROM approvals WHERE runId = ? AND toolName = 'skill_write'").get(runId)) covered(end);
     else db.prepare('DELETE FROM settings WHERE key = ?').run(windowKey);
     if (result.status !== 'completed') return { status: 'failed', runId, error: result.error ?? result.status };
-    setSetting(db, REVIEWED_UNTIL, window.end.toISOString(), clock());
-    covered();
+    setSetting(db, REVIEWED_UNTIL, end.toISOString(), clock());
+    covered(end);
     return { status: 'completed', runId };
   }
 }
