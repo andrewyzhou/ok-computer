@@ -37,11 +37,21 @@ interface Section {
 // the text goes to the end of its section. a missing section goes in the fixed order, so every note has the same
 // layout. sections that the owner adds by hand stay where they are.
 export function appendToDailyNote(memoryDir: string, day: string, section: DailySection, text: string): void {
+  replaceInDailyNote(memoryDir, day, section, '', text);
+}
+
+// the last run of the old lines in the section changes to the new text. when the old lines are not there, the new
+// text goes to the end of the section. an empty text only removes the old lines.
+export function replaceInDailyNote(memoryDir: string, day: string, section: DailySection, old: string, text: string): void {
   const path = dailyNotePath(memoryDir, day);
-  mkdirSync(join(memoryDir, 'daily'), { recursive: true });
   const { preamble, sections } = parseNote(existsSync(path) ? readFileSync(path, 'utf8') : `# ${day}\n`);
+  const lines = text.trim() ? text.trim().split('\n') : [];
+  const oldLines = old.trim() ? old.trim().split('\n') : [];
 
   let target = sections.find((s) => s.name === section);
+  const kept = trimBlank(target?.lines ?? []);
+  const at = lastRun(kept, oldLines);
+  if (!lines.length && at === -1) return;
   if (!target) {
     target = { name: section, lines: [] };
     const rank = DAILY_SECTIONS.indexOf(section);
@@ -51,8 +61,17 @@ export function appendToDailyNote(memoryDir: string, day: string, section: Daily
     });
     sections.splice(after === -1 ? sections.length : after, 0, target);
   }
-  target.lines = [...trimBlank(target.lines), ...text.trim().split('\n')];
+  target.lines = at === -1 ? [...kept, ...lines] : [...kept.slice(0, at), ...lines, ...kept.slice(at + oldLines.length)];
+  mkdirSync(join(memoryDir, 'daily'), { recursive: true });
   writeFileSync(path, serializeNote(preamble, sections));
+}
+
+function lastRun(lines: string[], run: string[]): number {
+  if (!run.length) return -1;
+  for (let start = lines.length - run.length; start >= 0; start--) {
+    if (run.every((line, i) => lines[start + i] === line)) return start;
+  }
+  return -1;
 }
 
 function parseNote(text: string): { preamble: string[]; sections: Section[] } {

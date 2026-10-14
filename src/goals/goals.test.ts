@@ -1,8 +1,13 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runTool } from '../../test/run-tool.js';
 import { openDb } from '../db/index.js';
+import { appendToDailyNote, dailyNotePath } from '../memory/daily.js';
 import { listAutomations } from '../scheduler/store.js';
 import { createToolRegistry } from '../tools/registry.js';
+import { writeDayResults } from './routine.js';
 import { addGoal, goalStats, listCheckins, startCheckin, updateGoal } from './store.js';
 import { createGoalTools } from './tools.js';
 
@@ -114,5 +119,42 @@ describe('goal store', () => {
       setStreak: 4,
       allDoneStreak: 1,
     });
+  });
+});
+
+describe('day results', () => {
+  it('replaces the lines of an earlier run for the same day and keeps the other lines', () => {
+    const db = openDb(':memory:');
+    const memoryDir = mkdtempSync(join(tmpdir(), 'okc-results-'));
+    const now = new Date('2026-10-13T06:45:00Z');
+    const essay = addGoal(db, { day: '2026-10-12', title: 'finish essay' }, now);
+    addGoal(db, { day: '2026-10-12', title: 'gym' }, now);
+    writeDayResults(db, memoryDir, '2026-10-12', now, TZ);
+    appendToDailyNote(memoryDir, '2026-10-12', 'slipped and why', '- the owner was sick.');
+    updateGoal(db, essay.id, { status: 'done' }, now);
+    writeDayResults(db, memoryDir, '2026-10-12', now, TZ);
+    expect(readFileSync(dailyNotePath(memoryDir, '2026-10-12'), 'utf8')).toBe(
+      [
+        '# 2026-10-12',
+        '',
+        '## goals',
+        '',
+        '1 of 2 goals done.',
+        '- [done] finish essay (done 23:45)',
+        '- [open] gym',
+        '',
+        '## done',
+        '',
+        '- finish essay',
+        '',
+        '## slipped and why',
+        '',
+        '- gym: still open at the end of the day.',
+        '- the owner was sick.',
+        '',
+        '',
+      ].join('\n'),
+    );
+    rmSync(memoryDir, { recursive: true, force: true });
   });
 });

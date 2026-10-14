@@ -1,12 +1,13 @@
 import type { Config } from '../config/schema.js';
 import type { Db } from '../db/index.js';
 import { getSetting, setSetting } from '../db/settings.js';
-import { appendToDailyNote } from '../memory/daily.js';
+import { replaceInDailyNote, type DailySection } from '../memory/daily.js';
 import { createAutomation } from '../scheduler/store.js';
 import { localTime } from '../time.js';
 import { closeCheckins, listGoals, type Goal } from './store.js';
 
 const INSTALLED = 'goals_routine_installed';
+const RESULTS_WRITTEN = 'goals_results_written';
 
 export const ASK_PROMPT =
   "It is time for the evening goals question. Ask the owner for today's three goals and an ETA for each. Keep it short and friendly. When the owner answers, save the goals with goals_set.";
@@ -71,13 +72,21 @@ export function writeDayResults(db: Db, memoryDir: string, day: string, now: Dat
       lines.push(`- [${goal.status}] ${goal.title}${details.length ? ` (${details.join(', ')})` : ''}`);
     }
   }
-  appendToDailyNote(memoryDir, day, 'goals', lines.join('\n'));
-  if (done.length) appendToDailyNote(memoryDir, day, 'done', done.map((goal) => `- ${goal.title}`).join('\n'));
-  if (slipped.length) {
-    const reasons = slipped.map((goal) => {
-      const state = goal.status === 'dropped' ? 'dropped' : 'still open at the end of the day';
-      return `- ${goal.title}: ${state}.${goal.note ? ` Reason: ${goal.note}` : ''}`;
-    });
-    appendToDailyNote(memoryDir, day, 'slipped and why', reasons.join('\n'));
+  const reasons = slipped.map((goal) => {
+    const state = goal.status === 'dropped' ? 'dropped' : 'still open at the end of the day';
+    return `- ${goal.title}: ${state}.${goal.note ? ` Reason: ${goal.note}` : ''}`;
+  });
+  const written: Partial<Record<DailySection, string>> = {
+    goals: lines.join('\n'),
+    done: done.map((goal) => `- ${goal.title}`).join('\n'),
+    'slipped and why': reasons.join('\n'),
+  };
+  // a second run for the same day, for example a retry or a run now, replaces the lines of the run before it. the
+  // app keeps the lines that it wrote last, so it does not remove lines that the owner or the agent wrote.
+  const last = getSetting<{ day: string; written: typeof written }>(db, RESULTS_WRITTEN);
+  const before = last?.day === day ? last.written : {};
+  for (const [section, text] of Object.entries(written) as Array<[DailySection, string]>) {
+    replaceInDailyNote(memoryDir, day, section, before[section] ?? '', text);
   }
+  setSetting(db, RESULTS_WRITTEN, { day, written }, now);
 }
