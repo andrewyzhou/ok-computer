@@ -31,11 +31,15 @@ export function createWebFetchTool(deps: { egress: Egress; limits?: FetchLimits 
       } catch {
         // the reason already says that the address is not valid.
       }
-      if (!got.ok) return { content: `web_fetch did not get ${url}: ${got.reason}`, isError: true, untrustedSource: host };
+      // web_fetch has no request log of its own, so the output keeps each address that the pc asked for. the caller
+      // redacts the output before it stores it.
+      const hops = got.redirects.length ? `Redirects: ${got.redirects.join(' -> ')}` : undefined;
+      if (!got.ok) return { content: [`web_fetch did not get ${url}: ${got.reason}`, hops].filter(Boolean).join('\n'), isError: true, untrustedSource: host };
       const page = isHtml(got.contentType, got.text) ? await extractIsolated(got.text, got.url) : { title: '', text: got.text };
       const lines = [
         page.title ? `Title: ${page.title}` : undefined,
-        `Address: ${got.url}${got.redirects.length ? ` (after ${got.redirects.length} redirect${got.redirects.length > 1 ? 's' : ''})` : ''}`,
+        `Address: ${got.url}`,
+        hops,
         `Status: ${got.status}`,
         got.cut ? 'The page was larger than the download limit, so its end is missing.' : undefined,
         'note' in page && page.note ? `Note: ${page.note}.` : undefined,

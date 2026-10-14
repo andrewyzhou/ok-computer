@@ -249,4 +249,13 @@ describe('web_fetch', () => {
     const out = await tool.run({ url: site.url('shop.test', '/redir-private') }, ctx);
     expect(out).toMatchObject({ isError: true, untrustedSource: `web:shop.test:${site.port}` });
   });
+
+  // web_fetch has no request log, so the stored output is the only record of each host that the pc asked.
+  it('names each hop of a redirect, after a success and after a failure', async () => {
+    const loop = site.url('shop.test', '/loop');
+    const failed = await tool.run({ url: loop }, ctx);
+    expect(failed.content).toBe(`web_fetch did not get ${loop}: more than 5 redirects\nRedirects: ${Array(5).fill(loop).join(' -> ')}`);
+    const moved = await tool.run({ url: site.url('shop.test', '/redir-evil') }, ctx);
+    expect(moved.content).toContain(`Redirects: ${site.url('evil.test', '/redirected?leak=1')}\n`);
+  });
 });
