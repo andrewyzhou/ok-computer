@@ -496,7 +496,10 @@ Decisions from M4:
 - `npm run dev`: start everything with reload. `npm start`: run the build. `npm run chat`: cli channel only. `npm run dev:web`: the dashboard UI with hot reload. `npm test`, `npm run typecheck`, `npm run build` (server and web).
 - Graceful shutdown on SIGINT and SIGTERM: stop channels, finish or abort active runs with a recorded status, close the database.
 - Database migrations are numbered SQL files applied at start inside a transaction, tracked in a `migrations` table.
-- Running as a service in WSL (systemd user unit) is a later task. Keep the process friendly to it: log to stdout and files, exit non-zero on fatal errors.
+- The agent runs on Windows, not in WSL. `scripts/okc.ps1` is the `okc` command: start (build if needed, then start the supervisor in a hidden window), stop, restart, status, logs, open, browser login, install, uninstall. `okc install` adds the command, a desktop shortcut, and an "OK Computer" task that runs `okc start` at logon. Start, stop and restart write to `data/logs/launcher.log`.
+- `scripts/run.ps1` is the supervisor. It holds a mutex for its folder, so only one supervisor runs, and it starts `node dist/main.js` again after each exit, with each restart in `data/logs/service.restarts.log`. An error in its loop is logged, and the loop continues.
+- `okc stop` asks the agent to stop by itself (`POST /api/shutdown` with the token in `data/okc.stop-token`), so runs end with a recorded status. Windows ends the process (TerminateProcess) only when it does not stop in time. Windows also ends the child processes of the agent (stdio MCP servers, Chrome) with it.
+- The live agent runs from its own folder, a `git archive` of a tested commit, and its config points at the data, workspace and skills folders of the repository. A build in the repository therefore never changes the running agent.
 
 ## 19. Testing
 
