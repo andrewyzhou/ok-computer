@@ -18,6 +18,22 @@ function skillsDir(files: Record<string, string>): string {
 const weekly = '---\nname: weekly-review\ndescription: "Review the week with the owner."\n---\n\n1. List the goals.';
 
 describe('skills', () => {
+  // a byte order mark left the skill out, a folded description became ">", and a second folder with the same name
+  // made skill_read pick one of the two by chance.
+  it('reads a file with a byte order mark and a folded description, and keeps the first of two equal names', () => {
+    const dir = skillsDir({
+      a_bom: '﻿---\nname: bom\ndescription: Has a mark.\n---\n',
+      b_folded: '---\nname: folded\ndescription: >\n  Two lines\n  in one.\n---\n',
+      c_same: '---\nname: same\ndescription: one\n---\n',
+      d_same: '---\nname: same\ndescription: two\n---\n',
+    });
+    expect(loadSkills(dir).map((skill) => [skill.name, skill.description])).toEqual([
+      ['bom', 'Has a mark.'],
+      ['folded', 'Two lines in one.'],
+      ['same', 'one'],
+    ]);
+  });
+
   it('lists the skills with a name and a description in name order', () => {
     const dir = skillsDir({
       weekly,

@@ -9,27 +9,42 @@ export interface Skill {
   path: string;
 }
 
+// an editor can save the file with a byte order mark, and the skill was then left out. a folded (>) or literal (|)
+// value continues on the indented lines after it.
 export function frontmatter(text: string): Record<string, string> {
-  const block = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? '';
+  const block = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text.replace(/^﻿/, ''))?.[1] ?? '';
   const fields: Record<string, string> = {};
-  for (const line of block.split(/\r?\n/)) {
-    const field = /^(\w+):\s*(.*)$/.exec(line);
-    if (field) fields[field[1]!] = field[2]!.trim().replace(/^(['"])(.*)\1$/, '$2');
+  const lines = block.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const field = /^(\w+):\s*(.*)$/.exec(lines[i]!);
+    if (!field) continue;
+    let value = field[2]!.trim();
+    if (/^[>|][+-]?$/.test(value)) {
+      const parts: string[] = [];
+      while (i + 1 < lines.length && /^\s+\S/.test(lines[i + 1]!)) parts.push(lines[++i]!.trim());
+      value = parts.join(value.startsWith('>') ? ' ' : '\n');
+    }
+    fields[field[1]!] = value.replace(/^(['"])(.*)\1$/, '$2');
   }
   return fields;
 }
 
 // the app reads the skills folder again for each prompt and each skill_read call. a changed file is then used at once.
-// a skill without a name or a description is left out, because the model cannot choose it.
+// a skill without a name or a description is left out, because the model cannot choose it. two folders with the same
+// skill name made skill_read ambiguous, so only the first folder in name order counts.
 export function loadSkills(dir: string): Skill[] {
   if (!existsSync(dir)) return [];
+  const seen = new Set<string>();
   return readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     .map((entry) => join(dir, entry.name, 'SKILL.md'))
     .filter((path) => existsSync(path))
     .flatMap((path) => {
       const { name, description } = frontmatter(readFileSync(path, 'utf8'));
-      return name && description ? [{ name, description, path }] : [];
+      if (!name || !description || seen.has(name)) return [];
+      seen.add(name);
+      return [{ name, description, path }];
     })
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
