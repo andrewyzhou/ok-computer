@@ -541,6 +541,25 @@ describe('correctionIn', () => {
       expect(correctionIn(text), text).toBeDefined();
     }
   });
+
+  it('finds a correction after a short lead-in, and one that says something is wrong anywhere', () => {
+    for (const text of [
+      "That's wrong, it goes on the work calendar",
+      'Wait, that is the wrong calendar. Use the work one.',
+      'Incorrect - work calendar please',
+      "That isn't what I asked",
+      'Not what I asked for',
+      'You got the date wrong',
+      'Hmm, no. Use the other account',
+      'Ugh, wrong calendar again',
+      'Please use the work calendar instead',
+      '"No", I said the other one',
+      '- no, the other one',
+    ]) {
+      expect(correctionIn(text), text).toBeDefined();
+    }
+    expect(correctionIn('please put the gym instead of the report on monday')).toBeUndefined();
+  });
 });
 
 describe('taskTranscript', () => {

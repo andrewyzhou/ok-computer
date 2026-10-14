@@ -35,11 +35,13 @@ const INPUT_CHARS = 500;
 const RESULT_CHARS = 300;
 const INSTALLED = 'workshop_installed';
 
-// a correction starts the message, or the owner teaches a rule anywhere in it. the match only makes the task a
+// a correction starts the message after a short lead-in such as "wait," a quote or a dash, or the message says
+// anywhere that something is wrong, or the owner teaches a rule anywhere in it. the match only makes the task a
 // candidate. the review model decides if a skill helps, so a false match costs only some input of the daily review.
 const CORRECTION_START =
-  /^\s*(no\b|nope\b|wrong\b|not quite\b|not that\b|that'?s not\b|that is not\b|actually\b|i said\b|i meant\b|i asked\b|you forgot\b|you missed\b|you should(?:n'?t| not)? have\b|don'?t\b|do not\b|stop\b|instead\b|why did you\b)/i;
-const CORRECTION_ANYWHERE = /\b(next time|from now on|in the future|remember to|always use|never use)\b/i;
+  /^[\s"'“”*>\-–—]*(?:(?:wait|hmm+|ugh+|ok(?:ay)?|oh|um+|well|sorry)\b[\s,.!?:;"'“”\-–—]*)*(no\b|nope\b|wrong\b|not quite\b|not that\b|that'?s not\b|that is not\b|actually\b|i said\b|i meant\b|i asked\b|you forgot\b|you missed\b|you should(?:n'?t| not)? have\b|don'?t\b|do not\b|stop\b|instead\b|why did you\b)/i;
+const CORRECTION_ANYWHERE =
+  /\b(next time|from now on|in the future|remember to|always use|never use|wrong|incorrect|(?:isn'?t|not) what (?:i|you)|instead(?=[\s.!]*$))\b/i;
 
 // a phone keyboard often types a curly apostrophe, so it counts as a straight one.
 export function correctionIn(text: string): string | undefined {
