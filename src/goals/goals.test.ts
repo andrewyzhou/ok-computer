@@ -72,6 +72,22 @@ describe('goal tools', () => {
     expect(checkins()).toEqual([{ enabled: true, at: '2026-10-13T08:00:00.000Z' }]);
   });
 
+  // the review found that just after midnight a later time today for yesterday's goal was refused as past, and that
+  // goals_set could no longer record yesterday's goals with their etas.
+  it('reads an eta for a goal of an earlier day as today, and records the etas of an earlier day as they are', async () => {
+    const { call, checkins, setNow } = setup();
+    await call('goals_set', { goals: [{ title: 'essay', eta: '23:00' }] });
+    setNow(new Date('2026-10-13T07:30:00Z'));
+    const moved = await call('goal_update', { id: 1, eta: '14:00' });
+    expect(moved.content).toBe('#1 essay [open, eta 2026-10-13 14:00]');
+    expect(checkins().filter((c) => c.enabled)).toEqual([{ enabled: true, at: '2026-10-13T21:00:00.000Z' }]);
+
+    const past = await call('goals_set', { day: '2026-10-11', goals: [{ title: 'gym', eta: '18:00' }] });
+    expect(past.isError).toBeUndefined();
+    expect(past.content).toContain('#2 gym [open, eta 18:00]');
+    expect(checkins().filter((c) => c.enabled)).toHaveLength(1);
+  });
+
   it('moves the check-in when the eta changes and removes it when the goal is done', async () => {
     const { call, checkins } = setup();
     await call('goals_set', { goals: [{ title: 'essay', eta: '21:00' }] });

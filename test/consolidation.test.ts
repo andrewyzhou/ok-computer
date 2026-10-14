@@ -61,7 +61,7 @@ describe('nightly consolidation', () => {
         'Streak of days with goals: 2. Streak of days with all goals done: 0.',
     );
     expect(weekly).toContain('- done goals by the time they were done (last 30 days): morning 1, afternoon 0, evening 1, night 0.');
-    expect(weekly).toContain('- slipped or late goals by their eta (last 30 days): morning 1, afternoon 0, evening 0, night 1.');
+    expect(weekly).toContain('- slipped or late goals by their first eta (last 30 days): morning 1, afternoon 0, evening 0, night 1.');
     expect(weekly).toContain('## trends\n\n- mornings work best\n');
 
     expect(readFileSync(join(t.memoryDir, 'MEMORY.md'), 'utf8')).toBe('The owner is vegetarian.\nThe owner climbs.\n');

@@ -78,7 +78,7 @@ export function consolidationStats(db: Db, day: string, timeZone: string): strin
       (goal) => goal.completedAt,
       timeZone,
     )}.`,
-    `- slipped or late goals by their eta (last 30 days): ${countByPart(slipped, (goal) => goal.eta, timeZone)}.`,
+    `- slipped or late goals by their first eta (last 30 days): ${countByPart(slipped, (goal) => goal.firstEta, timeZone)}.`,
   ].join('\n');
 }
 
