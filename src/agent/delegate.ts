@@ -3,8 +3,8 @@ import type { Slot } from '../config/schema.js';
 import { getRunDetail } from '../dashboard/queries.js';
 import type { Db } from '../db/index.js';
 import { listEvents } from '../events/log.js';
-import { SUBAGENT_PREFIX } from '../policy/policy.js';
-import { sessionTaint } from '../policy/store.js';
+import { SUBAGENT_PREFIX, type TaintSource } from '../policy/policy.js';
+import { decisionForApproval, sessionTaint } from '../policy/store.js';
 import type { RunQueue } from '../sessions/queue.js';
 import { NO_REPLY } from '../sessions/router.js';
 import type { Clock } from '../time.js';
@@ -104,7 +104,7 @@ export function createDelegateTool(deps: DelegateDeps): Tool {
         );
         // the child starts as tainted as its parent, because the parent wrote the task after it read outside text.
         // the task is not wrapped: it is the instruction of the child. the policy guards each call of the child.
-        const inherited = sessionTaint(db, ctx.sessionKey);
+        const inherited = taintOfTask(db, ctx.sessionKey, ctx.toolCallId);
         const result = await deps.queue.enqueue(sessionKey, () =>
           deps.runChild({
             runId,
@@ -140,6 +140,14 @@ export function createDelegateTool(deps: DelegateDeps): Tool {
       }
     },
   });
+}
+
+// an approved call can run after /new, when the session is clean. the model wrote the task before that, so the taint
+// is the snapshot of the decision that the owner approved, as for the note of the approval.
+function taintOfTask(db: Db, sessionKey: string, toolCallId: string | undefined): TaintSource[] {
+  const approval = /^approval-(\d+)$/.exec(toolCallId ?? '');
+  const decision = approval ? decisionForApproval(db, Number(approval[1])) : undefined;
+  return decision ? decision.taint : sessionTaint(db, sessionKey);
 }
 
 // a child that stops reports what it has: its last text, and each tool call with its outcome, so the parent does not
