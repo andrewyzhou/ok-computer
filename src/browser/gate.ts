@@ -98,7 +98,7 @@ export async function judge(check: ReturnType<typeof cachedCheck>, rules: TabRul
   }
   const sends = sendsData(method, body);
   if (sends && !rules.submitting()) {
-    return { ok: false, reason: `the page tried to send data (${method}) outside an approved submit. To send a form, use browser_submit, which the owner approves` };
+    return { ok: false, reason: `the page tried to send data (${method}) outside an approved submit. To send data, use browser_submit with the button that sends it, which the owner approves` };
   }
   // a page can answer the click of a submit with a post of its own, with other fields, to another site (r4 probe). the
   // owner approved a form for the sites of the task, so data goes only there. a script post to the site itself stays

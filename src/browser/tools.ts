@@ -76,7 +76,12 @@ interface PageControl {
   // the method of the submit as the browser reads it: get, post or dialog. a formmethod that is empty or not valid
   // gives get, and no formmethod gives an empty text.
   formMethod?: string;
-  form: { action: string; method: string; elements: ArrayLike<PageField> } | null;
+  form?: PageForm | null;
+}
+interface PageForm {
+  action: string;
+  method: string;
+  elements: ArrayLike<PageField>;
 }
 interface PageField {
   name: string;
@@ -118,6 +123,8 @@ interface FormState {
   skip: string[];
   password: boolean;
   method: string;
+  // the control is not a submit button, so a script of the page decides what it sends.
+  script: boolean;
 }
 
 // a page can send its form some time after the click, for example after a check of its own, with a script post or a
@@ -129,16 +136,27 @@ const SUBMIT_SETTLE_MS = 1_000;
 // the browser's own FormData gives the set that a submit sends: no disabled field, every selected option, every
 // field of a name. the card shows that set without the hidden fields, which a person does not see. a map of the
 // controls showed a disabled field that was never sent, and one value of a name that was sent twice.
-async function formOf(page: Page, control: ElementHandle): Promise<FormState | null> {
+// many sites send data from a control that is not a submit button: a button outside a form that posts with fetch, or
+// a type=button that calls form.requestSubmit(). the gate blocks the click of such a control, and the submit refused
+// it, so no tool could send its data (r6 probe). its set is the set of its form without a submitter, and a control
+// outside a form has an empty set.
+async function formOf(page: Page, control: ElementHandle): Promise<FormState> {
   return untraced(page, () => control.evaluate((el, selector) => {
     const button = el as unknown as PageControl;
-    if (!button.matches(selector) || !button.form) return null;
-    const { FormData } = globalThis as unknown as { FormData: new (form: unknown, submitter: unknown) => Iterable<[string, string | { name: string }]> };
-    const pairs: Array<[string, string]> = [...new FormData(button.form, button)].map(([name, value]) => [name, typeof value === 'string' ? value : value.name]);
+    const submit = button.matches(selector) && Boolean(button.form);
+    const form = submit ? button.form! : ((button.form ?? button.closest('form')) as unknown as PageForm | null);
+    const { FormData } = globalThis as unknown as { FormData: new (form: unknown, submitter?: unknown) => Iterable<[string, string | { name: string }]> };
+    if (!form) {
+      // a script can read each field of the page, so a password field with a value anywhere on the page refuses the send.
+      const { document } = globalThis as unknown as { document: { querySelectorAll(selector: string): ArrayLike<PageField> } };
+      const password = Array.from(document.querySelectorAll('input[type=password]')).some((item) => item.value !== '');
+      return { fields: {}, pairs: [], skip: [], password, method: 'post', script: true };
+    }
+    const pairs: Array<[string, string]> = [...(submit ? new FormData(form, button) : new FormData(form))].map(([name, value]) => [name, typeof value === 'string' ? value : value.name]);
     // an image button adds its click position, as name.x and name.y, or as x and y without a name. FormData gives 0
     // for each. only that one pair of each name leaves the set, so a field of the same name stays on the card.
     const prefix = button.name ? `${button.name}.` : '';
-    const image = button.matches('input[type=image]') ? [`${prefix}x`, `${prefix}y`] : [];
+    const image = submit && button.matches('input[type=image]') ? [`${prefix}x`, `${prefix}y`] : [];
     for (const name of image) {
       const at = pairs.findIndex(([each, value]) => each === name && value === '0');
       if (at >= 0) pairs.splice(at, 1);
@@ -146,8 +164,8 @@ async function formOf(page: Page, control: ElementHandle): Promise<FormState | n
     const left = new Map<string, number>();
     const key = (name: string, value: string) => JSON.stringify([name, value]);
     const leave = (name: string, value: string) => left.set(key(name, value), (left.get(key(name, value)) ?? 0) + 1);
-    for (const item of Array.from(button.form.elements)) if (item.type === 'hidden' && item.name && !item.disabled) leave(item.name, item.value);
-    if (button.name && !image.length) leave(button.name, button.value);
+    for (const item of Array.from(form.elements)) if (item.type === 'hidden' && item.name && !item.disabled) leave(item.name, item.value);
+    if (submit && button.name && !image.length) leave(button.name, button.value);
     const fields: Record<string, string | string[]> = {};
     for (const [name, value] of pairs) {
       const count = left.get(key(name, value)) ?? 0;
@@ -158,9 +176,9 @@ async function formOf(page: Page, control: ElementHandle): Promise<FormState | n
       const old = fields[name];
       fields[name] = old === undefined ? value : Array.isArray(old) ? [...old, value] : [old, value];
     }
-    const password = Array.from(button.form.elements).some((item) => item.type === 'password');
-    const method = button.formMethod || button.form.method;
-    return { fields, pairs, skip: image, password, method };
+    const password = Array.from(form.elements).some((item) => item.type === 'password');
+    const method = (submit && button.formMethod) || form.method;
+    return { fields, pairs, skip: image, password, method, script: !submit };
   }, SUBMIT_CONTROL));
 }
 
@@ -208,7 +226,8 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
     defineTool({
       name: 'browser_click',
       description:
-        'Click an element by its ref from the last snapshot, for example a link, a tab or a menu. A button that sends a form does not work here: use browser_submit.',
+        'Click an element by its ref from the last snapshot, for example a link, a tab or a menu. ' +
+        'A button that sends a form, or that sends data with a script (the gate then blocks the request), does not work here: use browser_submit.',
       input: z.object({ ref, element }),
       risk: 'write',
       async run({ ref: id, element: name }, ctx) {
@@ -280,9 +299,10 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
     defineTool({
       name: 'browser_submit',
       description:
-        'Send a form of the open page by pressing its button. The owner approves each call and reads the address, the button and the fields that you give, ' +
-        'so give them exactly as the page shows them now: every named field that a person sees, with its value. ' +
-        'If the page differs when the owner approves, nothing is sent.',
+        'Send a form of the open page by pressing its button, or press a button that sends data with a script, such as "Add to cart" outside a form. ' +
+        'The owner approves each call and reads the address, the button and the fields that you give, so give them exactly as the page shows them now: ' +
+        'every named field of the form of the button that a person sees, with its value, or {} for a button outside a form. ' +
+        'If the page differs when the owner approves, nothing is sent. The result lists each request that the page sent.',
       input: z.object({
         url: z.string().min(1).max(2000).describe('the address of the page with the form'),
         button: z.string().min(1).max(200).describe('the name of the button, as the snapshot shows it'),
@@ -305,8 +325,7 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
           if (count !== 1) throw new Error(`${count ? 'more than one' : 'no'} button is named ${JSON.stringify(name)}. Nothing was sent. Use the name that the snapshot shows`);
           const control = await buttons.elementHandle();
           const form = await formOf(page, control);
-          if (!form) throw new Error(`the button ${JSON.stringify(name)} does not send a form. Nothing was sent. Use browser_click`);
-          if (form.password) throw new Error('the form has a password field. The agent never sends a password. Nothing was sent. The owner signs in with okc browser login');
+          if (form.password) throw new Error('the form or the page has a password field. The agent never sends a password. Nothing was sent. The owner signs in with okc browser login');
           if (sortedPairs(fields) !== sortedPairs(form.fields)) throw new Error(`the form now has these fields: ${JSON.stringify(form.fields)}. Nothing was sent. Ask again with these values`);
           // the gate compares the request with this set, so a page script that changes a field at the click sends nothing.
           tab.setSubmit({ pairs: form.pairs, skip: form.skip });
@@ -315,20 +334,24 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
             await control.click();
             await page.waitForLoadState('domcontentloaded');
             // a get or a dialog form sends nothing that the gate counts. the tool said "sent" when the page sent
-            // nothing at all, for example a form that opens a new tab, which the browser refuses (r4 probe).
-            if (!READ_FORM_METHODS.includes(form.method)) outcome = await tab.waitForSent(SUBMIT_WAIT_MS, SUBMIT_SETTLE_MS);
+            // nothing at all, for example a form that opens a new tab, which the browser refuses (r4 probe). the
+            // script of a control chooses what it sends, so any request with data that the gate lets out counts.
+            if (form.script || !READ_FORM_METHODS.includes(form.method)) outcome = await tab.waitForSent(SUBMIT_WAIT_MS, SUBMIT_SETTLE_MS, form.script);
           } finally {
             tab.setSubmit(undefined);
           }
           // the tool said "sent" for an order that did not leave, when the page sent a beacon at the click (r5 probes).
+          if (!outcome.form && form.script) {
+            throw new Error(`the click ran, but the page sent no data that the gate let out within ${SUBMIT_WAIT_MS / 1000} s. See the blocked requests and the snapshot`);
+          }
           if (!outcome.form) {
             const why = outcome.refused ? 'the gate refused the request of the form' : `the request of the form did not leave within ${SUBMIT_WAIT_MS / 1000} s`;
             throw new Error(`the click ran, but ${why}, so the form was not sent. See the blocked and the sent requests and the snapshot`);
           }
           if (outcome.blocked) {
-            throw new Error(`the form was sent, but the gate refused ${outcome.blocked} later request${outcome.blocked > 1 ? 's' : ''} with data of the page, so the page may not have finished. See the blocked requests and the snapshot`);
+            throw new Error(`${form.script ? 'the page sent data' : 'the form was sent'}, but the gate refused ${outcome.blocked} later request${outcome.blocked > 1 ? 's' : ''} with data of the page, so the page may not have finished. See the blocked requests and the snapshot`);
           }
-          return `sent the form with ${button}`;
+          return form.script ? `pressed ${button}, and the page sent the requests below` : `sent the form with ${button}`;
         }, 'open');
         // the owner approved this call. a page that changed means the call did not act, but the approval must not
         // come back as pending: the same input would fail again.

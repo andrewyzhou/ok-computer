@@ -111,8 +111,9 @@ export interface ActTab {
   // the form data set of an approved submit while it runs, else undefined.
   setSubmit(form: ApprovedForm | undefined): void;
   // waits for the request of the approved form, and then until the page sends no more data for settleMs. it stops
-  // early when the gate refused the page's own send, because then the form cannot leave.
-  waitForSent(ms: number, settleMs: number): Promise<SubmitOutcome>;
+  // early when the gate refused the page's own send, because then the form cannot leave. with any, the first request
+  // with data that the gate lets out counts as the form, for a control whose script chooses what it sends.
+  waitForSent(ms: number, settleMs: number, any?: boolean): Promise<SubmitOutcome>;
 }
 
 export interface SubmitOutcome {
@@ -144,6 +145,7 @@ interface Tab {
   // the state of the submit that runs: the form left, the requests with data that the gate refused, and the time of the
   // last request with data.
   formSent: boolean;
+  anySent: boolean;
   sendBlocked: number;
   lastSendAt: number;
   // the address after the last step that did not end on the error page of chrome.
@@ -444,7 +446,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   async function newTab(ctx: BrowserContext, kind: Tab['kind'], step: StepInput, allowlist: string[]): Promise<Tab> {
     const page = await ctx.newPage();
     owned.add(page);
-    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), blocked: [], sent: [], reached: new Set(), more: { blocked: 0, sent: 0, reached: 0 }, formSent: false, sendBlocked: 0, lastSendAt: 0, console: [], lastUsed: performance.now(), queue: Promise.resolve(), snapshot: 0, runId: step.runId } as unknown as Tab;
+    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), blocked: [], sent: [], reached: new Set(), more: { blocked: 0, sent: 0, reached: 0 }, formSent: false, anySent: false, sendBlocked: 0, lastSendAt: 0, console: [], lastUsed: performance.now(), queue: Promise.resolve(), snapshot: 0, runId: step.runId } as unknown as Tab;
     tab.rules = {
       allows: (host) => allowedBy(tab.allowlist, host),
       submitting: () => tab.submit,
@@ -461,6 +463,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       // the route and the cdp layer both see the first request of a page, so one request comes here twice.
       onSent: (sent) => {
         if (sent.form) tab.formSent = true;
+        if (tab.submit) tab.anySent = true;
         tab.lastSendAt = performance.now();
         if (tab.sent.some((each) => each.method === sent.method && each.url === sent.url)) return;
         if (tab.sent.length < KEEP) tab.sent.push({ ...sent, url: sent.url.slice(0, URL_CHARS) });
@@ -834,18 +837,20 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
             if (!form) return;
             tab.sendRefused = false;
             tab.formSent = false;
+            tab.anySent = false;
             tab.sendBlocked = 0;
             tab.lastSendAt = performance.now();
           },
           // the first request with data is not always the form: a page sent a beacon, or the post of a check of its own,
           // before the form. the submit ended at that first request, so the gate refused the form (r5 probes).
-          waitForSent: async (ms, settleMs) => {
+          waitForSent: async (ms, settleMs, any = false) => {
             const tick = () => new Promise((resolve) => setTimeout(resolve, 50));
             const start = performance.now();
-            while (!tab.formSent && !tab.sendRefused && performance.now() - start < ms) await tick();
+            const left = () => (any ? tab.anySent : tab.formSent);
+            while (!left() && !tab.sendRefused && performance.now() - start < ms) await tick();
             // a site can send its order after the answer to a first post, so the submit stays open while the page sends.
-            if (tab.formSent) while (performance.now() - tab.lastSendAt < settleMs && performance.now() - start < 2 * ms) await tick();
-            return { form: tab.formSent, refused: tab.sendRefused, blocked: tab.sendBlocked };
+            if (left()) while (performance.now() - tab.lastSendAt < settleMs && performance.now() - start < 2 * ms) await tick();
+            return { form: left(), refused: tab.sendRefused, blocked: tab.sendBlocked };
           },
         }),
       );

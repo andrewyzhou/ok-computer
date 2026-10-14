@@ -223,6 +223,19 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
         const mode = new URL(path, 'http://x').searchParams.get('mode') ?? 'sync';
         return send(200, html(`<form id="f" action="/order" method="post"><label>Qty <input name="qty" value="1"></label><button>Place order</button></form><script>${handlers[mode]}</script>`, 'Checkout'));
       }
+      case 'shop.test/formless':
+        // a single-page shop: a button outside a form posts with fetch.
+        return send(
+          200,
+          html(
+            `<label>Qty <input id="qty" value="1"></label><p id="s">idle</p>
+             <button onclick="fetch('/api/cart', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ qty: qty.value }) }).then(() => (s.textContent = 'added'))">Add to cart</button>`,
+            'Cart',
+          ),
+        );
+      case 'shop.test/typebutton':
+        // a post form whose only button is type=button and sends the form with a script.
+        return send(200, html('<form id="f" action="/order" method="post"><label>Qty <input name="qty" value="1"></label><button type="button" onclick="f.requestSubmit()">Place order</button></form>', 'Order'));
       case 'shop.test/api/validate':
         return void setTimeout(() => send(200, '{"ok":true}', 'application/json'), 400);
       case 'shop.test/dialog':

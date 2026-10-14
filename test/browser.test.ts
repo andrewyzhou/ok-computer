@@ -346,6 +346,38 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(JSON.parse(String(h.steps().at(-1)!.blockedRequests))).toContainEqual(expect.objectContaining({ url: site.url('evil.test', '/exfil'), reason: expect.stringContaining('may not send data to it') }));
   });
 
+  // the gate blocks the click of such a control, and the submit refused it, so no tool could send its data (r6 probe).
+  it('sends the data of a control that is not a submit button: a button outside a form, and a type=button', async () => {
+    const h = harness();
+    const posts = () => site.hits.filter((hit) => hit.method === 'POST');
+    const cart = site.url('shop.test', '/formless');
+    const first = await h.run('browser_open', { url: cart });
+    const click = await h.run('browser_click', { ref: refOf(first.content, /button "Add to cart"/) });
+    expect(click.content).toContain('use browser_submit with the button');
+    expect(posts()).toEqual([]);
+    const wrong = await h.run('browser_submit', { url: cart, button: 'Add to cart', fields: { qty: '1' } });
+    expect(wrong).toMatchObject({ isError: true, content: expect.stringContaining('the form now has these fields: {}') });
+    const added = await h.run('browser_submit', { url: cart, button: 'Add to cart', fields: {} });
+    expect(added.isError).toBe(false);
+    expect(added.content).toContain(`POST ${site.url('shop.test', '/api/cart')} (sent by the page)`);
+    expect(posts()).toEqual([expect.objectContaining({ path: '/api/cart', body: '{"qty":"1"}' })]);
+
+    site.hits.length = 0;
+    const order = site.url('shop.test', '/typebutton');
+    await h.run('browser_open', { url: order });
+    const sent = await h.run('browser_submit', { url: order, button: 'Place order', fields: { qty: '1' } });
+    expect(sent.isError).toBe(false);
+    expect(posts()).toEqual([expect.objectContaining({ path: '/order', body: 'qty=1' })]);
+
+    // a button outside a form has an empty set, so a form that its script sends, with fields the owner never read, is
+    // refused.
+    site.hits.length = 0;
+    await h.run('browser_open', { url: site.url('shop.test') });
+    const save = await h.run('browser_submit', { url: site.url('shop.test'), button: 'Save', fields: {} });
+    expect(save).toMatchObject({ isError: true, content: expect.stringContaining('the page sent no data') });
+    expect(posts()).toEqual([]);
+  });
+
   // the check read a map of the controls, so a name sent twice showed one value, a multiple select showed one option,
   // and a disabled field showed a value that was never sent.
   it('checks the fields as the browser sends them: each value of a name, each selected option, no disabled field', async () => {
