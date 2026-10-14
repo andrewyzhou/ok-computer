@@ -57,6 +57,21 @@ describe('goal tools', () => {
     expect(out).toEqual({ content: expect.stringContaining('"tonight"'), isError: true });
   });
 
+  // "01:00" said at 23:00 was put on the goal's day, so it was past and got no check-in. goal_update also ended the
+  // old check-in first, and the model was not told.
+  it('moves an eta after midnight to the next day, and refuses a past eta without a change to the old check-in', async () => {
+    const { call, checkins, setNow } = setup();
+    setNow(new Date('2026-10-13T06:00:00Z'));
+    const out = await call('goals_set', { goals: [{ title: 'essay', eta: '01:00' }] });
+    expect(out.content).toContain('#1 essay [open, eta 2026-10-13 01:00]');
+    expect(checkins()).toEqual([{ enabled: true, at: '2026-10-13T08:00:00.000Z' }]);
+
+    const past = await call('goal_update', { id: 1, eta: '20:00' });
+    expect(past).toEqual({ content: expect.stringContaining('already past'), isError: true });
+    expect((await call('goal_update', { id: 1, eta: '2026-10-12T22:00:00-07:00' })).isError).toBe(true);
+    expect(checkins()).toEqual([{ enabled: true, at: '2026-10-13T08:00:00.000Z' }]);
+  });
+
   it('moves the check-in when the eta changes and removes it when the goal is done', async () => {
     const { call, checkins } = setup();
     await call('goals_set', { goals: [{ title: 'essay', eta: '21:00' }] });

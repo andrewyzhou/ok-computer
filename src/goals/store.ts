@@ -1,6 +1,6 @@
 import type { Result } from '../config/load.js';
 import type { Db } from '../db/index.js';
-import { addDays, localTime } from '../time.js';
+import { addDays, localDay, localTime } from '../time.js';
 
 export type GoalStatus = 'open' | 'done' | 'dropped';
 export type CheckinAnswer = 'done' | 'not_yet' | 'dropped' | 'no_answer';
@@ -130,7 +130,9 @@ export function goalStats(db: Db, from: string, to: string): GoalStats {
 }
 
 export function formatGoal(goal: Goal, timeZone: string): string {
-  const eta = goal.eta ? `, eta ${localTime(new Date(goal.eta), timeZone)}` : '';
+  // an eta after midnight is on the next day, so it shows its date.
+  const etaDay = goal.eta ? localDay(new Date(goal.eta), timeZone) : goal.day;
+  const eta = goal.eta ? `, eta ${etaDay === goal.day ? '' : `${etaDay} `}${localTime(new Date(goal.eta), timeZone)}` : '';
   const note = goal.note ? ` (note: ${goal.note})` : '';
   return `#${goal.id} ${goal.title} [${goal.status}${eta}]${note}`;
 }

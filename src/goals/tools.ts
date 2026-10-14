@@ -18,9 +18,21 @@ export interface GoalToolDeps {
 
 type EtaResult = { ok: true; iso: string } | { ok: false; error: string };
 
-function parseEta(value: string, goalDay: string, timeZone: string): EtaResult {
-  if (/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return { ok: true, iso: zonedToUtc(goalDay, value, timeZone).toISOString() };
+const HALF_DAY_MS = 12 * 3_600_000;
+
+// a past eta got no check-in, and goal_update had already ended the old one, without a word to the model. so an
+// "HH:MM" that is past on the goal's day moves to the next day when that is at most 12 hours ahead, for example
+// "01:00" said at 23:00. any other past eta is an error, and the goal and its check-in stay as they were.
+function parseEta(value: string, goalDay: string, timeZone: string, now: Date): EtaResult {
+  if (/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
+    const sameDay = zonedToUtc(goalDay, value, timeZone);
+    if (sameDay > now) return { ok: true, iso: sameDay.toISOString() };
+    const nextDay = zonedToUtc(addDays(goalDay, 1), value, timeZone);
+    if (nextDay > now && nextDay.getTime() - now.getTime() <= HALF_DAY_MS) return { ok: true, iso: nextDay.toISOString() };
+    return { ok: false, error: `the eta ${value} on ${goalDay} is already past. give a later time, or an iso time with a date.` };
+  }
   if (/(Z|[+-]\d{2}:\d{2})$/.test(value) && !Number.isNaN(Date.parse(value))) {
+    if (new Date(value) <= now) return { ok: false, error: `the eta ${value} is already past. give a later time.` };
     return { ok: true, iso: new Date(value).toISOString() };
   }
   return { ok: false, error: `the eta "${value}" is not "HH:MM" or an iso time with an offset` };
@@ -47,7 +59,7 @@ export function createGoalTools(deps: GoalToolDeps): Tool[] {
           etas.push(undefined);
           continue;
         }
-        const parsed = parseEta(goal.eta, goalDay, ctx.timeZone);
+        const parsed = parseEta(goal.eta, goalDay, ctx.timeZone, now);
         if (!parsed.ok) return { content: parsed.error, isError: true };
         etas.push(parsed.iso);
       }
@@ -92,7 +104,7 @@ export function createGoalTools(deps: GoalToolDeps): Tool[] {
       if (!goal) return { content: `no goal has the id ${input.id}`, isError: true };
       let etaIso: string | undefined;
       if (input.eta) {
-        const parsed = parseEta(input.eta, goal.day, ctx.timeZone);
+        const parsed = parseEta(input.eta, goal.day, ctx.timeZone, now);
         if (!parsed.ok) return { content: parsed.error, isError: true };
         etaIso = parsed.iso;
       }
