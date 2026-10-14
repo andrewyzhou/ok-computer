@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { describeInput } from '../approvals/flow.js';
-import { createApproval } from '../approvals/store.js';
+import { createApproval, markUnsent } from '../approvals/store.js';
 import { openDb, type Db } from '../db/index.js';
-import { setSetting } from '../db/settings.js';
+import { getSetting, setSetting } from '../db/settings.js';
 import { appendEvent, type StoredEvent } from '../events/log.js';
 import { registerSecret } from '../observability/redact.js';
 import type { TaintSource } from '../policy/policy.js';
@@ -266,7 +266,7 @@ describe('the workshop job', () => {
     expect(inputs[1]).toContain('Skill review of the main session from 2026-10-12 00:00 to 2026-10-14 00:00: 1 long or corrected task.');
     expect(inputs[1]).toContain(
       [
-        'Do not propose again a draft that the owner denied or that waits for the owner:',
+        'Do not propose again a draft that the owner denied, let expire, or that waits for the owner:',
         '- "calendar-booking": the owner approved it, but the app stopped before it ran, so it is not written',
         '- "dentist-booking": denied by the owner',
         '- "gym-plan": waits for the owner',
@@ -275,6 +275,85 @@ describe('the workshop job', () => {
     // the review of 10-14 covered the lost draft, so the review of 10-15 starts at the mark.
     now = at('09:00', '2026-10-15');
     expect(await review(automation)).toEqual({ status: 'skipped', error: 'no long or corrected task from 2026-10-14 00:00 to 2026-10-15 00:00' });
+  });
+
+  // drafting is a review agent that sends the drafts of the next list in drafts and keeps the review input.
+  function drafting(db: Db, clock: () => Date, drafts: string[][], inputs: string[]) {
+    let n = 0;
+    const config = { timeZone: tz, paths: { skills: skillsDir } } as WorkshopDeps['config'];
+    return createWorkshop({
+      db,
+      clock,
+      config,
+      queue: createRunQueue(),
+      signal: new AbortController().signal,
+      background: true,
+      newId: () => `review-${++n}`,
+      agent: async (input) => {
+        const runId = input.runId!;
+        inputs.push((input.events![0]!.payload as { text: string }).text);
+        db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES (?, ?, 'automation', 'consolidation', 'completed', ?)").run(runId, input.sessionKey, clock().toISOString());
+        for (const name of drafts.shift() ?? []) createApproval(db, { runId, toolName: 'skill_write', input: { name, replaces: false }, summary: name }, clock());
+        return { runId, status: 'completed', text: '' };
+      },
+    });
+  }
+
+  it('leaves the tasks after the limit for the next review, also in a window that a lost draft opened', async () => {
+    const db = openDb(':memory:');
+    for (let i = 1; i <= 5; i++) run(db, `old${i}`, at(`1${i}:00`), `old task ${i}`, LONG_TASK_CALLS);
+    for (let i = 1; i <= 3; i++) run(db, `new${i}`, at(`1${i}:00`, '2026-10-13'), `new task ${i}`, LONG_TASK_CALLS);
+    let now = at('09:00', '2026-10-13');
+    const inputs: string[] = [];
+    const review = drafting(db, () => now, [['old-skill']], inputs);
+    expect((await review(automation)).status).toBe('completed');
+    // the owner approves the draft, and the app stops before it runs.
+    db.prepare("UPDATE approvals SET status = 'expired', resolvedBy = 'button', resolvedAt = ? WHERE id = 1").run(now.toISOString());
+    now = at('09:00', '2026-10-14');
+    expect((await review(automation)).status).toBe('completed');
+    expect(inputs[1]).toContain('from 2026-10-12 00:00 to 2026-10-14 00:00: 8 long or corrected tasks. The last 3 are left for the next review.');
+    expect(inputs[1]).not.toContain('owner: new task');
+    expect(getSetting(db, REVIEWED_UNTIL)).toBe(at('11:00', '2026-10-13').toISOString());
+    now = at('09:00', '2026-10-15');
+    expect((await review(automation)).status).toBe('completed');
+    expect(inputs[2]).toContain('from 2026-10-13 11:00 to 2026-10-15 00:00: 3 long or corrected tasks.');
+    expect(['new task 1', 'new task 2', 'new task 3'].every((text) => inputs[2]!.includes(`owner: ${text}`))).toBe(true);
+    expect(getSetting(db, REVIEWED_UNTIL)).toBe(at('00:00', '2026-10-15').toISOString());
+  });
+
+  it('keeps the end of a review with a draft at the first task that the limit leaves out', async () => {
+    const db = openDb(':memory:');
+    for (let i = 1; i <= 6; i++) run(db, `t${i}`, at(`1${i}:00`), `task ${i}`, LONG_TASK_CALLS);
+    const now = at('09:00', '2026-10-13');
+    // the review sends a draft and fails, so only its own mark moves.
+    const review = job(db, now, draft(db, now));
+    expect((await review(automation)).status).toBe('failed');
+    expect(reviewWindow(db, now, tz).start).toEqual(at('16:00'));
+  });
+
+  it('opens the window again for a second draft of a review that gets lost after a later review covered the first', async () => {
+    const db = openDb(':memory:');
+    run(db, 'big', at('10:00'), 'big task', LONG_TASK_CALLS);
+    run(db, 'other', at('11:00'), 'other big task', LONG_TASK_CALLS);
+    let now = at('09:00', '2026-10-13');
+    const inputs: string[] = [];
+    const review = drafting(db, () => now, [['first-skill', 'second-skill']], inputs);
+    expect((await review(automation)).status).toBe('completed');
+    // the card of the second draft does not reach the owner. the owner approves the first, and the app stops.
+    markUnsent(db, 2, now);
+    db.prepare("UPDATE approvals SET status = 'expired', resolvedBy = 'dashboard', resolvedAt = ? WHERE id = 1").run(now.toISOString());
+    now = at('09:00', '2026-10-14');
+    expect((await review(automation)).status).toBe('completed');
+    expect(inputs[1]).toContain('- "second-skill": waits for the owner');
+    // the sweep expires the unsent card just after that review. it is lost, so its window opens once more.
+    db.prepare("UPDATE approvals SET status = 'expired', resolvedAt = ? WHERE id = 2").run(at('09:01', '2026-10-14').toISOString());
+    now = at('09:00', '2026-10-15');
+    expect(reviewWindow(db, now, tz).start).toEqual(at('00:00'));
+    expect((await review(automation)).status).toBe('completed');
+    expect(inputs[2]).toContain('- "second-skill": its card did not reach the owner, so it is not written');
+    // each lost draft opens its window once.
+    now = at('09:00', '2026-10-16');
+    expect(reviewWindow(db, now, tz).start).toEqual(at('00:00', '2026-10-15'));
   });
 
   it('reviews a window again after a failed review that sent no draft', async () => {
