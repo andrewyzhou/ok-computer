@@ -312,6 +312,9 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     }
   };
   let tracing: string | undefined;
+  // the end of the task that has the trace. a task that started while it ended got no trace (a test under load), so a
+  // new trace waits for it. each wait in the end of a task has a limit.
+  let traceStop: Promise<unknown> = Promise.resolve();
   let userAgent: string | undefined;
   // the --disable-features of playwright, read at the first launch. empty when playwright gives none.
   let playwrightOff: string | undefined;
@@ -529,6 +532,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     if (kind === 'task') {
       // the trace belongs to the context, so one task at a time has it. the row says why a task has no trace.
       try {
+        await traceStop;
         if (tracing) throw new Error(`task ${tracing} still has the trace`);
         // a dom snapshot also turns on the network log of the trace, with the cookie of each request. the screenshots
         // and the action list stay, and each step keeps the masked snapshot that the model read.
@@ -557,7 +561,11 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
 
   // the idle close waits for a tab that ends. a close in that moment lost the trace of the task, and its row said that
   // the app had stopped (r6 probe).
-  const endTab = (tab: Tab, status: 'closed' | 'crashed', reason: string) => inUse(() => closeTab(tab, status, reason));
+  const endTab = (tab: Tab, status: 'closed' | 'crashed', reason: string) => {
+    const ending = inUse(() => closeTab(tab, status, reason));
+    if (tracing === tab.id) traceStop = ending.catch(() => undefined);
+    return ending;
+  };
 
   async function closeTab(tab: Tab, status: 'closed' | 'crashed', reason: string): Promise<void> {
     const traced = tracing === tab.id;
