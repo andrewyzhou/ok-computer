@@ -31,13 +31,17 @@ export interface Body {
   data?: string;
 }
 
+// the playwright route of the context and the cdp session of the tab.
+export type Layer = 'route' | 'cdp';
+
 // the rules of one tab: its allowlist, and whether the current action may send data.
 export interface TabRules {
   allows(host: string): boolean;
   submitting(): ApprovedForm | undefined;
   // top is true for a navigation of the page itself, not of a frame in it. sends is true for a method other than get.
   onBlocked(blocked: Blocked, top: boolean, sends: boolean): void;
-  onSent(sent: Sent): void;
+  // layer names the part of the gate that saw the request. both parts see most requests, so the tab counts each request once.
+  onSent(sent: Sent, layer: Layer): void;
   // a request that the gate let through to a host off the allowlist, for example an image of a cdn.
   onReached(host: string): void;
 }
@@ -160,7 +164,7 @@ function sameForm(body: Body | undefined, form: ApprovedForm): boolean {
 }
 
 // both layers can see the same request, so each verdict goes to the tab rules through this one place.
-function report(rules: TabRules, url: string, method: string, document: boolean, top: boolean, verdict: Verdict, body?: Body): void {
+function report(layer: Layer, rules: TabRules, url: string, method: string, document: boolean, top: boolean, verdict: Verdict, body?: Body): void {
   const sends = sendsData(method, body);
   if (!verdict.ok) return rules.onBlocked({ url, reason: verdict.reason }, top, sends);
   if (sends) {
@@ -168,7 +172,7 @@ function report(rules: TabRules, url: string, method: string, document: boolean,
     // too, as a site that sends its form with fetch does.
     const form = rules.submitting();
     const own = form !== undefined && (document || sameForm(body, form));
-    rules.onSent({ method, url, ...(body?.data ? { body: body.data.slice(0, 2000) } : {}), ...(own ? { form: true as const } : {}) });
+    rules.onSent({ method, url, ...(body?.data ? { body: body.data.slice(0, 2000) } : {}), ...(own ? { form: true as const } : {}) }, layer);
   }
   // a page script can put text that the agent typed into the address of a subresource. the gate lets it out, so the
   // step records where it went.
@@ -198,7 +202,7 @@ export async function guardTab(cdp: CDPSession, egress: Egress, rules: TabRules)
       const entries = request.postDataEntries?.map((each) => Buffer.from(each.bytes ?? '', 'base64'));
       const body = { type, data: request.postData ?? (entries ? Buffer.concat(entries).toString() : undefined) };
       const verdict = await judge(check, rules, request.url, document, request.method, body);
-      report(rules, request.url, request.method, document, document &&event.frameId === targetInfo.targetId, verdict, body);
+      report('cdp', rules, request.url, request.method, document, document &&event.frameId === targetInfo.targetId, verdict, body);
       if (verdict.ok) return cdp.send('Fetch.continueRequest', { requestId: event.requestId });
       return cdp.send('Fetch.failRequest', { requestId: event.requestId, errorReason: 'BlockedByClient' });
     })().catch(() => {
@@ -238,7 +242,7 @@ export async function guardContext(
     const document = request.isNavigationRequest();
     const body = { type: request.headers()['content-type'], data: request.postData() ?? undefined };
     const verdict = await judge(check, rules, request.url(), document, request.method(), body);
-    report(rules, request.url(), request.method(), document, document &&request.frame() === page.mainFrame(), verdict, body);
+    report('route', rules, request.url(), request.method(), document, document &&request.frame() === page.mainFrame(), verdict, body);
     if (verdict.ok) return route.fallback().catch(() => undefined);
     return route.abort('blockedbyclient').catch(() => undefined);
   });
@@ -253,7 +257,7 @@ export async function guardSockets(page: Page, egress: Egress, rules: TabRules):
   const check = cachedCheck(egress);
   await page.routeWebSocket(/.*/, async (socket) => {
     const verdict = await judge(check, rules, socket.url().replace(/^ws/, 'http'), true, 'GET');
-    report(rules, socket.url(), 'GET', false, false, verdict);
+    report('route', rules, socket.url(), 'GET', false, false, verdict);
     if (verdict.ok) return void socket.connectToServer();
     return socket.close({ code: 1008, reason: 'blocked' });
   });

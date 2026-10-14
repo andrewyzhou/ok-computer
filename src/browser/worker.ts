@@ -10,7 +10,7 @@ import { redact, redactedJson } from '../observability/redact.js';
 import type { Clock } from '../time.js';
 import { errorText } from '../tools/registry.js';
 import { checkUrlShape, type Egress } from '../web/egress.js';
-import { allowedBy, guardContext, guardSockets, guardTab, siteOf, tooBroad, type ApprovedForm, type Blocked, type Sent, type TabRules } from './gate.js';
+import { allowedBy, guardContext, guardSockets, guardTab, siteOf, tooBroad, type ApprovedForm, type Blocked, type Layer, type Sent, type TabRules } from './gate.js';
 import { startEgressProxy, type EgressProxy } from './proxy.js';
 
 export interface BrowserDeps {
@@ -134,6 +134,8 @@ interface Tab {
   submit?: ApprovedForm;
   blocked: Blocked[];
   sent: Sent[];
+  // the times that each layer of the gate saw a request with the same method, address and body, since the last record.
+  seen: Map<string, Record<Layer, number>>;
   // the hosts off the allowlist that the gate let a request reach in this step.
   reached: Set<string>;
   // the entries that the lists did not keep since the last record.
@@ -446,7 +448,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   async function newTab(ctx: BrowserContext, kind: Tab['kind'], step: StepInput, allowlist: string[]): Promise<Tab> {
     const page = await ctx.newPage();
     owned.add(page);
-    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), blocked: [], sent: [], reached: new Set(), more: { blocked: 0, sent: 0, reached: 0 }, formSent: false, anySent: false, sendBlocked: 0, lastSendAt: 0, console: [], lastUsed: performance.now(), queue: Promise.resolve(), snapshot: 0, runId: step.runId } as unknown as Tab;
+    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), blocked: [], sent: [], seen: new Map(), reached: new Set(), more: { blocked: 0, sent: 0, reached: 0 }, formSent: false, anySent: false, sendBlocked: 0, lastSendAt: 0, console: [], lastUsed: performance.now(), queue: Promise.resolve(), snapshot: 0, runId: step.runId } as unknown as Tab;
     tab.rules = {
       allows: (host) => allowedBy(tab.allowlist, host),
       submitting: () => tab.submit,
@@ -460,12 +462,18 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
           tab.lastSendAt = performance.now();
         }
       },
-      // the route and the cdp layer both see the first request of a page, so one request comes here twice.
-      onSent: (sent) => {
+      // the route and the cdp layer both see most requests, so one request comes here twice. a key of the method and
+      // the address alone also dropped a second post with other data, for example the order after a check, and it left
+      // with no record (r7 probes). a layer that saw a key no more often than the other layer adds no entry.
+      onSent: (sent, layer) => {
         if (sent.form) tab.formSent = true;
         if (tab.submit) tab.anySent = true;
         tab.lastSendAt = performance.now();
-        if (tab.sent.some((each) => each.method === sent.method && each.url === sent.url)) return;
+        const key = JSON.stringify([sent.method, sent.url, sent.body ?? '']);
+        const seen = tab.seen.get(key) ?? { route: 0, cdp: 0 };
+        seen[layer]++;
+        tab.seen.set(key, seen);
+        if (seen[layer] <= seen[layer === 'route' ? 'cdp' : 'route']) return;
         if (tab.sent.length < KEEP) tab.sent.push({ ...sent, url: sent.url.slice(0, URL_CHARS) });
         else tab.more.sent++;
       },
@@ -655,6 +663,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   function recorded(tab: Tab): void {
     tab.blocked = [];
     tab.sent = [];
+    tab.seen = new Map();
     tab.reached = new Set();
     tab.more = { blocked: 0, sent: 0, reached: 0 };
     tab.console = [];

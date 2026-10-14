@@ -304,6 +304,22 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     if (mode === 'beacon') expect(out.content).toContain(`POST ${site.url('shop.test', '/track')} (sent by the page)`);
   });
 
+  // the record kept one entry for each method and address, so the order after a check to the same address left with no
+  // record (r7 probes).
+  it('records each request with data that leaves, also a second one to the same address', async () => {
+    const h = harness();
+    const url = site.url('shop.test', '/script-form?mode=repeat');
+    await h.run('browser_open', { url });
+    site.hits.length = 0;
+    const out = await h.run('browser_submit', { url, button: 'Place order', fields: { qty: '1' } });
+    expect(out.isError, out.content).toBe(false);
+    expect(site.hitsOn('shop.test').filter((hit) => hit.method === 'POST')).toHaveLength(3);
+    expect(out.content).toContain('Sent 3 requests');
+    expect(out.content).toContain(`POST ${site.url('shop.test', '/api/order')} (the approved form)`);
+    const sent = JSON.parse(String(h.steps().at(-1)!.sent)) as Array<{ body?: string; form?: true }>;
+    expect(sent.map((each) => (each.body?.includes('name="qty"') ? 'form' : each.body))).toEqual(['op=validate', 'op=validate', 'form']);
+  });
+
   it('says that the form was not sent when the gate refused it, also when the page sent a beacon at the click', async () => {
     const h = harness();
     const url = site.url('shop.test', '/script-form?mode=changed');

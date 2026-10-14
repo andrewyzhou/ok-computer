@@ -217,6 +217,9 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
           beacon: `f.onsubmit = (e) => { e.preventDefault(); navigator.sendBeacon('/track', 'checkout-click'); setTimeout(() => f.submit(), 300); };`,
           // a post of the form to a check of the site, which answers after 400 ms, then the order.
           twostep: `f.onsubmit = async (e) => { e.preventDefault(); const fd = new FormData(f); const ok = await fetch('/api/validate', { method: 'POST', body: fd }); if (ok.ok) fetch('/api/order', { method: 'POST', body: fd }); };`,
+          // two posts of a check to the address of the order, then the order there, as some api sites do. the record
+          // kept one entry for each method and address.
+          repeat: `f.onsubmit = async (e) => { e.preventDefault(); for (let i = 0; i < 2; i++) await fetch('/api/order', { method: 'POST', body: 'op=validate' }); fetch('/api/order', { method: 'POST', body: new FormData(f) }); };`,
           // a script changes the form at the click, so the gate refuses it, and a beacon leaves at the same moment.
           changed: `f.querySelector('button').onpointerdown = () => { f.qty.value = '500'; navigator.sendBeacon('/log', 'click'); };`,
         };
