@@ -841,10 +841,26 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     return closed;
   }
 
+  // a submit or a new domain can wait for the owner for up to a day, so its task stays open while the approval waits.
+  // an approved call that did not start yet also waits, because its run can start later. the approvals of an earlier
+  // task do not count.
+  function waitsForOwner(tab: Tab): boolean {
+    const row = db
+      .prepare(
+        `SELECT 1 FROM approvals a JOIN browser_tasks t ON t.id = ?
+         WHERE a.toolName IN ('browser_submit', 'browser_allow_domain') AND a.requestedAt >= t.startedAt
+           AND (a.status = 'pending' OR (a.status = 'approved' AND a.startedAt IS NULL))`,
+      )
+      .get(tab.id);
+    return row !== undefined;
+  }
+
   // a task that waits long frees the browser for other sessions, and chrome closes when nothing uses it, so the owner
   // can open the profile with okc browser login.
   const timer = setInterval(() => {
-    for (const tab of tasks.values()) if (performance.now() - tab.lastUsed > idleMs) void serial(tab, () => endTab(tab, 'closed', 'no browser action for a while'));
+    for (const tab of tasks.values()) {
+      if (performance.now() - tab.lastUsed > idleMs && !waitsForOwner(tab)) void serial(tab, () => endTab(tab, 'closed', 'no browser action for a while'));
+    }
     if (context && !tabs.size && !busy && performance.now() - lastActivity > idleMs) {
       closing = true;
       const ctx = context;
@@ -869,7 +885,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     // the task of another session can wait for the owner to approve a submit, for hours, so it is never taken.
     const other = ownTask();
     if (other) {
-      return { refused: `The browser is busy with a task of another session (${other.sessionKey}). That task ends after ${Math.round(idleMs / 60_000)} minutes without an action. Try again later.` };
+      return { refused: `The browser is busy with a task of another session (${other.sessionKey}). That task ends after ${Math.round(idleMs / 60_000)} minutes without an action, but not while a step of it waits for the owner's approval. Try again later.` };
     }
     const created = await inUse(async () => {
       const ctx = await contextOrRefusal();

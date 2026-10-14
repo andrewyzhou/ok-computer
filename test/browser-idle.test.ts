@@ -70,6 +70,28 @@ describe.skipIf(!hasChrome())('the idle close of chrome', { timeout: 60_000 }, (
     ]);
   });
 
+  it('keeps a task open while a submit for it waits for the owner, and ends it when the approval is gone', async () => {
+    const h = createBrowserHarness({ idleMs: IDLE_MS });
+    open.push(h);
+    // an approval of an earlier task does not hold the new task.
+    h.db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('run-1', 'main', 'message', 'main', 'running', ?)").run(new Date().toISOString());
+    const ask = (at: string) =>
+      Number(h.db.prepare("INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt) VALUES ('run-1', 'browser_submit', '{}', 's', 'pending', ?) RETURNING id").get(at)!.id);
+    ask('2026-01-01T00:00:00.000Z');
+    await h.run('browser_open', { url: url() });
+    const id = ask(new Date().toISOString());
+    await sleep(5 * IDLE_MS);
+    expect(h.tasks().map((row) => row.status)).toEqual(['open']);
+    // an approved call that did not start yet still holds the task.
+    h.db.prepare("UPDATE approvals SET status = 'approved' WHERE id = ?").run(id);
+    await sleep(3 * IDLE_MS);
+    expect(h.tasks().map((row) => row.status)).toEqual(['open']);
+    h.db.prepare("UPDATE approvals SET status = 'denied' WHERE id = ?").run(id);
+    // the close saves the trace, which takes longer when the full suite runs.
+    for (let waited = 0; h.tasks()[0]!.status === 'open' && waited < 20_000; waited += IDLE_MS) await sleep(IDLE_MS);
+    expect(h.tasks().map((row) => row.status)).toEqual(['closed']);
+  });
+
   it('waits for its own chrome to end before it starts chrome again, and does not blame another window', async () => {
     const h = createBrowserHarness({ idleMs: IDLE_MS });
     open.push(h);
