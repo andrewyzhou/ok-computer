@@ -389,14 +389,16 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
           tab.setSubmit({ pairs: form.pairs, skip: form.skip, hidden: form.hidden, charset: form.charset });
           let outcome: SubmitOutcome = { form: true, refused: false, blocked: 0, any: true };
           try {
-            // playwright waits after a click for the navigation that it starts. a site that answered the post after the
-            // action timeout gave a click error, and the tool said nothing of the form that had left (r8 probe).
-            await control.click({ noWaitAfter: true });
-            await page.waitForLoadState('domcontentloaded').catch(() => undefined);
             // a get or a dialog form sends nothing that the gate counts. the tool said "sent" when the page sent
             // nothing at all, for example a form that opens a new tab, which the browser refuses (r4 probe). the
             // script of a control chooses what it sends, so any request with data that the gate lets out counts.
-            if (form.script || !READ_FORM_METHODS.includes(form.method)) outcome = await tab.waitForSent(SUBMIT_WAIT_MS, SUBMIT_SETTLE_MS, form.script);
+            const sends = form.script || !READ_FORM_METHODS.includes(form.method);
+            // playwright waits after a click for the navigation that it starts. a site that answered the post after the
+            // action timeout gave a click error, and the tool said nothing of the form that had left (r8 probe). a get
+            // form keeps the wait, because nothing else waits for its page, and the snapshot failed during its load.
+            await control.click({ noWaitAfter: sends });
+            await page.waitForLoadState('domcontentloaded').catch(() => undefined);
+            if (sends) outcome = await tab.waitForSent(SUBMIT_WAIT_MS, SUBMIT_SETTLE_MS, form.script);
           } finally {
             tab.setSubmit(undefined);
           }
