@@ -171,7 +171,7 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
   // releases the claim, and the next poll tries again. else one channel failure at the moment that the token dies
   // hides for ever that the account is not checked. a park by the client has a lastError that starts with
   // CLIENT_REFUSED, and its accounts share one message.
-  const alertPending = async (): Promise<void> => {
+  const sendAlerts = async (): Promise<void> => {
     const at = now();
     const claim = (where: string) =>
       db
@@ -204,6 +204,10 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
     }
     await Promise.all(sends);
   };
+  // the callers do not wait for the alerts, so the promise must never reject. a database error in a claim or a
+  // release (for example SQLITE_BUSY) would else be an unhandled rejection, and node ends the process.
+  const alertPending = (): Promise<void> =>
+    sendAlerts().catch((err: unknown) => logger.error('the google sign-in alerts failed', { err }));
 
   const unavailable = (alias: string): string | undefined => {
     if (!aliases.includes(alias)) return `no google account has the alias ${alias}`;

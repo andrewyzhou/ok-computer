@@ -171,7 +171,7 @@ export function createGoogle(deps: GoogleDeps): Google {
       let note: string;
       try {
         const polls = await requestContext.run({ runId }, () => sync.pollAll(runId));
-        // alertPending catches the errors of its sends, and like the stall messages it must not hold the poll.
+        // alertPending catches all its errors, and like the stall messages it must not hold the poll.
         void accounts.alertPending();
         stallAlerts(polls);
         detect(polls, runId);
