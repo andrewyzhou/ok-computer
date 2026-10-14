@@ -179,6 +179,7 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
           text: ctx.message.text,
           messageId: String(ctx.message.message_id),
           ...(reply ? { replyToMessageId: String(reply.message_id) } : {}),
+          ...(ctx.message.forward_origin ? { forwarded: true } : {}),
         });
       });
       bot.on('callback_query:data', async (ctx) => {
@@ -273,7 +274,7 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
         logger.info('telegram send', { runId: out.runId, formats: delivery.formats, fallback: delivery.refused, neutralized });
       }
     },
-    progress(message, stop) {
+    progress(message, stop, guard = (text: string) => text) {
       const chatId = Number(message.chatId);
       // a random id, so a stop update for a draft of an older process does not stop a new run.
       const draftId = randomInt(1, 2 ** 31);
@@ -295,7 +296,7 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
       let inFlight: Promise<void> | undefined;
       // the router sends no message for a NO_REPLY answer, so no message replaces its draft. a text that can still
       // become NO_REPLY therefore never shows in a draft.
-      const visible = () => (NO_REPLY.startsWith(latest.trim()) ? '' : latest);
+      const visible = () => (NO_REPLY.startsWith(latest.trim()) ? '' : guard(latest));
       const composed = () => (tools ? `${visible()}\n\n⏳ ${tools}`.trimStart() : visible());
       // an empty draft shows the "Thinking…" placeholder. one draft at a time, so drafts never arrive out of order.
       const draft = () => {

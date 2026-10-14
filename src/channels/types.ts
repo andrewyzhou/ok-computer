@@ -6,6 +6,8 @@ export interface InboundMessage {
   // the id of the message in its chat. a channel uses it to react to the message.
   messageId?: string;
   replyToMessageId?: string;
+  // the owner forwarded the message, so its text is the text of another person.
+  forwarded?: boolean;
   // the data of the button that the owner pressed. a message with a button never goes to the model.
   button?: string;
   receivedAt: string;
@@ -46,6 +48,7 @@ export interface ChannelAdapter {
   start(onMessage: (message: InboundMessage) => void): Promise<void>;
   stop(): Promise<void>;
   send(out: OutboundMessage): Promise<{ messageId: string }>;
-  // the channel calls stop when the owner presses the stop button of the reply.
-  progress?(message: InboundMessage, stop: () => void): ReplyProgress;
+  // the channel calls stop when the owner presses the stop button of the reply. guard changes the text of the model
+  // before the channel shows it. the channel calls it only for the text that it shows, not for each streamed piece.
+  progress?(message: InboundMessage, stop: () => void, guard?: (text: string) => string): ReplyProgress;
 }

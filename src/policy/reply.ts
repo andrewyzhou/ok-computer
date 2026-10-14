@@ -76,11 +76,27 @@ export async function guardReply(
   return sent;
 }
 
+// a draft shows the text of a model call while it streams, before the guard reads the final reply. a chat app makes a
+// link of the draft text too. so in a tainted session each link that can carry data becomes a short mark. a draft has
+// no review, so a link that the session read also gets the mark. the final reply shows it after the guard.
+export const DRAFT_LINK = '[link]';
+
+export function guardDraft(db: Db, sessionKey: string, text: string): string {
+  if (!sessionTaint(db, sessionKey).length) return text;
+  const found = dataUrls(text);
+  if (!found.length) return text;
+  return replaceLinks(text, found.map((each) => each.url), DRAFT_LINK) ?? '';
+}
+
+function withoutLinks(text: string, urls: string[]): string {
+  return replaceLinks(text, urls, REMOVED_LINK) ?? REMOVED_REPLY;
+}
+
 // a chat app makes a link only of the text up to a space or a double quote. a longer link goes first, so a shorter link
 // inside it cannot leave a part of it. the finder reads the nfkc form, so a link that the text does not hold verbatim
-// makes the whole reply go.
-function withoutLinks(text: string, urls: string[]): string {
+// gives undefined, and the caller does not send the text.
+function replaceLinks(text: string, urls: string[], mark: string): string | undefined {
   const links = [...new Set(urls.map(linkOf))].sort((a, b) => b.length - a.length);
-  if (links.some((link) => !text.includes(link))) return REMOVED_REPLY;
-  return links.reduce((out, link) => out.split(link).join(REMOVED_LINK), text);
+  if (links.some((link) => !text.includes(link))) return undefined;
+  return links.reduce((out, link) => out.split(link).join(mark), text);
 }
