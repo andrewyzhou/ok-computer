@@ -50,6 +50,8 @@ export interface IntegrationStatus {
   tokenExpiresAt: string | null;
   lastError: string | null;
   lastErrorAt: string | null;
+  // the configured scopes that the stored token does not hold, because the server did not grant them.
+  withheldScopes?: string[];
   // the sign-in link that waits for the owner.
   authUrl?: string;
   // the redirect url that the owner gives the oauth app, and the credential name of a pre-registered client. paste
@@ -335,6 +337,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
         const row = deps.db.prepare('SELECT authorizedAt, tokenExpiresAt, lastError, lastErrorAt FROM integration_state WHERE integrationId = ?').get(entry.id);
         const text = (key: string) => (row?.[key] as string | null | undefined) ?? null;
         const authUrl = deps.oauth?.pendingUrl(entry.id);
+        const withheldScopes = deps.oauth?.withheld(entry.id) ?? [];
         const snapshot = catalog?.snapshot;
         const seen = new Set([...(snapshot?.tools.map((tool) => tool.mcpName) ?? []), ...(snapshot?.rejected.map((each) => each.mcpName) ?? []), ...(snapshot?.missing ?? [])]);
         return {
@@ -351,6 +354,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
           lastError: text('lastError'),
           lastErrorAt: text('lastErrorAt'),
           ...(authUrl ? { authUrl } : {}),
+          ...(withheldScopes.length ? { withheldScopes } : {}),
           ...(entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' && deps.oauth
             ? {
                 oauthApp: {
@@ -460,16 +464,27 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
     // a new attempt makes the sdk create a new flow, or connect with the stored tokens.
     parked.delete(id);
     authorizing.add(id);
+    oauth?.askAgain(id, true);
     try {
       await connection.stop();
       // the owner can press Pause while the old connection closes, and a stdio close on windows takes seconds. the
       // pause wins, or the page says paused while the server runs.
       if (paused.has(id)) return { error: `the owner paused the ${id} integration.` };
       await connection.start();
+      // a new sign-in that only asks again for a withheld scope leaves a stored token that still works. the connection
+      // starts again with it, so the tools and the dm polls do not stop while the link waits or after it expires.
+      if (oauth?.pendingUrl(id) && oauth.withheld(id).length && connection.state().status !== 'connected') {
+        oauth.askAgain(id, false);
+        await connection.stop();
+        if (paused.has(id)) return { error: `the owner paused the ${id} integration.` };
+        await connection.start();
+      }
     } finally {
       authorizing.delete(id);
+      oauth?.askAgain(id, false);
     }
     const url = oauth?.pendingUrl(id);
+    if (url && oauth?.withheld(id).length) return { url };
     // the connect of another integration can still wait for its sign-in link, and it needs the port.
     if (!url && connecting.size <= 1) await oauth?.closeIfIdle();
     if (connection.state().status === 'connected') return { connected: true };
