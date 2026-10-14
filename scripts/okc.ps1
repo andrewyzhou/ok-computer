@@ -56,17 +56,32 @@ function Test-BuildIsOld {
   return [bool]($items | Where-Object { $_.Refresh(); $_.LastWriteTime -gt $built } | Select-Object -First 1)
 }
 
+function Invoke-Build {
+  Write-Host 'building...'
+  Push-Location $root
+  try {
+    # cmd joins the error output to the normal output, so the launcher log keeps the reason of a failure. powershell
+    # 5.1 stops at the first error line of a command when it reads that output itself.
+    $output = cmd /c 'npm run build --silent 2>&1'
+    if ($LASTEXITCODE -ne 0) { $output | Select-Object -Last 40 | ForEach-Object { Write-Host $_ }; throw 'the build failed.' }
+  }
+  finally { Pop-Location }
+}
+
 function Start-Agent {
-  if (Get-Supervisor) { Write-Host 'ok computer is already running.' }
+  if (Get-Supervisor) {
+    Write-Host 'ok computer is already running.'
+    # the agent keeps the code of its start, also when a later build replaced the files.
+    $agent = Get-AgentProcess
+    $stamp = Join-Path $root 'dist/.build-ok'
+    if ((Test-BuildIsOld) -or ($agent -and (Get-Item -LiteralPath $stamp).LastWriteTime -gt $agent.StartTime)) {
+      Write-Host 'the code on disk is newer than the running agent. run okc restart to load it.'
+    }
+  }
   else {
     # an agent without its supervisor holds the data folder, so a new agent cannot start next to it.
     if (Get-AgentProcess) { Stop-Agent }
-    if (Test-BuildIsOld) {
-      Write-Host 'building...'
-      Push-Location $root
-      try { npm run build --silent | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'the build failed. run npm run build to see why.' } }
-      finally { Pop-Location }
-    }
+    if (Test-BuildIsOld) { Invoke-Build }
     Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden `
       -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$supervisorScript`""
     Write-Host 'ok computer started.'
@@ -126,7 +141,9 @@ function Start-BrowserLogin {
   if ($Sub -ne 'login') { Write-Host 'usage: okc browser login [url]'; return }
   Push-Location $root
   try {
-    if (Test-BuildIsOld) { npm run build --silent | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'the build failed. run npm run build to see why.' } }
+    # a build replaces the files of a running agent, and its dashboard then serves a page that is newer than its api.
+    # an agent can also run without its supervisor, so both must be absent.
+    if (-not (Get-Supervisor) -and -not (Get-AgentProcess) -and (Test-BuildIsOld)) { Invoke-Build }
     if ($Target) { node dist/browser/login.js $Target } else { node dist/browser/login.js }
   }
   finally { Pop-Location }
@@ -163,15 +180,29 @@ function Uninstall-Agent {
   Write-Host 'uninstalled.'
 }
 
-switch ($Command) {
-  'start' { Start-Agent }
-  'stop' { Stop-Agent }
-  'restart' { Stop-Agent; Start-Agent }
-  'status' { Show-Status }
-  'open' { Open-Dashboard }
-  'logs' { Show-Logs }
-  'browser' { Start-BrowserLogin }
-  'install' { Install-Agent }
-  'uninstall' { Uninstall-Agent }
-  default { Write-Host 'usage: okc [start|stop|restart|status|open|logs|browser login [url]|install|uninstall] [-NoOpen]' }
+# the desktop shortcut and the logon task run this script in a hidden window, so the launcher log keeps what a start or
+# a stop shows. its name does not start with okc-, because okc logs shows the newest okc-*.log file.
+$launcherLog = Join-Path $data 'logs/launcher.log'
+$logged = $Command -in 'start', 'stop', 'restart'
+if ($logged) {
+  New-Item -ItemType Directory -Force -Path (Split-Path $launcherLog) | Out-Null
+  if ((Test-Path -LiteralPath $launcherLog) -and (Get-Item -LiteralPath $launcherLog).Length -gt 1MB) { Remove-Item -LiteralPath $launcherLog }
+  Start-Transcript -LiteralPath $launcherLog -Append | Out-Null
 }
+# the error goes to the host after the end of the transcript, so the catch writes it first.
+try {
+  switch ($Command) {
+    'start' { Start-Agent }
+    'stop' { Stop-Agent }
+    'restart' { Stop-Agent; Start-Agent }
+    'status' { Show-Status }
+    'open' { Open-Dashboard }
+    'logs' { Show-Logs }
+    'browser' { Start-BrowserLogin }
+    'install' { Install-Agent }
+    'uninstall' { Uninstall-Agent }
+    default { Write-Host 'usage: okc [start|stop|restart|status|open|logs|browser login [url]|install|uninstall] [-NoOpen]' }
+  }
+}
+catch { Write-Host "error: $($_.Exception.Message)"; exit 1 }
+finally { if ($logged) { Stop-Transcript | Out-Null } }

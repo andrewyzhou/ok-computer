@@ -230,4 +230,61 @@ describe.runIf(process.platform === 'win32')('the okc scripts', { timeout: 90_00
     agents.push(child);
     await waitFor(() => !alive(child));
   });
+
+  // the shortcut and the logon task start okc in a hidden window, so a failed build showed nothing and left no trace.
+  it('keeps the output of a hidden start in the launcher log', () => {
+    const root = makeRoot();
+    copyFileSync(join(scripts, 'okc.ps1'), join(root, 'scripts', 'okc.ps1'));
+    const build = `node -e "console.error('type error in main.ts'); process.exit(2)"`;
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ scripts: { build } }));
+    const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(root, 'scripts', 'okc.ps1'), 'start', '-NoOpen'];
+    const result = spawnSync(powershell, args, { encoding: 'utf8', timeout: 60_000 });
+    expect(result.status).toBe(1);
+    const log = readFileSync(join(root, 'data', 'logs', 'launcher.log'), 'utf8');
+    expect(log).toContain('type error in main.ts');
+    expect(log).toContain('error: the build failed.');
+    expect(existsSync(join(root, 'data', 'okc.pid'))).toBe(false);
+  });
+
+  // a running agent keeps the code of its start. a build under it gave a dashboard page newer than its api.
+  it('tells the owner to restart when the code on disk is newer than the running agent, and does not build under it', async () => {
+    const root = makeRoot();
+    writeFileSync(join(root, 'dist', 'main.js'), 'setTimeout(() => {}, 15000);\n');
+    writeFileSync(join(root, 'dist', '.build-ok'), '');
+    const nodePidFile = join(root, 'data', 'okc.node.pid');
+    startSupervisor(root);
+    await waitFor(() => existsSync(nodePidFile));
+    agents.push(Number(readFileSync(nodePidFile, 'utf8')));
+    const hint = 'run okc restart to load it.';
+    expect(okc(root, '$NoOpen = $true; Start-Agent')).toBe('ok computer is already running.');
+
+    writeFileSync(join(root, 'dist', '.build-ok'), '');
+    expect(okc(root, '$NoOpen = $true; Start-Agent')).toContain(hint);
+
+    // without a stamp the build is old. okc browser login then uses the files of the running agent.
+    rmSync(join(root, 'dist', '.build-ok'));
+    expect(okc(root, '$NoOpen = $true; Start-Agent')).toContain(hint);
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ scripts: { build: `node -e "require('fs').writeFileSync('built', '')"` } }));
+    mkdirSync(join(root, 'dist', 'browser'));
+    writeFileSync(join(root, 'dist', 'browser', 'login.js'), "console.log('login');\n");
+    expect(okc(root, "$Sub = 'login'; Start-BrowserLogin")).toBe('login');
+    expect(existsSync(join(root, 'built'))).toBe(false);
+    process.kill(agents[0]!);
+  });
+
+  // the build empties dist, so a build under an agent that lost its supervisor deleted the files that agent runs.
+  it('does not build for okc browser login under an agent without its supervisor', async () => {
+    const root = makeRoot();
+    writeFileSync(join(root, 'dist', 'main.js'), 'setTimeout(() => {}, 15000);\n');
+    const agent = spawn(process.execPath, ['dist/main.js'], { cwd: root, stdio: 'ignore' });
+    agents.push(agent.pid!);
+    await waitFor(() => alive(agent.pid!));
+    writeFileSync(join(root, 'data', 'okc.node.pid'), String(agent.pid));
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ scripts: { build: `node -e "require('fs').writeFileSync('built', '')"` } }));
+    mkdirSync(join(root, 'dist', 'browser'));
+    writeFileSync(join(root, 'dist', 'browser', 'login.js'), "console.log('login');\n");
+    expect(okc(root, "$Sub = 'login'; Start-BrowserLogin")).toBe('login');
+    expect(existsSync(join(root, 'built'))).toBe(false);
+    process.kill(agent.pid!);
+  });
 });
