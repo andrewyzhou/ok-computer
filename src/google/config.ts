@@ -17,7 +17,8 @@ export const googleConfigSchema = z
     accounts: z.array(z.object({ alias, email: z.email().optional() }).strict()).min(1),
     // without send, the sign-in does not ask for gmail.send, and gmail_send is not a tool.
     send: z.boolean().default(false),
-    sessions: z.array(z.enum(['main', 'auto'])).default(['main']),
+    // auto-read gives automations only the tools that read mail and the calendar. auto gives them every tool.
+    sessions: z.array(z.enum(['main', 'auto', 'auto-read'])).default(['main']),
     pollMinutes: z.number().int().min(5).max(24 * 60).default(15),
   })
   .strict()

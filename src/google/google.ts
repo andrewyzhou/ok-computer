@@ -17,7 +17,7 @@ import { errorText, type Tool } from '../tools/registry.js';
 import { createGoogleAccounts, type GoogleAccounts, type GoogleEndpoints } from './accounts.js';
 import type { GoogleConfig } from './config.js';
 import { createSync, type AccountPoll, type Sync } from './sync.js';
-import { createGoogleTools, googleToolNames } from './tools.js';
+import { createGoogleTools, googleToolsFor } from './tools.js';
 import { createRequestTrace, requestContext } from './trace.js';
 import { ONE_CLICK_BODY, oneClick, type OneClickResult } from './unsubscribe.js';
 
@@ -25,8 +25,8 @@ export interface Google {
   accounts: GoogleAccounts;
   sync: Sync;
   tools: Tool[];
-  // the google tool names of a session profile (main or auto). they depend only on the config, so the tools
-  // parameter of a session never changes.
+  // the google tool names of a session profile (main or auto, which can be read only). they depend only on the
+  // config, so the tools parameter of a session never changes.
   toolNames(profile: string): string[];
   // poll is the job of the poll automation: sync every account, run the detectors, then label the new mail.
   poll(): Promise<JobResult>;
@@ -107,7 +107,6 @@ export function createGoogle(deps: GoogleDeps): Google {
     return result;
   };
   const tools = createGoogleTools({ accounts, config, logger, oneClick: deps.oneClick ? (target) => deps.oneClick!(target) : recordedOneClick });
-  const names = googleToolNames(config);
 
   // the detectors run before the classifier, so a label never hides a hit. the date detector uses the calendars that
   // this poll could read. a calendar that failed can then give a false hit, but never hide a deadline.
@@ -162,7 +161,7 @@ export function createGoogle(deps: GoogleDeps): Google {
     accounts,
     sync,
     tools,
-    toolNames: (profile) => (config.sessions.includes(profile as 'main' | 'auto') ? names : []),
+    toolNames: (profile) => googleToolsFor(config, profile),
     async poll() {
       if (deps.polls === false) return { status: 'skipped', error: 'the google poll runs only in the background app' };
       // the poll is a run of its own, so its requests and its classifier calls show in one timeline with their cost.

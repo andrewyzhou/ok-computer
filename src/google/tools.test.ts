@@ -9,7 +9,7 @@ import { CLIENT_ID, createGoogleHarness, refreshOf, type GoogleHarness } from '.
 import { runTool } from '../../test/run-tool.js';
 import { createToolRegistry, type ToolContext, type ToolOutput } from '../tools/registry.js';
 import { googleConfigSchema } from './config.js';
-import { createGoogleTools, googleToolNames } from './tools.js';
+import { createGoogleTools, googleToolNames, googleToolsFor } from './tools.js';
 import { requestContext } from './trace.js';
 import { oneClick, planUnsubscribe, unsubscribeTargets, type OneClickResult } from './unsubscribe.js';
 
@@ -115,6 +115,20 @@ describe('gmail_send', () => {
   it('is not a tool while sending is off', async () => {
     await setup({ send: false });
     expect(googleToolNames(h.config)).not.toContain('google__gmail_send');
+  });
+});
+
+describe('google tools of a session profile', () => {
+  // the owner wants automations to check mail and the calendar, but not to change them.
+  it('gives automations with auto-read only the tools that read', () => {
+    const config = (sessions: string[]) => googleConfigSchema.parse({ clientId: CLIENT_ID, accounts: [{ alias: 'personal' }], send: true, sessions });
+    const reads = ['gmail_search', 'gmail_read_thread', 'gmail_list_labels', 'calendar_list_events', 'calendar_freebusy'].map((n) => `google__${n}`);
+    expect(googleToolsFor(config(['main', 'auto-read']), 'auto')).toEqual(reads);
+    expect(googleToolsFor(config(['main', 'auto-read']), 'main')).toContain('google__gmail_send');
+    expect(googleToolsFor(config(['main', 'auto']), 'auto')).toEqual(googleToolNames(config([])));
+    expect(googleToolsFor(config(['main']), 'auto')).toEqual([]);
+    expect(googleToolsFor(config(['auto-read']), 'main')).toEqual([]);
+    expect(googleToolsFor(config(['main', 'auto-read']), 'heartbeat')).toEqual([]);
   });
 });
 

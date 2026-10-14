@@ -443,3 +443,17 @@ export function googleToolNames(config: Pick<GoogleConfig, 'send'>): string[] {
     'calendar_delete_event',
   ].map(name);
 }
+
+const READ_TOOLS = ['gmail_search', 'gmail_read_thread', 'gmail_list_labels', 'calendar_list_events', 'calendar_freebusy'].map(name);
+
+// the tools of a session profile. an automation with auto-read can check mail and the calendar, but it cannot change
+// them, also when a mail that it reads asks for that.
+export function googleToolsFor(config: Pick<GoogleConfig, 'send' | 'sessions'>, profile: string): string[] {
+  const all = googleToolNames(config);
+  if (profile === 'main') return config.sessions.includes('main') ? all : [];
+  if (profile === 'auto') {
+    if (config.sessions.includes('auto')) return all;
+    if (config.sessions.includes('auto-read')) return all.filter((each) => READ_TOOLS.includes(each));
+  }
+  return [];
+}

@@ -35,7 +35,7 @@ Add this block to `okc.config.json`. If the file does not exist, create it next 
 - `alias`: at most 16 lower-case letters, digits and dashes, but not `all` (the agent uses `all` for every account). The agent names an account by its alias.
 - `email` (optional, recommended): a sign-in with another Google account is refused, so an alias can never read the wrong mailbox.
 - `send` (default `false`): when `true`, the sign-in also asks for permission to send mail, and the agent gets `gmail_send`. You approve each send. If you change it later, connect each account again. With `false` the agent has no send tool, but Google lets the "modify" permission send mail too, so the limit is in the app, not in the token.
-- `sessions`: `main`, and also `auto` if your automations may use Gmail and Calendar.
+- `sessions`: `main`, and also `auto` if your automations may use Gmail and Calendar, or `auto-read` if they may only read mail and the calendar (search, read, labels, events, free/busy).
 - `pollMinutes` (default 15, at least 5).
 
 Run `okc restart`. If the block is invalid, the app stops at start and the message names the field.
