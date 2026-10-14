@@ -1,7 +1,7 @@
 import type { Config } from '../config/schema.js';
 import type { Db } from '../db/index.js';
 import type { Logger } from '../observability/logger.js';
-import type { Clock } from '../time.js';
+import { formatLocal, type Clock } from '../time.js';
 import { nextRun } from './schedule.js';
 import { dueAutomations, getAutomation, listAutomations, type Automation } from './store.js';
 
@@ -141,13 +141,26 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const onFailure = async (automation: Automation, error: string): Promise<void> => {
     const failures = automation.consecutiveFailures + 1;
     logger.warn('automation failed', { automationId: automation.id, name: automation.name, failures, error });
-    if (failures >= MAX_FAILURES) {
+    if (failures >= MAX_FAILURES && automation.schedule.kind === 'at') {
       db.prepare('UPDATE automations SET enabled = 0, nextRunAt = NULL, consecutiveFailures = ? WHERE id = ?').run(
         failures,
         automation.id,
       );
       await deps.notifyOwner(
         `The automation "${automation.name}" failed ${failures} times in a row, so I turned it off. The last error was: ${error}`,
+      );
+      return;
+    }
+    // a short outage of the model or a network uses all the retries in about 21 minutes. a recurring job stays on,
+    // because a daily system job that is off never comes back by itself. the claim already gave the job its next
+    // normal time, and the owner gets one message for each series of failures.
+    if (failures >= MAX_FAILURES) {
+      db.prepare('UPDATE automations SET consecutiveFailures = ? WHERE id = ?').run(failures, automation.id);
+      if (failures > MAX_FAILURES) return;
+      const row = db.prepare('SELECT nextRunAt FROM automations WHERE id = ?').get(automation.id);
+      const next = row?.nextRunAt ? ` It runs again at ${formatLocal(new Date(String(row.nextRunAt)), config.timeZone)}.` : '';
+      await deps.notifyOwner(
+        `The automation "${automation.name}" failed ${failures} times in a row. I keep it on.${next} The last error was: ${error}`,
       );
       return;
     }

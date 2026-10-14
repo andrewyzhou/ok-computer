@@ -100,7 +100,7 @@ The first poll runs 15 minutes after the start, and it reads the direct messages
 | Telegram: "The slack-work integration needs you to sign in again" | The token was revoked, for example because the app was removed. Press Connect. |
 | A poll is skipped: "slack-work is not connected" | Nothing. The Integrations page says why it is not connected, and the next poll goes on. |
 | A poll failed: "could not be read" | Slack answered in a form that the reader does not know. See step 4: save the answer as a fixture, and change the reader. The Slack tools of the agent still work. |
-| Telegram: "The automation "poll slack-work (slack-dms)" failed 5 times in a row, so I turned it off" | Read the last error on the **Automations** page and fix its cause, then turn the poll on again there. A Slack outage of more than about 20 minutes also does this. |
+| Telegram: "The automation "poll slack-work (slack-dms)" failed 5 times in a row. I keep it on." | Read the last error on the **Automations** page and fix its cause. The poll stays on and runs at its normal times; a Slack outage of more than about 20 minutes also gives this message. |
 
 ## Fallback: a local server with a token that you copy
 

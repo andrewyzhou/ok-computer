@@ -108,13 +108,13 @@ describe('slack acceptance', () => {
     expect(fake.sent).toHaveLength(1);
   });
 
-  it('turns the poll off after five failed polls and tells the owner once, without the text of the answer', async () => {
+  it('keeps the poll on after five failed polls and tells the owner once, without the text of the answer', async () => {
     const { t, fake, poll } = await slackApp([]);
     fake.faults.format = 'garbage';
     fake.messages.push({ channel: DM_ALICE, ts: '1792000000.000100', user: ALICE, text: 'x' });
-    for (let i = 0; i < 5; i++) await t.at(poll().nextRunAt!);
-    expect(poll()).toMatchObject({ enabled: 0, nextRunAt: null });
-    const told = t.printed().match(/failed 5 times in a row, so I turned it off\. The last error was: [^\n]*/g);
+    for (let i = 0; i < 6; i++) await t.at(poll().nextRunAt!);
+    expect(poll()).toMatchObject({ enabled: 1, consecutiveFailures: 6 });
+    const told = t.printed().match(/failed \d+ times in a row\. I keep it on\. It runs again at .*?\. The last error was: [^\n]*/g);
     expect(told).toEqual([expect.stringMatching(/could not be read: it has no message that the reader knows\. The JSON-RPC messages of the call show the raw answer\.$/)]);
     expect(t.printed()).not.toMatch(/new look|widget/);
   });

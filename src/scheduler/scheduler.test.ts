@@ -216,23 +216,42 @@ describe('scheduler', () => {
     expect(getAutomation(db, job.id)?.nextRunAt).toBe('2026-10-13T18:00:00.000Z');
   });
 
-  it('backs off after failures and disables the job after five failures in a row', async () => {
-    const { db, scheduler, create, advance, executed, notices } = setup(['failed', 'failed', 'failed', 'failed', 'failed']);
+  it('backs off after failures, and keeps a recurring job on at its next normal time after five failures', async () => {
+    const { db, scheduler, create, advance, executed, notices } = setup(['failed', 'failed', 'failed', 'failed', 'failed', 'failed']);
     const job = create({ name: 'flaky', schedule: { kind: 'every', everyMs: 24 * 60 * MIN } });
     advance(24 * 60 * MIN);
     const retries: number[] = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 4; i++) {
       await scheduler.tick();
       const current = getAutomation(db, job.id)!;
-      if (current.nextRunAt) {
-        retries.push(Date.parse(current.nextRunAt) - Date.parse(current.lastRunAt!));
-        advance(Date.parse(current.nextRunAt) - Date.parse(current.lastRunAt!));
-      }
+      retries.push(Date.parse(current.nextRunAt!) - Date.parse(current.lastRunAt!));
+      advance(Date.parse(current.nextRunAt!) - Date.parse(current.lastRunAt!));
     }
+    await scheduler.tick();
     expect(executed).toHaveLength(5);
     expect(retries).toEqual([30_000, 60_000, 5 * MIN, 15 * MIN]);
-    expect(getAutomation(db, job.id)).toMatchObject({ enabled: false, consecutiveFailures: 5 });
-    expect(notices).toEqual([expect.stringContaining('"flaky" failed 5 times in a row')]);
+    expect(getAutomation(db, job.id)).toMatchObject({ enabled: true, consecutiveFailures: 5, nextRunAt: '2026-10-14T17:00:00.000Z' });
+    expect(notices).toEqual([expect.stringContaining('"flaky" failed 5 times in a row. I keep it on. It runs again at')]);
+
+    // the next failure comes one day later and gives no second message.
+    advance(Date.parse('2026-10-14T17:00:00Z') - Date.parse(getAutomation(db, job.id)!.lastRunAt!));
+    await scheduler.tick();
+    expect(executed).toHaveLength(6);
+    expect(getAutomation(db, job.id)).toMatchObject({ enabled: true, consecutiveFailures: 6, nextRunAt: '2026-10-15T17:00:00.000Z' });
+    expect(notices).toHaveLength(1);
+  });
+
+  it('turns a one-shot job off after five failures in a row', async () => {
+    const { db, scheduler, create, advance, notices } = setup(['failed', 'failed', 'failed', 'failed', 'failed']);
+    const job = create({ name: 'once', schedule: { kind: 'at', at: '2026-10-12T18:00:00Z' } });
+    advance(60 * MIN);
+    for (let i = 0; i < 5; i++) {
+      await scheduler.tick();
+      const next = getAutomation(db, job.id)!.nextRunAt;
+      if (next) advance(Date.parse(next) - Date.parse(getAutomation(db, job.id)!.lastRunAt!));
+    }
+    expect(getAutomation(db, job.id)).toMatchObject({ enabled: false, nextRunAt: null, consecutiveFailures: 5 });
+    expect(notices).toEqual([expect.stringContaining('"once" failed 5 times in a row, so I turned it off')]);
   });
 
   it('resets the failure count after a success', async () => {

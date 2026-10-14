@@ -186,8 +186,8 @@ export function createGoogle(deps: GoogleDeps): Google {
         note = `the poll stopped: ${redact(errorText(err))}`;
       }
       db.prepare("UPDATE runs SET status = 'completed', endedAt = ?, error = ? WHERE id = ?").run(clock().toISOString(), note || null, runId);
-      // a poll with failed accounts still completes. a failed job backs off and is turned off after five failures,
-      // and a google outage must not turn the poll off for good.
+      // a poll with failed accounts still completes. a failed job backs off, and after five failures the owner gets a
+      // message. a google outage of one account must not do that.
       return { status: 'completed', runId, ...(note ? { error: note } : {}) };
     },
     close: () => accounts.close(),
