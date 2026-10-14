@@ -194,8 +194,9 @@ export interface SlackOAuthServer {
   scopes: string[];
   tokenAuth: string[];
   stats: { mcpRequests: number; apiRequests: number; registrations: number; codeGrants: number; refreshGrants: number };
-  // withhold names the scopes that a code grant leaves out, as a workspace admin can.
-  options: { rotation: boolean; refreshError: string | undefined; withhold: string[] };
+  // withhold names the scopes that a code grant leaves out, as a workspace admin can. refreshWithoutScope leaves the
+  // scope out of a refresh answer, which oauth allows when the scope does not change.
+  options: { rotation: boolean; refreshError: string | undefined; withhold: string[]; refreshWithoutScope?: boolean };
   // expire ends every access token, so the next call refreshes. revoke also ends every refresh token.
   expire(): void;
   revoke(): void;
@@ -324,7 +325,9 @@ export async function startSlackOAuth(fake: SlackFake, options: Partial<SlackOAu
         if (scope === undefined) return refuse(res, 'invalid_refresh_token');
         refresh.delete(params.get('refresh_token') ?? '');
         stats.refreshGrants++;
-        return json(res, 200, issue(scope));
+        const answer: Record<string, unknown> = issue(scope);
+        if (settings.refreshWithoutScope) delete answer.scope;
+        return json(res, 200, answer);
       }
       return refuse(res, 'unsupported_grant_type');
     }

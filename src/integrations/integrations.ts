@@ -471,11 +471,20 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       // pause wins, or the page says paused while the server runs.
       if (paused.has(id)) return { error: `the owner paused the ${id} integration.` };
       await connection.start();
+      // a new sign-in that only asks again for a withheld scope leaves a stored token that still works. the connection
+      // starts again with it, so the tools and the dm polls do not stop while the link waits or after it expires.
+      if (oauth?.pendingUrl(id) && oauth.withheld(id).length && connection.state().status !== 'connected') {
+        oauth.askAgain(id, false);
+        await connection.stop();
+        if (paused.has(id)) return { error: `the owner paused the ${id} integration.` };
+        await connection.start();
+      }
     } finally {
       authorizing.delete(id);
       oauth?.askAgain(id, false);
     }
     const url = oauth?.pendingUrl(id);
+    if (url && oauth?.withheld(id).length) return { url };
     // the connect of another integration can still wait for its sign-in link, and it needs the port.
     if (!url && connecting.size <= 1) await oauth?.closeIfIdle();
     if (connection.state().status === 'connected') return { connected: true };

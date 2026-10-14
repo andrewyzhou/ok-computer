@@ -242,7 +242,11 @@ export function createOAuth(deps: OAuthDeps): OAuth {
         const flow = active.get(id);
         const requested = flow ? scopes?.join(' ') : (before?.requested ?? requestedById.get(id));
         if (requested !== undefined) requestedById.set(id, requested);
-        const tokens: Tokens = requested === undefined ? given : { ...given, requested };
+        // oauth lets a refresh answer leave out the scope when it does not change. without the granted scopes, the record
+        // of the withheld scopes would go, and Connect would then never ask again for a scope that the admin allows later.
+        const scope = given.scope ?? (flow ? undefined : before?.scope);
+        const kept: Tokens = scope === undefined ? given : { ...given, scope };
+        const tokens: Tokens = requested === undefined ? kept : { ...kept, requested };
         const missing = notGranted(tokens);
         if (flow && missing.length) flow.missing = missing;
         try {

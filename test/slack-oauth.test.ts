@@ -213,6 +213,22 @@ describe('slack sign-in with a pre-registered client', () => {
     expect(t.slack.stats.codeGrants).toBe(1);
   });
 
+  it('keeps the record of the withheld scopes through a refresh answer without a scope, so Connect still asks again', async () => {
+    const t = await setup({ rotation: true, withhold: ['users:read'] });
+    await t.integrations.start();
+    const started = await t.integrations.connect('slack-work');
+    if (!('url' in started)) throw new Error('expected a link');
+    expect(await t.integrations.finishSignIn(await consent(t.slack, started.url))).toMatchObject({ ok: true });
+    await expect.poll(() => t.state().status).toBe('connected');
+    t.slack.options.refreshWithoutScope = true;
+    t.slack.expire();
+    expect(await search(t.integrations)).toMatchObject({ kind: 'result' });
+    expect(t.slack.stats.refreshGrants).toBe(1);
+    expect(t.integrations.status()[0]!.withheldScopes).toEqual(['users:read']);
+    t.slack.options.withhold = [];
+    expect(await t.integrations.connect('slack-work')).toHaveProperty('url');
+  });
+
   it('connects once when a configured scope entry holds a list with commas or spaces', async () => {
     const t = await setup({ scopes: ['search:read.im,search:read.mpim', 'im:history mpim:history', 'users:read', 'chat:write'] });
     await t.integrations.start();
@@ -279,6 +295,30 @@ describe('slack sign-in with a pre-registered client', () => {
     expect(stored.scope.split(',')).toContain('users:read');
     expect(t.integrations.status()[0]!.withheldScopes).toBeUndefined();
     expect(await t.integrations.connect('slack-work')).toEqual({ connected: true });
+  });
+
+  it('stays connected with the stored token while the new sign-in link of a Connect waits, and after it expires', async () => {
+    const t = await setup({ withhold: ['users:read'] });
+    await t.integrations.start();
+    const started = await t.integrations.connect('slack-work');
+    if (!('url' in started)) throw new Error('expected a link');
+    expect(await t.integrations.finishSignIn(await consent(t.slack, started.url))).toMatchObject({ ok: true });
+    await expect.poll(() => t.state().status).toBe('connected');
+    const again = await t.integrations.connect('slack-work');
+    expect(again).toHaveProperty('url');
+    expect(t.state().status).toBe('connected');
+    expect(await search(t.integrations, 'c1')).toMatchObject({ kind: 'result' });
+    t.advance(2 * 60 * 60 * 1000);
+    expect(t.state().status).toBe('connected');
+    expect(await search(t.integrations, 'c2')).toMatchObject({ kind: 'result' });
+    expect(t.slack.stats.codeGrants).toBe(1);
+    expect(t.needsAuth).toEqual([]);
+    // a new link finishes the sign-in while the connection runs.
+    const later = await t.integrations.connect('slack-work');
+    if (!('url' in later)) throw new Error(`expected a link, got ${JSON.stringify(later)}`);
+    expect(await t.integrations.finishSignIn(await consent(t.slack, later.url))).toMatchObject({ ok: true });
+    await expect.poll(() => t.slack.stats.codeGrants).toBe(2);
+    await expect.poll(() => t.state().status).toBe('connected');
   });
 
   it('names the withheld scopes on the page after a later error overwrites lastError', async () => {
