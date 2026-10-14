@@ -80,33 +80,25 @@ interface Respond {
   text?: string;
 }
 
-function responses(db: Db, sql: string, ...params: string[]): Respond[] {
-  return db
-    .prepare(sql)
-    .all(...params)
-    .map((row) => JSON.parse(String(row.input)) as Respond);
-}
-
 // a message that did not reach the owner is not a recent notification. the next heartbeat would see it as sent, and
 // it could then keep back the signal that the failed message was about.
-export function recentNotifications(db: Db): string[] {
-  return responses(
-    db,
-    `SELECT input FROM tool_calls WHERE name = 'heartbeat_respond' AND isError = 0
-       AND json_extract(input, '$.notify') = 1 AND runId NOT IN (SELECT value FROM json_each(?))
-       ORDER BY id DESC LIMIT ${RECENT_LIMIT}`,
-    JSON.stringify(getSetting<string[]>(db, UNSENT_RUNS) ?? []),
-  ).map((respond) => respond.text ?? '');
+export function recentNotifications(db: Db): Array<{ text: string; runId: string }> {
+  return db
+    .prepare(
+      `SELECT input, runId FROM tool_calls WHERE name = 'heartbeat_respond' AND isError = 0
+         AND json_extract(input, '$.notify') = 1 AND runId NOT IN (SELECT value FROM json_each(?))
+         ORDER BY id DESC LIMIT ${RECENT_LIMIT}`,
+    )
+    .all(JSON.stringify(getSetting<string[]>(db, UNSENT_RUNS) ?? []))
+    .map((row) => ({ text: (JSON.parse(String(row.input)) as Respond).text ?? '', runId: String(row.runId) }));
 }
 
-// a refusal and the step limit can come from the text of the input. a transient error, a rejected request or a crash
-// comes from the model or the app.
+// a refusal, the step limit and a request that the provider rejected (for example its content filter) can come from
+// the text of the input. a refusal counts also when the next model of the chain then failed. a transient error or a
+// crash comes from the model or the app.
 function inputCanCause(db: Db, result: RunResult): boolean {
-  if (result.stoppedAtLimit) return true;
-  const last = db.prepare('SELECT stopReason FROM model_calls WHERE runId = ? ORDER BY id DESC LIMIT 1').get(result.runId) as
-    | { stopReason: string | null }
-    | undefined;
-  return last?.stopReason === 'refusal';
+  if (result.stoppedAtLimit || result.rejected) return true;
+  return !!db.prepare("SELECT 1 FROM model_calls WHERE runId = ? AND stopReason = 'refusal' LIMIT 1").get(result.runId);
 }
 
 export function createHeartbeatTools(deps: { db: Db }): Tool[] {
@@ -184,6 +176,9 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
     }
 
     const recent = recentNotifications(db);
+    // a recent notification can repeat a mail that its heartbeat read. it keeps the taint of that run, so the mail
+    // cannot change the checklist one heartbeat later through it.
+    const recentTaint = recent.flatMap((each) => sessionTaint(db, `${HEARTBEAT_PREFIX}${each.runId}`));
     const text = [
       'Heartbeat check.',
       '',
@@ -198,10 +193,11 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
         : []),
       '',
       'Recent notifications to the owner:',
-      ...(recent.length ? recent.map((line) => `- ${line}`) : ['- none']),
+      recent.length ? wrapIfTainted(recentTaint, recent.map((each) => `- ${each.text}`).join('\n')) : '- none',
     ].join('\n');
-    // the digest quotes outside text, so the run starts with its taint. the heartbeat has no external tools.
-    const inherited = [...checklistTaint(db), ...(digest?.taint ?? [])];
+    // the digest and the recent notifications can quote outside text, so the run starts with their taint. the
+    // heartbeat has no external tools.
+    const inherited = [...checklistTaint(db), ...(digest?.taint ?? []), ...recentTaint];
     const runId = newId();
     const sessionKey = `${HEARTBEAT_PREFIX}${runId}`;
     const result = await queue.enqueue(sessionKey, () =>
@@ -227,6 +223,9 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
 
     // the answer comes from the event log, because one failed trace write must not drop the owner's notification.
     const answer = succeededCalls(db, sessionKey, runId, 'heartbeat_respond').at(-1) as Respond | undefined;
+    // a run that ended without heartbeat_respond (a plain answer, or a reply cut at max_tokens) did not decide about
+    // the signals. the text of a mail can cause this at every run, so it counts against them like a refusal.
+    if (!answer && digest?.shown.length) deps.signals!.failed(digest);
     const message = answer?.notify ? answer.text : undefined;
     const notified = !!message && (await owner.send(message, undefined, { markdown: true, runId }));
     if (message && !notified) {

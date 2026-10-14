@@ -16,7 +16,8 @@ import {
 export type SlotResult =
   // modelCallId is the model_calls row of the answer, so a caller can link a label or a verdict to its call.
   | { ok: true; response: ModelResponse; provider: string; model: string; modelCallId: number }
-  | { ok: false; error: string; aborted: boolean };
+  // rejected is a request error: the provider refused the request itself, for example its content filter.
+  | { ok: false; error: string; aborted: boolean; rejected?: true };
 
 export interface SlotRunner {
   call(
@@ -89,7 +90,7 @@ export function createSlotRunner(deps: SlotRunnerDeps): SlotRunner {
             if (err.kind === 'aborted') return { ok: false, error: 'the run was aborted', aborted: true };
             if (err.kind === 'request') {
               logger.error('model request failed', { slot, ref, runId, status: err.status, err });
-              return { ok: false, error: `${ref} rejected the request: ${message}`, aborted: false };
+              return { ok: false, error: `${ref} rejected the request: ${message}`, aborted: false, rejected: true };
             }
             lastError = `${ref} failed: ${message}`;
             logger.warn('transient model error', { slot, ref, runId, attempt, status: err.status, err });

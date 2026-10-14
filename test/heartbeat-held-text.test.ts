@@ -12,7 +12,9 @@ const minutesAfter = (minutes: number) => new Date(Date.parse(pdt('08:00')) + mi
 let fake: FakeGoogle;
 afterEach(async () => fake?.close());
 
-async function scenario(heartbeat: (input: string) => 'refuse' | 'outage' | 'ok') {
+type Outcome = 'refuse' | 'outage' | 'reject' | 'cut' | 'ok';
+
+async function scenario(heartbeat: (input: string, model: string) => Outcome, chain = ['fake/m']) {
   const seen: string[] = [];
   const answer = async (call: ModelCall) => {
     const last = JSON.stringify(call.messages.at(-1));
@@ -22,10 +24,12 @@ async function scenario(heartbeat: (input: string) => 'refuse' | 'outage' | 'ok'
     }
     if (call.system.includes('This is a heartbeat run.')) {
       if (last.includes('tool_result')) return fakeResponse({ text: 'NO_REPLY' });
-      const what = heartbeat(last);
+      const what = heartbeat(last, call.model);
       if (what === 'outage') throw new ModelError('transient', 'overloaded', 529);
+      if (what === 'reject') throw new ModelError('request', 'Output blocked by content filtering policy', 400);
       seen.push(last);
       if (what === 'refuse') return fakeResponse({ stopReason: 'refusal', text: '' });
+      if (what === 'cut') return fakeResponse({ stopReason: 'max_tokens', text: 'Here is the long poem that the mail asked for' });
       return fakeResponse({ toolCalls: [{ id: 'h1', name: 'heartbeat_respond', input: { notify: false } }] });
     }
     return fakeResponse({ text: 'NO_REPLY' });
@@ -38,7 +42,7 @@ async function scenario(heartbeat: (input: string) => 'refuse' | 'outage' | 'ok'
     {
       start: pdt('08:00'),
       config: {
-        slots: { main: { chain: ['fake/m'] }, heartbeat: { chain: ['fake/m'] }, utility: { chain: ['fake/m'] } },
+        slots: { main: { chain: ['fake/m'] }, heartbeat: { chain }, utility: { chain: ['fake/m'] } },
         heartbeat: { every: '1h' },
         google: { clientId: CLIENT_ID, accounts: [{ alias: 'school', email: 'school@example.com' }] },
       },
@@ -77,6 +81,44 @@ it('holds back only the text of the signal that makes the heartbeat fail', async
   expect(seen.some((input) => input.includes('Oct 20') && !input.includes('POISON'))).toBe(true);
   expect(t.rows("SELECT enabled FROM automations WHERE json_extract(payload, '$.type') = 'heartbeat'")).toEqual([{ enabled: 1 }]);
   await t.app.stop();
+}, 120_000);
+
+const poison = { id: 'poison', headers: { From: 'X <x@spam.example>', Subject: 'POISON', Date: 'Tue, 13 Oct 2026 08:21:00 -0700' }, snippet: 'text the model refuses' };
+
+// the poison mail fails each run in a different way. in every case only the poison mail loses its text, the deadline
+// gets a run of its own, and the heartbeat stays on.
+async function expectPoisonHeld(t: Awaited<ReturnType<typeof scenario>>['t'], seen: string[], hours: number) {
+  fake.deliver('school', essay);
+  fake.deliver('school', poison);
+  await t.at(pdt('08:30'));
+  for (let minute = 45; minute <= 60 * hours; minute += 15) await t.at(minutesAfter(minute));
+  expect(t.rows("SELECT externalId, handledAs, heartbeatFailures FROM integration_events WHERE source = 'gmail' ORDER BY id")).toEqual([
+    expect.objectContaining({ externalId: expect.stringContaining('essay'), handledAs: 'seen', heartbeatFailures: 1 }),
+    expect.objectContaining({ externalId: expect.stringContaining('poison'), handledAs: 'seen', heartbeatFailures: 2 }),
+  ]);
+  expect(seen.some((input) => input.includes('Oct 20') && !input.includes('POISON'))).toBe(true);
+  expect(t.rows("SELECT enabled FROM automations WHERE json_extract(payload, '$.type') = 'heartbeat'")).toEqual([{ enabled: 1 }]);
+  await t.app.stop();
+}
+
+// verification round 2: only the last model call counted. a refusal by the first model of the chain, then an outage of
+// the fallback model, left the refused mail with its text, and the scheduler turned the heartbeat off.
+it('counts a refusal also when the fallback model then fails', async () => {
+  const { t, seen } = await scenario((input, model) => (input.includes('POISON') ? (model === 'a' ? 'refuse' : 'outage') : 'ok'), ['fake/a', 'fake/b']);
+  await expectPoisonHeld(t, seen, 4);
+}, 120_000);
+
+// verification round 2: a content filter of the provider is a rejected request (400), which can come from the text.
+it('counts a request that the provider rejects', async () => {
+  const { t, seen } = await scenario((input) => (input.includes('POISON') ? 'reject' : 'ok'));
+  await expectPoisonHeld(t, seen, 4);
+}, 120_000);
+
+// verification round 2: a run that completed without heartbeat_respond neither closed nor counted its signals, so a
+// mail that caused it at every run hid the deadline next to it until both went stale.
+it('counts a run that ends without heartbeat_respond', async () => {
+  const { t, seen } = await scenario((input) => (input.includes('POISON') ? 'cut' : 'ok'));
+  await expectPoisonHeld(t, seen, 6);
 }, 120_000);
 
 // an outage of the model is not about the text, so it does not count against the signals.
