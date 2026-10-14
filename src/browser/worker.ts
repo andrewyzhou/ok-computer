@@ -121,8 +121,10 @@ export interface SubmitOutcome {
   form: boolean;
   // the gate refused a page navigation with data, for example a form that a script changed at the click.
   refused: boolean;
-  // the requests with data that the gate refused while the submit ran.
+  // the requests with data that the gate refused while the submit ran, before the form left or as a page navigation.
   blocked: number;
+  // the gate let some request with data out while the submit ran.
+  any: boolean;
 }
 
 interface Tab {
@@ -485,8 +487,11 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
         block(tab, top ? { ...blocked, top } : blocked);
         if (top) tab.topBlocked = true;
         if (top && sends) tab.sendRefused = true;
+        // the page of the answer to a sent form often sends an analytics beacon to an off-list host, and the tool
+        // called each such order an error (r8 probe). after the form left, only a page navigation that the gate refused
+        // can mean that the page did not finish. the step still lists each block.
         if (sends && tab.submit) {
-          tab.sendBlocked++;
+          if (top || !tab.formSent) tab.sendBlocked++;
           tab.lastSendAt = performance.now();
         }
       },
@@ -784,7 +789,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       // way back (probe p5), and the next browser_open starts a new task.
       if (shot.errors.length === 2 && /Timeout/.test(shot.errors.join(' '))) {
         await endTab(tab, 'crashed', 'the page stopped responding');
-        return { ...base, ok: false, title: '', note: `${error ? `${error}. ` : ''}The page stopped responding, so its tab closed and the task ended.` };
+        return { ...base, ok: false, title: '', note: `${error || note ? `${error || note}. ` : ''}The page stopped responding, so its tab closed and the task ended.` };
       }
       const title = await within(untraced(tab.page, () => tab.page.title()), t.capture).catch(() => '');
       return { ...base, ok: !error, note: error ? [error, stayed].filter(Boolean).join('. ') : note, title: typeof title === 'string' ? title : '' };
@@ -919,7 +924,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
             while (!left() && !tab.sendRefused && performance.now() - start < ms) await tick();
             // a site can send its order after the answer to a first post, so the submit stays open while the page sends.
             if (left()) while (performance.now() - tab.lastSendAt < settleMs && performance.now() - start < 2 * ms) await tick();
-            return { form: left(), refused: tab.sendRefused, blocked: tab.sendBlocked };
+            return { form: left(), refused: tab.sendRefused, blocked: tab.sendBlocked, any: tab.anySent };
           },
         }),
       );

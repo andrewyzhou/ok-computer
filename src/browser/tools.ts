@@ -224,6 +224,24 @@ async function controlsNamed(page: Page, name: string): Promise<{ count: number;
   return { count, first };
 }
 
+async function onlyControl(page: Page, name: string): Promise<{ frame: Frame; locator: Locator }> {
+  const { count, first } = await controlsNamed(page, name);
+  if (count === 1 && first) return first;
+  if (!count) throw new Error(`no button or link is named ${JSON.stringify(name)}. Nothing was sent. Use the name that the snapshot shows`);
+  throw new Error(`more than one button or link is named ${JSON.stringify(name)}. Nothing was sent. Give the ref of the one to press, from the last snapshot`);
+}
+
+// a product grid has an "Add to cart" in each form, so the name alone found more than one control, and no tool could
+// send any of them (r8 probe). the ref tells them apart, and the control must still have the name that the owner reads.
+async function controlAt(page: Page, tab: ActTab, id: string, name: string): Promise<{ frame: Frame; locator: Locator }> {
+  const locator = await find(page, tab, id);
+  const handle = await locator.elementHandle();
+  const frame = await handle.ownerFrame();
+  const named = frame && (await Promise.all(CONTROL_ROLES.map((role) => frame.getByRole(role, { name, exact: true }).evaluateAll((all, one) => all.includes(one), handle))));
+  if (!frame || !named?.some(Boolean)) throw new NotDone(`${id} is not a button or link named ${JSON.stringify(name)}. Nothing was sent. Use the ref and the name that the last snapshot shows`);
+  return { frame, locator };
+}
+
 const sameAddress = (a: string, b: string) => {
   try {
     const x = new URL(a);
@@ -272,7 +290,7 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
         return view(
           await act(ctx, 'click', { ref: id, element: name }, async (page, tab) => {
             const target = await find(page, tab, id);
-            if (await sendsData(page, target)) throw new NotDone(`${id} sends a form. Nothing was clicked. Use browser_submit, which the owner approves`);
+            if (await sendsData(page, target)) throw new NotDone(`${id} sends a form. Nothing was clicked. Use browser_submit with its name and this ref, which the owner approves`);
             await target.click();
           }),
         );
@@ -344,6 +362,7 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
       input: z.object({
         url: z.string().min(1).max(2000).describe('the address of the page with the form, or of its frame'),
         button: z.string().min(1).max(200).describe('the name of the button or link, as the snapshot shows it'),
+        ref: ref.optional().describe('the ref of the button or link in the last snapshot. Give it when more than one control has the name, for example an "Add to cart" for each product'),
         fields: z
           .record(z.string(), z.union([z.string().max(5000), z.array(z.string().max(5000)).max(50)]))
           .describe('each named field of the form and its value, or a list of values for a name that the form has more than once'),
@@ -352,16 +371,14 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
       // a submit acts on the open task of any session, so the caller can be a session with no taint, such as an
       // automation, where a broad allow rule of the owner holds. the owner approves each send.
       needsApproval: true,
-      async run({ url, button, fields }, ctx) {
-        const result = await act(ctx, 'submit', { url, button, fields }, async (page, tab) => {
+      async run({ url, button, ref: id, fields }, ctx) {
+        const result = await act(ctx, 'submit', { url, button, ...(id ? { ref: id } : {}), fields }, async (page, tab) => {
           const nowAt = () => new Error(`the page is now ${page.url()}, not ${url}. Nothing was sent`);
           if (!page.frames().some((frame) => sameAddress(frame.url(), url))) throw nowAt();
           // the snapshot names a control by its accessible name, and so does this lookup, which also leaves out hidden
           // elements. the check and the click use the same element, so the form that is sent is the form that was checked.
           const name = button.trim();
-          const { count, first } = await controlsNamed(page, name);
-          if (count !== 1 || !first) throw new Error(`${count ? 'more than one' : 'no'} button or link is named ${JSON.stringify(name)}. Nothing was sent. Use the name that the snapshot shows`);
-          const { frame, locator } = first;
+          const { frame, locator } = id ? await controlAt(page, tab, id, name) : await onlyControl(page, name);
           // the address is the address of the page, or of the frame of the control.
           if (!sameAddress(page.url(), url) && !sameAddress(frame.url(), url)) throw nowAt();
           const control = await locator.elementHandle();
@@ -370,10 +387,12 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
           if (sortedPairs(fields) !== sortedPairs(form.fields)) throw new Error(`the form now has these fields: ${JSON.stringify(form.fields)}. Nothing was sent. Ask again with these values`);
           // the gate compares the request with this set, so a page script that changes a field at the click sends nothing.
           tab.setSubmit({ pairs: form.pairs, skip: form.skip, hidden: form.hidden, charset: form.charset });
-          let outcome: SubmitOutcome = { form: true, refused: false, blocked: 0 };
+          let outcome: SubmitOutcome = { form: true, refused: false, blocked: 0, any: true };
           try {
-            await control.click();
-            await page.waitForLoadState('domcontentloaded');
+            // playwright waits after a click for the navigation that it starts. a site that answered the post after the
+            // action timeout gave a click error, and the tool said nothing of the form that had left (r8 probe).
+            await control.click({ noWaitAfter: true });
+            await page.waitForLoadState('domcontentloaded').catch(() => undefined);
             // a get or a dialog form sends nothing that the gate counts. the tool said "sent" when the page sent
             // nothing at all, for example a form that opens a new tab, which the browser refuses (r4 probe). the
             // script of a control chooses what it sends, so any request with data that the gate lets out counts.
@@ -385,13 +404,18 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
           if (!outcome.form && form.script) {
             throw new Error(`the click ran, but the page sent no data that the gate let out within ${SUBMIT_WAIT_MS / 1000} s. See the blocked requests and the snapshot`);
           }
-          if (!outcome.form) {
+          // a single-page shop stops the submit of its form and posts the fields as json, which is not a form that the
+          // gate can compare. the tool said "not sent" for an order that had left, and a retry could order twice (r8
+          // probe). the result names what the page sent, and it does not say that the form was sent.
+          const scripted = !outcome.form && !outcome.refused && outcome.any;
+          if (!outcome.form && !scripted) {
             const why = outcome.refused ? 'the gate refused the request of the form' : `the request of the form did not leave within ${SUBMIT_WAIT_MS / 1000} s`;
             throw new Error(`the click ran, but ${why}, so the form was not sent. See the blocked and the sent requests and the snapshot`);
           }
           if (outcome.blocked) {
-            throw new Error(`${form.script ? 'the page sent data' : 'the form was sent'}, but the gate refused ${outcome.blocked} later request${outcome.blocked > 1 ? 's' : ''} with data of the page, so the page may not have finished. See the blocked requests and the snapshot`);
+            throw new Error(`${form.script || scripted ? 'the page sent data' : 'the form was sent'}, but the gate refused ${outcome.blocked} request${outcome.blocked > 1 ? 's' : ''} with data of the page, so the page may not have finished. See the blocked requests and the snapshot`);
           }
+          if (scripted) return `pressed ${button}. The form itself did not leave as a form, but the page sent the requests below with a script, which can be the form in another shape. Check the page before you send it again`;
           return form.script ? `pressed ${button}, and the page sent the requests below` : `sent the form with ${button}`;
         }, 'open');
         // the owner approved this call. a page that changed means the call did not act, but the approval must not

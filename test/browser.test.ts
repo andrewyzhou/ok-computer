@@ -396,6 +396,67 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(site.hitsOn('shop.test').filter((hit) => hit.path === '/order')).toEqual([]);
   });
 
+  // the tool said "not sent" for an order that a single-page shop had sent as json, so a retry could order twice (r8
+  // probe).
+  it('names the requests of a page that sends its form as json, and does not say that nothing was sent', async () => {
+    const h = harness();
+    const url = site.url('shop.test', '/script-form?mode=json');
+    await h.run('browser_open', { url });
+    site.hits.length = 0;
+    const out = await h.run('browser_submit', { url, button: 'Place order', fields: { qty: '1' } });
+    expect(out.isError, out.content).toBe(false);
+    expect(out.content).toContain('the page sent the requests below with a script');
+    expect(out.content).toContain(`POST ${site.url('shop.test', '/api/order')} (sent by the page)`);
+    expect(site.hits.filter((hit) => hit.method === 'POST')).toEqual([expect.objectContaining({ path: '/api/order', body: '{"qty":"1"}' })]);
+  });
+
+  // a product grid has an "Add to cart" in each form, and no tool could send any of them (r8 probe).
+  it('presses the control of the ref when more than one control has the name', async () => {
+    const h = harness();
+    const url = site.url('shop.test', '/products');
+    await h.run('browser_open', { url });
+    site.hits.length = 0;
+    // each step takes a new snapshot, so each call uses the ref of the second button in the last one.
+    const second = (text: string) => text.split('\n').filter((line) => /button "Add to cart"/.test(line)).map((line) => /\[ref=(\w+)\]/.exec(line)![1]!)[1]!;
+    const both = await h.run('browser_submit', { url, button: 'Add to cart', fields: { qty: '1' } });
+    expect(both).toMatchObject({ isError: true, content: expect.stringContaining('Give the ref of the one to press') });
+    const click = await h.run('browser_click', { ref: second(both.content), element: 'Add to cart' });
+    expect(click.content).toContain('Use browser_submit with its name and this ref');
+    const wrong = await h.run('browser_submit', { url, button: 'Place order', ref: second(click.content), fields: { qty: '1' } });
+    expect(wrong).toMatchObject({ isError: true, content: expect.stringContaining(`${second(click.content)} is not a button or link named "Place order"`) });
+    expect(site.hits.filter((hit) => hit.method === 'POST')).toEqual([]);
+    const sent = await h.run('browser_submit', { url, button: 'Add to cart', ref: second(wrong.content), fields: { qty: '1' } });
+    expect(sent.isError, sent.content).toBe(false);
+    expect(site.hits.filter((hit) => hit.method === 'POST')).toEqual([expect.objectContaining({ path: '/cart-add', body: 'item=shirt&qty=1' })]);
+  });
+
+  // the page of the answer sent an analytics beacon to an off-list host, and the tool called the order an error (r8
+  // probe). the step still lists the block.
+  it('says that the form was sent when the page of the answer sends a beacon off the allowlist', async () => {
+    const h = harness();
+    const url = site.url('shop.test', '/script-form?mode=thanks');
+    await h.run('browser_open', { url });
+    site.hits.length = 0;
+    const out = await h.run('browser_submit', { url, button: 'Place order', fields: { qty: '1' } });
+    expect(out.isError, out.content).toBe(false);
+    expect(out.content).toContain('sent the form with Place order');
+    expect(out.content).toContain(`${site.url('evil.test', '/collect?en=purchase')}: evil.test is not on the allowlist`);
+    expect(site.hitsOn('evil.test')).toEqual([]);
+  });
+
+  // playwright waited after the click for the navigation, so a site that answered after the action timeout gave a click
+  // error for a form that had left (r8 probe).
+  it('says that the form was sent when the site answers after the action timeout', async () => {
+    const h = harness();
+    const url = site.url('shop.test', '/script-form?mode=slow');
+    await h.run('browser_open', { url });
+    site.hits.length = 0;
+    const out = await h.run('browser_submit', { url, button: 'Place order', fields: { qty: '1' } });
+    expect(out.isError, out.content).toBe(false);
+    expect(out.content).toContain('sent the form with Place order');
+    expect(site.hits.filter((hit) => hit.method === 'POST')).toEqual([expect.objectContaining({ path: '/slow-answer', body: 'qty=1' })]);
+  });
+
   it('reads the method of a submit as the browser does, so an empty formmethod sends a get', async () => {
     const h = harness();
     site.hits.length = 0;
