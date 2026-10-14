@@ -12,8 +12,13 @@ export interface EgressProxy {
 // and a preload of the speculation rules are not tied to one, so they reached the owner's network. chrome sends every
 // connection through this proxy, which checks the address and then connects to that same address, so a name that
 // resolves again to a private address (dns rebinding) does not get through either. the proxy knows only the host, not
-// the tab, so the allowlist and the rule for sending data stay with the page layers.
-export async function startEgressProxy(egress: Egress, onRefused: (target: string, reason: string) => void): Promise<EgressProxy> {
+// the tab, so the allowlist and the rule for sending data stay with the page layers. chrome can open a channel that no
+// page layer sees, for example the socket of a worker, so onPassed gets each host that the proxy lets a connection reach.
+export async function startEgressProxy(
+  egress: Egress,
+  onRefused: (target: string, reason: string) => void,
+  onPassed: (host: string) => void = () => undefined,
+): Promise<EgressProxy> {
   // a plain http request comes with its full address.
   const server = createServer(async (req, res) => {
     const url = URL.parse(req.url ?? '');
@@ -23,6 +28,7 @@ export async function startEgressProxy(egress: Egress, onRefused: (target: strin
       onRefused(url.href, host.reason);
       return void res.writeHead(403).end();
     }
+    onPassed(url.hostname);
     const headers = { ...req.headers };
     delete headers['proxy-connection'];
     const upstream = request({ host: host.address, port: url.port || 80, method: req.method, path: `${url.pathname}${url.search}`, headers, setHost: false });
@@ -43,6 +49,7 @@ export async function startEgressProxy(egress: Egress, onRefused: (target: strin
       onRefused(req.url ?? '', host.ok ? 'the address is not valid' : host.reason);
       return void client.end('HTTP/1.1 403 Forbidden\r\n\r\n');
     }
+    onPassed(target.hostname);
     const upstream = connect(Number(target.port || 443), host.address, () => {
       client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
       upstream.write(head);

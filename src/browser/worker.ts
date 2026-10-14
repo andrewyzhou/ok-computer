@@ -61,6 +61,11 @@ const IDLE_MS = 10 * 60_000;
 // minute, and the row of the next step grew to 293 MB. each list keeps its first entries and counts the others.
 const KEEP = 200;
 const URL_CHARS = 1000;
+// the reporting api sends its reports from the network service, outside any frame, so no page layer of the gate sees
+// them. a page sent its own address, with text that the agent typed, to a host off the allowlist that way (r6 probe).
+// network error logging sends its reports through the same service.
+const FEATURES_OFF = ['Reporting', 'NetworkErrorLogging'];
+const DISABLE = '--disable-features=';
 
 // a step is one action in a tab. its row keeps what the page looked like after the action.
 export interface StepInput {
@@ -290,6 +295,8 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   let closing = false;
   let tracing: string | undefined;
   let userAgent: string | undefined;
+  // the --disable-features of playwright, read at the first launch. empty when playwright gives none.
+  let playwrightOff: string | undefined;
   let lastActivity = performance.now();
   let proxy: Promise<EgressProxy> | undefined;
 
@@ -324,13 +331,25 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     hardenProfile(profile, downloads);
     // no other chrome holds the profile, so no task row that is open can be live. the app crashed while it ran.
     sweep();
-    proxy ??= startEgressProxy(deps.egress, (url, reason) => {
-      // the proxy does not know the tab, so each open tab records the block.
-      for (const tab of tabs.values()) block(tab, { url, reason });
-    });
+    proxy ??= startEgressProxy(
+      deps.egress,
+      (url, reason) => {
+        // the proxy does not know the tab, so each open tab records the block.
+        for (const tab of tabs.values()) block(tab, { url, reason });
+      },
+      (host) => {
+        // a host that no open tab allows can come from a channel that no page layer sees, so each open tab records it.
+        const open = [...tabs.values()];
+        if (!open.some((tab) => allowedBy(tab.allowlist, host))) for (const tab of open) tab.rules.onReached(host);
+      },
+    );
     const { url: proxyUrl } = await proxy;
+    // chrome uses only the last --disable-features, and playwright gives a list of its own (a second list turned storage
+    // partitioning back on, probe). the first launch only reads that list, and the next launches replace it with a
+    // list that also has the features of the app.
     const start = () =>
       chromium.launchPersistentContext(profile, {
+        ...(playwrightOff ? { ignoreDefaultArgs: [playwrightOff] } : {}),
         channel: 'chrome',
         headless: true,
         serviceWorkers: 'block',
@@ -343,21 +362,30 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
           '--proxy-bypass-list=<-loopback>',
           // a shared worker belongs to no tab, so no page layer of the gate sees its requests or its sockets.
           '--disable-blink-features=SharedWorker',
+          ...(playwrightOff !== undefined ? [`${DISABLE}${[playwrightOff.slice(DISABLE.length), ...FEATURES_OFF].filter(Boolean).join(',')}`] : []),
           ...(deps.args ?? []),
         ],
         ...(userAgent ? { userAgent } : {}),
       });
     let ctx = await start();
     // headless chrome names itself HeadlessChrome in its user agent, and a search engine shows more captchas to it. the
-    // first launch reads the name, and chrome starts once more with the name of normal chrome.
+    // first launch reads the name and the list of playwright, and chrome starts once more with both.
     if (!userAgent) {
-      const agent = await (ctx.pages()[0] ?? (await ctx.newPage())).evaluate(() => navigator.userAgent);
+      const first = ctx.pages()[0] ?? (await ctx.newPage());
+      const agent = await first.evaluate(() => navigator.userAgent);
+      await first.goto('chrome://version');
+      playwrightOff = /--disable-features=\S*/.exec(await first.locator('#command_line').innerText())?.[0] ?? '';
       userAgent = agent.replace('HeadlessChrome/', 'Chrome/');
-      if (userAgent !== agent) {
-        await ctx.close();
-        ctx = await start();
-      }
+      await ctx.close();
+      ctx = await start();
     }
+    // a page with webrtc can reach a turn server through the proxy, which checks only the address, and no page layer
+    // sees it. a page sent text that the agent typed to a host off the allowlist in the user name (r6 probe). no
+    // switch of chrome removes the api, so each document loses it before its own scripts run, also a frame that a
+    // script makes.
+    await ctx.addInitScript(() => {
+      for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection']) delete (globalThis as Record<string, unknown>)[name];
+    });
     ctx.on('close', onContextClosed);
     await guardContext(
       ctx,
