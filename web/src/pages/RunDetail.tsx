@@ -320,9 +320,16 @@ function ChildCost({ timeline }: { timeline: TimelineItem[] }) {
 
 export function RunDetail({ id }: { id: string }) {
   // the status and the cost of each child show on this page too, and they change while the parent waits.
+  // a delegate call can wait for the reviewer before its child starts, and the parent writes no event until the child
+  // ends. so a running page also loads again when a new child run of any parent starts.
   const runs = useRef<ReadonlySet<string>>(new Set());
-  const loaded = useApi<RunDetailData>(`/api/runs/${encodeURIComponent(id)}`, (message) => aboutRuns(runs.current)(message));
+  const running = useRef(false);
+  const loaded = useApi<RunDetailData>(
+    `/api/runs/${encodeURIComponent(id)}`,
+    (message) => aboutRuns(runs.current)(message) || (running.current && message.kind === 'run' && message.run.trigger === 'subagent'),
+  );
   runs.current = new Set([id, ...childrenOf(loaded.data?.timeline ?? []).map((child) => child.childRunId)]);
+  running.current = loaded.data?.run.status === 'running';
   return (
     <Page title={`Run ${id.slice(0, 8)}`} actions={<a href="#/runs">All runs</a>}>
       <Load loaded={loaded}>
