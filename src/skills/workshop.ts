@@ -7,6 +7,7 @@ import { getSetting, setSetting } from '../db/settings.js';
 import { listEvents, type StoredEvent } from '../events/log.js';
 import { dailyCron } from '../goals/routine.js';
 import type { TaintSource } from '../policy/policy.js';
+import { sessionTaint } from '../policy/store.js';
 import type { JobResult } from '../scheduler/scheduler.js';
 import { createAutomation, type Automation } from '../scheduler/store.js';
 import type { RunQueue } from '../sessions/queue.js';
@@ -143,11 +144,13 @@ const DRAFT_STATES: Record<string, string> = {
 // a lost draft opens its window again, so the review sees the tasks of the other drafts of that window again. it must
 // not send a draft again that the owner denied, let expire, or did not answer yet. a draft that expired without an
 // answer is not lost, so the owner saw its card.
-function draftsText(db: Db, since: Date): string | undefined {
+// the names are model text of earlier reviews, so the taint of those reviews goes with the list.
+function draftsText(db: Db, since: Date): { text: string; taint: TaintSource[] } | undefined {
   const rows = db
-    .prepare(`SELECT input, status, resolvedBy, ${LOST} AS lost FROM approvals WHERE toolName = 'skill_write' AND requestedAt >= ? ORDER BY id`)
+    .prepare(`SELECT runId, input, status, resolvedBy, ${LOST} AS lost FROM approvals WHERE toolName = 'skill_write' AND requestedAt >= ? ORDER BY id`)
     .all(since.toISOString());
   if (!rows.length) return undefined;
+  const taint = [...new Set(rows.map((row) => String(row.runId)))].flatMap((runId) => sessionTaint(db, `${WORKSHOP_PREFIX}${runId}`));
   const lines = rows.map((row) => {
     const input = JSON.parse(String(row.input)) as { name?: unknown; replaces?: unknown };
     const name = typeof input.name === 'string' ? JSON.stringify(headOf(input.name, 64)) : 'a draft without a name';
@@ -158,7 +161,10 @@ function draftsText(db: Db, since: Date): string | undefined {
         : 'its card did not reach the owner, so it is not written';
     return `- ${name}${input.replaces === true ? ' (a change)' : ''}: ${state}`;
   });
-  return `Skill drafts since the start of this window. Do not propose again a draft that the owner denied, let expire, or that waits for the owner:\n${lines.join('\n')}`;
+  return {
+    text: `Skill drafts since the start of this window. Do not propose again a draft that the owner denied, let expire, or that waits for the owner:\n${lines.join('\n')}`,
+    taint,
+  };
 }
 
 export const SKILL_LOST_TEXT = 'The next skill review looks at that task again and can propose the skill again.';
@@ -363,12 +369,14 @@ export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => 
     if (window.start >= window.end) return { status: 'skipped', error: `the main session is already reviewed until ${local(window.start)}` };
     // this review covers the windows of the lost drafts that it knows now. a draft that gets lost later opens its
     // window for the next review. when the task limit cuts the window, a lost draft whose window goes past the cut
-    // stays lost, so its window opens again for the tasks after the cut.
+    // stays lost, and its window starts again at the cut. the next review then starts at the first task that this
+    // review left out, and does not show the same tasks each day.
     const lost = draftReviews(db).filter((each) => each.lost.length);
     const covered = (until: Date) => {
       for (const { runId, lost: ids, ...stored } of lost) {
-        if (Date.parse(stored.end) > until.getTime()) continue;
-        setSetting(db, `${WINDOW_OF}${runId}`, { ...stored, covered: [...new Set([...(stored.covered ?? []), ...ids])] }, clock());
+        const key = `${WINDOW_OF}${runId}`;
+        if (Date.parse(stored.end) <= until.getTime()) setSetting(db, key, { ...stored, covered: [...new Set([...(stored.covered ?? []), ...ids])] }, clock());
+        else if (Date.parse(stored.start) < until.getTime()) setSetting(db, key, { ...stored, start: until.toISOString() }, clock());
       }
     };
     const tasks = findTasks(db, window);
@@ -383,13 +391,14 @@ export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => 
     // so the mark and the end of a draft do not move past them. a reopened window can show old tasks first.
     const next = tasks[MAX_TASKS] ? new Date(tasks[MAX_TASKS].startedAt) : undefined;
     const end = next && next > window.start ? next : window.end;
+    const drafts = draftsText(db, window.start);
     const text = [
       `Skill review of the main session ${span}: ${tasks.length} long or corrected ${tasks.length === 1 ? 'task' : 'tasks'}.${left ? ` The last ${left} are left for the next review.` : ''}`,
       skillsText(config.paths.skills),
-      ...[draftsText(db, window.start)].filter((each) => each !== undefined),
+      ...(drafts ? [drafts.text] : []),
       ...shown.map((task, i) => taskText(task, i + 1)),
     ].join('\n\n');
-    const taint = [...new Map(shown.flatMap((task) => task.taint).map((each) => [each.source, each])).values()];
+    const taint = [...new Map([...shown.flatMap((task) => task.taint), ...(drafts?.taint ?? [])].map((each) => [each.source, each])).values()];
 
     const runId = (deps.newId ?? randomUUID)();
     const sessionKey = `${WORKSHOP_PREFIX}${runId}`;
