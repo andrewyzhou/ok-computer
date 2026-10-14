@@ -110,15 +110,18 @@ export function ownerRequest(db: Db, sessionKey: string, runId?: string): string
       (scope.runId === undefined
         ? undefined
         : db.prepare(`SELECT json_extract(payload, '$.text') AS text FROM events WHERE runId = ? AND type = 'user_message' ORDER BY seq DESC LIMIT 1`).get(scope.runId)) ??
-      db
-        .prepare(
-          `SELECT json_extract(payload, '$.text') AS text FROM events
-           WHERE sessionKey = ? AND type = 'user_message' AND seq > ${reset} ORDER BY seq DESC LIMIT 1`,
-        )
-        .get(key, key, 'session_reset');
+      // a message run without an owner message started from a forwarded message. an older owner message is not its task.
+      (trigger === 'message'
+        ? undefined
+        : db
+            .prepare(
+              `SELECT json_extract(payload, '$.text') AS text FROM events
+               WHERE sessionKey = ? AND type = 'user_message' AND seq > ${reset} ORDER BY seq DESC LIMIT 1`,
+            )
+            .get(key, key, 'session_reset'));
     if (owner) return `<owner_request>\n${escapeText(headOf(String(owner.text), REQUEST_LIMIT))}\n</owner_request>`;
   }
-  const start = ownRun
+  const start = ownRun || trigger === 'message'
     ? db.prepare(`SELECT json_extract(payload, '$.text') AS text FROM events WHERE runId = ? AND type = 'system_event' ORDER BY seq LIMIT 1`).get(scope.runId!)
     : db
         .prepare(
