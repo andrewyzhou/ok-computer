@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 import { createHarness } from '../../test/harness.js';
 import { getRunDetail } from '../dashboard/queries.js';
-import { textStep, toolStep } from '../models/fake.js';
+import { fakeResponse, textStep, toolStep, type FakeStep } from '../models/fake.js';
 import { ModelError } from '../models/types.js';
 import { registerSecret } from '../observability/redact.js';
 import { defineTool } from '../tools/registry.js';
@@ -155,5 +155,17 @@ describe('agent loop', () => {
       { chatTimeoutMs: 1 },
     );
     expect(await run('hi')).toMatchObject({ status: 'aborted', error: 'the run timed out' });
+  });
+
+  // a compaction runs before the reply. under the chat timeout it used the time of the reply, and the reply was lost.
+  it('does not count the time of the context build against the timeout of the run', async () => {
+    const answer: FakeStep = async (_call, signal) => {
+      if (signal?.aborted) throw new ModelError('aborted', 'aborted');
+      return fakeResponse({ text: 'hello' });
+    };
+    const { deps, run } = createHarness([answer], { chatTimeoutMs: 50 });
+    const build = deps.strategy.build.bind(deps.strategy);
+    deps.strategy = { name: 'slow', build: async (input) => (await new Promise((r) => setTimeout(r, 150)), build(input)) };
+    expect(await run('hi')).toMatchObject({ status: 'completed', text: 'hello' });
   });
 });

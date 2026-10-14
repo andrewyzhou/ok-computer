@@ -86,7 +86,19 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
   deps.activeRuns?.add(runId);
 
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(new Error('timeout')), timeoutMs);
+  // the time of a compaction does not count against the run. a compaction is a flush turn and up to three summary
+  // calls, and under the chat timeout it could use the time of the reply. it has the background timeout of its own.
+  let remainingMs = timeoutMs;
+  let timerStarted = Date.now();
+  let timer = setTimeout(() => abort.abort(new Error('timeout')), remainingMs);
+  const pauseTimer = () => {
+    clearTimeout(timer);
+    remainingMs -= Date.now() - timerStarted;
+  };
+  const resumeTimer = () => {
+    timerStarted = Date.now();
+    timer = setTimeout(() => abort.abort(new Error('timeout')), Math.max(remainingMs, 0));
+  };
   const onOuterAbort = () => abort.abort(input.signal?.reason);
   if (input.signal?.aborted) onOuterAbort();
   input.signal?.addEventListener('abort', onOuterAbort);
@@ -125,6 +137,7 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
     });
     const system = deps.stablePrompt(input.sessionKey);
     const toolSpecs = tools.specs(input.allowedTools);
+    const compactionSignal = () => AbortSignal.any([abort.signal, AbortSignal.timeout(config.agent.backgroundTimeoutMs)]);
     const compaction: CompactionHooks | undefined = input.noCompaction
       ? undefined
       : {
@@ -149,13 +162,17 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
         append({ type: 'note', payload: { text: error } });
         return { ...finish('failed', '', error), stoppedAtLimit: true };
       }
-      const request = await strategy.build({
-        sessionKey: input.sessionKey,
-        events: listEvents(db, input.sessionKey),
-        system,
-        tools: toolSpecs,
-        ...(compaction ? { compaction } : {}),
-      });
+      pauseTimer();
+      const request = await strategy
+        .build({
+          sessionKey: input.sessionKey,
+          events: listEvents(db, input.sessionKey),
+          system,
+          tools: toolSpecs,
+          ...(compaction ? { compaction: { ...compaction, signal: compactionSignal() } } : {}),
+        })
+        .finally(resumeTimer);
+      if (abort.signal.aborted) return finish('aborted', '', abortReason(abort.signal));
       const result = await slots.call(input.slot, request, {
         runId,
         signal: abort.signal,
