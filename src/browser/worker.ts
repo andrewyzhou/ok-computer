@@ -751,6 +751,8 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     return next;
   }
 
+  // the idle time counts from the end of the last step, so a long step never ends its own task. the callback of
+  // finally runs before the next work in the queue of the tab, for example the idle close.
   async function step(tab: Tab, input: StepInput, action: (page: Page) => Promise<string | void>): Promise<StepResult | BrowserRefusal> {
     return serial(tab, async () => {
       if (tab.crashed || tab.page.isClosed()) {
@@ -793,7 +795,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       }
       const title = await within(untraced(tab.page, () => tab.page.title()), t.capture).catch(() => '');
       return { ...base, ok: !error, note: error ? [error, stayed].filter(Boolean).join('. ') : note, title: typeof title === 'string' ? title : '' };
-    });
+    }).finally(() => (tab.lastUsed = performance.now()));
   }
 
   // most calls of an action have a timeout of their own, but a read in the page (a count, an evaluate, the html) waits
@@ -859,7 +861,9 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   // can open the profile with okc browser login.
   const timer = setInterval(() => {
     for (const tab of tasks.values()) {
-      if (performance.now() - tab.lastUsed > idleMs && !waitsForOwner(tab)) void serial(tab, () => endTab(tab, 'closed', 'no browser action for a while'));
+      // a step or an approval can come while the close waits in the queue of the tab, so the close checks again.
+      const idle = () => performance.now() - tab.lastUsed > idleMs && !waitsForOwner(tab);
+      if (idle()) void serial(tab, async () => (idle() ? endTab(tab, 'closed', 'no browser action for a while') : undefined));
     }
     if (context && !tabs.size && !busy && performance.now() - lastActivity > idleMs) {
       closing = true;
