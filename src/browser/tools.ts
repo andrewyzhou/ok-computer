@@ -291,6 +291,9 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
           .describe('each named field of the form and its value, or a list of values for a name that the form has more than once'),
       }),
       risk: 'external',
+      // a submit acts on the open task of any session, so the caller can be a session with no taint, such as an
+      // automation, where a broad allow rule of the owner holds. the owner approves each send.
+      needsApproval: true,
       async run({ url, button, fields }, ctx) {
         const result = await act(ctx, 'submit', { url, button, fields }, async (page, tab) => {
           if (!sameAddress(page.url(), url)) throw new Error(`the page is now ${page.url()}, not ${url}. Nothing was sent`);

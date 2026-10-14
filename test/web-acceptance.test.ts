@@ -15,17 +15,21 @@ afterAll(() => site?.close());
 
 const start = '2026-10-13T17:00:00Z';
 
-describe('browser_allow_domain', () => {
-  it('waits for the owner, also when a rule of the owner allows every tool', async () => {
+// a submit acts on the open task of any session, so the session that calls it can have no taint, for example an
+// automation. a broad allow rule of the owner must not send a form or widen an allowlist.
+const OWNER_CALLS = [
+  ['browser_allow_domain', { url: 'https://shop.example/', domain: 'pay.example', reason: 'checkout' }],
+  ['browser_submit', { url: 'https://shop.example/', button: 'Buy now', fields: {} }],
+] as const;
+
+describe.each(OWNER_CALLS)('%s', (name, input) => {
+  it('waits for the owner in a session with no taint, also when a rule of the owner allows every tool', async () => {
     const rules = [...BUILTIN_RULES, { id: 'okc.policy.json#1', tool: '*', effect: 'allow' as const }];
-    const t = createTestApp(
-      [toolStep({ id: 'c1', name: 'browser_allow_domain', input: { url: 'https://shop.example/', domain: 'pay.example', reason: 'checkout' } }), textStep('ok')],
-      { start, deps: { rules, web: { egress: fixtureEgress() } } },
-    );
+    const t = createTestApp([toolStep({ id: 'c1', name, input }), textStep('ok')], { start, deps: { rules, web: { egress: fixtureEgress() } } });
     await t.app.start();
     try {
-      await t.say('allow the payment site');
-      expect(t.rows("SELECT status FROM approvals WHERE toolName = 'browser_allow_domain'")).toEqual([{ status: 'pending' }]);
+      await t.say('go on');
+      expect(t.rows('SELECT status, toolName FROM approvals')).toEqual([{ status: 'pending', toolName: name }]);
       expect(t.rows('SELECT decision, rule FROM policy_decisions')).toEqual([{ decision: 'approve', rule: expect.anything() }]);
     } finally {
       await t.app.stop();
