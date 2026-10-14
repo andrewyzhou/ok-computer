@@ -25,7 +25,13 @@ interface Flow {
   verifier: string;
   discovery?: OAuthDiscoveryState;
   expiresAt: number;
+  // the configured scopes that the server did not grant at the code grant of this flow.
+  missing?: string[];
 }
+
+// the stored tokens also keep the scopes that the app asked for at the last sign-in. a server can grant fewer scopes
+// than it was asked for, so the scopes of the token cannot show if the config changed after the sign-in.
+type Tokens = StoredOAuthTokens & { requested?: string };
 
 // the sdk calls the provider in a fixed order during one auth(): discovery, state, verifier, redirect. the draft holds
 // these values until the redirect, which binds them to the state of the flow.
@@ -112,7 +118,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
   // new tokens that the credential manager did not take. a server with rotation already spent the old refresh token,
   // so a lost new set would end the sign-in at the next refresh. the provider uses this copy and saves it again at
   // each read, until a save works. a restart before that loses it.
-  const unsaved = new Map<string, StoredOAuthTokens>();
+  const unsaved = new Map<string, Tokens>();
   const saveUnsaved = async (id: string) => {
     const tokens = unsaved.get(id);
     if (!tokens) return;
@@ -175,25 +181,38 @@ export function createOAuth(deps: OAuthDeps): OAuth {
       },
       async tokens() {
         await saveUnsaved(id);
-        const tokens = unsaved.get(id) ?? (await readJson<StoredOAuthTokens>(tokensRef(id)));
+        const tokens = unsaved.get(id) ?? (await readJson<Tokens>(tokensRef(id)));
         // each token is a secret on its own. the redaction of the whole json text would miss a token in a header.
         registerSecret(tokens?.access_token, `${tokensRef(id)}#access`);
         registerSecret(tokens?.refresh_token, `${tokensRef(id)}#refresh`);
         // the owner can add a scope to the config after a sign-in. a token that never expires would then hold the old
-        // scopes for ever, so a token that does not name each configured scope makes the sdk start a new sign-in. a
-        // token without a scope, as after some refreshes, is kept, because the app cannot know what it holds.
-        const granted = tokens?.scope ? new Set(tokens.scope.split(/[\s,]+/)) : undefined;
-        const missing = auth?.scopes?.filter((scope) => !granted?.has(scope)) ?? [];
-        if (granted && missing.length) {
-          logger.warn('oauth token lacks a configured scope, so a new sign-in starts', { integration: id, missing });
+        // scopes for ever, so a configured scope that the last sign-in did not ask for makes the sdk start a new
+        // sign-in. the check uses the scopes that the app asked for, not the granted ones: a server can grant fewer,
+        // and a new sign-in would then end with a token that the app refuses again. a token from before this record
+        // uses the scopes that it names. a token without either is kept, because the app cannot know what it holds.
+        const scopes = tokens?.requested ?? tokens?.scope;
+        const asked = scopes ? new Set(scopes.split(/[\s,]+/)) : undefined;
+        const missing = auth?.scopes?.filter((scope) => !asked?.has(scope)) ?? [];
+        if (asked && missing.length) {
+          logger.warn('a configured scope is new since the last sign-in, so a new sign-in starts', { integration: id, missing });
           return undefined;
         }
         return tokens;
       },
-      async saveTokens(tokens) {
-        registerSecret(tokens.access_token, `${tokensRef(id)}#access`);
-        registerSecret(tokens.refresh_token, `${tokensRef(id)}#refresh`);
-        const before = unsaved.get(id) ?? (await readJson<StoredOAuthTokens>(tokensRef(id)).catch(() => undefined));
+      async saveTokens(given) {
+        registerSecret(given.access_token, `${tokensRef(id)}#access`);
+        registerSecret(given.refresh_token, `${tokensRef(id)}#refresh`);
+        const before = unsaved.get(id) ?? (await readJson<Tokens>(tokensRef(id)).catch(() => undefined));
+        // a code comes only through the callback, which marks its flow as active. a refresh keeps the record of the
+        // sign-in before it.
+        const flow = active.get(id);
+        const requested = flow ? auth?.scopes?.join(' ') : before?.requested;
+        const tokens: Tokens = requested === undefined ? given : { ...given, requested };
+        if (flow && auth?.scopes && given.scope) {
+          const granted = new Set(given.scope.split(/[\s,]+/));
+          const missing = auth.scopes.filter((scope) => !granted.has(scope));
+          if (missing.length) flow.missing = missing;
+        }
         try {
           await secrets.set(tokensRef(id), JSON.stringify(tokens));
           unsaved.delete(id);
@@ -395,7 +414,21 @@ export function createOAuth(deps: OAuthDeps): OAuth {
     try {
       await transport.finishAuth(url.searchParams);
       logger.info('oauth flow finished', { integration: id });
-      return { status: 200, integrationId: id, text: 'Connected. You can close this tab.' };
+      if (!flow.missing) return { status: 200, integrationId: id, text: 'Connected. You can close this tab.' };
+      // the token works, so the connection starts. the owner must still know which tools can fail, also later on the
+      // dashboard.
+      const text = `Connected, but the server did not grant these scopes: ${flow.missing.join(', ')}. Tools that need them fail with missing_scope.`;
+      logger.warn('oauth sign-in got fewer scopes than configured', { integration: id, missing: flow.missing });
+      try {
+        const now = clock().toISOString();
+        db.prepare(
+          `INSERT INTO integration_state (integrationId, lastError, lastErrorAt, updatedAt) VALUES (?, ?, ?, ?)
+           ON CONFLICT (integrationId) DO UPDATE SET lastError = excluded.lastError, lastErrorAt = excluded.lastErrorAt, updatedAt = excluded.updatedAt`,
+        ).run(id, text, now, now);
+      } catch (err) {
+        logger.error('integration state write failed', { integration: id, err });
+      }
+      return { status: 200, integrationId: id, text };
     } catch (err) {
       logger.error('oauth flow failed', { integration: id, err: errorText(err) });
       return { status: 400, integrationId: id, text: 'The sign-in did not finish. Start again from the dashboard.' };

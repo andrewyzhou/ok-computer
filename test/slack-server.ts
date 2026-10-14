@@ -194,7 +194,8 @@ export interface SlackOAuthServer {
   scopes: string[];
   tokenAuth: string[];
   stats: { mcpRequests: number; apiRequests: number; registrations: number; codeGrants: number; refreshGrants: number };
-  options: { rotation: boolean; refreshError: string | undefined };
+  // withhold names the scopes that a code grant leaves out, as a workspace admin can.
+  options: { rotation: boolean; refreshError: string | undefined; withhold: string[] };
   // expire ends every access token, so the next call refreshes. revoke also ends every refresh token.
   expire(): void;
   revoke(): void;
@@ -212,7 +213,7 @@ export async function startSlackOAuth(fake: SlackFake, options: Partial<SlackOAu
   const scopes: string[] = [];
   const tokenAuth: string[] = [];
   const stats = { mcpRequests: 0, apiRequests: 0, registrations: 0, codeGrants: 0, refreshGrants: 0 };
-  const settings: SlackOAuthServer['options'] = { rotation: false, refreshError: undefined, ...options };
+  const settings: SlackOAuthServer['options'] = { rotation: false, refreshError: undefined, withhold: [], ...options };
   let mcpBase = '';
   let apiBase = '';
 
@@ -314,7 +315,7 @@ export async function startSlackOAuth(fake: SlackFake, options: Partial<SlackOAu
           return refuse(res, 'invalid_code');
         }
         stats.codeGrants++;
-        return json(res, 200, issue(code.scope));
+        return json(res, 200, issue(code.scope.split(' ').filter((scope) => !settings.withhold.includes(scope)).join(',')));
       }
       if (params.get('grant_type') === 'refresh_token') {
         if (settings.refreshError) return refuse(res, settings.refreshError);
