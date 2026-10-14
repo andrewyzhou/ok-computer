@@ -4,11 +4,13 @@ import type {
   ModelCallRow,
   PolicyDecisionRow,
   RunDetail as RunDetailData,
+  StreamMessage,
   SubagentLink,
   TimelineItem,
   ToolCallRow,
   ToolCatalog,
 } from '../../../src/dashboard/types';
+import { useRef } from 'react';
 import { useApi } from '../api';
 import { Expand, Json, Load, Page, Panel, Status } from '../components';
 import { EventView } from '../events';
@@ -116,8 +118,13 @@ function Timeline({ items, className = 'timeline' }: { items: TimelineItem[]; cl
   );
 }
 
+// a message about one of the runs, or about an event of one of them.
+const aboutRuns = (ids: ReadonlySet<string>) => (message: StreamMessage) =>
+  (message.kind === 'run' && ids.has(message.run.id)) || (message.kind === 'event' && ids.has(message.event.runId ?? ''));
+
+// the parent writes no events while its delegate call waits, so the child timeline follows the events of the child.
 function ChildTimeline({ id }: { id: string }) {
-  const loaded = useApi<RunDetailData>(`/api/runs/${encodeURIComponent(id)}`);
+  const loaded = useApi<RunDetailData>(`/api/runs/${encodeURIComponent(id)}`, aboutRuns(new Set([id])));
   return <Load loaded={loaded}>{(detail) => <Timeline items={detail.timeline} className="timeline child" />}</Load>;
 }
 
@@ -294,10 +301,13 @@ function ToolCallItem({ call }: { call: ToolCallRow }) {
   );
 }
 
+const childrenOf = (timeline: TimelineItem[]) =>
+  timeline.flatMap((item) => (item.kind === 'model' ? item.tools : [item.call])).flatMap((call) => (call.child ? [call.child] : []));
+
 // the cost of a run counts its own model calls, the reviewer too. its children have their own runs, so their cost
 // shows next to it.
 function ChildCost({ timeline }: { timeline: TimelineItem[] }) {
-  const children = timeline.flatMap((item) => (item.kind === 'model' ? item.tools : [item.call])).flatMap((call) => (call.child ? [call.child] : []));
+  const children = childrenOf(timeline);
   if (!children.length) return null;
   const cost = children.reduce((sum, child) => sum + (child.costUsd ?? 0), 0);
   return (
@@ -309,10 +319,10 @@ function ChildCost({ timeline }: { timeline: TimelineItem[] }) {
 }
 
 export function RunDetail({ id }: { id: string }) {
-  const loaded = useApi<RunDetailData>(
-    `/api/runs/${encodeURIComponent(id)}`,
-    (message) => (message.kind === 'run' && message.run.id === id) || (message.kind === 'event' && message.event.runId === id),
-  );
+  // the status and the cost of each child show on this page too, and they change while the parent waits.
+  const runs = useRef<ReadonlySet<string>>(new Set());
+  const loaded = useApi<RunDetailData>(`/api/runs/${encodeURIComponent(id)}`, (message) => aboutRuns(runs.current)(message));
+  runs.current = new Set([id, ...childrenOf(loaded.data?.timeline ?? []).map((child) => child.childRunId)]);
   return (
     <Page title={`Run ${id.slice(0, 8)}`} actions={<a href="#/runs">All runs</a>}>
       <Load loaded={loaded}>
