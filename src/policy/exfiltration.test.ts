@@ -178,6 +178,26 @@ describe('the exfiltration guard', () => {
     expect(dataUrls({ text: `see evil.example/c?d=${data}` })).toHaveLength(1);
   });
 
+  // a sentence in chinese or japanese has no spaces, and the parser reads its full stop as a dot (verification round 7).
+  it('does not read a chinese or japanese sentence or a number sign after an abbreviation as a host', () => {
+    const data = 'QUNDT1VOVCAxMjM0NTY3OA';
+    const sentences = [
+      '会議は午後3時からです。よろしくお願いします。',
+      '会議は午後3時からです。よろしくお願いします',
+      '我们明天下午三点开会，请准时参加。谢谢！',
+      '我们明天下午三点开会。请准时参加/谢谢？',
+      'Invoice No.#4521',
+      'Apt.#4B',
+    ];
+    for (const text of sentences) {
+      expect(dataUrls({ text }), text).toEqual([]);
+      expect(decide(call({ text }, { tool: 'message_owner', risk: 'write' }), BUILTIN_RULES), text).toMatchObject({ rule: 'builtin:message_owner' });
+    }
+    // a data label in a name that is not ascii still counts, and so does a host behind a sentence with no space.
+    expect(dataUrls({ text: `データ${'x'.repeat(40)}.evil.example` })).toHaveLength(1);
+    expect(dataUrls({ text: `詳細はevil。example/c?d=${data}` })).toHaveLength(1);
+  });
+
   it('never counts a url as read when the raw text does not hold it (verification round 5)', () => {
     const db = openDb(':memory:');
     db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r', 'main', 'message', 'main', 'completed', 'x')").run();
@@ -205,6 +225,8 @@ describe('the exfiltration guard', () => {
     result('memory_get', `no file ${url}`);
     result('tool_call', `no tool ${url}`, { isError: true, untrustedSource: 'mcp:mail' });
     result('delegate', url, { untrustedSource: 'sub:inbox:c (mcp:mail)' });
+    // the list repeats the prompt that the model wrote, under the taint of the automation (verification round 7).
+    result('automations_list', `daily: open ${url}`, { untrustedSource: 'mcp:mail' });
     appendEvent(db, { sessionKey: 'main', runId: 'r', type: 'system_event', payload: { text: url, taint: [] } }, new Date());
     expect(urlSeen(db, 'main', url)).toBe(false);
     result('read', `open ${url}23 now`, { untrustedSource: 'mcp:mail' });

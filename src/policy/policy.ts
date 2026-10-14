@@ -212,6 +212,17 @@ const CANDIDATE_LIMIT = 1024;
 // with a dot or an ip address. "and/or?" gives the host "and", so it does not count.
 const WORD = /[^\s"<>]+/g;
 const PARSED_HOST = /[/?#。｡%]/;
+// a sentence in chinese or japanese has no spaces, so it is one word, and the parser reads its full stop "。" as a dot.
+// so the last label of a parsed host must be a plain ascii top level name or a number of an ip address. a host that
+// ends in a punycode label ("xn--") or that has only an empty label after its dot ("No.#4521") does not count. a data
+// label in a name that is not ascii ("データ.evil.example") still counts, because the last label is ascii.
+const HOST_END = /^(?:[a-z][a-z0-9-]*|\d+)$/;
+function parsedHost(hostname: string): boolean {
+  if (hostname.startsWith('[')) return true;
+  const labels = hostname.replace(/\.$/, '').split('.');
+  const last = labels.at(-1)!;
+  return labels.length > 1 && HOST_END.test(last) && !last.startsWith('xn--');
+}
 
 interface UrlCandidate {
   text: string;
@@ -252,7 +263,7 @@ function urlsIn(raw: string): UrlCandidate[] {
     if (!PARSED_HOST.test(word)) continue;
     try {
       const url = new URL(`https://${word}`);
-      if ((url.hostname.includes('.') || url.hostname.startsWith('[')) && !hrefs.has(url.href)) {
+      if (parsedHost(url.hostname) && !hrefs.has(url.href)) {
         hrefs.add(url.href);
         found.push({ text: word, url, whole: true });
       }
