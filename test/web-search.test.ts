@@ -50,7 +50,16 @@ describe.skipIf(!hasChrome())('web_search through the browser', { timeout: 60_00
     expect(out.content).toContain('1. Autumn shirts for autumn shirts\n   https://shirts.example/autumn');
     expect(out.content).toContain('https://wiki.example/Shirt');
     expect(s.h.tasks()).toMatchObject([{ kind: 'search', status: 'closed' }]);
-    expect(s.h.steps()).toMatchObject([{ action: 'search', target: JSON.stringify('google: autumn shirts'), screenshotBlob: expect.any(String) }]);
+    const [search, ...rest] = s.h.steps();
+    expect(search).toMatchObject({ action: 'search', target: JSON.stringify('google: autumn shirts'), screenshotBlob: expect.any(String) });
+    // chrome makes its own requests in the background, for example to accounts.google.com. the proxy records a block
+    // on each open tab, so the close of the tab can write one more row. the gate stays as it is. the row must hold
+    // only hosts outside the fixture, so a request of a fixture page still fails the test.
+    expect(rest.length).toBeLessThanOrEqual(1);
+    for (const row of rest) {
+      expect(row).toMatchObject({ action: 'close', sent: null });
+      expect(`${String(row.blockedRequests)} ${String(row.offsiteHosts)}`).not.toMatch(/\.test\b/);
+    }
   });
 
   // a search during an open task goes into the trace of the task: the screencast shows the search page, and each
