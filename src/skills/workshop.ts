@@ -77,6 +77,8 @@ export function installWorkshop(db: Db, config: Pick<Config, 'timeZone'>, now: D
 export interface Window {
   start: Date;
   end: Date;
+  // set when a lost draft moved the start before the mark of the last finished review.
+  reopened?: true;
 }
 
 // the window starts where the last finished review stopped and ends at the start of today. without a mark it starts
@@ -96,7 +98,8 @@ export function reviewWindow(db: Db, now: Date, timeZone: string): Window {
   const start = marks.length ? Math.max(...marks, floor) : yesterday.getTime();
   // a lost draft opens the window of its review again, also when a later mark is after it.
   const lost = reviews.filter((review) => review.lost.length).map((review) => Date.parse(review.start));
-  return { start: new Date(Math.max(Math.min(start, ...lost), floor)), end };
+  const opened = Math.max(Math.min(start, ...lost), floor);
+  return { start: new Date(opened), end, ...(opened < start ? { reopened: true as const } : {}) };
 }
 
 // a draft is lost when it expired before it ran, and the owner approved it or never got its card. the app stopped
@@ -389,13 +392,16 @@ export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => 
     }
     const shown = tasks.slice(0, MAX_TASKS);
     const left = tasks.length - shown.length;
-    // the tasks that the limit leaves out go to the next review. this review covers the time up to the first of them,
-    // so the mark and the end of a draft do not move past them. a reopened window can show old tasks first.
-    const next = tasks[MAX_TASKS] ? new Date(tasks[MAX_TASKS].startedAt) : undefined;
+    // a window that a lost draft opened again shows its old tasks first. so in that window the tasks after the limit
+    // go to the next review: this review covers only the time up to the first of them. the next window then starts at
+    // the mark and covers the rest. in a normal window the tasks after the limit are left out. if they also went to
+    // the next review, each day with more than 5 tasks would push the reviews one day further back, until the floor
+    // of a week drops the old tasks without a note.
+    const next = window.reopened && tasks[MAX_TASKS] ? new Date(tasks[MAX_TASKS].startedAt) : undefined;
     const end = next && next > window.start ? next : window.end;
     const drafts = draftsText(db, window.start);
     const text = [
-      `Skill review of the main session ${span}: ${tasks.length} long or corrected ${tasks.length === 1 ? 'task' : 'tasks'}.${left ? ` The last ${left} are left for the next review.` : ''}`,
+      `Skill review of the main session ${span}: ${tasks.length} long or corrected ${tasks.length === 1 ? 'task' : 'tasks'}.${left ? ` The last ${left} are left out of this review.` : ''}`,
       skillsText(config.paths.skills),
       ...(drafts ? [drafts.text] : []),
       ...shown.map((task, i) => taskText(task, i + 1)),

@@ -311,7 +311,7 @@ describe('the workshop job', () => {
     db.prepare("UPDATE approvals SET status = 'expired', resolvedBy = 'button', resolvedAt = ? WHERE id = 1").run(now.toISOString());
     now = at('09:00', '2026-10-14');
     expect((await review(automation)).status).toBe('completed');
-    expect(inputs[1]).toContain('from 2026-10-12 00:00 to 2026-10-14 00:00: 8 long or corrected tasks. The last 3 are left for the next review.');
+    expect(inputs[1]).toContain('from 2026-10-12 00:00 to 2026-10-14 00:00: 8 long or corrected tasks. The last 3 are left out of this review.');
     expect(inputs[1]).not.toContain('owner: new task');
     expect(getSetting(db, REVIEWED_UNTIL)).toBe(at('11:00', '2026-10-13').toISOString());
     now = at('09:00', '2026-10-15');
@@ -321,14 +321,28 @@ describe('the workshop job', () => {
     expect(getSetting(db, REVIEWED_UNTIL)).toBe(at('00:00', '2026-10-15').toISOString());
   });
 
-  it('keeps the end of a review with a draft at the first task that the limit leaves out', async () => {
+  it('moves the end of a normal window with a draft past the tasks that the limit leaves out', async () => {
     const db = openDb(':memory:');
     for (let i = 1; i <= 6; i++) run(db, `t${i}`, at(`1${i}:00`), `task ${i}`, LONG_TASK_CALLS);
     const now = at('09:00', '2026-10-13');
     // the review sends a draft and fails, so only its own mark moves.
     const review = job(db, now, draft(db, now));
     expect((await review(automation)).status).toBe('failed');
-    expect(reviewWindow(db, now, tz).start).toEqual(at('16:00'));
+    expect(reviewWindow(db, now, tz).start).toEqual(at('00:00', '2026-10-13'));
+  });
+
+  it('keeps each daily review on the day before when each day has more tasks than the limit', async () => {
+    const db = openDb(':memory:');
+    const days = ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15'];
+    for (const day of days) for (let i = 1; i <= 6; i++) run(db, `${day}-${i}`, at(`1${i}:00`, day), `task ${i} of ${day}`, LONG_TASK_CALLS);
+    let now = at('09:00', '2026-10-13');
+    const inputs: string[] = [];
+    const review = drafting(db, () => now, [], inputs);
+    for (const [i, day] of days.entries()) {
+      now = at('09:00', days[i + 1] ?? '2026-10-16');
+      expect((await review(automation)).status).toBe('completed');
+      expect(inputs[i]).toContain(`from ${day} 00:00 to ${days[i + 1] ?? '2026-10-16'} 00:00: 6 long or corrected tasks. The last 1 are left out of this review.`);
+    }
   });
 
   it('opens the window again for a second draft of a review that gets lost after a later review covered the first', async () => {
@@ -373,7 +387,7 @@ describe('the workshop job', () => {
     db.prepare("UPDATE approvals SET status = 'expired', resolvedAt = ? WHERE id IN (1, 2)").run(at('09:30', '2026-10-14').toISOString());
     now = at('09:00', '2026-10-15');
     expect((await review(automation)).status).toBe('completed');
-    expect(inputs[2]).toContain('6 long or corrected tasks. The last 1 are left for the next review.');
+    expect(inputs[2]).toContain('6 long or corrected tasks. The last 1 are left out of this review.');
     expect(inputs[2]).not.toContain('owner: day13 task 2');
     // the window of the second lost draft goes past the cut, so it opens again at the cut for the task after it.
     now = at('09:00', '2026-10-16');
@@ -400,7 +414,7 @@ describe('the workshop job', () => {
     db.prepare("UPDATE approvals SET status = 'expired', resolvedBy = 'button', resolvedAt = ? WHERE id = 2").run(at('09:05', '2026-10-14').toISOString());
     now = at('09:00', '2026-10-15');
     expect((await review(automation)).status).toBe('completed');
-    expect(inputs[2]).toContain('8 long or corrected tasks. The last 3 are left for the next review.');
+    expect(inputs[2]).toContain('8 long or corrected tasks. The last 3 are left out of this review.');
     expect(getSetting<{ covered?: number[] }>(db, `${WINDOW_OF}review-1`)?.covered).toEqual([1]);
     expect(getSetting<{ covered?: number[] }>(db, `${WINDOW_OF}review-2`)?.covered).toBeUndefined();
     now = at('09:00', '2026-10-16');
@@ -425,7 +439,7 @@ describe('the workshop job', () => {
     // the reopened window joins the 23:50 run and the correction into a sixth task, and the limit cuts there.
     now = at('09:00', '2026-10-15');
     expect((await review(automation)).status).toBe('completed');
-    expect(inputs[1]).toContain('The last 4 are left for the next review.');
+    expect(inputs[1]).toContain('The last 4 are left out of this review.');
     now = at('09:00', '2026-10-16');
     expect(reviewWindow(db, now, tz).start).toEqual(at('23:50'));
     expect((await review(automation)).status).toBe('completed');
