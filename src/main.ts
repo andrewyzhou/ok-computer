@@ -64,21 +64,23 @@ async function main(): Promise<void> {
 
   let dashboard: RunningDashboard | undefined;
   let stopping = false;
-  const stop = async (reason: string) => {
+  const stop = async (reason: string, code = 0) => {
     if (stopping) return;
     stopping = true;
     logger.info('shutting down', { reason });
     await dashboard?.close();
     await app.stop();
     db.close();
-    exitWhenIdle(0);
+    exitWhenIdle(code);
   };
 
   const channels: ChannelAdapter[] = [];
   const ownerIds: Record<string, string> = {};
   // npm run chat is the cli only. without a token or an owner id, telegram does not start and the cli still runs.
   if (!chatMode && secrets.telegramBotToken && telegramOwnerId) {
-    channels.push(createTelegramChannel({ bot: new Bot(secrets.telegramBotToken), ownerId: telegramOwnerId, logger }));
+    // a new start polls again. the supervisor waits longer after each quick stop, so a wrong token does not loop fast.
+    const onPollingFailed = () => void stop('telegram polling stopped', 1);
+    channels.push(createTelegramChannel({ bot: new Bot(secrets.telegramBotToken), ownerId: telegramOwnerId, logger, onPollingFailed }));
     ownerIds[TELEGRAM] = telegramOwnerId;
   } else if (!chatMode) {
     logger.info('telegram is off, because TELEGRAM_BOT_TOKEN or TELEGRAM_OWNER_ID is not set');

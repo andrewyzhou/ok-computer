@@ -110,6 +110,27 @@ describe('telegram channel', () => {
     await channel.stop();
   });
 
+  // grammy ends polling on a 409 (another process polls) and on a 401 (a wrong token). the app must not stay up deaf.
+  it('tells the app when polling ends without a stop, and not after a stop', async () => {
+    for (const code of [409, 401]) {
+      const fake = createFakeTelegram();
+      fake.refuse((c) => (c.method === 'getUpdates' ? code : false));
+      let failed = 0;
+      const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock, onPollingFailed: () => failed++ });
+      await channel.start(() => {});
+      await until(() => failed === 1);
+      await channel.stop();
+    }
+    const fake = createFakeTelegram();
+    let failed = 0;
+    const channel = createTelegramChannel({ bot: fake.bot, ownerId: '777', logger: silentLogger, clock, onPollingFailed: () => failed++ });
+    await channel.start(() => {});
+    await until(() => fake.calls.some((c) => c.method === 'getUpdates'));
+    await channel.stop();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(failed).toBe(0);
+  });
+
   // telegram refuses the answer to a press that waited while the app restarted. the press must still reach the app.
   it('passes on a press when telegram refuses the answer to it', async () => {
     const fake = createFakeTelegram();

@@ -84,6 +84,9 @@ export interface TelegramOptions {
   ownerId: string;
   logger: Logger;
   clock?: Clock;
+  // polling that ended without a stop, for example on a 401 or a 409. the process then ends, and the supervisor
+  // starts it again.
+  onPollingFailed?: () => void;
 }
 
 // model replies go out as rich markdown. other text, for example an approval card, never goes through a markdown
@@ -218,13 +221,18 @@ export function createTelegramChannel(options: TelegramOptions): ChannelAdapter 
       bot.api
         .setMyCommands(COMMANDS, { scope: { type: 'chat', chat_id: Number(options.ownerId) } })
         .catch((err: unknown) => logger.warn('telegram commands menu not set', { err }));
-      // polling runs in the background. a network failure is logged, and the other channels keep working.
+      // polling runs in the background, and grammy tries a network failure again. it ends polling on a 401 (a wrong
+      // token) or a 409 (another process polls with the same token). a process without polling looks healthy, so the
+      // owner would not know that telegram is deaf.
       void bot
         .start({
           allowed_updates: ALLOWED_UPDATES,
           onStart: (info) => logger.info('telegram polling started', { username: info.username }),
         })
-        .catch((err: unknown) => logger.error('telegram polling stopped', { err }));
+        .catch((err: unknown) => {
+          logger.error('telegram polling stopped', { err });
+          options.onPollingFailed?.();
+        });
     },
     async stop() {
       if (bot.isRunning()) await bot.stop();
