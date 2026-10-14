@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { createDelegateTool, PROFILES, profileOf, SUBAGENT_INSTRUCTIONS } from './agent/delegate.js';
 import { runAgent, type AgentDeps } from './agent/loop.js';
-import { closeStaleWork, interruptedText, repairSession } from './agent/recovery.js';
+import { closeStaleWork, interruptedText, repairSession, replyLost } from './agent/recovery.js';
 import { buildStablePrompt } from './agent/system-prompt.js';
 import { approvalNote, createApprovalFlow, type ApprovalFlow } from './approvals/flow.js';
 import { expireApprovals, type Approval } from './approvals/store.js';
@@ -314,6 +314,10 @@ export function createApp(deps: AppDeps): App {
       }
       const stale = closeStaleWork(db, now, staleMs, { runs: activeRuns, approvals: approvals.active });
       if (stale.runs.length) logger.warn('closed the runs of a stopped process', { runs: stale.runs.map((run) => run.id) });
+      // the owner waits for the reply of such a run. the message has no link, because the reply was not checked.
+      for (const run of stale.runs.filter((each) => replyLost(db, each.id, false))) {
+        void owner.send(`The app stopped while the reviewer checked a reply (run ${run.id.slice(0, 8)}), so the reply did not come to the chat. The run page on the dashboard shows it.`);
+      }
       // the next run of a session repairs its calls. an isolated automation and the heartbeat have a session for
       // each run, so no next run comes, and the sweep repairs it. that session belongs to the stale run alone, so no
       // live turn of another process can be in it. a shared session can have such a turn, so the sweep leaves it.

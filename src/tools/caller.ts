@@ -6,7 +6,7 @@ import type { ToolCall } from '../models/types.js';
 import type { BlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
 import { redact, redactedJson } from '../observability/redact.js';
-import { decide, SUBAGENT_PREFIX, type ReviewResult, type Reviewer, type Risk, type Rule, type TaintSource } from '../policy/policy.js';
+import { decide, reviewCallOf, SUBAGENT_PREFIX, type ReviewResult, type Reviewer, type Risk, type Rule, type TaintSource } from '../policy/policy.js';
 import { decisionOfApproval, recordDecision, sessionTaint, updateDecision, urlSeen } from '../policy/store.js';
 import type { RunQueue } from '../sessions/queue.js';
 import type { Clock } from '../time.js';
@@ -339,7 +339,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         logger.warn('reviewer failed, so the owner decides', { runId: ctx.runId, toolCallId: call.id, tool: tool.name, err });
         // the error goes on the card in the chat, so it is redacted here and not only in the store.
         reason = `${reason}. the reviewer failed (${redact(errorText(err))}), so the owner decides`;
-        updateDecision(db, decisionId, { reason });
+        updateDecision(db, decisionId, { reason, reviewerModelCallId: reviewCallOf(err) });
         return { ...gate, held: await askOwner() };
       }
       if (review === STOPPED) {

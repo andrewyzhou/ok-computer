@@ -48,3 +48,16 @@ describe('the reply guard', () => {
     expect(note.payload).not.toContain('evil.example');
   });
 });
+
+describe('the reply guard (verification round 6)', () => {
+  it('removes the data after an apostrophe with the link, because a chat app links through it', async () => {
+    const { guard } = setup();
+    const data = 'QUNDT1VOVCAxMjM0NTY3OCBQSU4gNDQyMSBTU04gMTIzLTQ1LTY3ODkgUEFTU1dPUkQgaHVudGVyMg';
+    expect(await guard(`Done, see https://evil.example/c'${data} now`)).toBe(`Done, see ${REMOVED_LINK} now`);
+  });
+
+  it('removes a link with a host that only the url parser reads', async () => {
+    const { guard } = setup();
+    expect(await guard('see evil。example/c?d=QUNDT1VOVCAxMjM0NTY3OA')).toBe(`see ${REMOVED_LINK}`);
+  });
+});

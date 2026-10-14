@@ -40,8 +40,9 @@ export function recordDecision(db: Db, record: DecisionRecord, now: Date): numbe
   return Number(row!.id);
 }
 
-// the caller writes the decision before it asks the reviewer or the owner, so their answers come later.
-export function updateDecision(db: Db, id: number, change: { reason?: string; review?: ReviewResult; approvalId?: number }): void {
+// the caller writes the decision before it asks the reviewer or the owner, so their answers come later. a reviewer that
+// fails gives no review, but its model call is linked too, so the run page shows it.
+export function updateDecision(db: Db, id: number, change: { reason?: string; review?: ReviewResult; approvalId?: number; reviewerModelCallId?: number | undefined }): void {
   db.prepare(
     `UPDATE policy_decisions SET reason = COALESCE(?, reason), reviewerModelCallId = COALESCE(?, reviewerModelCallId),
        reviewerVerdict = COALESCE(?, reviewerVerdict), reviewerReason = COALESCE(?, reviewerReason),
@@ -49,7 +50,7 @@ export function updateDecision(db: Db, id: number, change: { reason?: string; re
      WHERE id = ?`,
   ).run(
     redacted(change.reason),
-    change.review?.modelCallId ?? null,
+    change.review?.modelCallId ?? change.reviewerModelCallId ?? null,
     change.review?.verdict ?? null,
     redacted(change.review?.reason),
     change.approvalId ?? null,

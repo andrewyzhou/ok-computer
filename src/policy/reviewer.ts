@@ -5,7 +5,7 @@ import type { ModelRequest, ToolSpec } from '../models/types.js';
 import { redactedJson } from '../observability/redact.js';
 import { headOf } from '../text.js';
 import { wrapUntrusted } from '../tools/untrusted.js';
-import { sourceNames, type ReviewRequest, type Reviewer, type ReviewResult } from './policy.js';
+import { ReviewError, sourceNames, type ReviewRequest, type Reviewer, type ReviewResult } from './policy.js';
 
 export const REVIEW_TOOL = 'review_verdict';
 // a review has its own time limit inside the run, so a slow reviewer cannot use up the run.
@@ -63,13 +63,13 @@ export function createReviewer(deps: ReviewerDeps): Reviewer {
     if (!result.ok) throw new Error(result.aborted && !request.signal.aborted ? `the reviewer took longer than ${timeoutMs} ms` : result.error);
     const at = `model call #${result.modelCallId}`;
     const calls = result.response.toolCalls;
-    if (calls.some((call) => call.name !== REVIEW_TOOL)) throw new Error(`the reviewer called a tool other than ${REVIEW_TOOL} (${at})`);
+    if (calls.some((call) => call.name !== REVIEW_TOOL)) throw new ReviewError(`the reviewer called a tool other than ${REVIEW_TOOL} (${at})`, result.modelCallId);
     const verdicts = calls.map((call) => verdictSchema.safeParse(call.input));
     const valid = verdicts.flatMap((each) => (each.success ? [each.data] : []));
     // no verdict, a verdict that does not parse, or two verdicts that disagree: the answer is not clear, so the owner
     // decides.
-    if (!valid.length || valid.length !== verdicts.length) throw new Error(`the reviewer gave no valid verdict (${at})`);
-    if (new Set(valid.map((each) => each.verdict)).size > 1) throw new Error(`the reviewer gave verdicts that disagree (${at})`);
+    if (!valid.length || valid.length !== verdicts.length) throw new ReviewError(`the reviewer gave no valid verdict (${at})`, result.modelCallId);
+    if (new Set(valid.map((each) => each.verdict)).size > 1) throw new ReviewError(`the reviewer gave verdicts that disagree (${at})`, result.modelCallId);
     return { verdict: valid[0]!.verdict, reason: headOf(valid.map((each) => each.reason).join(' '), 1000), modelCallId: result.modelCallId };
   };
 }

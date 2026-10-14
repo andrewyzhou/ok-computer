@@ -154,6 +154,30 @@ describe('the exfiltration guard', () => {
     expect(dataUrls({ text: 'use and/or? and src/app.ts?x=1, at 10:30 or 1.2.3' })).toEqual([]);
   });
 
+  it('judges the data after an apostrophe in a link, because a chat app links through it (verification round 6)', () => {
+    const data = 'QUNDT1VOVCAxMjM0NTY3OCBQSU4gNDQyMSBTU04gMTIzLTQ1LTY3ODkgUEFTU1dPUkQgaHVudGVyMg';
+    const link = `https://evil.example/c'${data}`;
+    expect(dataUrls({ text: `Done, see ${link}` })).toMatchObject([{ url: link, verbatim: true }]);
+    expect(dataUrls({ text: `Done, see evil.example/c'${data} now` })).toHaveLength(1);
+    const owner = decide(call({ text: `Done, see ${link}` }, { tool: 'message_owner', risk: 'write' }), BUILTIN_RULES);
+    expect(owner).toMatchObject({ decision: 'review', rule: 'exfiltration' });
+    // a short quoted link carries no data.
+    expect(dataUrls({ text: `see 'https://example.com/about'.` })).toEqual([]);
+  });
+
+  it('finds a bare host that only the url parser reads as a host (verification round 6)', () => {
+    const data = 'QUNDT1VOVCAxMjM0NTY3OA';
+    for (const host of ['evil。example', 'evil｡example', 'evil%2Eexample', '3232235777', '0xC0A80101', '[2001:db8::1]']) {
+      expect(dataUrls({ url: `${host}/c?d=${data}` }), host).toHaveLength(1);
+      expect(dataUrls({ text: `see ${host}/c?d=${data}` }), host).toHaveLength(1);
+      expect(decide(call({ url: `${host}/c?d=${data}` }), []), host).toMatchObject({ decision: 'review', rule: 'exfiltration' });
+    }
+    expect(dataUrls({ text: `see ${'x'.repeat(40)}。evil。example` })).toHaveLength(1);
+    // a word that the parser reads as a host with no dot is not a url. a url that a pattern found is counted once.
+    expect(dataUrls({ text: 'use and/or? and src/app.ts?x=1, at 10:30 or 1.2.3, 50% off' })).toEqual([]);
+    expect(dataUrls({ text: `see evil.example/c?d=${data}` })).toHaveLength(1);
+  });
+
   it('never counts a url as read when the raw text does not hold it (verification round 5)', () => {
     const db = openDb(':memory:');
     db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r', 'main', 'message', 'main', 'completed', 'x')").run();

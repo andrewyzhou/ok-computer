@@ -2,7 +2,8 @@ import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
 import type { Clock } from '../time.js';
-import { dataUrls, sourceNames, unseenUrls, type ReviewResult, type Reviewer } from './policy.js';
+import { errorText } from '../tools/registry.js';
+import { dataUrls, linkOf, reviewCallOf, sourceNames, unseenUrls, type ReviewResult, type Reviewer } from './policy.js';
 import { recordDecision, sessionTaint, updateDecision, urlSeen } from './store.js';
 
 // the final reply of a run goes to the owner's chat with no tool call, and a chat app fetches a link preview. so in a
@@ -46,6 +47,7 @@ export async function guardReply(
     clock(),
   );
   let review: ReviewResult | undefined;
+  let failed = false;
   try {
     review = await deps.reviewer?.({
       runId: run.runId,
@@ -59,11 +61,14 @@ export async function guardReply(
     });
   } catch (err) {
     deps.logger.warn('the review of a reply failed', { runId: run.runId, err });
+    // the trace keeps the failure and the paid model call, as for a tool call.
+    failed = true;
+    updateDecision(db, decisionId, { reason: `${reason}. the reviewer failed (${errorText(err)})`, reviewerModelCallId: reviewCallOf(err) });
   }
   if (review) updateDecision(db, decisionId, { review });
   if (review?.verdict === 'allow') return text;
   const sent = withoutLinks(text, unseen.map((each) => each.url));
-  const why = review ? 'the reviewer held it' : 'it had no review';
+  const why = review ? 'the reviewer held it' : failed ? 'the review failed' : 'it had no review';
   const what = sent === REMOVED_REPLY ? 'the chat got only a short notice in its place' : 'the chat got it without the links that can carry data';
   // the note does not repeat the links. the next run reads it, so the model knows that the owner did not see them.
   appendEvent(db, { sessionKey: run.sessionKey, runId: run.runId, type: 'note', payload: { text: `${REPLY_NOTE}: ${why}, so ${what}.` } }, clock());
@@ -71,11 +76,11 @@ export async function guardReply(
   return sent;
 }
 
-// a chat app makes a link only of the text up to a space or a quote. a longer link goes first, so a shorter link
+// a chat app makes a link only of the text up to a space or a double quote. a longer link goes first, so a shorter link
 // inside it cannot leave a part of it. the finder reads the nfkc form, so a link that the text does not hold verbatim
 // makes the whole reply go.
 function withoutLinks(text: string, urls: string[]): string {
-  const links = [...new Set(urls.map((url) => url.split(/[\s"'<>]/)[0]!))].sort((a, b) => b.length - a.length);
+  const links = [...new Set(urls.map(linkOf))].sort((a, b) => b.length - a.length);
   if (links.some((link) => !text.includes(link))) return REMOVED_REPLY;
   return links.reduce((out, link) => out.split(link).join(REMOVED_LINK), text);
 }

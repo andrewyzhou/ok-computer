@@ -3,7 +3,7 @@ import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
 import { redactedJson } from '../observability/redact.js';
-import { dataUrls, SOURCE_LIMIT, SOURCE_NAME_LIMIT, type TaintSource } from '../policy/policy.js';
+import { dataUrls, linkOf, SOURCE_LIMIT, SOURCE_NAME_LIMIT, type TaintSource } from '../policy/policy.js';
 import { decisionForApproval } from '../policy/store.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
 import type { RunQueue } from '../sessions/queue.js';
@@ -233,7 +233,7 @@ export function withoutLiveLinks(text: string): string {
   return text
     .split('\n')
     .map((line) => {
-      const links = [...new Set(dataUrls(line).map((each) => each.url.split(/[\s"'<>]/)[0]!))].sort((a, b) => b.length - a.length);
+      const links = [...new Set(dataUrls(line).map((each) => linkOf(each.url)))].sort((a, b) => b.length - a.length);
       // the finder reads the nfkc form. a link that the line does not hold verbatim makes the marks break in all of it.
       if (links.some((link) => !line.includes(link))) return broken(line);
       return links.reduce((out, link) => out.split(link).join(broken(link)), line);
