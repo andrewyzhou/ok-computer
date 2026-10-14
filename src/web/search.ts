@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { untraced, type BrowserWorker } from '../browser/worker.js';
 import type { Db } from '../db/index.js';
 import { getSetting, setSetting } from '../db/settings.js';
+import { redact } from '../observability/redact.js';
 import { defineTool, type Tool } from '../tools/registry.js';
 import { localDay, localTime, type Clock } from '../time.js';
 
@@ -67,9 +68,13 @@ async function readPage(page: Page, engine: Engine['id']): Promise<Seen> {
   return untraced(page, () => page.evaluate((id) => {
     const doc = (globalThis as unknown as { document: Loose; location: Loose }).document;
     const where = (globalThis as unknown as { location: { pathname: string; hostname: string } }).location;
+    // a results page shows the query in its titles, so a search about an "unusual traffic" message paused both engines
+    // (r5 probe). the text of a captcha page counts only on a page without results.
     const text = String(doc.body?.innerText ?? '').slice(0, 5000);
+    const found = (results: SearchResult[], words: RegExp) =>
+      results.length ? { kind: 'results' as const, results } : words.test(text) ? { kind: 'captcha' as const } : { kind: 'nothing' as const };
     if (id === 'google') {
-      if (where.pathname.startsWith('/sorry') || doc.querySelector('#captcha-form, form[action*="sorry"], iframe[src*="recaptcha"]') || /unusual traffic/i.test(text)) return { kind: 'captcha' as const };
+      if (where.pathname.startsWith('/sorry') || doc.querySelector('#captcha-form, form[action*="sorry"], iframe[src*="recaptcha"]')) return { kind: 'captcha' as const };
       if (where.hostname.startsWith('consent.') || doc.querySelector('form[action*="consent"]')) return { kind: 'consent' as const };
       const root = doc.querySelector('#search') ?? doc.querySelector('#rso') ?? doc.body;
       const results: SearchResult[] = [];
@@ -88,9 +93,9 @@ async function readPage(page: Page, engine: Engine['id']): Promise<Seen> {
         const snippet = String(box?.innerText ?? '').replace(title, '').replace(/\s+/g, ' ').trim().slice(0, 300);
         results.push({ title, url, snippet });
       }
-      return results.length ? { kind: 'results' as const, results } : { kind: 'nothing' as const };
+      return found(results, /unusual traffic/i);
     }
-    if (doc.querySelector('.anomaly-modal, #challenge-form') || /bots use DuckDuckGo too|unusual activity/i.test(text)) return { kind: 'captcha' as const };
+    if (doc.querySelector('.anomaly-modal, #challenge-form')) return { kind: 'captcha' as const };
     const results: SearchResult[] = [];
     for (const box of Array.from(doc.querySelectorAll('.result') as unknown as ArrayLike<Loose>)) {
       const link = box.querySelector('a.result__a');
@@ -104,7 +109,7 @@ async function readPage(page: Page, engine: Engine['id']): Promise<Seen> {
       }
       results.push({ title: String(link.innerText ?? '').trim(), url, snippet: String(box.querySelector('.result__snippet')?.innerText ?? '').trim().slice(0, 300) });
     }
-    return results.length ? { kind: 'results' as const, results } : { kind: 'nothing' as const };
+    return found(results, /bots use DuckDuckGo too|unusual activity/i);
   }, engine));
 }
 
@@ -153,6 +158,11 @@ export function createWebSearchTool(deps: SearchDeps): Tool {
     risk: 'read',
     untrustedOutput: 'web_search',
     run({ query, engine: first }, ctx) {
+      // a search that runs while a task is open goes into the trace of that task: the console messages of the search
+      // page keep its address with the query, and the screencast shows it (r5 probes). a search never needs a secret.
+      if (redact(query) !== query) {
+        return Promise.resolve({ content: 'The query holds text with the shape of a secret, such as an api key. Nothing was searched. Search without it.', isError: true, effect: 'none' as const });
+      }
       const work = async () => {
         const order = first ? [...engines.filter((e) => e.id === first), ...engines.filter((e) => e.id !== first)] : engines;
         const notes: string[] = [];

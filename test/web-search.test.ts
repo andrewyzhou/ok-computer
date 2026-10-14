@@ -53,16 +53,36 @@ describe.skipIf(!hasChrome())('web_search through the browser', { timeout: 60_00
     expect(s.h.steps()).toMatchObject([{ action: 'search', target: JSON.stringify('google: autumn shirts'), screenshotBlob: expect.any(String) }]);
   });
 
-  it('keeps the query of a search out of the trace of a task that is open at the same time', async () => {
+  // a search during an open task goes into the trace of the task: the screencast shows the search page, and each
+  // console message keeps its address (r5 probes). so a query with a secret is refused before any page opens.
+  it('searches for no secret, so none reaches the trace of a task that is open at the same time', async () => {
     const s = setup();
     await s.h.run('browser_open', { url: site.url('shop.test', '/about') });
+    const hits = site.hits.length;
     // not a real secret: a value with the shape of an api key.
     const out = await s.search('what is sk-ant-api03-PROBESECRETvalue0123456789');
-    expect(out.isError).toBeFalsy();
+    expect(out).toMatchObject({ isError: true, effect: 'none', content: expect.stringContaining('the shape of a secret') });
+    expect(site.hits.length).toBe(hits);
     await s.h.run('browser_close', {});
     const trace = [...traceEntries(join(s.h.dir, 'traces', 'task-1.zip')).values()].map((bytes) => bytes.toString('latin1')).join('\n');
     expect(trace).toContain('/about');
     expect(trace).not.toContain('PROBESECRET');
+    expect(s.h.tasks().map((task) => task.kind)).toEqual(['task']);
+  });
+
+  // the results show the query, as real engines do, so the text of a captcha page paused both engines (r5 probe).
+  it('reads results about an unusual traffic message as results, not as a captcha', async () => {
+    const s = setup();
+    const out = await s.search('bank says unusual activity and unusual traffic, is it a scam');
+    expect(out.untrustedSource).toBe('web_search:google');
+    expect(out.content).toContain('Autumn shirts for bank says unusual activity');
+    expect(s.state()).toEqual({});
+    // google finds nothing, so duckduckgo reads the same words.
+    site.google = 'layout';
+    s.later(60_000);
+    const ddg = await s.search('bank says unusual activity and unusual traffic');
+    expect(ddg.untrustedSource).toBe('web_search:duckduckgo');
+    expect(s.state()).toEqual({});
   });
 
   it('falls back to duckduckgo after a captcha, and the pause survives a restart', async () => {
