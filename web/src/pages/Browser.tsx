@@ -169,7 +169,7 @@ export function BrowserTask({ id }: { id: string }) {
                     <ul>
                       {step.sent.map((sent, i) => (
                         <li key={i} className="wrap">
-                          <span className="badge tone-serious">sent</span> {sent.method} {sent.url}
+                          <span className="badge tone-serious">{sent.form ? 'the form' : 'sent by the page'}</span> {sent.method} {sent.url}
                           {sent.body ? <code className="wrap small"> {sent.body}</code> : null}
                         </li>
                       ))}

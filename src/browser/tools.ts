@@ -2,7 +2,7 @@ import type { ElementHandle, Locator, Page } from 'playwright-core';
 import { z } from 'zod';
 import { defineTool, type Tool, type ToolContext, type ToolOutput } from '../tools/registry.js';
 import { extractIsolated } from '../web/extract-run.js';
-import { NotDone, untraced, untracedIfSecret, type ActTab, type BrowserRefusal, type BrowserWorker, type StepInput, type StepResult } from './worker.js';
+import { NotDone, untraced, untracedIfSecret, type ActTab, type BrowserRefusal, type BrowserWorker, type StepInput, type StepResult, type SubmitOutcome } from './worker.js';
 
 // the tools that change what leaves the pc. the owner approves each call, so they stay with the main session when a
 // browser child session gets the other tools.
@@ -44,8 +44,10 @@ function view(result: StepResult | BrowserRefusal, options: { body?: 'snapshot' 
     for (const each of result.blocked.slice(0, 8)) lines.push(`- ${each.url.slice(0, 200)}: ${each.reason}`);
   }
   if (result.sent.length) {
-    lines.push(`Sent ${result.sent.length} request${result.sent.length > 1 ? 's' : ''} with the owner's approval:`);
-    for (const each of result.sent.slice(0, 8)) lines.push(`- ${each.method} ${each.url.slice(0, 200)}`);
+    // the owner approved the form. the page can send other posts to the sites of the task while the submit runs, and
+    // the owner did not read them.
+    lines.push(`Sent ${result.sent.length} request${result.sent.length > 1 ? 's' : ''} while the approved submit ran:`);
+    for (const each of result.sent.slice(0, 8)) lines.push(`- ${each.method} ${each.url.slice(0, 200)} (${each.form ? 'the approved form' : 'sent by the page'})`);
   }
   // each step takes a new snapshot, so the refs that the model read before this step no longer work.
   if (options.body === 'note' && result.ok) lines.push('Refs of earlier snapshots no longer work. Use browser_snapshot for new refs.', '', result.note);
@@ -71,6 +73,9 @@ interface PageControl {
   closest(selector: string): PageControl | null;
   getAttribute(name: string): string | null;
   matches(selector: string): boolean;
+  // the method of the submit as the browser reads it: get, post or dialog. a formmethod that is empty or not valid
+  // gives get, and no formmethod gives an empty text.
+  formMethod?: string;
   form: { action: string; method: string; elements: ArrayLike<PageField> } | null;
 }
 interface PageField {
@@ -80,13 +85,17 @@ interface PageField {
   disabled: boolean;
 }
 
-// a get form only reads, for example a search box, so a click may send it. the gate allows only get anyway.
+// a get form only reads, for example a search box, so a click may send it. the gate allows only get anyway. a dialog
+// form only closes its dialog, for example a cookie notice, and sends nothing.
+const READ_FORM_METHODS = ['get', 'dialog'];
+
 async function sendsData(page: Page, locator: Locator): Promise<boolean> {
-  return untraced(page, () => locator.evaluate((el, selector) => {
+  return untraced(page, () => locator.evaluate((el, [selector, reads]) => {
     const control = (el as unknown as PageControl).closest(selector);
     if (!control?.form) return false;
-    return (control.getAttribute('formmethod') ?? control.form.method).toLowerCase() !== 'get';
-  }, SUBMIT_CONTROL));
+    // the attribute as it is gave '' for formmethod="", which the browser sends as get (r5 probe).
+    return !reads.includes(control.formMethod || control.form.method);
+  }, [SUBMIT_CONTROL, READ_FORM_METHODS] as const));
 }
 
 // playwright reads a ref against the last snapshot of the page, which can be newer than the one that the model read.
@@ -112,8 +121,10 @@ interface FormState {
 }
 
 // a page can send its form some time after the click, for example after a check of its own, with a script post or a
-// later submit. the gate lets data out only while the submit runs, so the submit waits for the first request.
+// later submit. the gate lets data out only while the submit runs, so the submit waits for the request of the form,
+// and then until the page sends no more data for a second, for example the order after the answer to a check.
 const SUBMIT_WAIT_MS = 5_000;
+const SUBMIT_SETTLE_MS = 1_000;
 
 // the browser's own FormData gives the set that a submit sends: no disabled field, every selected option, every
 // field of a name. the card shows that set without the hidden fields, which a person does not see. a map of the
@@ -148,7 +159,7 @@ async function formOf(page: Page, control: ElementHandle): Promise<FormState | n
       fields[name] = old === undefined ? value : Array.isArray(old) ? [...old, value] : [old, value];
     }
     const password = Array.from(button.form.elements).some((item) => item.type === 'password');
-    const method = (button.getAttribute('formmethod') ?? button.form.method).toLowerCase();
+    const method = button.formMethod || button.form.method;
     return { fields, pairs, skip: image, password, method };
   }, SUBMIT_CONTROL));
 }
@@ -296,17 +307,24 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
           if (sortedPairs(fields) !== sortedPairs(form.fields)) throw new Error(`the form now has these fields: ${JSON.stringify(form.fields)}. Nothing was sent. Ask again with these values`);
           // the gate compares the request with this set, so a page script that changes a field at the click sends nothing.
           tab.setSubmit({ pairs: form.pairs, skip: form.skip });
-          let sent = true;
+          let outcome: SubmitOutcome = { form: true, refused: false, blocked: 0 };
           try {
             await control.click();
             await page.waitForLoadState('domcontentloaded');
-            // a get form sends nothing that the gate counts. the tool said "sent" when the page sent nothing at all,
-            // for example a form that opens a new tab, which the browser refuses (r4 probe).
-            if (form.method !== 'get') sent = await tab.waitForSent(SUBMIT_WAIT_MS);
+            // a get or a dialog form sends nothing that the gate counts. the tool said "sent" when the page sent
+            // nothing at all, for example a form that opens a new tab, which the browser refuses (r4 probe).
+            if (!READ_FORM_METHODS.includes(form.method)) outcome = await tab.waitForSent(SUBMIT_WAIT_MS, SUBMIT_SETTLE_MS);
           } finally {
             tab.setSubmit(undefined);
           }
-          if (!sent) throw new Error(`the click ran, but the page sent no data within ${SUBMIT_WAIT_MS / 1000} s, so the form was not sent. See the blocked requests and the snapshot`);
+          // the tool said "sent" for an order that did not leave, when the page sent a beacon at the click (r5 probes).
+          if (!outcome.form) {
+            const why = outcome.refused ? 'the gate refused the request of the form' : `the request of the form did not leave within ${SUBMIT_WAIT_MS / 1000} s`;
+            throw new Error(`the click ran, but ${why}, so the form was not sent. See the blocked and the sent requests and the snapshot`);
+          }
+          if (outcome.blocked) {
+            throw new Error(`the form was sent, but the gate refused ${outcome.blocked} later request${outcome.blocked > 1 ? 's' : ''} with data of the page, so the page may not have finished. See the blocked requests and the snapshot`);
+          }
           return `sent the form with ${button}`;
         }, 'open');
         // the owner approved this call. a page that changed means the call did not act, but the approval must not

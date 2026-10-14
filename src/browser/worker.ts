@@ -105,9 +105,18 @@ export interface ActTab {
   snapshot: number;
   // the form data set of an approved submit while it runs, else undefined.
   setSubmit(form: ApprovedForm | undefined): void;
-  // true when the gate let a request with data out in this step. it stops early when the gate refused the page's own
-  // send, because then the form cannot leave.
-  waitForSent(ms: number): Promise<boolean>;
+  // waits for the request of the approved form, and then until the page sends no more data for settleMs. it stops
+  // early when the gate refused the page's own send, because then the form cannot leave.
+  waitForSent(ms: number, settleMs: number): Promise<SubmitOutcome>;
+}
+
+export interface SubmitOutcome {
+  // the gate let the request of the approved form out.
+  form: boolean;
+  // the gate refused a page navigation with data, for example a form that a script changed at the click.
+  refused: boolean;
+  // the requests with data that the gate refused while the submit ran.
+  blocked: number;
 }
 
 interface Tab {
@@ -127,6 +136,11 @@ interface Tab {
   topBlocked: boolean;
   // the gate refused a page navigation that sends data, for example a form that a script changed at the click.
   sendRefused: boolean;
+  // the state of the submit that runs: the form left, the requests with data that the gate refused, and the time of the
+  // last request with data.
+  formSent: boolean;
+  sendBlocked: number;
+  lastSendAt: number;
   // the address after the last step that did not end on the error page of chrome.
   lastPage?: string;
   console: string[];
@@ -384,7 +398,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   async function newTab(ctx: BrowserContext, kind: Tab['kind'], step: StepInput, allowlist: string[]): Promise<Tab> {
     const page = await ctx.newPage();
     owned.add(page);
-    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), blocked: [], sent: [], reached: new Set(), more: { blocked: 0, sent: 0, reached: 0 }, console: [], lastUsed: performance.now(), queue: Promise.resolve(), snapshot: 0, runId: step.runId } as unknown as Tab;
+    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), blocked: [], sent: [], reached: new Set(), more: { blocked: 0, sent: 0, reached: 0 }, formSent: false, sendBlocked: 0, lastSendAt: 0, console: [], lastUsed: performance.now(), queue: Promise.resolve(), snapshot: 0, runId: step.runId } as unknown as Tab;
     tab.rules = {
       allows: (host) => allowedBy(tab.allowlist, host),
       submitting: () => tab.submit,
@@ -393,9 +407,15 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
         block(tab, top ? { ...blocked, top } : blocked);
         if (top) tab.topBlocked = true;
         if (top && sends) tab.sendRefused = true;
+        if (sends && tab.submit) {
+          tab.sendBlocked++;
+          tab.lastSendAt = performance.now();
+        }
       },
       // the route and the cdp layer both see the first request of a page, so one request comes here twice.
       onSent: (sent) => {
+        if (sent.form) tab.formSent = true;
+        tab.lastSendAt = performance.now();
         if (tab.sent.some((each) => each.method === sent.method && each.url === sent.url)) return;
         if (tab.sent.length < KEEP) tab.sent.push({ ...sent, url: sent.url.slice(0, URL_CHARS) });
         else tab.more.sent++;
@@ -563,7 +583,8 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
           tab.blocked.length ? redactedJson(blockedOf(tab)) : null,
           tab.sent.length ? redactedJson(sentOf(tab)) : null,
           tab.reached.size ? JSON.stringify([...[...tab.reached].sort(), ...(tab.more.reached ? [`(${tab.more.reached} more hosts)`] : [])]) : null,
-          data.error ?? null,
+          // a navigation error names the address, which can hold a secret, as the target and the addresses can.
+          data.error === undefined ? null : redact(data.error),
           Math.round(performance.now() - data.started),
           now(),
         );
@@ -734,6 +755,9 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       // a page of chrome itself, such as chrome://history, never passes the gate, so only web addresses open.
       const shape = checkUrlShape(url);
       if (!shape.ok) return { refused: `${shape.reason}. Nothing was opened.` };
+      // the trace keeps the address of each console message of a page, and playwright cannot leave them out, so an
+      // untraced goto did not keep a secret in the address out of the zip (r5 probe). an address never needs a secret.
+      if (redact(url) !== url) return { refused: 'The address holds text with the shape of a secret, such as an api key. Nothing was opened. Open the page without it.' };
       // the check and the start of a task wait for chrome and a new tab. two opens at the same moment, in one turn or
       // from two sessions, would each start a task, so they run one at a time.
       const claimed = opening.then(() => claim(input, shape.url));
@@ -741,7 +765,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       const tab = await claimed;
       if ('refused' in tab) return tab;
       return step(tab, { ...input, target: url }, async (page) => {
-        const response = await untracedIfSecret(page, url, () => page.goto(url, { waitUntil: 'domcontentloaded' }));
+        const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
         return response && response.status() >= 400 ? `the page answered with status ${response.status()}` : undefined;
       });
     },
@@ -754,13 +778,21 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
           snapshot: tab.snapshot,
           setSubmit: (form) => {
             tab.submit = form;
+            if (!form) return;
             tab.sendRefused = false;
+            tab.formSent = false;
+            tab.sendBlocked = 0;
+            tab.lastSendAt = performance.now();
           },
-          waitForSent: async (ms) => {
-            const end = performance.now() + ms;
-            const sent = () => tab.sent.length + tab.more.sent > 0;
-            while (!sent() && !tab.sendRefused && performance.now() < end) await new Promise((resolve) => setTimeout(resolve, 50));
-            return sent();
+          // the first request with data is not always the form: a page sent a beacon, or the post of a check of its own,
+          // before the form. the submit ended at that first request, so the gate refused the form (r5 probes).
+          waitForSent: async (ms, settleMs) => {
+            const tick = () => new Promise((resolve) => setTimeout(resolve, 50));
+            const start = performance.now();
+            while (!tab.formSent && !tab.sendRefused && performance.now() - start < ms) await tick();
+            // a site can send its order after the answer to a first post, so the submit stays open while the page sends.
+            if (tab.formSent) while (performance.now() - tab.lastSendAt < settleMs && performance.now() - start < 2 * ms) await tick();
+            return { form: tab.formSent, refused: tab.sendRefused, blocked: tab.sendBlocked };
           },
         }),
       );

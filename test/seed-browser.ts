@@ -35,7 +35,7 @@ export function seedBrowser() {
         '[{"url":"https://evil.example/x","reason":"evil.example is not on the allowlist of this task"}]', '["cdn.example"]', 120, '2026-10-13T17:00:01Z');
     INSERT INTO browser_steps (taskId, runId, toolCallId, action, target, urlBefore, urlAfter, snapshotBlob, screenshotBlob, sent, durationMs, createdAt)
       VALUES ('bt_1', 'run-1', 'approval-7', 'submit', '"{\\"button\\":\\"Buy now\\"}"', 'https://shop.example/', 'https://shop.example/buy', '${snapshot}', '${shot}',
-        '[{"method":"POST","url":"https://shop.example/buy"}]', 90, '2026-10-13T17:00:05Z');
+        '[{"method":"POST","url":"https://shop.example/buy","form":true}]', 90, '2026-10-13T17:00:05Z');
   `);
   setSetting(t.db, 'web_search.engines', { google: { strikes: 2, until: '2026-10-13T18:00:00Z', reason: 'a CAPTCHA' } }, clock());
   mkdirSync(join(t.dataDir, 'browser', 'traces'), { recursive: true });

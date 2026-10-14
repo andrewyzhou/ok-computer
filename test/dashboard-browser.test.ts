@@ -20,7 +20,7 @@ describe('the browser api', () => {
     const detail = (await (await dashboard.request('/api/browser/tasks/bt_1')).json()) as BrowserTaskDetail;
     expect(detail.steps).toEqual([
       expect.objectContaining({ action: 'open', target: 'https://shop.example/', snapshotBlob: snapshot, screenshotBlob: shot, blockedRequests: [expect.objectContaining({ url: 'https://evil.example/x' })], sent: [], offsiteHosts: ['cdn.example'], decision: null }),
-      expect.objectContaining({ action: 'submit', sent: [{ method: 'POST', url: 'https://shop.example/buy' }], risk: 'external', decision: 'approve', rule: 'risk:external', approvalId: 7 }),
+      expect.objectContaining({ action: 'submit', sent: [{ method: 'POST', url: 'https://shop.example/buy', form: true }], risk: 'external', decision: 'approve', rule: 'risk:external', approvalId: 7 }),
     ]);
   });
 

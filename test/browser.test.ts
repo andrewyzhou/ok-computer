@@ -162,6 +162,30 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(site.hitsOn('shop.test').filter((hit) => hit.method !== 'GET')).toEqual([]);
   });
 
+  // the gate counted OPTIONS as a method that only reads, and fetch let a page send typed text in its body to an
+  // off-list host (r5 probe).
+  it('sends no OPTIONS request with a body outside a submit', async () => {
+    const h = harness();
+    site.hits.length = 0;
+    const page = await h.run('browser_open', { url: site.url('shop.test', '/scripts') });
+    await h.run('browser_click', { ref: refOf(page.content, /button "Options body"/) });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await h.run('browser_snapshot', {});
+    expect(site.hitsOn('evil.test')).toEqual([]);
+    const blocked = h.steps().flatMap((step) => (step.blockedRequests ? JSON.parse(String(step.blockedRequests)) : []));
+    expect(blocked).toContainEqual({ url: site.url('evil.test', '/opt'), reason: expect.stringContaining('send data (OPTIONS)') });
+  });
+
+  it('presses the button of a dialog form, which sends nothing, with a click', async () => {
+    const h = harness();
+    site.hits.length = 0;
+    const page = await h.run('browser_open', { url: site.url('shop.test', '/dialog') });
+    const out = await h.run('browser_click', { ref: refOf(page.content, /button "Accept all"/), element: 'Accept all' });
+    expect(out.isError).toBe(false);
+    expect(out.content).toContain('notice closed: ok');
+    expect(site.hits.filter((hit) => hit.method !== 'GET')).toEqual([]);
+  });
+
   it('saves no download', async () => {
     const h = harness();
     const page = await h.run('browser_open', { url: site.url('shop.test', '/files') });
@@ -222,7 +246,7 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(sent.content).toContain('Order placed');
     expect(site.hitsOn('shop.test').filter((hit) => hit.path === '/buy')).toEqual([expect.objectContaining({ method: 'POST', body: 'name=Ada&size=S&csrf=t0k3n' })]);
     // the step lists what the submit let out: one post, once, although both layers of the gate saw it.
-    expect(JSON.parse(String(h.steps().at(-1)!.sent))).toEqual([{ method: 'POST', url: site.url('shop.test', '/buy'), body: 'name=Ada&size=S&csrf=t0k3n' }]);
+    expect(JSON.parse(String(h.steps().at(-1)!.sent))).toEqual([{ method: 'POST', url: site.url('shop.test', '/buy'), body: 'name=Ada&size=S&csrf=t0k3n', form: true }]);
     expect(sent.content).toContain(`POST ${site.url('shop.test', '/buy')}`);
   });
 
@@ -260,7 +284,52 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     const out = await h.run('browser_submit', { url, button: 'Place order', fields: { qty: '1' } });
     expect(out.isError).toBe(false);
     expect(site.hitsOn('shop.test').filter((hit) => hit.method === 'POST').map((hit) => hit.path)).toEqual([target]);
-    expect(out.content).toContain(`POST ${site.url('shop.test', target)}`);
+    expect(out.content).toContain(`POST ${site.url('shop.test', target)} (the approved form)`);
+  });
+
+  // the submit ended at the first request with data, so the gate refused the form that came after it, and the tool
+  // said "sent" (r5 probes).
+  it.each([
+    ['a beacon before the form', 'beacon', ['/track', '/order']],
+    ['a post to a check of the site before the order', 'twostep', ['/api/validate', '/api/order']],
+  ])('sends the form when the page sends %s', async (_name, mode, paths) => {
+    const h = harness();
+    const url = site.url('shop.test', `/script-form?mode=${mode}`);
+    await h.run('browser_open', { url });
+    site.hits.length = 0;
+    const out = await h.run('browser_submit', { url, button: 'Place order', fields: { qty: '1' } });
+    expect(out.isError, out.content).toBe(false);
+    expect(site.hitsOn('shop.test').filter((hit) => hit.method === 'POST').map((hit) => hit.path)).toEqual(paths);
+    expect(out.content).toContain(`POST ${site.url('shop.test', paths[1])} (the approved form)`);
+    if (mode === 'beacon') expect(out.content).toContain(`POST ${site.url('shop.test', '/track')} (sent by the page)`);
+  });
+
+  it('says that the form was not sent when the gate refused it, also when the page sent a beacon at the click', async () => {
+    const h = harness();
+    const url = site.url('shop.test', '/script-form?mode=changed');
+    await h.run('browser_open', { url });
+    site.hits.length = 0;
+    const out = await h.run('browser_submit', { url, button: 'Place order', fields: { qty: '1' } });
+    expect(out).toMatchObject({ isError: true, content: expect.stringContaining('the gate refused the request of the form, so the form was not sent') });
+    expect(out.content).toContain(`POST ${site.url('shop.test', '/log')} (sent by the page)`);
+    expect(site.hitsOn('shop.test').filter((hit) => hit.path === '/order')).toEqual([]);
+  });
+
+  it('reads the method of a submit as the browser does, so an empty formmethod sends a get', async () => {
+    const h = harness();
+    site.hits.length = 0;
+    const url = site.url('shop.test', '/empty-method');
+    const page = await h.run('browser_open', { url });
+    // a get form only reads, so a click may send it, and a submit does not wait for data.
+    const out = await h.run('browser_click', { ref: refOf(page.content, /button "Find"/), element: 'Find' });
+    expect(out.isError).toBe(false);
+    expect(out.content).toContain('Found socks');
+    expect(site.hitsOn('shop.test').filter((hit) => hit.path.startsWith('/find'))).toEqual([expect.objectContaining({ method: 'GET', path: '/find?q=socks' })]);
+    // the submit said "not sent" for this form, because it waited for data that a get never carries.
+    await h.run('browser_open', { url });
+    const sent = await h.run('browser_submit', { url, button: 'Find', fields: { q: 'socks' } });
+    expect(sent.isError, sent.content).toBe(false);
+    expect(sent.content).toContain('Found socks');
   });
 
   it('says that nothing was sent when the page sends nothing, and sends no data off the allowlist at the click', async () => {
@@ -270,8 +339,8 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
       await h.run('browser_open', { url });
       site.hits.length = 0;
       const out = await h.run('browser_submit', { url, button: 'Place order', fields: { qty: '1' } });
-      expect(out, mode).toMatchObject({ isError: true, content: expect.stringContaining('the page sent no data within 5 s, so the form was not sent') });
-      expect(out.content, mode).not.toContain("with the owner's approval");
+      expect(out, mode).toMatchObject({ isError: true, content: expect.stringContaining('the request of the form did not leave within 5 s, so the form was not sent') });
+      expect(out.content, mode).not.toContain('(the approved form)');
       expect(site.hits.filter((hit) => hit.method === 'POST'), mode).toEqual([]);
     }
     expect(JSON.parse(String(h.steps().at(-1)!.blockedRequests))).toContainEqual(expect.objectContaining({ url: site.url('evil.test', '/exfil'), reason: expect.stringContaining('may not send data to it') }));
@@ -445,15 +514,22 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(JSON.parse(String(last.blockedRequests))).toContainEqual(expect.objectContaining({ url: site.url('evil.test', '/late?leak=1') }));
   });
 
-  it('keeps a secret in an address out of the step rows and the trace', async () => {
+  // the trace keeps the address of each console message of a page, so an untraced goto still put the secret into the
+  // zip (r5 probe). the error column kept the address of a failed navigation as it was.
+  it('opens no address with a secret, and keeps a secret out of the error of a step', async () => {
     const h = harness();
-    await h.run('browser_open', { url: site.url('shop.test', `/about?key=${PATTERN_KEY}`) });
+    site.hits.length = 0;
+    const refused = await h.run('browser_open', { url: site.url('shop.test', `/about?key=${PATTERN_KEY}`) });
+    expect(refused).toMatchObject({ isError: true, effect: 'none', content: expect.stringContaining('the shape of a secret') });
+    expect(site.hits).toEqual([]);
+    expect(h.tasks()).toEqual([]);
+    await h.run('browser_open', { url: site.url('shop.test', '/about') });
+    const wrong = await h.run('browser_submit', { url: site.url('shop.test', `/about?key=${PATTERN_KEY}`), button: 'Buy now', fields: {} });
+    expect(wrong.isError).toBe(true);
     await h.run('browser_close', {});
     const rows = JSON.stringify(h.steps());
-    expect(rows).toContain('about?key=');
+    expect(String(h.steps().find((step) => step.action === 'submit')!.error)).toMatch(/^the page is now .*\/about, not .*\/about\?key=/);
     expect(rows).not.toContain(PATTERN_KEY);
-    const trace = [...traceEntries(join(h.dir, 'traces', 'task-1.zip')).values()].map((bytes) => bytes.toString('latin1')).join('\n');
-    expect(trace).not.toContain(PATTERN_KEY);
   });
 
   it('closes the tab when its task row cannot be written, so chrome can still close and free the profile', async () => {

@@ -13,6 +13,9 @@ export interface Sent {
   url: string;
   // the start of the body, so the owner can see what left. the step row keeps it redacted.
   body?: string;
+  // the request of the approved form itself: a page navigation that the check passed, or a post of the same pairs.
+  // the page sends the other requests of a submit, for example a beacon.
+  form?: true;
 }
 
 // the form data set of an approved submit, as the browser sends it. skip names the click position of an image button:
@@ -74,6 +77,10 @@ export type Verdict = { ok: true } | { ok: false; reason: string };
 // a beacon), so only an approved submit may send it.
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
+// fetch lets a page send OPTIONS with a body, and a probe sent typed text to an off-list host that way. a request with
+// a body sends data, whatever its method. a cors preflight has no body, so it still only reads.
+const sendsData = (method: string, body?: Body) => !READ_METHODS.has(method) || (body?.data ?? '') !== '';
+
 // one decision for both layers. a document is a page or a frame, and it must be on the allowlist. every other request
 // only needs a public address, because a page loads its images and scripts from many hosts, and the page already has
 // its own data.
@@ -89,19 +96,20 @@ export async function judge(check: ReturnType<typeof cachedCheck>, rules: TabRul
   if (document && !rules.allows(parsed.hostname)) {
     return { ok: false, reason: `${parsed.hostname} is not on the allowlist of this task. Use browser_allow_domain to ask the owner` };
   }
-  if (!READ_METHODS.has(method) && !rules.submitting()) {
+  const sends = sendsData(method, body);
+  if (sends && !rules.submitting()) {
     return { ok: false, reason: `the page tried to send data (${method}) outside an approved submit. To send a form, use browser_submit, which the owner approves` };
   }
   // a page can answer the click of a submit with a post of its own, with other fields, to another site (r4 probe). the
   // owner approved a form for the sites of the task, so data goes only there. a script post to the site itself stays
   // possible, because many sites send their forms that way.
-  if (!READ_METHODS.has(method) && !rules.allows(parsed.hostname)) {
+  if (sends && !rules.allows(parsed.hostname)) {
     return { ok: false, reason: `${parsed.hostname} is not on the allowlist of this task, so the page may not send data to it. Nothing was sent there` };
   }
   // a page script can change a field between the check and the click, for example on pointerdown or submit. the form
   // that a page sends is a document request, so its body must be the set that the check read.
   const form = rules.submitting();
-  if (document && !READ_METHODS.has(method) && form && !sameForm(body, form)) {
+  if (document && sends && form && !sameForm(body, form)) {
     return { ok: false, reason: 'the page changed the form after the check, so its request differs from the approved fields. Nothing was sent. Ask the owner again' };
   }
   const host = await check(parsed.hostname);
@@ -152,9 +160,16 @@ function sameForm(body: Body | undefined, form: ApprovedForm): boolean {
 }
 
 // both layers can see the same request, so each verdict goes to the tab rules through this one place.
-function report(rules: TabRules, url: string, method: string, top: boolean, verdict: Verdict, body?: Body): void {
-  if (!verdict.ok) return rules.onBlocked({ url, reason: verdict.reason }, top, !READ_METHODS.has(method));
-  if (!READ_METHODS.has(method)) rules.onSent({ method, url, ...(body?.data ? { body: body.data.slice(0, 2000) } : {}) });
+function report(rules: TabRules, url: string, method: string, document: boolean, top: boolean, verdict: Verdict, body?: Body): void {
+  const sends = sendsData(method, body);
+  if (!verdict.ok) return rules.onBlocked({ url, reason: verdict.reason }, top, sends);
+  if (sends) {
+    // a document request with data passed the check of the form in judge. a script post of the same pairs is the form
+    // too, as a site that sends its form with fetch does.
+    const form = rules.submitting();
+    const own = form !== undefined && (document || sameForm(body, form));
+    rules.onSent({ method, url, ...(body?.data ? { body: body.data.slice(0, 2000) } : {}), ...(own ? { form: true as const } : {}) });
+  }
   // a page script can put text that the agent typed into the address of a subresource. the gate lets it out, so the
   // step records where it went.
   const parsed = URL.parse(url);
@@ -183,7 +198,7 @@ export async function guardTab(cdp: CDPSession, egress: Egress, rules: TabRules)
       const entries = request.postDataEntries?.map((each) => Buffer.from(each.bytes ?? '', 'base64'));
       const body = { type, data: request.postData ?? (entries ? Buffer.concat(entries).toString() : undefined) };
       const verdict = await judge(check, rules, request.url, document, request.method, body);
-      report(rules, request.url, request.method, document && event.frameId === targetInfo.targetId, verdict, body);
+      report(rules, request.url, request.method, document, document &&event.frameId === targetInfo.targetId, verdict, body);
       if (verdict.ok) return cdp.send('Fetch.continueRequest', { requestId: event.requestId });
       return cdp.send('Fetch.failRequest', { requestId: event.requestId, errorReason: 'BlockedByClient' });
     })().catch(() => {
@@ -223,7 +238,7 @@ export async function guardContext(
     const document = request.isNavigationRequest();
     const body = { type: request.headers()['content-type'], data: request.postData() ?? undefined };
     const verdict = await judge(check, rules, request.url(), document, request.method(), body);
-    report(rules, request.url(), request.method(), document && request.frame() === page.mainFrame(), verdict, body);
+    report(rules, request.url(), request.method(), document, document &&request.frame() === page.mainFrame(), verdict, body);
     if (verdict.ok) return route.fallback().catch(() => undefined);
     return route.abort('blockedbyclient').catch(() => undefined);
   });
@@ -238,7 +253,7 @@ export async function guardSockets(page: Page, egress: Egress, rules: TabRules):
   const check = cachedCheck(egress);
   await page.routeWebSocket(/.*/, async (socket) => {
     const verdict = await judge(check, rules, socket.url().replace(/^ws/, 'http'), true, 'GET');
-    report(rules, socket.url(), 'GET', false, verdict);
+    report(rules, socket.url(), 'GET', false, false, verdict);
     if (verdict.ok) return void socket.connectToServer();
     return socket.close({ code: 1008, reason: 'blocked' });
   });

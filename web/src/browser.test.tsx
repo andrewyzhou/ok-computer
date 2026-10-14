@@ -40,6 +40,7 @@ describe('the browser pages', () => {
     render(<App />);
     expect(await screen.findByText("Sent after the owner's approval")).toBeTruthy();
     expect(screen.getByText(/POST https:\/\/shop.example\/buy/)).toBeTruthy();
+    expect(screen.getByText('the form')).toBeTruthy();
     expect(screen.getByText('external')).toBeTruthy();
     expect(screen.getByText('approve')).toBeTruthy();
     expect(screen.getByText('approval #7').getAttribute('href')).toBe('#/approvals');
