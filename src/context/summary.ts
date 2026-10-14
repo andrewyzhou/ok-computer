@@ -116,7 +116,7 @@ export function validateSummary(summary: string, identifiers: string[]): string[
   return failures;
 }
 
-export type SummaryResult = { ok: true; summary: string; model: string } | { ok: false; error: string };
+export type SummaryResult = { ok: true; summary: string; model: string } | { ok: false; error: string; invalid?: true };
 
 export async function summarize(
   deps: { slots: SlotRunner; logger: Logger },
@@ -139,7 +139,8 @@ export async function summarize(
     const summary = result.response.text.trim();
     failures = validateSummary(summary, identifiers);
     if (!failures.length) return { ok: true, summary, model: result.model };
-    last = { summary, model: result.model };
+    // a summary that the token limit cut off can still have every heading, so only a complete one can be kept.
+    last = result.response.stopReason === 'max_tokens' ? undefined : { summary, model: result.model };
     deps.logger.warn('compaction summary failed validation', { runId: input.runId, attempt, failures });
     // the next attempt sees its earlier summary and the failures, so it can fix only what is wrong.
     messages.push(
@@ -162,5 +163,5 @@ export async function summarize(
     deps.logger.warn('compaction summary left out identifiers, so the code adds them', { runId: input.runId, count: left.length });
     return { ok: true, summary: `${last.summary}\n${LEFT_OUT_HEADING}\n${left.map((id) => `- ${id}`).join('\n')}`, model: last.model };
   }
-  return { ok: false, error: `the summary failed validation ${SUMMARY_ATTEMPTS} times: ${failures.join(' ')}` };
+  return { ok: false, invalid: true, error: `the summary failed validation ${SUMMARY_ATTEMPTS} times: ${failures.join(' ')}` };
 }

@@ -87,10 +87,14 @@ export function createTrimAndCompact(deps: TrimAndCompactDeps): ContextStrategy 
   const { db, logger, clock, windowTokens } = deps;
   const reserve = Math.min(RESERVE_TOKENS, Math.floor(windowTokens / 4));
   const keep = Math.min(KEEP_TOKENS, Math.floor(windowTokens / 4));
-  // each attempt costs a flush and up to three summary calls. so a run tries at most once, and after a failure the
-  // session tries again only when it is a quarter larger. a second trigger in a run that compacted uses trimming.
+  // each attempt costs a flush and up to three summary calls. so a run tries at most once, and after a summary that
+  // failed validation the session tries again only when it is a quarter larger. a stop, a timeout or a provider error
+  // says nothing about the session, so the next run tries again. the key holds the last reset, so /new starts clean.
+  // a second trigger in a run that compacted uses trimming.
   const triedRuns = new Set<string>();
   const failedAt = new Map<string, number>();
+  const segmentKey = (input: ContextInput) =>
+    `${input.sessionKey}:${input.events.findLast((event) => event.type === 'session_reset')?.id ?? 0}`;
 
   const request = (system: string, tools: ToolSpec[], messages: ModelMessage[]): ModelRequest => ({ system, tools, messages });
 
@@ -107,7 +111,8 @@ export function createTrimAndCompact(deps: TrimAndCompactDeps): ContextStrategy 
     return estimateTokens(cut) <= windowTokens / 2 ? cut : draft(true);
   };
 
-  const compact = async (input: ContextInput, hooks: CompactionHooks, tokensBefore: number): Promise<boolean> => {
+  // 'invalid' means the session itself gave no usable summary. 'failed' is a stop, a timeout or a provider error.
+  const compact = async (input: ContextInput, hooks: CompactionHooks, tokensBefore: number): Promise<'done' | 'invalid' | 'failed'> => {
     let events = input.events;
     // the kept events of the last compaction can hold the flush that ran before it. only a newer flush counts.
     const before = currentView(events);
@@ -130,7 +135,7 @@ export function createTrimAndCompact(deps: TrimAndCompactDeps): ContextStrategy 
     const boundary = chooseBoundary(view.live, keep);
     if (boundary <= 0) {
       logger.warn('compaction found nothing to summarize', { runId: hooks.runId });
-      return false;
+      return 'invalid';
     }
     const summary = await summarize(deps, {
       runId: hooks.runId,
@@ -140,7 +145,7 @@ export function createTrimAndCompact(deps: TrimAndCompactDeps): ContextStrategy 
     });
     if (!summary.ok) {
       logger.warn('compaction failed, so the context uses trimming only', { runId: hooks.runId, error: summary.error });
-      return false;
+      return summary.invalid && !hooks.signal.aborted ? 'invalid' : 'failed';
     }
 
     const kept = view.live.slice(boundary).map(stripThinking);
@@ -157,7 +162,7 @@ export function createTrimAndCompact(deps: TrimAndCompactDeps): ContextStrategy 
     };
     appendEvent(db, { sessionKey: input.sessionKey, runId: hooks.runId, type: 'compaction', payload }, clock());
     logger.info('session compacted', { runId: hooks.runId, tokensBefore, tokensAfter: payload.tokensAfter });
-    return true;
+    return 'done';
   };
 
   return {
@@ -167,14 +172,18 @@ export function createTrimAndCompact(deps: TrimAndCompactDeps): ContextStrategy 
       const hooks = input.compaction;
       const tokens = estimateTokens(full);
       if (!hooks || tokens <= windowTokens - reserve) return full;
-      const failed = failedAt.get(input.sessionKey);
+      const key = segmentKey(input);
+      const failed = failedAt.get(key);
       if (triedRuns.has(hooks.runId) || (failed !== undefined && tokens < failed * 1.25)) return trimmedFallback(input, input.events);
+      // only the runs of this process are in the set, and an old run never builds again, so a bound is enough.
+      if (triedRuns.size >= 1000) triedRuns.clear();
       triedRuns.add(hooks.runId);
-      if (await compact(input, hooks, tokens)) {
-        failedAt.delete(input.sessionKey);
+      const outcome = await compact(input, hooks, tokens);
+      if (outcome === 'done') {
+        failedAt.delete(key);
         return request(input.system, input.tools, render(currentView(listEvents(db, input.sessionKey))));
       }
-      failedAt.set(input.sessionKey, tokens);
+      if (outcome === 'invalid') failedAt.set(key, tokens);
       return trimmedFallback(input, listEvents(db, input.sessionKey));
     },
   };

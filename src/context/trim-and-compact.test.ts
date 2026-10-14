@@ -11,7 +11,7 @@ import { appendEvent, listEvents, type EventInput } from '../events/log.js';
 import { createMemoryTools } from '../memory/tools.js';
 import { createFakeClient, fakeResponse, textStep, toolStep, type FakeStep } from '../models/fake.js';
 import { createSlotRunner } from '../models/slots.js';
-import type { ModelCall, ModelMessage } from '../models/types.js';
+import { ModelError, type ModelCall, type ModelMessage } from '../models/types.js';
 import { silentLogger } from '../observability/logger.js';
 import { nowTool } from '../tools/now.js';
 import { createToolRegistry } from '../tools/registry.js';
@@ -292,6 +292,38 @@ describe('trim-and-compact strategy', () => {
     const again = await build('r3');
     expect(summaries()).toBe(4);
     expect(JSON.stringify(again.messages)).not.toContain(BIG);
+  });
+
+  // a stop, a timeout or a provider error held compaction back until the session was a quarter larger, and /new kept
+  // the old threshold. a summary cut at the token limit could still have every heading and was kept.
+  it('backs off only after an invalid summary of this segment, and never keeps a cut-off summary', async () => {
+    const bad = textStep('## decisions\n- the trip');
+    const cut: FakeStep = async () => fakeResponse({ text: SUMMARY_HEADINGS.join('\n- x\n'), stopReason: 'max_tokens' });
+    const t = setup([new ModelError('request', 'bad request', 400), cut, cut, cut, bad, bad, bad]);
+    seed(t.add);
+    const strategy = createTrimAndCompact({ db: t.db, slots: t.slots, logger: silentLogger, clock: () => new Date(), windowTokens: WINDOW });
+    const hooks = (runId: string) => ({ runId, signal: new AbortController().signal, flush: async () => ({ status: 'completed', text: 'NO_REPLY' }) });
+    const build = (runId: string) => strategy.build({ sessionKey: 'main', events: t.events(), system: 's', tools: [], compaction: hooks(runId) });
+    const summaries = () => t.db.prepare("SELECT count(*) AS n FROM model_calls WHERE slot = 'compaction'").get()!.n;
+    for (const id of ['r1', 'r2', 'r3', 'r4']) {
+      t.db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES (?, 'main', 'message', 'main', 'running', '')").run(id);
+    }
+
+    await build('r1');
+    expect(summaries()).toBe(1);
+    // the provider error does not hold the next run back. the three summaries are cut off, so none is kept.
+    await build('r2');
+    expect(summaries()).toBe(4);
+    expect(t.events().some((e) => e.type === 'compaction')).toBe(false);
+
+    // the invalid summaries hold the same segment back.
+    await build('r3');
+    expect(summaries()).toBe(4);
+
+    // after /new the segment starts clean, so a new session just over the trigger tries at once.
+    t.add([{ type: 'session_reset', payload: {} }, user(`New. ${'blah '.repeat(1500)}`), assistant('Noted.'), user('Go on.')]);
+    await build('r4');
+    expect(summaries()).toBe(7);
   });
 
   it('skips the flush when the session cannot write memory', async () => {
