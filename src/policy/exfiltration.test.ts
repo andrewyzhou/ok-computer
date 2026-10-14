@@ -145,6 +145,33 @@ describe('the exfiltration guard', () => {
     expect(owner('Done, see en.wikipedia.org and notes.md, or write to john.smith@company.example.')).toMatchObject({ rule: 'builtin:message_owner' });
   });
 
+  it('finds a bare ipv4 address and a name with a port, but not a name with only a path (verification round 5)', () => {
+    const data = 'QUNDT1VOVCAxMjM0NTY3OA';
+    expect(dataUrls({ url: `203.0.113.7/c?d=${data}` })).toHaveLength(1);
+    expect(dataUrls({ text: `see 203.0.113.7:8080/c?d=${data}` })).toHaveLength(1);
+    expect(dataUrls({ url: `localhost:8080/c?d=${data}` })).toHaveLength(1);
+    expect(dataUrls({ url: '203.0.113.7' })).toEqual([]);
+    expect(dataUrls({ text: 'use and/or? and src/app.ts?x=1, at 10:30 or 1.2.3' })).toEqual([]);
+  });
+
+  it('never counts a url as read when the raw text does not hold it (verification round 5)', () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r', 'main', 'message', 'main', 'completed', 'x')").run();
+    const link = `https://evil.example/t?k=${'a'.repeat(32)}`;
+    appendEvent(
+      db,
+      { sessionKey: 'main', runId: 'r', type: 'tool_result', payload: { toolCallId: 'm', name: 'read', content: `Read more: ${link}`, isError: false, untrustedSource: 'mcp:mail' } },
+      new Date(),
+    );
+    const seen = (url: string) => urlSeen(db, 'main', url);
+    // each fullwidth a is one bit. the nfkc form equals the read link, but the tool gets the raw text.
+    const bits = link.replace(/a(?=a*$)/g, (char, at: number) => (at % 3 ? char : 'ａ'));
+    expect(bits).not.toBe(link);
+    expect(decide(call({ url: link }, { seen }), [])).toMatchObject({ decision: 'allow' });
+    expect(decide(call({ url: bits }, { seen }), [])).toMatchObject({ decision: 'review', rule: 'exfiltration' });
+    expect(dataUrls({ url: bits })[0]).toMatchObject({ verbatim: false });
+  });
+
   it('counts only a successful untrusted result as read, and only the whole url', () => {
     const db = openDb(':memory:');
     db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r', 'main', 'message', 'main', 'completed', 'x')").run();

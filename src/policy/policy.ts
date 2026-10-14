@@ -195,9 +195,12 @@ const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
 // goes to the next "http:", and the parser judges it. the part up to the first space or quote is the url that a chat
 // app makes a link of. a host name with no scheme counts too, with or without a port, a path, a query or a fragment,
 // because a chat app makes a link of "evil.example/c?d=1" and of "evil.example", and its preview looks up the host. a
-// client also opens ws:, wss: and ftp:, and a page opens "//evil.example/c" with its own scheme.
+// client also opens ws:, wss: and ftp:, and a page opens "//evil.example/c" with its own scheme. an ipv4 address and a
+// name with a port ("localhost:8080") count too, because a chat app or a fetch tool adds a scheme to them. a name with
+// no dot and no port does not count, because "and/or?" and "src/app.ts" have the same form.
 const SCHEME = /(?:https?|wss?|ftp):/gi;
-const BARE_URL = /(?<![\w.:/@\\-])(?:[a-z0-9-]+\.)+[a-z][a-z0-9-]*(?::\d{1,5})?(?:[/?#][^\s"'<>]*)?/gi;
+const BARE_URL =
+  /(?<![\w.:/@\\-])(?:(?:[a-z0-9-]+\.)+[a-z][a-z0-9-]*(?::\d{1,5})?|\d{1,3}(?:\.\d{1,3}){3}(?::\d{1,5})?|[a-z][a-z0-9-]*:\d{1,5})(?:[/?#][^\s"'<>]*)?/gi;
 const RELATIVE_URL = /(?<![\w:/\\])\/\/[^\s"'<>/\\]+[^\s"'<>]*/g;
 const LINK_END = /[\s"'<>]/;
 const CANDIDATE_LIMIT = 1024;
@@ -249,15 +252,30 @@ const LABEL_LIMIT = 32;
 // check of each url reads the event log, so a call with many urls goes to the reviewer without the check.
 export const SEEN_CHECKS = 20;
 
-export function dataUrls(value: unknown): Array<{ url: string; signal: string }> {
-  const found: Array<{ url: string; signal: string }> = [];
+// the finder reads the nfkc form, but the tool gets the raw text. a url can look like a read url only in its nfkc form,
+// and then each fullwidth or plain letter in it can carry one bit. so verbatim is false when the raw text does not hold
+// the url, and such a url never counts as read.
+export interface DataUrl {
+  url: string;
+  signal: string;
+  verbatim: boolean;
+}
+
+export function dataUrls(value: unknown): DataUrl[] {
+  const found: DataUrl[] = [];
   eachString(value, (text) => {
     for (const each of urlsIn(text)) {
       const signal = urlSignal(each);
-      if (signal) found.push({ url: each.text, signal });
+      if (signal) found.push({ url: each.text, signal, verbatim: text.includes(each.text) });
     }
   });
   return found;
+}
+
+// the policy and the reply guard ask seen only for a url that the text holds verbatim.
+export function unseenUrls(urls: DataUrl[], seen?: (url: string) => boolean): DataUrl[] {
+  if (urls.length > SEEN_CHECKS || !seen) return urls;
+  return urls.filter((each) => !each.verbatim || !seen(each.url));
 }
 
 // the words after a link make a long path, so a candidate with more than the link is judged only by the parts that
@@ -278,9 +296,7 @@ function dataLeak(input: PolicyInput): string | undefined {
   if (input.tool === 'web_search' && typeof fields.query === 'string' && fields.query.trim()) {
     return `sends a search query (${headOf(fields.query, 200)})`;
   }
-  const urls = dataUrls(input.input);
-  const seen = input.seen;
-  const unseen = urls.length > SEEN_CHECKS || !seen ? urls[0] : urls.find((each) => !seen(each.url));
+  const unseen = unseenUrls(dataUrls(input.input), input.seen)[0];
   return unseen ? `sends a url that can carry data (${headOf(unseen.url, 200)}): ${unseen.signal}` : undefined;
 }
 
