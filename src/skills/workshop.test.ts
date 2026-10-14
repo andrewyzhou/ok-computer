@@ -356,6 +356,58 @@ describe('the workshop job', () => {
     expect(reviewWindow(db, now, tz).start).toEqual(at('00:00', '2026-10-15'));
   });
 
+
+  it('keeps a lost draft lost when the limit cuts before the end of its window, so its tasks are reviewed again', async () => {
+    const db = openDb(':memory:');
+    for (const [i, h] of ['10', '11', '12'].entries()) run(db, `d12-${i}`, at(`${h}:00`), `day12 task ${i}`, LONG_TASK_CALLS);
+    for (const [i, h] of ['10', '11', '12'].entries()) run(db, `d13-${i}`, at(`${h}:00`, '2026-10-13'), `day13 task ${i}`, LONG_TASK_CALLS);
+    let now = at('09:00', '2026-10-13');
+    const inputs: string[] = [];
+    const review = drafting(db, () => now, [['skill-one'], ['skill-two'], [], []], inputs);
+    expect((await review(automation)).status).toBe('completed');
+    markUnsent(db, 1, now);
+    now = at('09:00', '2026-10-14');
+    expect((await review(automation)).status).toBe('completed');
+    markUnsent(db, 2, now);
+    // the sweep expires both unsent cards.
+    db.prepare("UPDATE approvals SET status = 'expired', resolvedAt = ? WHERE id IN (1, 2)").run(at('09:30', '2026-10-14').toISOString());
+    now = at('09:00', '2026-10-15');
+    expect((await review(automation)).status).toBe('completed');
+    expect(inputs[2]).toContain('6 long or corrected tasks. The last 1 are left for the next review.');
+    expect(inputs[2]).not.toContain('owner: day13 task 2');
+    // the window of the second lost draft goes past the cut, so it opens again for the task after the cut.
+    now = at('09:00', '2026-10-16');
+    expect(reviewWindow(db, now, tz).start).toEqual(at('00:00', '2026-10-13'));
+    expect((await review(automation)).status).toBe('completed');
+    expect(inputs[3]).toContain('owner: day13 task 2');
+    now = at('09:00', '2026-10-17');
+    expect(reviewWindow(db, now, tz).start).toEqual(at('00:00', '2026-10-16'));
+  });
+
+  it('marks only the lost drafts before the cut as covered when one review opens two lost windows', async () => {
+    const db = openDb(':memory:');
+    for (let i = 1; i <= 4; i++) run(db, `a${i}`, at(`1${i}:00`), `a task ${i}`, LONG_TASK_CALLS);
+    for (let i = 1; i <= 4; i++) run(db, `b${i}`, at(`1${i}:00`, '2026-10-13'), `b task ${i}`, LONG_TASK_CALLS);
+    let now = at('09:00', '2026-10-13');
+    const inputs: string[] = [];
+    const review = drafting(db, () => now, [['a-skill'], ['b-skill'], [], []], inputs);
+    expect((await review(automation)).status).toBe('completed');
+    markUnsent(db, 1, now);
+    now = at('09:00', '2026-10-14');
+    expect((await review(automation)).status).toBe('completed');
+    // the unsent card expires. the owner approves b-skill, and it expires before it runs.
+    db.prepare("UPDATE approvals SET status = 'expired', resolvedAt = ? WHERE id = 1").run(at('09:01', '2026-10-14').toISOString());
+    db.prepare("UPDATE approvals SET status = 'expired', resolvedBy = 'button', resolvedAt = ? WHERE id = 2").run(at('09:05', '2026-10-14').toISOString());
+    now = at('09:00', '2026-10-15');
+    expect((await review(automation)).status).toBe('completed');
+    expect(inputs[2]).toContain('8 long or corrected tasks. The last 3 are left for the next review.');
+    expect(getSetting<{ covered?: number[] }>(db, `${WINDOW_OF}review-1`)?.covered).toEqual([1]);
+    expect(getSetting<{ covered?: number[] }>(db, `${WINDOW_OF}review-2`)?.covered).toBeUndefined();
+    now = at('09:00', '2026-10-16');
+    expect(reviewWindow(db, now, tz).start).toEqual(at('00:00', '2026-10-13'));
+    expect((await review(automation)).status).toBe('completed');
+    for (const n of [2, 3, 4]) expect(inputs[3]).toContain(`owner: b task ${n}`);
+  });
   it('reviews a window again after a failed review that sent no draft', async () => {
     const db = openDb(':memory:');
     const now = at('09:00', '2026-10-13');

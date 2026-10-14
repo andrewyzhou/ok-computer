@@ -362,17 +362,19 @@ export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => 
     const span = `from ${local(window.start)} to ${local(window.end)}`;
     if (window.start >= window.end) return { status: 'skipped', error: `the main session is already reviewed until ${local(window.start)}` };
     // this review covers the windows of the lost drafts that it knows now. a draft that gets lost later opens its
-    // window for the next review.
-    const lost = draftReviews(db).filter((each) => each.lost.length && Date.parse(each.end) <= window.end.getTime());
-    const covered = () => {
+    // window for the next review. when the task limit cuts the window, a lost draft whose window goes past the cut
+    // stays lost, so its window opens again for the tasks after the cut.
+    const lost = draftReviews(db).filter((each) => each.lost.length);
+    const covered = (until: Date) => {
       for (const { runId, lost: ids, ...stored } of lost) {
+        if (Date.parse(stored.end) > until.getTime()) continue;
         setSetting(db, `${WINDOW_OF}${runId}`, { ...stored, covered: [...new Set([...(stored.covered ?? []), ...ids])] }, clock());
       }
     };
     const tasks = findTasks(db, window);
     if (!tasks.length) {
       setSetting(db, REVIEWED_UNTIL, window.end.toISOString(), clock());
-      covered();
+      covered(window.end);
       return { status: 'skipped', error: `no long or corrected task ${span}` };
     }
     const shown = tasks.slice(0, MAX_TASKS);
@@ -409,11 +411,11 @@ export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => 
       }),
     );
     // a review with a draft covers its window, so a lost draft of that window does not open it again.
-    if (db.prepare("SELECT 1 FROM approvals WHERE runId = ? AND toolName = 'skill_write'").get(runId)) covered();
+    if (db.prepare("SELECT 1 FROM approvals WHERE runId = ? AND toolName = 'skill_write'").get(runId)) covered(end);
     else db.prepare('DELETE FROM settings WHERE key = ?').run(windowKey);
     if (result.status !== 'completed') return { status: 'failed', runId, error: result.error ?? result.status };
     setSetting(db, REVIEWED_UNTIL, end.toISOString(), clock());
-    covered();
+    covered(end);
     return { status: 'completed', runId };
   }
 }
