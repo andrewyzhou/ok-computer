@@ -113,6 +113,8 @@ export interface App {
   // contextView renders the session with the same strategy, prompt and tools as its next model call.
   contextView(sessionKey: string): Promise<ModelRequest>;
   resolveApproval: ApprovalFlow['resolve'];
+  // the policy rules that the caller uses now. "always allow" adds to this list while the app runs.
+  rules: readonly Rule[];
   integrations: Integrations;
   google?: Google;
 }
@@ -518,5 +520,6 @@ export function createApp(deps: AppDeps): App {
         tools: tools.specs(withIntegrations(sessionKey, sessionTools(sessionKey))),
       }),
     resolveApproval: approvals.resolve,
+    rules,
   };
 }

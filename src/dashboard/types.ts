@@ -61,6 +61,28 @@ export interface PolicyDecisionRow {
   reviewerCall?: ModelCallRow;
 }
 
+// one row of the policy page. the run link opens the call with its input and its reviewer call.
+export interface PolicyListRow extends PolicyDecisionRow {
+  runId: string;
+  sessionKey: string;
+  toolName: string;
+}
+
+export interface PolicyRuleRow {
+  id: string;
+  tool: string;
+  session: string | null;
+  args: Record<string, string> | null;
+  effect: string;
+  note: string | null;
+}
+
+export interface PolicyPage {
+  decisions: PolicyListRow[];
+  // the rules that the app uses now: the built-in rules, then the rules of okc.policy.json.
+  rules: PolicyRuleRow[];
+}
+
 export interface ToolCallRow {
   id: number;
   runId: string;

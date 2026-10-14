@@ -178,6 +178,23 @@ describe('every dashboard page loads against the seeded database', () => {
     expect(await screen.findByText('Nothing waits for your approval.')).toBeTruthy();
   });
 
+  it('lists the policy decisions newest first, filters the held calls, and shows the rules', async () => {
+    seeded.t.db
+      .prepare(
+        `INSERT INTO policy_decisions (runId, toolCallId, toolName, decision, rule, reason, reviewerVerdict, reviewerReason, createdAt)
+         VALUES ('run-1', 'call-held', 'browser_type', 'review', 'risk:write', 'browser_type changes data', 'hold', 'the owner did not ask for this', '2026-10-13T01:40:00.000Z')`,
+      )
+      .run();
+    open('#/policy');
+    expect(await screen.findByText('the owner did not ask for this', { exact: false })).toBeTruthy();
+    const tools = () => [...document.querySelectorAll('tbody')[0]!.querySelectorAll('tr')].map((row) => row.cells[1]!.textContent);
+    expect(tools()[0]).toBe('browser_type');
+    expect(tools()).toContain('goals_set');
+    expect(screen.getByText('builtin:delegate')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('verdict'), { target: { value: 'hold' } });
+    await expect.poll(() => tools()).toEqual(['browser_type']);
+  });
+
   it('shows the cost by day, slot and model', async () => {
     open('#/cost');
     expect(await screen.findByText('Cost by day')).toBeTruthy();

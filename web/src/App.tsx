@@ -13,6 +13,7 @@ import { IntegrationDetail, Integrations } from './pages/Integrations';
 import { Logs } from './pages/Logs';
 import { Memory } from './pages/Memory';
 import { Overview } from './pages/Overview';
+import { Policy } from './pages/Policy';
 import { RunDetail } from './pages/RunDetail';
 import { Runs } from './pages/Runs';
 import { SessionDetail, Sessions } from './pages/Sessions';
@@ -25,6 +26,7 @@ const NAV = [
   ['goals', 'Goals'],
   ['memory', 'Memory'],
   ['approvals', 'Approvals'],
+  ['policy', 'Policy'],
   ['integrations', 'Integrations'],
   ['google', 'Google'],
   ['signals', 'Signals'],
@@ -62,6 +64,8 @@ export function route(path: string): ReactNode {
       return <Memory />;
     case 'approvals':
       return <Approvals />;
+    case 'policy':
+      return <Policy />;
     case 'integrations':
       return param ? <IntegrationDetail key={param} id={param} /> : <Integrations />;
     case 'google':

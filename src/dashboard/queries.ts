@@ -2,6 +2,7 @@ import type { Config } from '../config/schema.js';
 import type { Db } from '../db/index.js';
 import { goalStats, listGoals, type Goal } from '../goals/store.js';
 import { redact, redactValue } from '../observability/redact.js';
+import type { Rule } from '../policy/policy.js';
 import { REPLY_CALL_ID, REPLY_NOTE, REPLY_TOOL } from '../policy/reply.js';
 import { REVIEW_TOOL } from '../policy/reviewer.js';
 import { outcomeOf } from './outcome.js';
@@ -25,6 +26,7 @@ import type {
   ModelCallRow,
   Overview,
   PolicyDecisionRow,
+  PolicyPage,
   RunDetail,
   RunRow,
   SessionRow,
@@ -560,6 +562,34 @@ export function listApprovals(db: Db): ApprovalRow[] {
       resolvedAt: str(row.resolvedAt),
       resolvedBy: str(row.resolvedBy),
     }));
+}
+
+// the reviewer decides each write call without the owner, so this list is the one place that shows what it allowed or
+// held. a reason can quote the input of the call, so it is redacted.
+export function policyPage(db: Db, rules: readonly Rule[], filter: { decision?: string; verdict?: string }, limit = 200): PolicyPage {
+  const where = [...(filter.decision ? ['d.decision = @decision'] : []), ...(filter.verdict ? ['d.reviewerVerdict = @verdict'] : [])];
+  const decisions = db
+    .prepare(
+      `SELECT d.*, approvals.status AS approvalStatus, runs.sessionKey FROM policy_decisions d
+       JOIN runs ON runs.id = d.runId LEFT JOIN approvals ON approvals.id = d.approvalId
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY d.id DESC LIMIT @limit`,
+    )
+    .all({ ...(filter.decision ? { decision: filter.decision } : {}), ...(filter.verdict ? { verdict: filter.verdict } : {}), limit })
+    .map((row) => {
+      const decision = toDecision(row);
+      return {
+        ...decision,
+        reason: redact(decision.reason),
+        reviewerReason: decision.reviewerReason === null ? null : redact(decision.reviewerReason),
+        runId: String(row.runId),
+        sessionKey: String(row.sessionKey),
+        toolName: String(row.toolName),
+      };
+    });
+  return {
+    decisions,
+    rules: rules.map((rule) => ({ id: rule.id, tool: rule.tool, session: rule.session ?? null, args: rule.args ?? null, effect: rule.effect, note: rule.note ?? null })),
+  };
 }
 
 // the owner's days do not match utc days, so the grouping by day happens here and not in sql.

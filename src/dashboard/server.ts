@@ -34,6 +34,7 @@ import {
   listRuns,
   listSessions,
   overview,
+  policyPage,
   sessionEvents,
   toMcpMessage,
 } from './queries.js';
@@ -49,7 +50,7 @@ export interface DashboardDeps {
   config: Config;
   clock: Clock;
   logger: Logger;
-  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google'>;
+  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google' | 'rules'>;
   // with a token, every api request must give it. the browser gives it in the query, because EventSource has no
   // headers.
   token?: string;
@@ -252,6 +253,8 @@ export function createDashboard(deps: DashboardDeps): Hono {
     const message = await app.resolveApproval(Number(c.req.param('id')), input.decision, 'dashboard');
     return c.json({ message });
   });
+
+  server.get('/api/policy', (c) => c.json(policyPage(db, app.rules, { decision: c.req.query('decision'), verdict: c.req.query('verdict') })));
 
   // the integrations page reads the live state of each server. the sign-in link opens on this pc only, because the
   // callback listens on loopback.
