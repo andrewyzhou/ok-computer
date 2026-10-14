@@ -96,6 +96,8 @@ describe('the dashboard api on a seeded database', () => {
 
     const body = await get<ModelCallBody>(dashboard, `/api/model-calls/${first?.call.id}`);
     expect(body.request).toMatchObject({ model: 'm', system: expect.stringContaining('USER.md') });
+    // the row keeps the tool list only in its snapshot, and the body puts it back, so the page shows what the model saw.
+    expect((body.request as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name)).toContain('goals_list');
     expect(body.response).toMatchObject({ toolCalls: [{ id: 'call-goals' }, { id: 'call-bad' }] });
 
     const failed = await get<RunDetail>(dashboard, '/api/runs/run-3');

@@ -387,9 +387,17 @@ function subagentLinks(db: Db, where: string, id: string): SubagentLink[] {
 }
 
 export function getModelCallBody(db: Db, id: number): ModelCallBody | undefined {
-  const row = db.prepare('SELECT request, response FROM model_calls WHERE id = ?').get(id);
+  const row = db
+    .prepare(
+      `SELECT m.request, m.response, s.tools FROM model_calls m
+       LEFT JOIN tool_catalog_snapshots s ON s.hash = m.toolCatalogHash WHERE m.id = ?`,
+    )
+    .get(id);
   if (!row) return undefined;
-  return { request: JSON.parse(String(row.request)), response: row.response ? JSON.parse(String(row.response)) : null };
+  // a new row keeps its tool list only in the snapshot. an older row has the list in the request itself.
+  const request = JSON.parse(String(row.request));
+  if (request.tools === undefined && row.tools) request.tools = JSON.parse(String(row.tools));
+  return { request, response: row.response ? JSON.parse(String(row.response)) : null };
 }
 
 export function getBlob(db: Db, read: (hash: string) => string | undefined, hash: string): BlobBody | undefined {

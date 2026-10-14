@@ -159,7 +159,8 @@ function record(db: Db, row: CallRecord, now: Date): number {
     row.latencyMs,
     row.response?.stopReason ?? null,
     row.error ?? null,
-    redactedJson(row.call),
+    // the tool list is in tool_catalog_snapshots under toolCatalogHash, so each row does not repeat it.
+    redactedJson({ ...row.call, tools: undefined }),
     row.response ? redactedJson(row.response) : null,
     now.toISOString(),
     recordToolCatalog(db, row.call.tools, now),

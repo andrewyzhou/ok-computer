@@ -78,7 +78,9 @@ describe('slot runner', () => {
     const call = db.prepare('SELECT request, toolCatalogHash FROM model_calls').get()!;
     const snapshot = db.prepare('SELECT tools FROM tool_catalog_snapshots WHERE hash = ?').get(String(call.toolCatalogHash))!;
     expect(String(snapshot.tools)).not.toContain(secret);
-    expect(JSON.parse(String(snapshot.tools))).toEqual((JSON.parse(String(call.request)) as { tools: unknown }).tools);
+    // the request row does not repeat the tool list, so a long session does not store it again on each call.
+    expect(JSON.parse(String(call.request))).not.toHaveProperty('tools');
+    expect(JSON.parse(String(snapshot.tools))[0].description).toBe('Search with https://api.example/?key=[redacted]');
   });
 
   it('retries the same model one time after a transient error', async () => {
