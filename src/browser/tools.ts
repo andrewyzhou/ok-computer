@@ -1,4 +1,4 @@
-import type { ElementHandle, Locator, Page } from 'playwright-core';
+import type { ElementHandle, Frame, Locator, Page } from 'playwright-core';
 import { z } from 'zod';
 import { defineTool, type Tool, type ToolContext, type ToolOutput } from '../tools/registry.js';
 import { extractIsolated } from '../web/extract-run.js';
@@ -125,6 +125,8 @@ interface FormState {
   method: string;
   // the control is not a submit button, so a script of the page decides what it sends.
   script: boolean;
+  // with script, the names of the hidden fields of the form, whose values the script may set before it sends.
+  hidden: string[];
 }
 
 // a page can send its form some time after the click, for example after a check of its own, with a script post or a
@@ -150,7 +152,7 @@ async function formOf(page: Page, control: ElementHandle): Promise<FormState> {
       // a script can read each field of the page, so a password field with a value anywhere on the page refuses the send.
       const { document } = globalThis as unknown as { document: { querySelectorAll(selector: string): ArrayLike<PageField> } };
       const password = Array.from(document.querySelectorAll('input[type=password]')).some((item) => item.value !== '');
-      return { fields: {}, pairs: [], skip: [], password, method: 'post', script: true };
+      return { fields: {}, pairs: [], skip: [], password, method: 'post', script: true, hidden: [] };
     }
     const pairs: Array<[string, string]> = [...(submit ? new FormData(form, button) : new FormData(form))].map(([name, value]) => [name, typeof value === 'string' ? value : value.name]);
     // an image button adds its click position, as name.x and name.y, or as x and y without a name. FormData gives 0
@@ -178,13 +180,34 @@ async function formOf(page: Page, control: ElementHandle): Promise<FormState> {
     }
     const password = Array.from(form.elements).some((item) => item.type === 'password');
     const method = (submit && button.formMethod) || form.method;
-    return { fields, pairs, skip: image, password, method, script: !submit };
+    // an asp.net postback link puts the name of the control into a hidden field and then sends the form (r7 probe).
+    // the script of the page chooses what it sends, and the gate lets its data go only to the sites of the task.
+    const hidden = submit ? [] : Array.from(form.elements).filter((item) => item.type === 'hidden' && item.name).map((item) => item.name);
+    return { fields, pairs, skip: image, password, method, script: !submit, hidden };
   }, SUBMIT_CONTROL));
 }
 
 // the order of the fields does not matter to the owner, so both sides are compared as sorted pairs.
 const sortedPairs = (fields: Record<string, string | string[]>) =>
   JSON.stringify(Object.entries(fields).flatMap(([name, value]) => (Array.isArray(value) ? value : [value]).map((each) => [name, each])).sort());
+
+// a post form can have a link or a menu item as its control, for example an asp.net postback, and it can be in a frame
+// of the same site, such as an embedded contact form. the submit looked only for a button of the main frame, so no
+// tool could send such a form (r7 probes).
+const CONTROL_ROLES = ['button', 'link', 'menuitem'] as const;
+async function controlsNamed(page: Page, name: string): Promise<{ count: number; first?: { frame: Frame; locator: Locator } }> {
+  let count = 0;
+  let first: { frame: Frame; locator: Locator } | undefined;
+  for (const frame of page.frames()) {
+    for (const role of CONTROL_ROLES) {
+      const locator = frame.getByRole(role, { name, exact: true });
+      const n = await locator.count();
+      if (n && !first) first = { frame, locator };
+      count += n;
+    }
+  }
+  return { count, first };
+}
 
 const sameAddress = (a: string, b: string) => {
   try {
@@ -227,7 +250,7 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
       name: 'browser_click',
       description:
         'Click an element by its ref from the last snapshot, for example a link, a tab or a menu. ' +
-        'A button that sends a form, or that sends data with a script (the gate then blocks the request), does not work here: use browser_submit.',
+        'A button or link that sends a form, or that sends data with a script (the gate then blocks the request), does not work here: use browser_submit.',
       input: z.object({ ref, element }),
       risk: 'write',
       async run({ ref: id, element: name }, ctx) {
@@ -299,13 +322,13 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
     defineTool({
       name: 'browser_submit',
       description:
-        'Send a form of the open page by pressing its button, or press a button that sends data with a script, such as "Add to cart" outside a form. ' +
+        'Send a form of the open page by pressing its button or link, also in a frame, or press a button that sends data with a script, such as "Add to cart" outside a form. ' +
         'The owner approves each call and reads the address, the button and the fields that you give, so give them exactly as the page shows them now: ' +
         'every named field of the form of the button that a person sees, with its value, or {} for a button outside a form. ' +
         'If the page differs when the owner approves, nothing is sent. The result lists each request that the page sent.',
       input: z.object({
-        url: z.string().min(1).max(2000).describe('the address of the page with the form'),
-        button: z.string().min(1).max(200).describe('the name of the button, as the snapshot shows it'),
+        url: z.string().min(1).max(2000).describe('the address of the page with the form, or of its frame'),
+        button: z.string().min(1).max(200).describe('the name of the button or link, as the snapshot shows it'),
         fields: z
           .record(z.string(), z.union([z.string().max(5000), z.array(z.string().max(5000)).max(50)]))
           .describe('each named field of the form and its value, or a list of values for a name that the form has more than once'),
@@ -316,19 +339,22 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
       needsApproval: true,
       async run({ url, button, fields }, ctx) {
         const result = await act(ctx, 'submit', { url, button, fields }, async (page, tab) => {
-          if (!sameAddress(page.url(), url)) throw new Error(`the page is now ${page.url()}, not ${url}. Nothing was sent`);
-          // the snapshot names a button by its accessible name, and so does this lookup, which also leaves out hidden
+          const nowAt = () => new Error(`the page is now ${page.url()}, not ${url}. Nothing was sent`);
+          if (!page.frames().some((frame) => sameAddress(frame.url(), url))) throw nowAt();
+          // the snapshot names a control by its accessible name, and so does this lookup, which also leaves out hidden
           // elements. the check and the click use the same element, so the form that is sent is the form that was checked.
           const name = button.trim();
-          const buttons = page.getByRole('button', { name, exact: true });
-          const count = await buttons.count();
-          if (count !== 1) throw new Error(`${count ? 'more than one' : 'no'} button is named ${JSON.stringify(name)}. Nothing was sent. Use the name that the snapshot shows`);
-          const control = await buttons.elementHandle();
+          const { count, first } = await controlsNamed(page, name);
+          if (count !== 1 || !first) throw new Error(`${count ? 'more than one' : 'no'} button or link is named ${JSON.stringify(name)}. Nothing was sent. Use the name that the snapshot shows`);
+          const { frame, locator } = first;
+          // the address is the address of the page, or of the frame of the control.
+          if (!sameAddress(page.url(), url) && !sameAddress(frame.url(), url)) throw nowAt();
+          const control = await locator.elementHandle();
           const form = await formOf(page, control);
           if (form.password) throw new Error('the form or the page has a password field. The agent never sends a password. Nothing was sent. The owner signs in with okc browser login');
           if (sortedPairs(fields) !== sortedPairs(form.fields)) throw new Error(`the form now has these fields: ${JSON.stringify(form.fields)}. Nothing was sent. Ask again with these values`);
           // the gate compares the request with this set, so a page script that changes a field at the click sends nothing.
-          tab.setSubmit({ pairs: form.pairs, skip: form.skip });
+          tab.setSubmit({ pairs: form.pairs, skip: form.skip, hidden: form.hidden });
           let outcome: SubmitOutcome = { form: true, refused: false, blocked: 0 };
           try {
             await control.click();

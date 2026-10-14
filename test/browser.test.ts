@@ -263,7 +263,7 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(mixed).toMatchObject({ isError: true, content: expect.stringContaining('the form now has these fields: {}') });
     // the text of a button is not its name.
     const text = await h.run('browser_submit', { url: site.url('shop.test', '/forms'), button: 'Send', fields: { msg: 'hi' } });
-    expect(text).toMatchObject({ isError: true, content: expect.stringContaining('no button is named "Send"') });
+    expect(text).toMatchObject({ isError: true, content: expect.stringContaining('no button or link is named "Send"') });
     expect(posts()).toEqual([]);
     const sent = await h.run('browser_submit', { url: site.url('shop.test', '/forms'), button: 'Send message', fields: { msg: 'hi' } });
     expect(sent.isError).toBe(false);
@@ -335,6 +335,38 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(out.content).toContain('The page showed a confirm dialog "Delete it?", and the browser accepted it.');
     expect(site.hitsOn('shop.test').filter((hit) => hit.method === 'POST')).toEqual([expect.objectContaining({ path: '/buy', body: 'item=socks' })]);
     expect(JSON.parse(String(h.steps().at(-1)!.consoleErrors))).toContain('The page showed a confirm dialog "Delete it?", and the browser accepted it');
+  });
+
+  // no tool could send a post form whose control is a link, or a form in a frame of the same site (r7 probes).
+  it('sends a form from a link, such as an asp.net postback, and refuses a link whose script changes a field', async () => {
+    const h = harness();
+    const url = site.url('shop.test', '/postback');
+    const page = await h.run('browser_open', { url });
+    site.hits.length = 0;
+    const click = await h.run('browser_click', { ref: refOf(page.content, /link "Place order"/), element: 'Place order' });
+    expect(click.content).toContain('use browser_submit with the button or link');
+    await h.run('browser_open', { url });
+    const more = await h.run('browser_submit', { url, button: 'Order more', fields: { qty: '1' } });
+    expect(more).toMatchObject({ isError: true, content: expect.stringContaining('the page changed the form after the check') });
+    expect(site.hits.filter((hit) => hit.method === 'POST')).toEqual([]);
+    await h.run('browser_open', { url });
+    const out = await h.run('browser_submit', { url, button: 'Place order', fields: { qty: '1' } });
+    expect(out.isError, out.content).toBe(false);
+    expect(site.hits.filter((hit) => hit.method === 'POST')).toEqual([expect.objectContaining({ path: '/order', body: '__EVENTTARGET=pay&qty=1' })]);
+  });
+
+  it('sends a form in a frame of the same site, with the address of the page or of the frame', async () => {
+    const h = harness();
+    const url = site.url('shop.test', '/framed');
+    for (const at of [url, site.url('shop.test', '/forms')]) {
+      await h.run('browser_open', { url });
+      site.hits.length = 0;
+      const out = await h.run('browser_submit', { url: at, button: 'Send message', fields: { msg: 'hi' } });
+      expect(out.isError, out.content).toBe(false);
+      expect(site.hits.filter((hit) => hit.method === 'POST')).toEqual([expect.objectContaining({ path: '/send', body: 'msg=hi' })]);
+    }
+    const wrong = await h.run('browser_submit', { url: site.url('shop.test', '/about'), button: 'Send message', fields: { msg: 'hi' } });
+    expect(wrong).toMatchObject({ isError: true, content: expect.stringContaining('Nothing was sent') });
   });
 
   it('says that the form was not sent when the gate refused it, also when the page sent a beacon at the click', async () => {

@@ -202,6 +202,20 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
             'Forms',
           ),
         );
+      case 'shop.test/postback':
+        // an asp.net form: a link puts its name into a hidden field and sends the form. a second link also changes a
+        // field that the owner reads.
+        return send(
+          200,
+          html(
+            `<form id="f" action="/order" method="post"><input type="hidden" name="__EVENTTARGET"><label>Qty <input name="qty" value="1"></label>
+              <a href="javascript:__doPostBack('pay')">Place order</a> <a href="#" onclick="f.qty.value = '500'; __doPostBack('more'); return false">Order more</a></form>
+             <script>function __doPostBack(target) { f.__EVENTTARGET.value = target; f.submit(); }</script>`,
+            'Checkout',
+          ),
+        );
+      case 'shop.test/framed':
+        return send(200, html('<h1>Contact</h1><iframe src="/forms" width="600" height="300"></iframe>', 'Contact'));
       case 'shop.test/send':
         return send(200, html(`<h1>Message sent</h1><p>${body}</p>`, 'Sent'));
       case 'shop.test/script-form': {
