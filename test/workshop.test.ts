@@ -46,8 +46,14 @@ function setup(steps: FakeStep[], options: { rules?: typeof BUILTIN_RULES } = {}
 const long = (id: string) => toolStep(...Array.from({ length: 8 }, (_, i) => ({ id: `${id}${i}`, name: 'now', input: {} })));
 const task: FakeStep[] = [long('n'), textStep('Booked on the personal calendar.'), textStep('Sorry, I will use the work calendar.')];
 
-async function runTask(t: ReturnType<typeof setup>) {
+// the nightly consolidation catches up in the morning and takes a model step. these tests check the review only.
+async function start(t: ReturnType<typeof setup>) {
   await t.app.start();
+  t.db.prepare("UPDATE automations SET enabled = 0 WHERE json_extract(payload, '$.type') = 'consolidation'").run();
+}
+
+async function runTask(t: ReturnType<typeof setup>) {
+  await start(t);
   // an earlier run of the session read a newsletter, so the task can repeat its text.
   appendEvent(t.db, { sessionKey: 'main', runId: null, type: 'system_event', payload: { text: 'a relayed newsletter', taint } });
   await t.say('book the dentist for friday 3pm');
@@ -122,7 +128,7 @@ describe('skill workshop', () => {
 
   it('makes no model call for a window without a long or corrected task, and moves the mark', async () => {
     const t = setup([textStep('Hi.')]);
-    await t.app.start();
+    await start(t);
     await t.say('hello');
     await t.at(pdt('09:00', '2026-10-13'));
     expect(t.model.calls).toHaveLength(1);
@@ -141,7 +147,7 @@ describe('skill workshop', () => {
       new ModelError('request', 'the request was refused', 400),
       textStep('NO_REPLY'),
     ]);
-    await t.app.start();
+    await start(t);
     await t.say('hello');
     await t.at(pdt('09:00', '2026-10-13'));
     expect(until(t)).toBe(pdt('00:00', '2026-10-13'));

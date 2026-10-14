@@ -62,6 +62,25 @@ function plannedRun(schedule: Schedule, after: Date, createdAt: Date, timeZone: 
   }
 }
 
+// the last planned time at or before the given time. a retry runs after its planned time, and some jobs take their
+// day from the planned time.
+export function previousRun(schedule: Schedule, atOrBefore: Date, createdAt: Date, timeZone: string): Date {
+  switch (schedule.kind) {
+    case 'at':
+      return new Date(schedule.at);
+    case 'every': {
+      const anchor = schedule.anchor ? Date.parse(schedule.anchor) : createdAt.getTime();
+      if (atOrBefore.getTime() < anchor) return atOrBefore;
+      return new Date(anchor + Math.floor((atOrBefore.getTime() - anchor) / schedule.everyMs) * schedule.everyMs);
+    }
+    case 'cron': {
+      // croner looks strictly before the reference and drops the milliseconds, so the reference is one second later.
+      const cron = new Cron(schedule.expr, { timezone: schedule.tz ?? timeZone, paused: true });
+      return cron.previousRuns(1, new Date(atOrBefore.getTime() + 1000))[0] ?? atOrBefore;
+    }
+  }
+}
+
 export function describeSchedule(schedule: Schedule, timeZone: string): string {
   switch (schedule.kind) {
     case 'at':

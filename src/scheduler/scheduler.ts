@@ -2,7 +2,7 @@ import type { Config } from '../config/schema.js';
 import type { Db } from '../db/index.js';
 import type { Logger } from '../observability/logger.js';
 import { formatLocal, type Clock } from '../time.js';
-import { nextRun } from './schedule.js';
+import { nextRun, previousRun } from './schedule.js';
 import { dueAutomations, getAutomation, listAutomations, type Automation } from './store.js';
 
 export interface JobResult {
@@ -41,6 +41,11 @@ export interface Scheduler {
 
 export const BACKOFF_MS = [30_000, 60_000, 5 * 60_000, 15 * 60_000] as const;
 export const MAX_FAILURES = 5;
+
+// a nightly job that writes about one day still has value later, and it takes its day from its planned time. after
+// the pc sleeps through the night, it runs in the morning. a job of this type has a grace period of one day.
+const CATCH_UP_TYPES: ReadonlySet<string> = new Set(['consolidation', 'goals_results']);
+const CATCH_UP_MS = 24 * 60 * 60_000;
 
 // a timer can fire late after the pc sleeps, so the scheduler wakes at least one time each minute.
 const MAX_SLEEP_MS = 60_000;
@@ -103,12 +108,24 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     }
   };
 
+  const graceMs = (automation: Automation): number =>
+    CATCH_UP_TYPES.has(automation.payload.type)
+      ? Math.max(config.scheduler.missedGraceMs, CATCH_UP_MS)
+      : config.scheduler.missedGraceMs;
+
+  // a catch-up job runs for its newest planned time at or before now. a retry after midnight then still has the day
+  // of its planned run, and after a stop of more than one day the newest missed day runs.
+  const plannedAt = (automation: Automation, now: Date): string =>
+    CATCH_UP_TYPES.has(automation.payload.type) && automation.schedule.kind !== 'at'
+      ? previousRun(automation.schedule, now, new Date(automation.createdAt), config.timeZone).toISOString()
+      : automation.nextRunAt!;
+
   const fire = async (automation: Automation, now: Date): Promise<void> => {
-    const lateMs = now.getTime() - Date.parse(automation.nextRunAt!);
     if (!claim(automation, now)) return;
+    const planned = plannedAt(automation, now);
     running.add(automation.id);
     try {
-      await runClaimed(automation, now, lateMs);
+      await runClaimed({ ...automation, nextRunAt: planned }, now, now.getTime() - Date.parse(planned));
     } finally {
       running.delete(automation.id);
     }
@@ -117,7 +134,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const runClaimed = async (automation: Automation, now: Date, lateMs: number): Promise<void> => {
 
     // the scheduler runs a missed job one time only. this prevents a burst of old reminders after the pc starts.
-    if (lateMs > config.scheduler.missedGraceMs) {
+    if (lateMs > graceMs(automation)) {
       const error = `missed by ${Math.round(lateMs / 60_000)} min, which is more than the grace period`;
       logger.warn('automation missed', { automationId: automation.id, name: automation.name, lateMs });
       if (automation.schedule.kind === 'at') db.prepare('UPDATE automations SET enabled = 0 WHERE id = ?').run(automation.id);

@@ -254,6 +254,34 @@ describe('scheduler', () => {
     expect(notices).toEqual([expect.stringContaining('"once" failed 5 times in a row, so I turned it off')]);
   });
 
+  // the pc sleeps through the night. the consolidation of 03:00 then runs in the morning for the planned day.
+  it('runs a missed nightly consolidation up to one day late, for its newest planned time', async () => {
+    const { db, scheduler, create, advance, executed, planned, runs } = setup();
+    const job = create({ schedule: { kind: 'cron', expr: '0 3 * * *' }, payload: { type: 'consolidation' }, createdBy: 'system' });
+    advance(Date.parse('2026-10-13T17:00:00Z') - Date.parse('2026-10-12T17:00:00Z'));
+    await scheduler.tick();
+    expect(planned).toEqual(['2026-10-13T10:00:00.000Z']);
+    expect(getAutomation(db, job.id)?.nextRunAt).toBe('2026-10-14T10:00:00.000Z');
+    // a stop of more than one day: the newest missed night runs.
+    advance(48 * 60 * MIN);
+    await scheduler.tick();
+    expect(executed).toEqual(['job', 'job']);
+    expect(planned.at(-1)).toBe('2026-10-15T10:00:00.000Z');
+    expect(runs()).toEqual([{ status: 'completed', error: null }, { status: 'completed', error: null }]);
+  });
+
+  // the results of 23:45 fail until after midnight. the retry must still write about the planned day.
+  it('gives each retry of the day results the planned time of 23:45', async () => {
+    const { scheduler, create, advance, planned } = setup(['failed', 'failed', 'failed', 'failed']);
+    create({ schedule: { kind: 'cron', expr: '45 23 * * *' }, payload: { type: 'goals_results' }, createdBy: 'system' });
+    advance(Date.parse('2026-10-13T06:45:00Z') - Date.parse('2026-10-12T17:00:00Z'));
+    for (const ms of [0, 30_000, 60_000, 5 * MIN, 15 * MIN]) {
+      advance(ms);
+      await scheduler.tick();
+    }
+    expect(planned).toEqual(Array(5).fill('2026-10-13T06:45:00.000Z'));
+  });
+
   it('resets the failure count after a success', async () => {
     const { db, scheduler, create, advance } = setup(['failed', 'completed']);
     const job = create({ schedule: { kind: 'every', everyMs: 60 * MIN } });
