@@ -30,19 +30,31 @@ It runs on this PC. Its persona files (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, an
 | `okc logs` | Follow the agent log |
 | `okc open` | Open the dashboard at http://127.0.0.1:4317 |
 
-To connect MCP servers (optional), see [docs/setup/integrations.md](docs/setup/integrations.md). For Slack, see [docs/setup/slack.md](docs/setup/slack.md). To sign the agent's browser in to sites, see [docs/setup/browser.md](docs/setup/browser.md).
-
-To open the dashboard from your phone or laptop (optional), see [docs/setup/tailscale.md](docs/setup/tailscale.md).
-
-To check the Telegram v2 features against the real bot once, run `node --env-file=.env scripts/smoke-telegram.mjs` and look at the chat. It sends a few test messages to you and reads no updates.
-
-To connect Gmail and Google Calendar (optional), see [docs/setup/google.md](docs/setup/google.md). New mail and calendar changes become signals that the heartbeat reads; sending, unsubscribing and invitations always ask you.
-
-A call that changes data (risk `write`, for example an archive in an integration) goes to a reviewer model on the `utility` slot, not to you. The reviewer holds a call that you did not ask for, a failed review comes to you, and you still approve everything that leaves the PC. Run `npm run smoke:reviewer` once (about 30 calls of the utility slot) to see how well the reviewer holds injected actions.
-
 A small supervisor restarts the agent if it stops. The logon task means it runs whenever you are signed in to Windows.
 
 `npm run chat` uses the same database as the background agent. That is fine, but do not chat with it while the agent is answering you in Telegram at the same moment: two processes in one conversation can give the same tool call two results. `npm run chat` never connects to MCP servers: only the background agent does, so each server runs once and an OAuth token is refreshed by one process.
+
+## What works now and how to turn each part on
+
+A part that needs setup stays off until the setup is done, and the rest of the app works without it. Settings go in `okc.config.json`, secrets in `.env` or the Windows Credential Manager. Run `okc restart` after a change. The background agent runs the build of its last start, so restart it once after an update.
+
+| Part | State | How to turn it on |
+|---|---|---|
+| Chat, goals, heartbeat, memory, automations | Running | `.env`: `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_ID` |
+| Telegram v2: rich replies, streaming, reactions, approval cards, commands menu | Built | Nothing. Check it once: `node --env-file=.env scripts/smoke-telegram.mjs` sends a few test messages to you |
+| Trace and dashboard (runs, what the model saw, Policy page) | Built | Nothing. `okc open` |
+| Gmail (all accounts) and Calendar | Built, not yet checked against real Google | A `google` block and one sign-in for each account: [docs/setup/google.md](docs/setup/google.md). New mail and calendar changes become signals for the heartbeat; sending, unsubscribing and invitations always ask you |
+| Slack, one integration for each workspace: search, read, send with approval | Built, not yet checked against real Slack. The DM poll stores new DMs, but nothing shows them yet | [docs/setup/slack.md](docs/setup/slack.md). Other MCP servers: [docs/setup/integrations.md](docs/setup/integrations.md) |
+| Web search, `web_fetch` and the agent browser | On (needs Chrome) | Optional sign-ins: `okc browser login`, see [docs/setup/browser.md](docs/setup/browser.md). Each form submit asks you |
+| Reviewer model, taint and sub-agents (`delegate`) | On | Nothing. `npm run smoke:reviewer` (about 30 calls of the `utility` slot) shows how well the reviewer holds injected actions |
+| Skill Workshop | On | Nothing. A review at 09:00 can propose a skill; only Approve writes it to `skills/` |
+| Dashboard on the phone and laptop | Optional | `DASHBOARD_TOKEN` and Tailscale Serve: [docs/setup/tailscale.md](docs/setup/tailscale.md) |
+| Subscription sweep | Owner test, not a separate feature | After Gmail works, ask the agent for it (see below) |
+| Claude history, Docker sandbox | On hold | Nothing to do |
+
+A call that changes data (risk `write`, for example an archive) goes to the reviewer model on the `utility` slot, not to you. The reviewer holds a call that you did not ask for, a failed review comes to you, and you still approve everything that leaves the PC.
+
+To test the subscription sweep, ask the agent in Telegram, for example: "Look through my newsletters in all accounts from the last month, group them by sender, and unsubscribe me from the ones that I leave unread." It should search with the Gmail tools (or a `delegate` to the `inbox` profile), show you the list, and send one approval card for each unsubscribe. If the test shows a gap, the gap becomes a normal fix.
 
 ## Phases
 

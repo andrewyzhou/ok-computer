@@ -6,7 +6,7 @@ Research for this document was done on 2026-10-13. Versions and prices are from 
 
 ## 0. Goals
 
-1. Connect Computer to everything the owner uses: all Gmail accounts, Google Calendar, Slack DMs in every workspace, web search, a browser for sites without an API, and the owner's Claude history.
+1. Connect Computer to everything the owner uses: all Gmail accounts, Google Calendar, Slack DMs in every workspace, web search, a browser for sites without an API, and the owner's Claude history (on hold, section 10).
 2. Keep **full observability**. For every new capability, record exactly what the agent saw, what it decided, which policy allowed it, and what happened. Nothing that reaches the model or leaves the machine is unrecorded.
 3. Give the agent more power safely: a permission system with a reviewer model, taint tracking for untrusted content, a real sandbox for code, and sub-agents with fixed limits.
 4. Make Telegram pleasant: formatted replies, streaming, reactions, and clear approval cards.
@@ -46,7 +46,7 @@ These add to DESIGN.md section 2.
 - `mcp_messages`: every JSON-RPC message per server: `serverId, direction (out | in), method, rpcId, payloadBlob, latencyMs, createdAt`. This includes `tools/list` results and notifications. The run id is set when the message belongs to a tool call.
 - The tables below are the plan for later milestones. Each one is created by the migration of the milestone that writes it (2.5).
 - `browser_steps`: `taskId, runId, toolCallId, action, target, urlBefore, urlAfter, snapshotBlob, screenshotBlob, consoleErrors, blockedRequests, createdAt`. Plus one Playwright trace zip per browser task.
-- `sandbox_execs`: `runId, toolCallId, command, cwd, network (none | allowlist), exitCode, stdoutBlob, stderrBlob, filesChanged, durationMs`.
+- `sandbox_execs` (on hold with the sandbox, 5.4): `runId, toolCallId, command, cwd, network (none | allowlist), exitCode, stdoutBlob, stderrBlob, filesChanged, durationMs`.
 - `integration_events`: polled changes (new mail, calendar changes, Slack DMs) with `source, account, externalId, kind, summary, payloadBlob, seenAt`.
 - `subagent_runs`: `parentRunId, childRunId, profile, task, resultSummary`.
 
@@ -639,6 +639,8 @@ Three designs were built and judged (minimal, failure modes first, owner experie
 - **Round 4: the task of a finished per-run session goes to the next session.** A sub-agent session (`sub:<profile>:<runId>`) and the session of an isolated automation (`auto:<id>:<runId>`) have one run. When that run is no longer `running`, the next session that calls a page tool, `browser_open` or `browser_close` takes the task with its page and allowlist. So the parent can check the page after it sends the form of its child and close it, and the next child does not get "busy" for 10 minutes. A task whose submit or new domain waits for the owner is not taken. Rejected: page tools in the parent that act on the task of its child through `subagent_runs`. That needs a link in the worker and does not help an automation run.
 - **Round 4: the MCP sign-in registers the code and the verifier as secrets**, before the token request, as the Google sign-in does (4.12). A server that quoted them in an error put them in `lastError` and the log.
 - **Round 4: the card of `browser_submit` has no screenshot.** The card shows the address, the button and each field value, and the submit checks them against the live page before it sends; a difference sends nothing. A screenshot shows the page at the last step, which can be older than that check, and a photo needs a second Telegram message beside the card, which must stay one message (10.1). The step screenshots are on the Browser page. Known gap: on the phone the owner sees the fields, not the page.
+- **Final polish: a wide table scrolls by itself on a phone.** A headless Chrome pass over every page at 390 pixels found that the tables of the Runs, Sessions, Automations, Integrations and Signals pages made the whole page scroll sideways, which matters over Tailscale. Below 760 pixels each table is a block that scrolls. The same pass found the Google page said "revoked.. Connect it again" (an error from Google ends with a period) and a 404 for `/favicon.ico` on each load.
+- **Final polish: Chrome's own requests are expected in the browser tests.** A probe found that the agent Chrome contacts `accounts.google.com` (the account list of the Google sign-in) and `android.clients.google.com` (push check-in) within about 10 seconds of each start, every time. No switch that was tried stops both: `--gaia-url` moves the first to another address, which the gate still blocks; `--disable-sync`, `--disable-default-apps`, `--no-pings`, `--disable-field-trial-config` and the sign-in switches change nothing. In production these requests reach Google and each step lists them as hosts off the allowlist; in the tests they are blocked, because the fixture resolves each other name to an address that the gate refuses. So the search test keeps the rule of round 2: it checks its own rows exactly and allows one `close` row that names no fixture host and sent nothing. The result of the test does not depend on when Chrome makes the requests.
 
 ## 5. Permissions, review, and sandboxing
 
@@ -776,9 +778,9 @@ Built as recorded in 5.5; that section wins where they differ.
 - `delegate { profile, task, budget? }` starts a child run in a fresh session `sub:<runId>`.
 - Profiles in config define the tool set, the model slot, the iteration limit, and the domain allowlist. The first profiles:
   - `browser`: browser tools, `web_fetch`, `result_read`.
-  - `research`: `web_search`, `web_fetch`, `history_search`, `memory_search`.
+  - `research`: `web_search`, `web_fetch`, `memory_search`, `memory_get` (`history_search` waits for the history milestone).
   - `inbox`: Gmail read tools, labeling with review, and the `batch` slot for bulk triage.
-  - `code`: sandbox tools.
+  - `code`: sandbox tools. Not built, because the sandbox is on hold (section 10).
 - Children cannot delegate (depth 1). They inherit the parent's taint and are stricter where their profile says so.
 - The child's final text is the tool result, through a handle when long. The full child trace links to the parent in `subagent_runs` and in the dashboard timeline.
 - At most 3 children run at once per parent. A child that hits its budget stops and reports what it has.
@@ -797,7 +799,7 @@ Built as recorded in 5.5; that section wins where they differ.
 - **Approval cards.**
   - a one-line summary;
   - an expandable blockquote with the exact arguments;
-  - a screenshot for browser actions;
+  - a screenshot for browser actions (not built, see 4.14: the card shows the address, the button and the fields);
   - Approve and Deny buttons, plus "Always allow this" (adds a static rule, after a second confirmation).
 - **Commands menu** (`setMyCommands`): `/new`, `/status`, `/goals`, `/approvals`, `/dashboard`, `/stop`.
 - **Later, a Mini App.** The dashboard opens inside Telegram through a Tailscale Serve URL, which works only while the phone's Tailscale is connected. The server must verify `initData` with the bot token and the owner id.
