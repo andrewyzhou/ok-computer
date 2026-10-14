@@ -136,14 +136,20 @@ export function createGoogle(deps: GoogleDeps): Google {
     return { id: Number(row.id), subject, text: `${subject} ${fields.snippet ?? ''}`, arrived };
   };
 
-  const stallAlerts = async (polls: AccountPoll[]) => {
+  // the poll does not wait for the messages. a send can hang for minutes, and a poll run that stays open hides the new
+  // mail of every account from the heartbeat. the claim is released when the send ends without success.
+  const stallAlerts = (polls: AccountPoll[]) => {
     db.prepare('UPDATE google_accounts SET stallAlertedAt = NULL WHERE failures < ?').run(STALL_POLLS);
     for (const each of polls.filter((poll) => !poll.ok && poll.failures >= STALL_POLLS)) {
       const at = clock().toISOString();
       const claimed = db.prepare('UPDATE google_accounts SET stallAlertedAt = ? WHERE alias = ? AND stallAlertedAt IS NULL').run(at, each.alias);
       if (Number(claimed.changes) !== 1) continue;
-      if (await deps.notifyOwner(`The Google poll of the ${each.alias} account has failed ${each.failures} times in a row: ${each.error}`)) continue;
-      db.prepare('UPDATE google_accounts SET stallAlertedAt = NULL WHERE alias = ? AND stallAlertedAt = ?').run(each.alias, at);
+      const text = `The Google poll of the ${each.alias} account has failed ${each.failures} times in a row: ${each.error}`;
+      void (async () => {
+        const sent = await deps.notifyOwner(text).catch((err: unknown) => (logger.error('the google stall message failed', { alias: each.alias, err }), false));
+        if (!sent) db.prepare('UPDATE google_accounts SET stallAlertedAt = NULL WHERE alias = ? AND stallAlertedAt = ?').run(each.alias, at);
+        // the database can be closed when a late send ends after a stop of the app.
+      })().catch((err: unknown) => logger.warn('the google stall claim was not released', { alias: each.alias, err }));
     }
   };
 
@@ -165,8 +171,9 @@ export function createGoogle(deps: GoogleDeps): Google {
       let note: string;
       try {
         const polls = await requestContext.run({ runId }, () => sync.pollAll(runId));
-        await accounts.alertPending();
-        await stallAlerts(polls);
+        // alertPending catches the errors of its sends, and like the stall messages it must not hold the poll.
+        void accounts.alertPending();
+        stallAlerts(polls);
         detect(polls, runId);
         try {
           await classifySignals({ db, slots: deps.slots, logger, runId, ...(deps.signal ? { signal: deps.signal } : {}) });
