@@ -32,12 +32,17 @@ const DEFAULT_SLOTS: Record<Slot, z.input<typeof slotSchema>> = {
   compaction: { chain: ['anthropic/claude-sonnet-5-5'], effort: 'medium' },
 };
 
-// a slot in the config file changes only the fields that it gives, so { "effort": "high" } keeps the default chain.
+// a slot without a chain keeps the default slot and changes only the fields that it gives, so { "effort": "high" }
+// works. a slot with a chain names other models, so it gets none of the defaults: an older model can refuse effort,
+// and the 1-hour cache costs more.
 function partialSlot(slot: Slot) {
-  return z.preprocess(
-    (value) => (value && typeof value === 'object' && !Array.isArray(value) ? { ...DEFAULT_SLOTS[slot], ...value } : value),
-    slotSchema,
-  ).prefault(DEFAULT_SLOTS[slot]);
+  return z
+    .preprocess(
+      (value) =>
+        value && typeof value === 'object' && !Array.isArray(value) && !('chain' in value) ? { ...DEFAULT_SLOTS[slot], ...value } : value,
+      slotSchema,
+    )
+    .prefault(DEFAULT_SLOTS[slot]);
 }
 
 const priceSchema = z.strictObject({

@@ -79,6 +79,10 @@ describe('parseConfig', () => {
     const result = parseConfig({ slots: { main: { effort: 'high' } } });
     if (!result.ok) throw new Error(result.error);
     expect(result.value.slots.main).toMatchObject({ chain: ['anthropic/claude-sonnet-5-5', 'anthropic/claude-opus-5-5'], effort: 'high', cacheTtl: '1h' });
+    // a slot with its own chain gets no default effort, which an older model can refuse.
+    const own = parseConfig({ slots: { heartbeat: { chain: ['anthropic/claude-haiku-4-5'] } } });
+    if (!own.ok) throw new Error(own.error);
+    expect(own.value.slots.heartbeat).toEqual({ chain: ['anthropic/claude-haiku-4-5'], maxTokens: 16000, cacheTtl: '5m' });
   });
 
   it('rejects a model reference without a provider', () => {
