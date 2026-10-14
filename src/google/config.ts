@@ -1,7 +1,11 @@
 import { z } from 'zod';
 
 // an alias is a part of each tool input and of each untrusted source, for example gmail:school.
-const alias = z.string().regex(/^[a-z][a-z0-9-]{0,15}$/, 'use at most 16 lower-case letters, digits and dashes, for example "school"');
+// the read tools take "all" to mean every account, so it cannot be an alias.
+const alias = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]{0,15}$/, 'use at most 16 lower-case letters, digits and dashes, for example "school"')
+  .refine((value) => value !== 'all', '"all" means every account in the tools, so pick another alias');
 
 export const googleConfigSchema = z
   .object({

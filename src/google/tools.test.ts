@@ -5,9 +5,10 @@ import type { AddressInfo, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createGoogleHarness, refreshOf, type GoogleHarness } from '../../test/google-harness.js';
+import { CLIENT_ID, createGoogleHarness, refreshOf, type GoogleHarness } from '../../test/google-harness.js';
 import { runTool } from '../../test/run-tool.js';
 import { createToolRegistry, type ToolContext, type ToolOutput } from '../tools/registry.js';
+import { googleConfigSchema } from './config.js';
 import { createGoogleTools, googleToolNames } from './tools.js';
 import { isPrivateAddress, oneClick, planUnsubscribe, unsubscribeTargets, type OneClickResult } from './unsubscribe.js';
 
@@ -213,13 +214,49 @@ describe('gmail_unsubscribe', () => {
       planUnsubscribe({ payload: { headers: [['From', 'Bank <news@bank.example>'], ['List-Unsubscribe', `<${forgery}>`], ...headers].map(([name, value]) => ({ name, value })) } }, 'news@bank.example', forgery, true);
     expect(plan([['Authentication-Results', 'mx.google.com; dkim=none; dmarc=fail header.from=bank.example']]).way).toBe('refused');
     expect(plan([['Authentication-Results', 'mx.google.com; dkim=pass header.i=@bank.example'], ['DKIM-Signature', 'v=1; d=bank.example; h=From:Subject; b=x']]).way).toBe('refused');
-    expect(plan([['Authentication-Results', 'mx.google.com; dkim=pass header.i=@bank.example'], ['DKIM-Signature', 'v=1; d=bank.example; h=From:List-Unsubscribe; b=x']])).toMatchObject({ way: 'mailto', to: 'payments@acme-corp.example' });
+    expect(plan([['Authentication-Results', 'mx.google.com; dkim=pass header.i=@bank.example'], ['DKIM-Signature', 'v=1; d=bank.example; h=From:List-Unsubscribe; b=x']])).toMatchObject({
+      way: 'refused',
+      text: expect.stringContaining('not one address in the domain of the sender'),
+    });
 
     const call = await setup();
     h.fake.deliver('personal', { ...newsletter, headers: { ...newsletter.headers, 'Authentication-Results': 'mx.google.com; dkim=none; dmarc=fail' } });
     const out = await call('gmail_unsubscribe', { account: 'personal', messageId: 'n1', sender: SENDER, target: 'mailto:unsub@shop.example?subject=stop' });
     expect(out).toMatchObject({ isError: true, content: expect.stringContaining('dkim') });
     expect(h.fake.sent).toEqual([]);
+  });
+
+  // verification round 3 after the merge: a sender that signs its own domain passes the dkim check, and it chose a
+  // percent-encoded third party, subject and body. the card showed only escapes, and the owner's account sent the
+  // sender's text to that third party.
+  it('sends a mailto unsubscribe only to one address in the domain of the sender', () => {
+    const signed: Array<[string, string]> = [
+      ['From', 'Deals <news@deals.example>'],
+      ['Authentication-Results', 'mx.google.com; dkim=pass header.i=@deals.example header.b=Sig1; dmarc=pass'],
+      ['DKIM-Signature', 'v=1; d=deals.example; h=from:subject:list-unsubscribe; b=Sig1abc'],
+    ];
+    const escaped = (text: string) => [...text].map((char) => `%${char.charCodeAt(0).toString(16)}`).join('');
+    const plan = (target: string) =>
+      planUnsubscribe({ payload: { headers: [...signed, ['List-Unsubscribe', `<${target}>`]].map(([name, value]) => ({ name, value })) } }, 'news@deals.example', target, true);
+    expect(plan(`mailto:${escaped('payments@acme-corp.example')}?subject=${escaped('Re: invoice 4471')}&body=${escaped('approved')}`)).toMatchObject({ way: 'refused' });
+    expect(plan('mailto:unsub@deals.example,payments@acme-corp.example').way).toBe('refused');
+    expect(plan('mailto:%E0%A4%A')).toMatchObject({ way: 'refused' });
+    // the address of the sender's domain, or of a child domain, still works, with the subject that its list server reads.
+    expect(plan(`mailto:${escaped('unsub-42@deals.example')}?subject=unsubscribe-42`)).toEqual({ way: 'mailto', to: 'unsub-42@deals.example', subject: 'unsubscribe-42', body: 'unsubscribe' });
+    expect(plan('mailto:u@lists.deals.example')).toMatchObject({ way: 'mailto', to: 'u@lists.deals.example' });
+  });
+
+  // verification round 4: the recipient check was the symmetric alignment of the dkim check, so a sender that signs
+  // only its own subdomain made the owner's account mail the parent domain, which can be another organisation.
+  it('refuses a mailto unsubscribe to a parent of the from domain', () => {
+    const headers = [
+      ['From', 'News <news@deals.shared-dns.example>'],
+      ['Authentication-Results', 'mx.google.com; dkim=pass header.i=@deals.shared-dns.example header.b=Sig1'],
+      ['DKIM-Signature', 'v=1; d=deals.shared-dns.example; h=from:subject:list-unsubscribe; b=Sig1abc'],
+      ['List-Unsubscribe', '<mailto:billing@shared-dns.example?subject=Re%3A%20invoice%204471>'],
+    ].map(([name, value]) => ({ name, value }));
+    const plan = planUnsubscribe({ payload: { headers } }, 'news@deals.shared-dns.example', 'mailto:billing@shared-dns.example?subject=Re%3A%20invoice%204471', true);
+    expect(plan).toMatchObject({ way: 'refused', text: expect.stringContaining('not one address in the domain of the sender') });
   });
 
   // the refusals go to the model without the untrusted wrapper, so they do not quote the from header or its domain.
@@ -379,6 +416,12 @@ describe('read tools', () => {
   it('refuses an account alias that the config does not have', async () => {
     const call = await setup();
     expect(await call('gmail_search', { account: 'boss', query: 'x' })).toMatchObject({ isError: true, content: expect.stringContaining('invalid input') });
+  });
+
+  // the read tools take "all" to mean every account. an account with that alias could not be read alone.
+  it('refuses the alias all in the config', () => {
+    expect(googleConfigSchema.safeParse({ clientId: CLIENT_ID, accounts: [{ alias: 'all' }, { alias: 'work' }] }).success).toBe(false);
+    expect(googleConfigSchema.safeParse({ clientId: CLIENT_ID, accounts: [{ alias: 'allison' }] }).success).toBe(true);
   });
 
   it('shows the unsubscribe targets in the thread', async () => {

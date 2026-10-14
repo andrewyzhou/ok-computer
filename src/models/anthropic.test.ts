@@ -188,7 +188,11 @@ describe('createAnthropicClient streaming', () => {
       });
     await expect(broken('overloaded_error').complete(request, undefined, () => {})).rejects.toMatchObject({ name: 'ModelError', kind: 'transient' });
     await expect(broken('api_error').complete(request, undefined, () => {})).rejects.toMatchObject({ kind: 'transient' });
-    await expect(broken('invalid_request_error').complete(request, undefined, () => {})).rejects.toMatchObject({ kind: 'request' });
+    await expect(broken('invalid_request_error').complete(request, undefined, () => {})).rejects.toMatchObject({ kind: 'request', status: 400 });
+    // verification round 4: every other type was a request error with status 0, which counts as an error of the input.
+    await expect(broken('rate_limit_error').complete(request, undefined, () => {})).rejects.toMatchObject({ kind: 'transient', status: 429 });
+    await expect(broken('timeout_error').complete(request, undefined, () => {})).rejects.toMatchObject({ kind: 'transient' });
+    await expect(broken('authentication_error').complete(request, undefined, () => {})).rejects.toMatchObject({ kind: 'request', status: 401 });
   });
 
   // a stream stays open for the whole reply, so a cut in the middle is the usual network failure. the sdk then

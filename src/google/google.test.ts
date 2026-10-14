@@ -89,6 +89,47 @@ describe('google poll job', () => {
     await google.close();
   });
 
+  // after the merge: the poll waited for the stall message before the detectors. a send that hung (telegram waits up to
+  // 500 s per request) held the poll run open, and the digest hid the new mail of every account for that time.
+  it('does not wait for a stall message that hangs', async () => {
+    h = await createGoogleHarness({ accounts: ['personal', 'school'] });
+    h.signedIn('personal');
+    h.signedIn('school');
+    let hang = false;
+    const make = () =>
+      createGoogle({
+        db: h.db,
+        clock: () => h.now.value,
+        logger: h.logger,
+        blobs: h.blobs,
+        secrets: h.secrets,
+        slots: { call: async () => ({ ok: false, error: 'x', aborted: false }) },
+        config: h.config,
+        timeZone: 'UTC',
+        notifyOwner: () => (hang ? new Promise<boolean>(() => {}) : Promise.resolve(true)),
+        endpoints: { apiRoot: h.fake.url, tokenUrl: `${h.fake.url}token` },
+      });
+    const first = make();
+    await first.poll();
+    await first.close();
+    h.fake.deliver('personal', { id: 'p1', headers: { From: 'Prof <prof@school.example>', Subject: 'Essay due Oct 20' }, snippet: 'due Oct 20' });
+    // the school account fails for the twelfth time in a row, with an error that does not park it.
+    const secrets = h.secrets as unknown as { get: (ref: string) => Promise<string | undefined> };
+    const get = secrets.get.bind(h.secrets);
+    secrets.get = async (ref) => {
+      if (ref === 'google.school') throw new Error('credential manager is starting');
+      return get(ref);
+    };
+    h.db.prepare("UPDATE google_accounts SET failures = 11 WHERE alias = 'school'").run();
+    hang = true;
+    const google = make();
+    const outcome = await Promise.race([google.poll().then(() => 'finished'), new Promise((resolve) => setTimeout(() => resolve('running'), 3_000))]);
+    expect(outcome).toBe('finished');
+    expect(h.rows("SELECT stallAlertedAt IS NOT NULL AS claimed FROM google_accounts WHERE alias = 'school'")).toEqual([{ claimed: 1 }]);
+    expect(signalDigest(h.db, h.now.value, 'UTC')?.text).toContain('detector date_not_on_calendar');
+    await google.close();
+  }, 20_000);
+
   it('is a run of its own, and its note says that a gap in the mail history made no signals', async () => {
     h = await createGoogleHarness({ accounts: ['personal'] });
     h.signedIn('personal');

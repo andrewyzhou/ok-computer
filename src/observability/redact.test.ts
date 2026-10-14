@@ -107,4 +107,10 @@ describe('redact', () => {
     registerSecret('1//refresh/token+value=2026', 'google.test');
     expect(redact('refresh_token=1%2F%2Frefresh%2Ftoken%2Bvalue%3D2026&grant_type=refresh_token')).toBe('refresh_token=[redacted]&grant_type=refresh_token');
   });
+
+  // a pkce verifier can hold "~". a form encoder writes it as %7E, and encodeURIComponent keeps it.
+  it('hides the form-encoded form of a secret', () => {
+    registerSecret('verifier~value-2026', 'google.verifier');
+    expect(redact('code_verifier=verifier%7Evalue-2026&x=1')).toBe('code_verifier=[redacted]&x=1');
+  });
 });

@@ -58,6 +58,8 @@ export interface RunResult {
   error?: string;
   // the run used all its model calls without a final answer.
   stoppedAtLimit?: true;
+  // the provider rejected a request of the run, for example with its content filter.
+  rejected?: true;
 }
 
 export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunResult> {
@@ -153,7 +155,8 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
         ...(input.onText ? { onText: input.onText } : {}),
       });
       if (!result.ok) {
-        return finish(result.aborted ? 'aborted' : 'failed', '', abortReason(abort.signal) ?? result.error);
+        const ended = finish(result.aborted ? 'aborted' : 'failed', '', abortReason(abort.signal) ?? result.error);
+        return result.rejected ? { ...ended, rejected: true } : ended;
       }
       const response = result.response;
       append({

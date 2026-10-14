@@ -32,7 +32,7 @@ Add this block to `okc.config.json`. If the file does not exist, create it next 
 ```
 
 - `clientId`: the client ID of the Desktop app client (it ends in `.apps.googleusercontent.com`). It is not a secret.
-- `alias`: at most 16 lower-case letters, digits and dashes. The agent names an account by its alias.
+- `alias`: at most 16 lower-case letters, digits and dashes, but not `all` (the agent uses `all` for every account). The agent names an account by its alias.
 - `email` (optional, recommended): a sign-in with another Google account is refused, so an alias can never read the wrong mailbox.
 - `send` (default `false`): when `true`, the sign-in also asks for permission to send mail, and the agent gets `gmail_send`. You approve each send. If you change it later, connect each account again. With `false` the agent has no send tool, but Google lets the "modify" permission send mail too, so the limit is in the app, not in the token.
 - `sessions`: `main`, and also `auto` if your automations may use Gmail and Calendar.
@@ -55,7 +55,9 @@ Open the dashboard on this PC (`okc open`), then go to **Google**.
 ## 4. What happens next
 
 - Every `pollMinutes`, the app reads the new inbox mail and the calendar changes of each signed-in account. Mail from before the sign-in is not news. Each poll is a run on the **Runs** page (trigger `poll`), with every request to Google and every classifier call.
-- New items become **signals**. Code checks two things first: a date in a mail that no event of that day matches, and an event that starts within two hours. Then a cheap model labels each mail (`needs_reply`, `deadline`, `event_change`, `newsletter`, `noise`). The heartbeat reads at most 20 new signals (detector hits first) and tells you only what needs attention. When two heartbeat runs that showed a signal fail, later runs see it without its text. It runs for signals also when the heartbeat checklist is empty, so you only need `heartbeat.every`. Newsletters and noise without a detector hit are closed without a model call. The **Signals** page shows what happened to each signal.
+- New items become **signals**. Code checks two things first: a date in a mail that no event of that day matches, and an event that starts within two hours. Then a cheap model labels each mail (`needs_reply`, `deadline`, `event_change`, `newsletter`, `noise`). The heartbeat reads at most 20 new signals (detector hits first) and tells you only what needs attention. When a signal makes two heartbeat runs fail (the model refuses it, or the run hits its step limit), later runs see it without its text; a model outage does not count. It runs for signals also when the heartbeat checklist is empty, so you only need `heartbeat.every`. Newsletters and noise without a detector hit are closed without a model call. The **Signals** page shows what happened to each signal.
+- **Only the primary calendar** of each account is read and written. A deadline that is only on another calendar (a class calendar, a subscribed feed) is reported as not on the primary calendar, and free/busy ignores the other calendars. To have such deadlines count, add them to the primary calendar.
+- **The heartbeat checklist** can be changed by a heartbeat run only when that run read no outside text. A heartbeat that saw new mail cannot change it; change it in chat or on the dashboard.
 - **Approvals.** These always ask you: sending mail, unsubscribing, an event with guests (Google sends them invitations), and changing or deleting an event. The card shows the sender and the exact unsubscribe link, the recipients, or the current title of the event.
 - **Write tools.** Archive, labels, mark as read, drafts and private events also ask you until the reviewer model exists. To let the agent do them without asking, add rules to `okc.policy.json` (next to `okc.config.json`) and restart:
 
@@ -72,7 +74,7 @@ Open the dashboard on this PC (`okc open`), then go to **Google**.
   ```
 
   An allow rule on a write tool also holds after the agent read mail. It never lets an event invite people, and the label tool cannot move mail to the trash or to spam.
-- **Unsubscribe** uses only the sender's own `List-Unsubscribe` header: a one-click link (only when Gmail saw a valid DKIM signature of the sender's domain that covers the unsubscribe headers, and never to an address inside your network) or a mail (only with `send: true`, and only with the same DKIM check, because a forged header could make your account mail a stranger). Otherwise the agent gives you the link.
+- **Unsubscribe** uses only the sender's own `List-Unsubscribe` header: a one-click link (only when Gmail saw a valid DKIM signature of the sender's domain that covers the unsubscribe headers, and never to an address inside your network) or a mail (only with `send: true`, only with the same DKIM check, and only to one address in the sender's own domain or a subdomain of it, so a sender cannot make your account mail a stranger; a list whose unsubscribe address is at another domain, or at a parent of the sender's domain, is refused). Otherwise the agent gives you the link.
 
 ## 5. When something goes wrong
 

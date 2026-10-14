@@ -156,14 +156,28 @@ function toStopReason(reason: BetaStopReason | null): StopReason {
   }
 }
 
+// the error types of the api, with the http status of each.
+const STREAM_ERROR_STATUS: Record<string, number> = {
+  invalid_request_error: 400,
+  authentication_error: 401,
+  billing_error: 402,
+  permission_error: 403,
+  not_found_error: 404,
+  request_too_large: 413,
+  rate_limit_error: 429,
+  api_error: 500,
+  timeout_error: 504,
+  overloaded_error: 529,
+};
+
 function toModelError(err: unknown, signal: AbortSignal | undefined): ModelError {
   if (err instanceof Anthropic.APIUserAbortError || signal?.aborted) return new ModelError('aborted', 'the request was aborted');
   if (err instanceof Anthropic.APIConnectionError) return new ModelError('transient', err.message);
   if (err instanceof Anthropic.APIError) {
-    const status = err.status ?? 0;
-    // an error event inside a stream has no status. its type tells an overload from a bad request.
-    const streamed = status === 0 && (err.type === 'overloaded_error' || err.type === 'api_error');
-    const transient = streamed || status === 408 || status === 409 || status === 429 || status >= 500;
+    // an error event inside a stream has no status. its type gives the status that the same error has without a
+    // stream, so a rate limit is retried, and a bad key does not count as an error that the input caused.
+    const status = err.status || STREAM_ERROR_STATUS[String(err.type)] || 0;
+    const transient = status === 408 || status === 409 || status === 429 || status >= 500;
     return new ModelError(transient ? 'transient' : 'request', err.message, status);
   }
   // a stream that the network cut, that ended before message_stop, or that sent bad json gives the base error of the

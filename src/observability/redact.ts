@@ -36,8 +36,10 @@ export function registerSecret(value: string | undefined, source?: string): void
   }
   // a form body or a query string holds the percent-encoded value. a server that quotes its request in an error
   // (an oauth token endpoint, for example) puts that form in the message.
+  // a form encoder also escapes "~" and other characters that encodeURIComponent keeps, so its form is a secret too.
   const encoded = encodeURIComponent(value);
-  if (encoded !== value) forms.push(encoded);
+  const formEncoded = new URLSearchParams({ v: value }).toString().slice(2);
+  for (const each of new Set([encoded, formEncoded])) if (each !== value) forms.push(each);
   if (source === undefined) forms.forEach((each) => fixed.add(each));
   else bySource.set(source, [{ value, forms }, ...(bySource.get(source) ?? []).filter((each) => each.value !== value)].slice(0, KEPT_PER_SOURCE));
   const held = [...bySource.values()].flatMap((values) => values.flatMap((each) => each.forms));

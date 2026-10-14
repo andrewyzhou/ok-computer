@@ -98,13 +98,16 @@ export function keywords(text: string): string[] {
 const dayOf = (event: CalendarItem, timeZone: string) => (event.allDay ? event.start.slice(0, 10) : localDay(new Date(event.start), timeZone));
 
 // date_not_on_calendar: the mail names a day, and no event of that day, in any account, shares a word with the
-// subject of the mail. an empty subject never matches, so its date always counts as missing.
-export function dateHits(mail: MailItem, events: CalendarItem[], timeZone: string): DetectorHit[] {
+// subject of the mail. an empty subject never matches, so its date always counts as missing. a poll can find a mail
+// days after it arrived, for example after the computer was off. a day before the day of the poll has passed, and the
+// live read of the calendar does not hold its events, so it is not a deadline.
+export function dateHits(mail: MailItem, events: CalendarItem[], timeZone: string, now: Date): DetectorHit[] {
   const words = keywords(mail.subject);
-  return mentionedDates(mail.text, mail.arrived, timeZone).flatMap(({ day, phrase }) => {
+  const today = localDay(now, timeZone);
+  return mentionedDates(mail.text, mail.arrived, timeZone).filter(({ day }) => day >= today).flatMap(({ day, phrase }) => {
     const sameDay = events.filter((event) => dayOf(event, timeZone) === day);
     if (sameDay.some((event) => keywords(event.summary).some((word) => words.includes(word)))) return [];
-    return [{ name: 'date_not_on_calendar', detail: cleanLine(`mentions "${phrase}" (${day}); the calendars have ${sameDay.length} events that day and none about "${mail.subject}"`) }];
+    return [{ name: 'date_not_on_calendar', detail: cleanLine(`mentions "${phrase}" (${day}); the primary calendars have ${sameDay.length} events that day and none about "${mail.subject}"`) }];
   });
 }
 

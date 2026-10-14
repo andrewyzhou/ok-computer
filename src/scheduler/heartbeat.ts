@@ -80,23 +80,41 @@ interface Respond {
   text?: string;
 }
 
-function responses(db: Db, sql: string, ...params: string[]): Respond[] {
-  return db
-    .prepare(sql)
-    .all(...params)
-    .map((row) => JSON.parse(String(row.input)) as Respond);
-}
-
 // a message that did not reach the owner is not a recent notification. the next heartbeat would see it as sent, and
 // it could then keep back the signal that the failed message was about.
-export function recentNotifications(db: Db): string[] {
-  return responses(
-    db,
-    `SELECT input FROM tool_calls WHERE name = 'heartbeat_respond' AND isError = 0
-       AND json_extract(input, '$.notify') = 1 AND runId NOT IN (SELECT value FROM json_each(?))
-       ORDER BY id DESC LIMIT ${RECENT_LIMIT}`,
-    JSON.stringify(getSetting<string[]>(db, UNSENT_RUNS) ?? []),
-  ).map((respond) => respond.text ?? '');
+export function recentNotifications(db: Db): Array<{ text: string; runId: string }> {
+  return db
+    .prepare(
+      `SELECT input, runId FROM tool_calls WHERE name = 'heartbeat_respond' AND isError = 0
+         AND json_extract(input, '$.notify') = 1 AND runId NOT IN (SELECT value FROM json_each(?))
+         ORDER BY id DESC LIMIT ${RECENT_LIMIT}`,
+    )
+    .all(JSON.stringify(getSetting<string[]>(db, UNSENT_RUNS) ?? []))
+    .map((row) => ({ text: (JSON.parse(String(row.input)) as Respond).text ?? '', runId: String(row.runId) }));
+}
+
+// the taint that a heartbeat run read itself: its checklist and its digest. a run from before readTaint has only
+// its whole taint.
+function readTaint(db: Db, runId: string): TaintSource[] {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(json_extract(payload, '$.readTaint'), json_extract(payload, '$.taint')) AS taint FROM events
+       WHERE sessionKey = ? AND type = 'system_event' ORDER BY seq LIMIT 1`,
+    )
+    .get(`${HEARTBEAT_PREFIX}${runId}`);
+  return row?.taint ? (JSON.parse(String(row.taint)) as TaintSource[]) : [];
+}
+
+// a refusal, the step limit and a request that the provider rejected (for example its content filter) can come from
+// the text of the input. a refusal counts also when the next model of the chain then failed. a transient error or a
+// crash comes from the model or the app.
+// a rejected request can also come from the setup of the owner, for example a max_tokens or an effort that the model
+// does not take, or a model without tools. the error text does not tell the two apart, so the check runs again
+// without the signals: only when that run completes did the signals cause the error.
+async function inputCanCause(db: Db, result: RunResult, withoutSignals: () => Promise<RunResult>): Promise<boolean> {
+  if (result.stoppedAtLimit) return true;
+  if (db.prepare("SELECT 1 FROM model_calls WHERE runId = ? AND stopReason = 'refusal' LIMIT 1").get(result.runId)) return true;
+  return !!result.rejected && (await withoutSignals()).status === 'completed';
 }
 
 export function createHeartbeatTools(deps: { db: Db }): Tool[] {
@@ -108,7 +126,14 @@ export function createHeartbeatTools(deps: { db: Db }): Tool[] {
     risk: 'write',
     async run(input, ctx) {
       if (input.notify && !input.text?.trim()) return { content: 'notify true needs a text', isError: true };
-      if (input.checklist !== undefined) setChecklist(deps.db, input.checklist, ctx.clock(), sessionTaint(deps.db, ctx.sessionKey));
+      if (input.checklist === undefined) return { content: 'recorded' };
+      // a heartbeat run that read outside text (a mail in the digest, or a checklist that a tainted session wrote)
+      // must not change the checklist. the owner does not see this session, and a new checklist drives every later
+      // heartbeat. the answer itself still counts, so a notification is not lost. the main session can change the
+      // checklist with heartbeat_checklist_set, where the owner sees it.
+      const taint = sessionTaint(deps.db, ctx.sessionKey);
+      if (taint.length) return { content: 'recorded, but the checklist did not change, because this run read outside text' };
+      setChecklist(deps.db, input.checklist, ctx.clock());
       return { content: 'recorded' };
     },
   });
@@ -167,48 +192,73 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
     }
 
     const recent = recentNotifications(db);
-    const text = [
-      'Heartbeat check.',
-      '',
-      'Checklist:',
-      checklist || '- none',
-      ...(digest?.shown.length
-        ? [
-            '',
-            "New signals from the owner's accounts: the ones with a detector hit first, then the newest. Tell the owner about a signal only when it needs attention soon, for example a deadline that is not on the calendar. Each signal is shown one time.",
-            digest.text,
-          ]
-        : []),
-      '',
-      'Recent notifications to the owner:',
-      ...(recent.length ? recent.map((line) => `- ${line}`) : ['- none']),
-    ].join('\n');
-    // the digest quotes outside text, so the run starts with its taint. the heartbeat has no external tools.
-    const inherited = [...checklistTaint(db), ...(digest?.taint ?? [])];
+    // a recent notification can repeat a mail that its heartbeat read. it keeps the taint of that run, so the mail
+    // cannot change the checklist one heartbeat later through it. only the taint that the run read itself counts, not
+    // the taint of the recent notifications that it read. else each notification gives the taint to the next ones, and
+    // one mail taints every later heartbeat and the main session for ever.
+    const recentTaint = recent.flatMap((each) => readTaint(db, each.runId));
+    const textWith = (signals: string[]) =>
+      [
+        'Heartbeat check.',
+        '',
+        'Checklist:',
+        checklist || '- none',
+        ...signals,
+        '',
+        'Recent notifications to the owner:',
+        recent.length ? wrapIfTainted(recentTaint, recent.map((each) => `- ${each.text}`).join('\n')) : '- none',
+      ].join('\n');
+    // the digest and the recent notifications can quote outside text, so the run starts with their taint. the
+    // heartbeat has no external tools.
+    const start = (runId: string, text: string, read: TaintSource[], allowedTools: readonly string[]) => {
+      const inherited = [...read, ...recentTaint];
+      const sessionKey = `${HEARTBEAT_PREFIX}${runId}`;
+      return queue.enqueue(sessionKey, () =>
+        deps.agent({
+          runId,
+          sessionKey,
+          trigger: 'heartbeat',
+          slot: automation.slot,
+          channel: owner.chat()?.channel ?? 'cli',
+          allowedTools,
+          events: [{ type: 'system_event', payload: { text, ...(inherited.length ? { taint: inherited, readTaint: read } : {}) } }],
+          signal: deps.signal,
+        }),
+      );
+    };
+    const signalLines = digest?.shown.length
+      ? [
+          '',
+          "New signals from the owner's accounts: the ones with a detector hit first, then the newest. Tell the owner about a signal only when it needs attention soon, for example a deadline that is not on the calendar. Each signal is shown one time.",
+          digest.text,
+        ]
+      : [];
     const runId = newId();
     const sessionKey = `${HEARTBEAT_PREFIX}${runId}`;
-    const result = await queue.enqueue(sessionKey, () =>
-      deps.agent({
-        runId,
-        sessionKey,
-        trigger: 'heartbeat',
-        slot: automation.slot,
-        channel: owner.chat()?.channel ?? 'cli',
-        allowedTools: HEARTBEAT_TOOLS,
-        events: [{ type: 'system_event', payload: { text, ...(inherited.length ? { taint: inherited } : {}) } }],
-        signal: deps.signal,
-      }),
-    );
-    // a failed run leaves the signals unhandled, so the next heartbeat shows them again. a failure counts against the
-    // shown signals, so a signal whose text makes every run fail loses that text, and the scheduler does not turn the
-    // heartbeat off. an aborted run (a stop of the app) does not count.
+    const result = await start(runId, textWith(signalLines), [...checklistTaint(db), ...(digest?.taint ?? [])], HEARTBEAT_TOOLS);
+    // the check without signals has the same checklist, notifications and model settings. it has no
+    // heartbeat_respond, so it cannot send or record a notification.
+    const withoutSignals = () =>
+      start(
+        newId(),
+        textWith(['', 'This run only checks that the model works, so it shows no signals. Do not call tools. Reply NO_REPLY.']),
+        checklistTaint(db),
+        HEARTBEAT_TOOLS.filter((name) => name !== 'heartbeat_respond'),
+      );
+    // a failed run leaves the signals unhandled, so the next heartbeat shows them again. a failure that the input can
+    // cause counts against the shown signals, so a signal whose text makes every run fail loses that text, and the
+    // scheduler does not turn the heartbeat off. an outage of the model or an aborted run (a stop of the app) does not
+    // count, because the text would else be lost for a failure that the text did not cause.
     if (result.status !== 'completed') {
-      if (result.status === 'failed' && digest?.shown.length) deps.signals!.failed(digest);
+      if (result.status === 'failed' && digest?.shown.length && (await inputCanCause(db, result, withoutSignals))) deps.signals!.failed(digest);
       return { status: 'failed', runId, error: result.error ?? result.status };
     }
 
     // the answer comes from the event log, because one failed trace write must not drop the owner's notification.
     const answer = succeededCalls(db, sessionKey, runId, 'heartbeat_respond').at(-1) as Respond | undefined;
+    // a run that ended without heartbeat_respond (a plain answer, or a reply cut at max_tokens) did not decide about
+    // the signals. the text of a mail can cause this at every run, so it counts against them like a refusal.
+    if (!answer && digest?.shown.length) deps.signals!.failed(digest);
     const message = answer?.notify ? answer.text : undefined;
     const notified = !!message && (await owner.send(message, undefined, { markdown: true, runId }));
     if (message && !notified) {
