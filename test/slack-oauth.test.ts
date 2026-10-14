@@ -32,7 +32,9 @@ afterEach(async () => {
 
 const SCOPES = ['search:read.im', 'search:read.mpim', 'im:history', 'mpim:history', 'users:read', 'chat:write'];
 
-async function setup(options: { callback?: 'loopback' | 'paste'; rotation?: boolean; client?: string | null; withhold?: string[] } = {}) {
+async function setup(
+  options: { callback?: 'loopback' | 'paste'; rotation?: boolean; client?: string | null; withhold?: string[]; scopes?: string[] } = {},
+) {
   let now = Date.parse('2026-10-13T16:00:00Z');
   const clock = () => new Date(now);
   const fake = createSlackFake(() => Math.floor(now / 1000));
@@ -54,7 +56,7 @@ async function setup(options: { callback?: 'loopback' | 'paste'; rotation?: bool
         id: 'slack-work',
         kind: 'mcp-http',
         url: slack.url,
-        auth: { type: 'oauth', clientRef: 'slack-work-app', scopes: SCOPES, callback: options.callback ?? 'paste' },
+        auth: { type: 'oauth', clientRef: 'slack-work-app', scopes: options.scopes ?? SCOPES, callback: options.callback ?? 'paste' },
         tools: { allow: ['slack_search_public_and_private', 'slack_read_user_profile', 'slack_send_message'] },
         risk: { slack_search_public_and_private: 'read', slack_read_user_profile: 'read', slack_send_message: 'external' },
       },
@@ -209,6 +211,48 @@ describe('slack sign-in with a pre-registered client', () => {
     await t.integrations.start();
     await expect.poll(() => t.state().status).toBe('connected');
     expect(t.slack.stats.codeGrants).toBe(1);
+  });
+
+  it('connects once when a configured scope entry holds a list with commas or spaces', async () => {
+    const t = await setup({ scopes: ['search:read.im,search:read.mpim', 'im:history mpim:history', 'users:read', 'chat:write'] });
+    await t.integrations.start();
+    await signIn(t);
+    expect(t.slack.scopes.at(-1)).toBe(SCOPES.join(' '));
+    expect(JSON.parse((await t.secrets.get('slack-work:oauth-tokens'))!)).toMatchObject({ requested: SCOPES.join(' ') });
+    expect(await search(t.integrations)).toMatchObject({ kind: 'result' });
+    await t.integrations.stop();
+    await t.integrations.start();
+    await expect.poll(() => t.state().status).toBe('connected');
+    expect(t.slack.stats.codeGrants).toBe(1);
+    expect(t.needsAuth).toEqual([]);
+  });
+
+  it('keeps the record of the asked scopes through a refresh when the read of the stored tokens fails', async () => {
+    const t = await setup({ rotation: true, withhold: ['users:read'] });
+    await t.integrations.start();
+    const started = await t.integrations.connect('slack-work');
+    if (!('url' in started)) throw new Error('expected a link');
+    expect(await t.integrations.finishSignIn(await consent(t.slack, started.url))).toMatchObject({ ok: true });
+    await expect.poll(() => t.state().status).toBe('connected');
+    t.slack.expire();
+    // the transport reads the tokens for the header, and the sdk reads them for the refresh. only the third read, the
+    // one inside saveTokens, fails.
+    const get = t.secrets.get.bind(t.secrets);
+    let reads = 0;
+    t.secrets.get = async (ref: string) => {
+      if (ref === 'slack-work:oauth-tokens' && ++reads === 3) throw new Error('the credential manager is busy');
+      return get(ref);
+    };
+    expect(await search(t.integrations)).toMatchObject({ kind: 'result' });
+    t.secrets.get = get;
+    expect(reads).toBeGreaterThanOrEqual(3);
+    expect(t.slack.stats.refreshGrants).toBe(1);
+    expect(JSON.parse((await t.secrets.get('slack-work:oauth-tokens'))!)).toMatchObject({ requested: SCOPES.join(' ') });
+    await t.integrations.stop();
+    await t.integrations.start();
+    await expect.poll(() => t.state().status).toBe('connected');
+    expect(t.slack.stats.codeGrants).toBe(1);
+    expect(t.needsAuth).toEqual([]);
   });
 
   it('uses a client that the owner stores again after the first sign-in', async () => {

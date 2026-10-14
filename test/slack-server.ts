@@ -209,7 +209,8 @@ export async function startSlackOAuth(fake: SlackFake, options: Partial<SlackOAu
   const clientSecret = `cs${b64url(randomBytes(16))}`;
   const codes = new Map<string, { challenge: string; redirect: string; scope: string }>();
   const access = new Set<string>();
-  const refresh = new Set<string>();
+  // each refresh token and the scopes of its grant, which a refresh answer names again.
+  const refresh = new Map<string, string>();
   const scopes: string[] = [];
   const tokenAuth: string[] = [];
   const stats = { mcpRequests: 0, apiRequests: 0, registrations: 0, codeGrants: 0, refreshGrants: 0 };
@@ -227,7 +228,7 @@ export async function startSlackOAuth(fake: SlackFake, options: Partial<SlackOAu
     access.add(token);
     if (!settings.rotation) return { ok: true, app_id: 'A0FAKE', authed_user: { id: SELF }, team: { id: 'T0ACME01' }, scope, access_token: token, token_type: 'user' };
     const refreshToken = `xoxe-1-${b64url(randomBytes(16))}`;
-    refresh.add(refreshToken);
+    refresh.set(refreshToken, scope);
     return { ok: true, scope, access_token: token, refresh_token: refreshToken, expires_in: 43_200, token_type: 'user' };
   };
   const readBody = async (req: IncomingMessage) => {
@@ -319,9 +320,11 @@ export async function startSlackOAuth(fake: SlackFake, options: Partial<SlackOAu
       }
       if (params.get('grant_type') === 'refresh_token') {
         if (settings.refreshError) return refuse(res, settings.refreshError);
-        if (!refresh.delete(params.get('refresh_token') ?? '')) return refuse(res, 'invalid_refresh_token');
+        const scope = refresh.get(params.get('refresh_token') ?? '');
+        if (scope === undefined) return refuse(res, 'invalid_refresh_token');
+        refresh.delete(params.get('refresh_token') ?? '');
         stats.refreshGrants++;
-        return json(res, 200, issue(''));
+        return json(res, 200, issue(scope));
       }
       return refuse(res, 'unsupported_grant_type');
     }

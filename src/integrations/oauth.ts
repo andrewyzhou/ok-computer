@@ -119,6 +119,10 @@ export function createOAuth(deps: OAuthDeps): OAuth {
   // so a lost new set would end the sign-in at the next refresh. the provider uses this copy and saves it again at
   // each read, until a save works. a restart before that loses it.
   const unsaved = new Map<string, Tokens>();
+  // the last known record of the asked scopes. a refresh keeps the record from the stored tokens, and a failed read of
+  // them would otherwise save the new tokens without it. a server that granted fewer scopes would then make the next
+  // read refuse the new, working token.
+  const requestedById = new Map<string, string>();
   const saveUnsaved = async (id: string) => {
     const tokens = unsaved.get(id);
     if (!tokens) return;
@@ -140,6 +144,9 @@ export function createOAuth(deps: OAuthDeps): OAuth {
     const id = entry.id;
     const draft = () => drafts.get(id) ?? (drafts.set(id, {}), drafts.get(id)!);
     const auth = entry.auth?.type === 'oauth' ? entry.auth : undefined;
+    // slack writes a scope list with commas, and the record of a sign-in is split on commas and spaces. a config entry
+    // that holds a list must thus be split the same way, or it can never match the record.
+    const scopes = auth?.scopes?.flatMap((scope) => scope.split(/[\s,]+/)).filter(Boolean);
     const redirectUrl = redirectFor(entry);
     const metadata: OAuthClientMetadata = {
       client_name: 'OK Computer',
@@ -147,7 +154,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
       token_endpoint_auth_method: 'none',
-      ...(auth?.scopes ? { scope: auth.scopes.join(' ') } : {}),
+      ...(scopes ? { scope: scopes.join(' ') } : {}),
     };
     return {
       get redirectUrl() {
@@ -190,9 +197,10 @@ export function createOAuth(deps: OAuthDeps): OAuth {
         // sign-in. the check uses the scopes that the app asked for, not the granted ones: a server can grant fewer,
         // and a new sign-in would then end with a token that the app refuses again. a token from before this record
         // uses the scopes that it names. a token without either is kept, because the app cannot know what it holds.
-        const scopes = tokens?.requested ?? tokens?.scope;
-        const asked = scopes ? new Set(scopes.split(/[\s,]+/)) : undefined;
-        const missing = auth?.scopes?.filter((scope) => !asked?.has(scope)) ?? [];
+        if (tokens?.requested !== undefined) requestedById.set(id, tokens.requested);
+        const record = tokens?.requested ?? tokens?.scope;
+        const asked = record ? new Set(record.split(/[\s,]+/)) : undefined;
+        const missing = scopes?.filter((scope) => !asked?.has(scope)) ?? [];
         if (asked && missing.length) {
           logger.warn('a configured scope is new since the last sign-in, so a new sign-in starts', { integration: id, missing });
           return undefined;
@@ -206,11 +214,12 @@ export function createOAuth(deps: OAuthDeps): OAuth {
         // a code comes only through the callback, which marks its flow as active. a refresh keeps the record of the
         // sign-in before it.
         const flow = active.get(id);
-        const requested = flow ? auth?.scopes?.join(' ') : before?.requested;
+        const requested = flow ? scopes?.join(' ') : (before?.requested ?? requestedById.get(id));
+        if (requested !== undefined) requestedById.set(id, requested);
         const tokens: Tokens = requested === undefined ? given : { ...given, requested };
-        if (flow && auth?.scopes && given.scope) {
+        if (flow && scopes && given.scope) {
           const granted = new Set(given.scope.split(/[\s,]+/));
-          const missing = auth.scopes.filter((scope) => !granted.has(scope));
+          const missing = scopes.filter((scope) => !granted.has(scope));
           if (missing.length) flow.missing = missing;
         }
         try {
@@ -249,7 +258,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
         }
         // the sdk asks for every scope that the metadata of the server offers. the configured scopes win, so the app
         // gets only the access that the owner names, and an app that lacks one of the offered scopes still works.
-        if (auth?.scopes) url.searchParams.set('scope', auth.scopes.join(' '));
+        if (scopes) url.searchParams.set('scope', scopes.join(' '));
         prune();
         for (const [key, flow] of flows) if (flow.integrationId === id) flows.delete(key);
         flows.set(state, {
