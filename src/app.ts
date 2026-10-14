@@ -185,6 +185,14 @@ export function createApp(deps: AppDeps): App {
         ...ids,
       })
     : undefined;
+  // /status shows each google account with the mcp integrations, so the owner can see on the phone that a sign-in works.
+  const googleStates = () =>
+    google
+      ? google.accounts.aliases.map((alias) => {
+          const row = db.prepare('SELECT status FROM google_accounts WHERE alias = ?').get(alias);
+          return { id: `google:${alias}`, state: { status: String(row?.status ?? 'signed_out') } };
+        })
+      : [];
   const web = createWeb({ db, blobs, logger, clock, config, enabled: deps.connectIntegrations !== false, ...deps.web });
   // each run gets the integration tools of its session. the list comes from the config, not from a catalog, so the
   // tools parameter of a session never changes when a server changes its tools.
@@ -405,7 +413,7 @@ export function createApp(deps: AppDeps): App {
       dashboardUrl: (deps.loginCodes && config.dashboard.publicUrl) || `http://127.0.0.1:${config.dashboard.port}`,
       ...(config.dashboard.publicUrl && deps.loginCodes ? { signInLink: signInLink(config.dashboard.publicUrl, deps.loginCodes, config.dashboard.port) } : {}),
       approvalCard: approvals.card,
-      integrations: () => integrations.status(),
+      integrations: () => [...integrations.status(), ...googleStates()],
     }),
     onReset: () => {
       const now = clock();
