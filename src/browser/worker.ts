@@ -352,6 +352,11 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     if (profileBusy(profile)) throw new Error('profile busy');
     mkdirSync(downloads, { recursive: true });
     hardenProfile(profile, downloads);
+    // serviceWorkers 'block' only stops a page from registering a worker, and it hides the requests of a worker from
+    // the page layers of the gate. a worker that a site registered in okc browser login still controlled its pages, so
+    // a click sent a post with no approval, and typed text reached an off-list host (r8 probe). the agent chrome starts
+    // with no worker.
+    rmSync(join(profile, 'Default', 'Service Worker'), { recursive: true, force: true });
     // no other chrome holds the profile, so no task row that is open can be live. the app crashed while it ran.
     sweep();
     proxy ??= startEgressProxy(

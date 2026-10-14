@@ -3,13 +3,14 @@ import { tmpdir } from 'node:os';
 import { createSocket } from 'node:dgram';
 import { createServer, get } from 'node:http';
 import { join } from 'node:path';
+import { chromium } from 'playwright-core';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { siteOf } from '../src/browser/gate.js';
 import { browserLogin } from '../src/browser/login.js';
 import { maskPasswords, profileBusy } from '../src/browser/worker.js';
 import { openDb } from '../src/db/index.js';
 import { registerSecret } from '../src/observability/redact.js';
-import { createBrowserHarness, hasChrome, killChrome, traceEntries } from './browser-harness.js';
+import { createBrowserHarness, FIXTURE_ARGS, hasChrome, killChrome, traceEntries } from './browser-harness.js';
 import { FIXTURE_COOKIE, FIXTURE_PASSWORD, startFixture, type Fixture } from './web-fixture.js';
 
 // not real secrets: a value with the shape of an api key, and a value that the test registers.
@@ -698,6 +699,29 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     } finally {
       await lan.close();
     }
+  });
+
+  // serviceWorkers 'block' only stops a new registration. a worker that a site registered in okc browser login carried
+  // a click post and typed text to an off-list host past the page layers of the gate (r8 probe).
+  it('starts with no service worker that a site registered in the login window', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'okc-browser-'));
+    // a service worker needs a secure context. real sites use https, and the fixture is plain http.
+    const args = [...FIXTURE_ARGS, `--unsafely-treat-insecure-origin-as-secure=${site.url('shop.test')}`];
+    const login = await chromium.launchPersistentContext(join(dir, 'profile'), { channel: 'chrome', headless: true, args });
+    const page = login.pages()[0] ?? (await login.newPage());
+    await page.goto(site.url('shop.test', '/sw-register'));
+    await page.waitForFunction("document.getElementById('out').textContent === 'ready'", undefined, { timeout: 10_000 });
+    await login.close();
+    const h = harness({ dir, args });
+    site.hits.length = 0;
+    const opened = await h.run('browser_open', { url: site.url('shop.test', '/sw-app') });
+    expect(opened.content).toContain('controlled false');
+    await h.run('browser_type', { ref: refOf(opened.content, /textbox "Note"/), element: 'Note', text: 'TYPED-NOTE' });
+    const typed = await h.run('browser_snapshot', {});
+    await h.run('browser_click', { ref: refOf(typed.content, /button "Delete item"/), element: 'Delete item' });
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    expect((await h.run('browser_snapshot', {})).content).toContain('delete err evil err');
+    expect(site.hits.filter((hit) => hit.method === 'POST')).toEqual([]);
   });
 
   // chrome preloads the pages of speculation rules outside the tab, and the activation of a prerender sends no request,
