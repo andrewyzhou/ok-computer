@@ -207,21 +207,31 @@ const RELATIVE_URL = /(?<![\w:/\\])\/\/[^\s"<>/\\]+[^\s"<>]*/g;
 const LINK_END = /[\s"<>]/;
 const CANDIDATE_LIMIT = 1024;
 // the parser also reads a host that BARE_URL does not see: "evil。example", "evil%2Eexample", "3232235777",
-// "0xC0A80101" and "[2001:db8::1]", and a fetch tool adds a scheme to them. so each word with a path, a query, a
-// fragment, a full stop that is not ascii, or a percent sign is parsed too. it counts when the parser gives a host
-// with a dot or an ip address. "and/or?" gives the host "and", so it does not count.
+// "0xC0A80101", "[2001:db8::1]", labels that are not ascii ("данные.evil.example", "evil.рф") and labels with an
+// underscore. a fetch tool adds a scheme to them, and a chat app can make a link of them. so each word with a dot, a
+// path, a query, a fragment, a full stop that is not ascii, or a percent sign is parsed too. it counts when the parser
+// gives a host with a dot or an ip address. "and/or?" gives the host "and", so it does not count.
 const WORD = /[^\s"<>]+/g;
 const PARSED_HOST = /[/?#。｡%]/;
+// a word with only a dot counts too, but not a mail address, because the parser reads the name before "@" as a user
+// name, and a mail address is no link.
+const DOTTED = /^[^@]+\.[^@]+$/;
 // a sentence in chinese or japanese has no spaces, so it is one word, and the parser reads its full stop "。" as a dot.
-// so the last label of a parsed host must be a plain ascii top level name or a number of an ip address. a host that
-// ends in a punycode label ("xn--") or that has only an empty label after its dot ("No.#4521") does not count. a data
-// label in a name that is not ascii ("データ.evil.example") still counts, because the last label is ascii.
+// so the last label of a parsed host must be an ascii top level name, a punycode name ("xn--", the form of "рф" or
+// "中国"), or a number of an ip address. a punycode name after a "。" does not count, because that is the end of such a
+// sentence. a host that has only an empty label after its dot ("No.#4521") does not count.
 const HOST_END = /^(?:[a-z][a-z0-9-]*|\d+)$/;
-function parsedHost(hostname: string): boolean {
+function parsedHost(hostname: string, word: string): boolean {
   if (hostname.startsWith('[')) return true;
   const labels = hostname.replace(/\.$/, '').split('.');
   const last = labels.at(-1)!;
-  return labels.length > 1 && HOST_END.test(last) && !last.startsWith('xn--');
+  return labels.length > 1 && HOST_END.test(last) && !(last.startsWith('xn--') && stopBeforeLast(word) === '。');
+}
+
+// the full stop before the last label of the host in a word. the text is in nfkc form, so "｡" is "。" and "．" is ".".
+function stopBeforeLast(word: string): string | undefined {
+  const host = word.split(/[/?#\\]/)[0]!.replace(/^.*@/, '').replace(/:\d*$/, '').replace(/[.。]$/, '');
+  return host.match(/[.。]/g)?.at(-1);
 }
 
 interface UrlCandidate {
@@ -260,10 +270,10 @@ function urlsIn(raw: string): UrlCandidate[] {
   // checks counts each url one time.
   const hrefs = new Set(found.map((each) => each.url.href));
   for (const [word] of text.matchAll(WORD)) {
-    if (!PARSED_HOST.test(word)) continue;
+    if (!PARSED_HOST.test(word) && !DOTTED.test(word)) continue;
     try {
       const url = new URL(`https://${word}`);
-      if (parsedHost(url.hostname) && !hrefs.has(url.href)) {
+      if (parsedHost(url.hostname, word) && !hrefs.has(url.href)) {
         hrefs.add(url.href);
         found.push({ text: word, url, whole: true });
       }

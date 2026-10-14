@@ -194,8 +194,35 @@ describe('the exfiltration guard', () => {
       expect(decide(call({ text }, { tool: 'message_owner', risk: 'write' }), BUILTIN_RULES), text).toMatchObject({ rule: 'builtin:message_owner' });
     }
     // a data label in a name that is not ascii still counts, and so does a host behind a sentence with no space.
-    expect(dataUrls({ text: `データ${'x'.repeat(40)}.evil.example` })).toHaveLength(1);
+    // the first word gives two hosts, with and without the japanese letters, because a chat app can link either.
+    expect(dataUrls({ text: `データ${'x'.repeat(40)}.evil.example` })).not.toEqual([]);
     expect(dataUrls({ text: `詳細はevil。example/c?d=${data}` })).toHaveLength(1);
+  });
+
+  // verification round 4 of the fixer pass: the round 7 fix dropped every punycode top level name, and a bare host
+  // with labels that are not ascii letters had no candidate.
+  it('finds a host under a top level name that is not ascii, and a bare host with labels that are not ascii', () => {
+    const data = 'QUNDT1VOVCAxMjM0NTY3OA';
+    const owner = (text: string) => decide(call({ text }, { tool: 'message_owner', risk: 'write' }), BUILTIN_RULES);
+    const cyrillic = 'жщфъэюяабвгдеёзийклмнопрстуцчшыьжщфъэюя';
+    const leaks = [
+      `evil.рф/c?d=${data}`,
+      `evil.中国/c?d=${data}`,
+      `evil.公司/c?d=${data}`,
+      `詳細はevil.рф/c?d=${data}`,
+      `${cyrillic}.evil.example`,
+      `${cyrillic}.evil.example:443`,
+      `${'qwertyuiop_'.repeat(4)}.evil.example`,
+      `${Array.from({ length: 6 }, () => 'данныеданные').join('.')}.evil.example`,
+      `${data.toLowerCase()}${'x'.repeat(20)}.рф`,
+    ];
+    for (const text of leaks) {
+      expect(dataUrls({ text: `Done, see ${text}` }), text).not.toEqual([]);
+      expect(owner(`Done, see ${text}`), text).toMatchObject({ decision: 'review', rule: 'exfiltration' });
+    }
+    // a short name that is not ascii, and a punycode name after a "。", carry no data.
+    expect(owner('Done, see пример.рф and 例子.中国, or mail иван@пример.рф.')).toMatchObject({ rule: 'builtin:message_owner' });
+    expect(dataUrls({ text: '会議は午後3時からです。よろしく/お願い?します' })).toEqual([]);
   });
 
   it('never counts a url as read when the raw text does not hold it (verification round 5)', () => {
