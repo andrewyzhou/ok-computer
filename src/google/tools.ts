@@ -243,7 +243,8 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
         const plan = planUnsubscribe(message, sender, target, config.send);
         if (plan.way === 'refused') return { content: `${tool} did not run: ${plan.text}.`, isError: true };
         if (plan.way === 'mailto') return sendDraft(accounts, tool, alias, { to: [plan.to], subject: plan.subject, body: plan.body });
-        const result = await oneClick(target);
+        // the post goes outside accounts.run, so the trace gets the account here. without it the row had no account.
+        const result = await requestContext.run({ ...requestContext.getStore(), account: alias }, () => oneClick(target));
         if (result.ok) return { content: `unsubscribed: ${result.text}.` };
         return { content: `${tool} did not finish: ${result.text}.`, isError: true, ...(result.refused ? {} : { effect: result.sent ? 'unknown' : 'none' }) };
       },

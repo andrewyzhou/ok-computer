@@ -10,6 +10,7 @@ import { runTool } from '../../test/run-tool.js';
 import { createToolRegistry, type ToolContext, type ToolOutput } from '../tools/registry.js';
 import { googleConfigSchema } from './config.js';
 import { createGoogleTools, googleToolNames } from './tools.js';
+import { requestContext } from './trace.js';
 import { isPrivateAddress, oneClick, planUnsubscribe, unsubscribeTargets, type OneClickResult } from './unsubscribe.js';
 
 let h: GoogleHarness;
@@ -131,6 +132,15 @@ describe('gmail_unsubscribe', () => {
     expect(posted).toEqual([]);
     expect(await call('gmail_unsubscribe', { account: 'personal', messageId: 'n1', sender: 'News@Shop.example', target: 'https://shop.example/u/abc' })).toMatchObject({ content: expect.stringContaining('unsubscribed') });
     expect(posted).toEqual(['https://shop.example/u/abc']);
+  });
+
+  // the trace of the post read the context without the account, so its google_requests row had account null.
+  it('gives the one-click post the account and the call in its trace context', async () => {
+    const seen: unknown[] = [];
+    const call = await setup({ oneClick: async () => (seen.push(requestContext.getStore()), { ok: true, sent: true, text: 'x' }) });
+    h.fake.deliver('school', newsletter);
+    await call('gmail_unsubscribe', { account: 'school', messageId: 'n1', sender: SENDER, target: 'https://shop.example/u/abc' });
+    expect(seen).toEqual([expect.objectContaining({ account: 'school', runId: 'run-1' })]);
   });
 
   it('refuses a one-click post without a passing dkim check', async () => {
