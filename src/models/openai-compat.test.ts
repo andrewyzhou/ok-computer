@@ -80,6 +80,26 @@ describe('createOpenAiCompatClient', () => {
     expect(response.usage).toEqual({ inputTokens: 20, outputTokens: 8, cacheReadTokens: 100, cacheWriteTokens: 0 });
   });
 
+  // some servers end a turn with tool calls with "stop", and the loop runs tools only on tool_use.
+  it('treats a turn with tool calls as tool_use, also when the server says stop', async () => {
+    const client = createOpenAiCompatClient('http://localhost:11434/v1', undefined, {
+      fetch: reply({
+        id: 'c1',
+        object: 'chat.completion',
+        created: 0,
+        model: 'llama3',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'stop',
+            message: { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'now', arguments: '{}' } }] },
+          },
+        ],
+      }),
+    });
+    expect((await client.complete(base)).stopReason).toBe('tool_use');
+  });
+
   // a server that numbers the calls of each reply from call_0 gave the same id twice in one run. after a crash, the
   // repair then gave the second call the recorded result of the first.
   it('gives a new id to a call whose id an earlier call has, or that has no id', async () => {

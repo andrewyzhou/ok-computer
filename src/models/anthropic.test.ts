@@ -72,6 +72,13 @@ describe('toAnthropicParams', () => {
       { type: 'tool_use', id: 'toolu_1', name: 'now', input: {} },
     ]);
   });
+
+  // a local model wrote arguments that were not json, and the api refused every later request of the session.
+  it('wraps tool input of another provider that is not an object', () => {
+    const foreign: AssistantTurn = { ...nativeTurn, provider: 'openai-compat', toolCalls: [{ id: 'c', name: 'now', input: 'not json' }] };
+    const params = toAnthropicParams(call([{ role: 'user', content: [{ type: 'text', text: 'x' }] }, { role: 'assistant', ...foreign }]));
+    expect(params.messages[1]?.content).toContainEqual({ type: 'tool_use', id: 'c', name: 'now', input: { _raw: 'not json' } });
+  });
 });
 
 describe('fromAnthropicMessage', () => {

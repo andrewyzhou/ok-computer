@@ -104,7 +104,11 @@ export function fromOpenAiCompletion(completion: OpenAI.Chat.ChatCompletion, lat
     content: choice ? [choice.message] : [],
     toolCalls,
     text: choice?.message.content ?? '',
-    stopReason: toStopReason(choice?.finish_reason),
+    // some servers end a turn with tool calls with "stop". the loop runs tools only on tool_use, so the calls were lost.
+    stopReason:
+      toolCalls.length && choice?.finish_reason !== 'length' && choice?.finish_reason !== 'content_filter'
+        ? 'tool_use'
+        : toStopReason(choice?.finish_reason),
     usage: {
       // other providers count cached tokens in the input. the anthropic count does not, so this adapter subtracts them.
       inputTokens: (completion.usage?.prompt_tokens ?? 0) - cached,

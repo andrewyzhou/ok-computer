@@ -108,7 +108,8 @@ function toAnthropicMessage(message: ModelMessage): BetaMessageParam[] {
       type: 'tool_use' as const,
       id: call.id,
       name: call.name,
-      input: call.input,
+      // the api accepts only an object as input. a local model can write arguments that are not json.
+      input: call.input !== null && typeof call.input === 'object' && !Array.isArray(call.input) ? call.input : { _raw: call.input },
     })),
   ];
   return content.length ? [{ role: 'assistant', content }] : [];
