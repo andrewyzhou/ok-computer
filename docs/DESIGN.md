@@ -546,7 +546,7 @@ Example:
 ### 21.2 Commits
 
 - Commit after each coherent step that passes `typecheck` and `test`. Small commits are better than large ones.
-- Style follows the owner's history: a lower-case conventional prefix (`feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`), a lower-case subject that says what changed, and for larger changes a body in lower-case prose that explains why and how, wrapped near 75 characters. Examples from the owner's history:
+- Style follows the owner's history: a lower-case conventional prefix (`feat:`, `fix:`, `perf:`, `chore:`, `refactor:`, `test:`, `docs:`), a lower-case subject that says what changed, and for larger changes a body in lower-case prose that explains why and how, wrapped near 75 characters. Examples from the owner's history:
 
   ```
   feat: sync strava api activities into neon via webhook + daily cron

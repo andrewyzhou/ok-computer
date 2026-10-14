@@ -47,9 +47,9 @@ A small supervisor restarts the agent if it stops. The logon task means it runs 
 ## Phases
 
 1. **Core coach (done):** Telegram adapter, agent loop, workspace files, scheduler (automations + heartbeat), 3-goals routine, daily notes + nightly consolidation into weekly trends, run logging, first version of the observability dashboard.
-2. **Foundation and core accounts:** full tracing v2, MCP client and integration registry, Gmail (all accounts) + Calendar, Telegram v2. See [docs/DESIGN-NEXT.md](docs/DESIGN-NEXT.md).
-3. **More reach:** Slack, web search + browser worker, reviewer model + taint + sub-agents.
-4. **Power tools:** Skill Workshop.
+2. **Foundation and core accounts (built; manual checks against the real services pending):** full tracing v2, MCP client and integration registry, Gmail (all accounts) + Calendar, Telegram v2. See [docs/DESIGN-NEXT.md](docs/DESIGN-NEXT.md).
+3. **More reach (built; manual checks against the real services pending):** Slack, web search + browser worker, reviewer model + taint + sub-agents.
+4. **Power tools (built; manual checks against the real services pending):** Skill Workshop.
 
 On hold: Claude history (a later design should cover ChatGPT logs too) and the Docker sandbox. The subscription sweep is an owner test of the agent with Gmail, not a separate feature.
 

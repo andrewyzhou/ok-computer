@@ -265,13 +265,6 @@ The `tools` parameter therefore never changes inside a session. A changed server
 - **Elicitation is deferred.** The client declares no elicitation capability. A form that asks for data is an outbound channel and needs its own approval design.
 - **Dashboard.** `GET /api/integrations`, `GET /api/integrations/:id` (versions with diffs, recent calls with outcome words, JSON-RPC messages), `POST …/connect` (reconnect for every kind; resumes a paused integration), `POST …/pause {paused}` (survives a restart), `GET /api/mcp-messages/:id`. The pages reload on a log line of an integration. A changed description of an allowed tool is red in the version list. The run timeline shows the JSON-RPC messages of each integration call.
 - **No migration.** Migrations 004 and 005 have every table and column M2 writes. `tool_calls.source = 'mcp'` and `serverId` are now written.
-- **Verification round 3.**
-  - **Unload posts.** A close (`browser_close`, the idle close, the app stop, a hung tab) ran the `pagehide` and `unload` handlers after the tab left the tab map, so the page layers no longer judged their beacons and keepalive posts, and the proxy (address only) let them reach any public host. `endTab` now moves the tab to `about:blank` (untraced, capture time limit) while the gate holds, waits 200 ms so the blocks are recorded, and then writes the `close` row. A `beforeunload` handler did not stop the move. A method check in the proxy was not added: HTTPS tunnels are opaque to it, and it would need the submit state of the tabs.
-  - **Bounded lists.** A page that posts in a loop put 174,000 entries (293 MB) into one row in a minute. Each step keeps 200 blocked, 200 sent and 200 off-list hosts, with addresses cut to 1,000 characters; the row's last entry counts the rest, and the tool text gives the full count.
-  - **Masks.** The snapshot trims a value, turns each run of white space into one space, and escapes a value in quotes, so a password with a space at its start showed in clear text. Each value is masked in its raw, shown and escaped forms. Masking by element was not built: Playwright keeps the ref of an element in internal state.
-  - **WebRTC.** `webrtc.ip_handling_policy: disable_non_proxied_udp` in the profile stops STUN and connectivity checks with page-chosen text to this PC; the `--force-webrtc-ip-handling-policy` flag did not.
-  - **Submit check.** Exactly one whole-number pair of each click-position name may leave (`go.x`, `go.y`, or `x`, `y` for an image button without a name, which now works); a form's own field of that name stays on the card. A multipart file part with content fails the check, because the agent cannot attach a file.
-  - **Search.** A consent wall is read only from a blocked top-level navigation of the search tab to a `consent.` host, not from a proxy refusal that another task's page caused. A pause that ends more than the longest backoff (24 h) from now came from a clock that was ahead and counts as over; a pause that ends on another day shows its date. `okc browser login` ends every pause when its window closes and keeps the strikes; the dashboard uses the same `pausedNow`.
 - **Known gaps after M2.**
   - Orphan stdio servers after a hard crash of the app (the tree kill runs only on close).
   - The SDK's 10 MB stdio line limit, and the same limit on an HTTP answer (3.10): a larger result closes the connection, and the call is `unknown`.
@@ -475,6 +468,13 @@ No paid search API. The owner has Chrome on this PC, and search runs through it.
   - **Submit.** The check reads `new FormData(form, submitter)`: no disabled field, every selected option, every value of a repeated name (`fields` takes a list for such a name). The card shows that set without the hidden inputs. While a submit runs, the gate compares the body of a document request (url-encoded, multipart or plain text) with the checked set and fails it when they differ, so a page that changes a field on `pointerdown` or `submit` sends nothing. Each `sent` entry keeps the first 2,000 characters of its body, redacted, and the Browser page shows them. A script's own `fetch` post during the submit is recorded but not compared.
   - **Records.** Password values are read in every frame. A close writes a last step row when a block, a send or an off-list host came after the last step. `urlBefore` and `urlAfter` are stored redacted, and an open, a select or a way back whose text holds a secret runs outside the trace. A tab whose task row fails closes, and the open gives a refusal.
   - **Failures.** `stripTags` is linear (an `indexOf` scan for tags and the title, one pass for white space), and the extraction runs it only when the worker gave no result. The search gap, the hourly count, the idle close and the gate's name cache use `performance.now()`; only the captcha pause uses the wall clock, because it is kept across a restart.
+- **Verification round 3.**
+  - **Unload posts.** A close (`browser_close`, the idle close, the app stop, a hung tab) ran the `pagehide` and `unload` handlers after the tab left the tab map, so the page layers no longer judged their beacons and keepalive posts, and the proxy (address only) let them reach any public host. `endTab` now moves the tab to `about:blank` (untraced, capture time limit) while the gate holds, waits 200 ms so the blocks are recorded, and then writes the `close` row. A `beforeunload` handler did not stop the move. A method check in the proxy was not added: HTTPS tunnels are opaque to it, and it would need the submit state of the tabs.
+  - **Bounded lists.** A page that posts in a loop put 174,000 entries (293 MB) into one row in a minute. Each step keeps 200 blocked, 200 sent and 200 off-list hosts, with addresses cut to 1,000 characters; the row's last entry counts the rest, and the tool text gives the full count.
+  - **Masks.** The snapshot trims a value, turns each run of white space into one space, and escapes a value in quotes, so a password with a space at its start showed in clear text. Each value is masked in its raw, shown and escaped forms. Masking by element was not built: Playwright keeps the ref of an element in internal state.
+  - **WebRTC.** `webrtc.ip_handling_policy: disable_non_proxied_udp` in the profile stops STUN and connectivity checks with page-chosen text to this PC; the `--force-webrtc-ip-handling-policy` flag did not.
+  - **Submit check.** Exactly one whole-number pair of each click-position name may leave (`go.x`, `go.y`, or `x`, `y` for an image button without a name, which now works); a form's own field of that name stays on the card. A multipart file part with content fails the check, because the agent cannot attach a file.
+  - **Search.** A consent wall is read only from a blocked top-level navigation of the search tab to a `consent.` host, not from a proxy refusal that another task's page caused. A pause that ends more than the longest backoff (24 h) from now came from a clock that was ahead and counts as over; a pause that ends on another day shows its date. `okc browser login` ends every pause when its window closes and keeps the strikes; the dashboard uses the same `pausedNow`.
 - **Verification round 4.**
   - **Submit.** The gate let data out only while the click ran, and the tool said "sent" when the page sent nothing: a form that a script sends after a wait, a form that opens a new tab. After the click the submit now waits up to 5 s for the first request that the gate lets out (not for a GET form), and stops early when the gate refuses the page's own send. With nothing sent, the tool says so and is an error; the effect stays unknown. While a submit runs, a request other than GET also needs the allowlist: a page answered the click with its own post, with other fields, to an off-list site. A script post to an allowed site is still not compared with the checked fields, because many sites send their forms that way; it is recorded with its body.
   - **The owner's own addresses.** A global IPv6 address of this PC is in no private range, and the router gives each device of the LAN an address of the same /64; `web_fetch` and a page reached a server on this PC that listened on `::`. `isPublicAddress` now refuses each address of this PC and the /64 of each of its IPv6 addresses, read from `os.networkInterfaces()` again after 10 s. Loopback and link-local interfaces are left out of that list, because a Node `BlockList` also matches an IPv4 address against IPv6 rules (`::ffff:a.b.c.d`), so the /64 of `::1` held every IPv4 address.
@@ -528,6 +528,8 @@ No paid search API. The owner has Chrome on this PC, and search runs through it.
 - **Rich messages and link previews are unchanged here.** The reply guard comes with the review merge (section 5).
 
 ### 4.5 Claude history
+
+On hold (section 10).
 
 There is no official API or MCP server for claude.ai history.
 
@@ -625,6 +627,10 @@ Three designs were built and judged (minimal, failure modes first, owner experie
 - **`/status` names each Google account** with the state of its sign-in (`google:<alias> ok`, `needs auth` or `signed out`), after the MCP integrations. Before, the owner could not see on the phone that Gmail and Calendar work; the alerts only say when they stop.
 - **The one-click post of an unsubscribe has its account in the trace.** It runs outside `accounts.run`, so its `google_requests` row had no account and the counts of the Google page missed it.
 - **Not changed: the polled Slack DMs.** They still wait for the decision of 4.9; the guide now says that nothing shows them yet.
+- **Round 2: drafts hide data links in a tainted session.** The reply guard (5.5) reads only the final reply, but a Telegram draft showed the model's text while it streamed, and Telegram makes a link of a URL in plain text. In a tainted session the draft now shows `[link]` in place of each link with a signal, read or not, because a draft has no review; a link that the text does not hold verbatim hides the draft text. The channel runs the guard only on the text it shows (one draft a second), because a scan for each streamed piece cost about 2 ms on a long reply. Rejected: no model text in the drafts of a tainted session. Taint is common after one mail read, and the owner would lose streaming for most replies.
+- **Round 2: a forwarded Telegram message is untrusted.** It went in as a `user_message`, so it did not taint the session, and the reviewer read it as the owner's request (`<owner_request>`). Now the router writes it as a wrapped `system_event` with the taint source `telegram: a forwarded message`. The reviewer then reads the owner's last own message, and the workshop does not take it as a correction. A command in a forwarded text (for example `/new`) still works as a command; the owner chose to forward it.
+- **Round 2: each test run has one temporary folder.** One full `npm test` left about 700 `okc-*` folders (1.1 GB) in `%TEMP%`, and the disk became full once. A vitest global setup (`test/temp-root.ts`) points `TEMP`, `TMP` and `TMPDIR` at one new folder before the workers and their Chrome processes start, and removes it at the end. A helper in each of the 39 test files that make folders was the other option; it needs a change in each file and misses a folder that Chrome makes itself.
+- **Round 2: the search test accepts a background request of Chrome.** Chrome's own request to `accounts.google.com` can reach the proxy while the search tab is open, and the close then writes one more row. The test now checks the search row, and allows at most one `close` row that names no fixture host and sent nothing. The gate is unchanged.
 
 ## 5. Permissions, review, and sandboxing
 
@@ -659,21 +665,19 @@ The reviewer is a separate call on the `utility` slot. It sees:
 
 It returns `allow` or `hold` with a reason. A hold does not run the tool. The agent gets the reason and can change course or ask the owner. Every review is a `model_calls` row linked from `policy_decisions`.
 
-### 5.3 Comparison with fx, and what we take
+### 5.3 What the policy design takes
 
-| | fx | OK Computer |
-|---|---|---|
-| Default mode | `auto`: routine actions run, others go to a reviewer model | Risk levels plus static rules, reviewer for `write`, owner approval for `external` |
-| What the reviewer catches | Prompt injection and malicious actions; the action is held | Same, plus our taint rule: outbound actions after untrusted input always need the owner |
-| OS isolation | None; commands run in the owner's login shell | Code runs in a Docker sandbox; no host shell by default |
-| MCP | Lazy schemas through capability search | Same idea: `tool_search` and `tool_call`, with a stable tool list for caching |
-| Large outputs | Stored out of context; preview plus a read tool | Same: handles and `result_read` |
-| Sub-agents | Inherit permissions; cannot spawn further | Same rules, plus explicit tool profiles and their own trace |
-| Owner in the loop | Rarely; holds go back to the agent | Approvals by Telegram button for anything that leaves the machine |
-
-We take fx's reviewer, lazy MCP schemas, output handles, and sub-agent limits. We do not embed fx itself: on Windows its library runs only as WebAssembly, without process or filesystem access, and it lacks our scheduler, channels, and tracing.
+- **Default mode.** Risk levels and static rules decide. A reviewer model checks `write` calls, and the owner approves `external` calls.
+- **What the reviewer catches.** Prompt injection and malicious actions; the action is held. The taint rule adds to it: an outbound action after untrusted input always needs the owner.
+- **OS isolation.** Code runs in a Docker sandbox, and there is no host shell by default (on hold, see 5.4).
+- **MCP.** Lazy schemas through `tool_search` and `tool_call`, with a stable tool list for caching.
+- **Large outputs.** Stored out of context, with a preview, a handle and `result_read`.
+- **Sub-agents.** They inherit the permissions of the parent and cannot start sub-agents of their own. They also have explicit tool profiles and their own trace.
+- **Owner in the loop.** Approvals by Telegram button for anything that leaves the machine; a hold goes back to the agent.
 
 ### 5.4 Sandbox for code and shell
+
+On hold (section 10).
 
 **Decision:** one long-lived Docker container, `okc-sandbox`, through Docker Desktop (on Windows it runs through WSL2).
 
@@ -754,6 +758,8 @@ This section covers the reviewer, the exfiltration guard, taint across sub-agent
 - **Telegram link previews.** The reply guard and the exfiltration guard close the path that the final review of the phases found on master: in a tainted session a data link in a final reply, in `message_owner`, in a heartbeat notification or in an automation reply is reviewed before Telegram can fetch a preview of it.
 
 ## 6. Sub-agents
+
+Built as recorded in 5.5; that section wins where they differ.
 
 - `delegate { profile, task, budget? }` starts a child run in a fresh session `sub:<runId>`.
 - Profiles in config define the tool set, the model slot, the iteration limit, and the domain allowlist. The first profiles:
