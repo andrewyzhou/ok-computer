@@ -372,6 +372,23 @@ describe('slack sign-in with a pre-registered client', () => {
     expect(lastError(t)).toBe('the sign-in step /api/oauth.v2.user.access failed. The server said: invalid_grant: the server said invalid_code');
   });
 
+  it('keeps the code and the verifier out of lastError and the log when the server quotes them', async () => {
+    const t = await setup();
+    t.slack.options.quoteGrant = true;
+    await t.integrations.start();
+    const started = await t.integrations.connect('slack-work');
+    if (!('url' in started)) throw new Error('expected a link');
+    const address = await consent(t.slack, started.url);
+    const code = new URL(address).searchParams.get('code')!;
+    expect(await t.integrations.finishSignIn(address)).toMatchObject({ ok: false });
+    const quoted = t.slack.quoted.at(-1)!;
+    expect(quoted.code).toBe(code);
+    const stored = [lastError(t), ...t.logLines()].join('\n');
+    expect(lastError(t)).toContain('[redacted]');
+    expect(stored).not.toContain(code);
+    expect(stored).not.toContain(quoted.verifier);
+  });
+
   it('clears the tokens of a refresh that slack refuses with http 200, tells the owner once, and parks after a restart', async () => {
     const t = await setup({ rotation: true });
     await t.integrations.start();

@@ -447,6 +447,9 @@ export function createOAuth(deps: OAuthDeps): OAuth {
     }
     const transport = finish(id) as (Transport & { finishAuth?: (params: URLSearchParams) => Promise<void> }) | undefined;
     if (!transport?.finishAuth) return { status: 500, integrationId: id, text: 'The integration is not ready. Start again from the dashboard.' };
+    // a token endpoint that quotes its form body in an error puts the code and the verifier in lastError and the log.
+    registerSecret(url.searchParams.get('code') ?? undefined, `${id}:code`);
+    registerSecret(flow.verifier, `${id}:verifier`);
     active.set(id, flow);
     try {
       await transport.finishAuth(url.searchParams);

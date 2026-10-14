@@ -193,10 +193,13 @@ export interface SlackOAuthServer {
   // the scope of each authorize request, and the client auth of each token request.
   scopes: string[];
   tokenAuth: string[];
+  // the code and the verifier of each grant that quoteGrant refused.
+  quoted: Array<{ code: string; verifier: string }>;
   stats: { mcpRequests: number; apiRequests: number; registrations: number; codeGrants: number; refreshGrants: number };
   // withhold names the scopes that a code grant leaves out, as a workspace admin can. refreshWithoutScope leaves the
-  // scope out of a refresh answer, which oauth allows when the scope does not change.
-  options: { rotation: boolean; refreshError: string | undefined; withhold: string[]; refreshWithoutScope?: boolean };
+  // scope out of a refresh answer, which oauth allows when the scope does not change. quoteGrant makes a code grant fail
+  // with an error that quotes the code and the verifier, as a careless server can.
+  options: { rotation: boolean; refreshError: string | undefined; withhold: string[]; refreshWithoutScope?: boolean; quoteGrant?: boolean };
   // expire ends every access token, so the next call refreshes. revoke also ends every refresh token.
   expire(): void;
   revoke(): void;
@@ -214,6 +217,7 @@ export async function startSlackOAuth(fake: SlackFake, options: Partial<SlackOAu
   const refresh = new Map<string, string>();
   const scopes: string[] = [];
   const tokenAuth: string[] = [];
+  const quoted: SlackOAuthServer['quoted'] = [];
   const stats = { mcpRequests: 0, apiRequests: 0, registrations: 0, codeGrants: 0, refreshGrants: 0 };
   const settings: SlackOAuthServer['options'] = { rotation: false, refreshError: undefined, withhold: [], ...options };
   let mcpBase = '';
@@ -313,6 +317,10 @@ export async function startSlackOAuth(fake: SlackFake, options: Partial<SlackOAu
         const code = codes.get(params.get('code') ?? '');
         codes.delete(params.get('code') ?? '');
         const verifier = params.get('code_verifier') ?? '';
+        if (settings.quoteGrant) {
+          quoted.push({ code: params.get('code') ?? '', verifier });
+          return refuse(res, `invalid_code: code=${params.get('code')} code_verifier=${verifier}`);
+        }
         if (!code || code.redirect !== params.get('redirect_uri') || b64url(createHash('sha256').update(verifier).digest()) !== code.challenge) {
           return refuse(res, 'invalid_code');
         }
@@ -342,6 +350,7 @@ export async function startSlackOAuth(fake: SlackFake, options: Partial<SlackOAu
     clientSecret,
     scopes,
     tokenAuth,
+    quoted,
     stats,
     options: settings,
     expire: () => access.clear(),
