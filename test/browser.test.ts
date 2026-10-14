@@ -873,6 +873,24 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(task).toMatchObject({ status: 'closed', tracePath: 'traces/task-1.zip' });
     expect(Number(task!.traceBytes)).toBeGreaterThan(1000);
     expect(existsSync(join(h.dir, 'traces', 'task-1.zip'))).toBe(true);
+    // playwright keeps the raw trace, with each frame, after the zip. the next task still gets a trace.
+    expect(existsSync(join(h.dir, 'tracing'))).toBe(false);
+    await h.run('browser_open', { url: site.url('shop.test') });
+    await h.run('browser_close', {});
+    expect(h.tasks()[1]).toMatchObject({ status: 'closed', tracePath: 'traces/task-2.zip' });
+  });
+
+  // okc stop ends the app at once, and the raw trace of the open task, with the typed text, stayed in %TEMP% for good
+  // (r8 probe).
+  it('keeps the raw trace in the data folder, and removes the trace of a hard stop at the next launch', async () => {
+    const h = harness();
+    await h.run('browser_open', { url: site.url('shop.test') });
+    expect(readdirSync(join(h.dir, 'tracing')).some((name) => name.endsWith('.trace'))).toBe(true);
+    killChrome(h.dir);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const after = harness({ dir: h.dir });
+    await after.run('browser_open', { url: site.url('shop.test') });
+    expect(readdirSync(join(h.dir, 'tracing')).filter((name) => name.endsWith('.trace'))).toHaveLength(1);
   });
 
   it('keeps no cookie, header, network log or dom in the trace, and keeps the screenshots and the actions', async () => {
@@ -949,6 +967,29 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     h.db.prepare("INSERT INTO browser_tasks (id, kind, sessionKey, allowlist, status, startedAt) VALUES ('old', 'task', 'main', '[]', 'open', 'x')").run();
     await h.run('browser_open', { url: site.url('shop.test') });
     expect(h.tasks().find((task) => task.id === 'old')).toMatchObject({ status: 'interrupted', traceError: expect.stringContaining('app stopped') });
+  });
+
+  // the chrome of a launch that failed half way kept the profile lock with no reference, so each later open was
+  // refused as if another chrome window held the profile (r8 probe).
+  it('closes the chrome of a launch that fails after chrome started, so the next open works', async () => {
+    const spare = await chromium.launchPersistentContext(mkdtempSync(join(tmpdir(), 'okc-spare-')), { channel: 'chrome', headless: true });
+    const proto = Object.getPrototypeOf(spare) as { addInitScript: (...args: unknown[]) => Promise<unknown> };
+    await spare.close();
+    const original = proto.addInitScript;
+    proto.addInitScript = async function () {
+      proto.addInitScript = original;
+      throw new Error('injected: the init script failed');
+    };
+    try {
+      const h = harness();
+      const first = await h.run('browser_open', { url: site.url('shop.test') });
+      expect(first).toMatchObject({ isError: true, content: expect.stringContaining('The browser did not start: injected') });
+      expect(profileBusy(join(h.dir, 'profile'))).toBe(false);
+      const second = await h.run('browser_open', { url: site.url('shop.test') });
+      expect(second.isError, second.content).toBe(false);
+    } finally {
+      proto.addInitScript = original;
+    }
   });
 
   it('says that the profile is in use when another chrome holds it', async () => {

@@ -294,6 +294,8 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   const profile = join(deps.dir, 'profile');
   const downloads = join(deps.dir, 'downloads');
   const traces = join(deps.dir, 'traces');
+  // playwright writes the raw trace here while a task runs, with the typed text and the frames of the screencast.
+  const rawTraces = join(deps.dir, 'tracing');
   const tabs = new Map<Page, Tab>();
   const tasks = new Map<string, Tab>();
   let context: BrowserContext | undefined;
@@ -357,6 +359,8 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     // a click sent a post with no approval, and typed text reached an off-list host (r8 probe). the agent chrome starts
     // with no worker.
     rmSync(join(profile, 'Default', 'Service Worker'), { recursive: true, force: true });
+    // no chrome of this app runs, so a raw trace here is the part of a task that a hard stop or a crash ended.
+    rmSync(rawTraces, { recursive: true, force: true });
     // no other chrome holds the profile, so no task row that is open can be live. the app crashed while it ran.
     sweep();
     proxy ??= startEgressProxy(
@@ -372,17 +376,23 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       },
     );
     const { url: proxyUrl } = await proxy;
+    // a chrome that started and has no reference keeps the profile lock, so after a launch that failed half way each
+    // later open was refused as if another chrome window held the profile (r8 probe).
+    const started: BrowserContext[] = [];
     // chrome uses only the last --disable-features, and playwright gives a list of its own (a second list turned storage
     // partitioning back on, probe). the first launch only reads that list, and the next launches replace it with a
     // list that also has the features of the app.
-    const start = () =>
-      chromium.launchPersistentContext(profile, {
+    const start = async () => {
+      const ctx = await chromium.launchPersistentContext(profile, {
         ...(playwrightOff ? { ignoreDefaultArgs: [playwrightOff] } : {}),
         channel: 'chrome',
         headless: true,
         serviceWorkers: 'block',
         // no tool works with a file, and a download is a file that a page puts on this pc without a step.
         acceptDownloads: false,
+        // the default is a folder in %TEMP%, and a hard stop of the app (okc stop) left the raw trace there for good, outside
+        // data and okc prune (r8 probe).
+        tracesDir: rawTraces,
         viewport: { width: 1280, height: 800 },
         args: [
           // <-loopback> also sends the addresses of this pc through the proxy, which chrome otherwise connects to directly.
@@ -395,41 +405,49 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
         ],
         ...(userAgent ? { userAgent } : {}),
       });
-    let ctx = await start();
-    // headless chrome names itself HeadlessChrome in its user agent, and a search engine shows more captchas to it. the
-    // first launch reads the name and the list of playwright, and chrome starts once more with both.
-    if (!userAgent) {
-      const first = ctx.pages()[0] ?? (await ctx.newPage());
-      const agent = await first.evaluate(() => navigator.userAgent);
-      await first.goto('chrome://version');
-      playwrightOff = /--disable-features=\S*/.exec(await first.locator('#command_line').innerText())?.[0] ?? '';
-      userAgent = agent.replace('HeadlessChrome/', 'Chrome/');
-      await ctx.close();
-      ctx = await start();
+      started.push(ctx);
+      return ctx;
+    };
+    try {
+      let ctx = await start();
+      // headless chrome names itself HeadlessChrome in its user agent, and a search engine shows more captchas to it. the
+      // first launch reads the name and the list of playwright, and chrome starts once more with both.
+      if (!userAgent) {
+        const first = ctx.pages()[0] ?? (await ctx.newPage());
+        const agent = await first.evaluate(() => navigator.userAgent);
+        await first.goto('chrome://version');
+        playwrightOff = /--disable-features=\S*/.exec(await first.locator('#command_line').innerText())?.[0] ?? '';
+        userAgent = agent.replace('HeadlessChrome/', 'Chrome/');
+        await ctx.close();
+        ctx = await start();
+      }
+      // a page with webrtc can reach a turn server through the proxy, which checks only the address, and no page layer
+      // sees it. a page sent text that the agent typed to a host off the allowlist in the user name (r6 probe). no
+      // switch of chrome removes the api, so each document loses it before its own scripts run, also a frame that a
+      // script makes.
+      await ctx.addInitScript(() => {
+        for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection']) delete (globalThis as Record<string, unknown>)[name];
+      });
+      ctx.on('close', onContextClosed);
+      await guardContext(
+        ctx,
+        deps.egress,
+        (page) => tabs.get(page)?.rules,
+        (url) => {
+          // a popup belongs to no tab. it is refused, and the open task records it.
+          const task = ownTask();
+          if (task) block(task, { url, reason: 'a new tab or window is refused. Use browser_open with its address' });
+        },
+      );
+      // a page that the app did not open is a popup. the route refuses its requests at once, and it closes here. the
+      // event can come before newPage gives the app its own page, so the test waits a moment.
+      for (const page of ctx.pages()) owned.add(page);
+      ctx.on('page', (page) => void setTimeout(() => !owned.has(page) && void page.close().catch(() => undefined), 1000));
+      return ctx;
+    } catch (err) {
+      for (const each of started) await within(each.close(), t.navigation);
+      throw err;
     }
-    // a page with webrtc can reach a turn server through the proxy, which checks only the address, and no page layer
-    // sees it. a page sent text that the agent typed to a host off the allowlist in the user name (r6 probe). no
-    // switch of chrome removes the api, so each document loses it before its own scripts run, also a frame that a
-    // script makes.
-    await ctx.addInitScript(() => {
-      for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection']) delete (globalThis as Record<string, unknown>)[name];
-    });
-    ctx.on('close', onContextClosed);
-    await guardContext(
-      ctx,
-      deps.egress,
-      (page) => tabs.get(page)?.rules,
-      (url) => {
-        // a popup belongs to no tab. it is refused, and the open task records it.
-        const task = ownTask();
-        if (task) block(task, { url, reason: 'a new tab or window is refused. Use browser_open with its address' });
-      },
-    );
-    // a page that the app did not open is a popup. the route refuses its requests at once, and it closes here. the
-    // event can come before newPage gives the app its own page, so the test waits a moment.
-    for (const page of ctx.pages()) owned.add(page);
-    ctx.on('page', (page) => void setTimeout(() => !owned.has(page) && void page.close().catch(() => undefined), 1000));
-    return ctx;
   }
 
   const owned = new WeakSet<Page>();
@@ -445,12 +463,12 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       context = await launching;
       return context;
     } catch (err) {
+      logger.error('the browser did not start', { err });
       // a second chrome on the profile fails with "target page, context or browser has been closed" (probe p3), so
       // the lock file tells the real reason.
       if (profileBusy(profile)) {
         return { refused: 'The agent browser profile is in use by another Chrome window, for example okc browser login. Try again after it closes.' };
       }
-      logger.error('the browser did not start', { err });
       return { refused: `The browser did not start: ${errorText(err).split('\n')[0]}` };
     }
   }
@@ -608,6 +626,13 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       } catch (err) {
         rmSync(`${path}.tmp`, { force: true });
         trace = { error: `the trace was not saved: ${errorText(err).split('\n')[0]}` };
+      }
+      // playwright keeps the raw trace after the zip, with each frame of the screencast. the zip is the record. a file
+      // that a stop with no answer still holds stays until the next launch.
+      try {
+        rmSync(rawTraces, { recursive: true, force: true });
+      } catch (err) {
+        logger.warn('the raw browser trace was not removed', { taskId: tab.id, err });
       }
     }
     endRow(tab.id, status, reason, trace);
