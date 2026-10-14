@@ -108,7 +108,12 @@ interface FormState {
   // the values before the click.
   skip: string[];
   password: boolean;
+  method: string;
 }
+
+// a page can send its form some time after the click, for example after a check of its own, with a script post or a
+// later submit. the gate lets data out only while the submit runs, so the submit waits for the first request.
+const SUBMIT_WAIT_MS = 5_000;
 
 // the browser's own FormData gives the set that a submit sends: no disabled field, every selected option, every
 // field of a name. the card shows that set without the hidden fields, which a person does not see. a map of the
@@ -143,7 +148,8 @@ async function formOf(page: Page, control: ElementHandle): Promise<FormState | n
       fields[name] = old === undefined ? value : Array.isArray(old) ? [...old, value] : [old, value];
     }
     const password = Array.from(button.form.elements).some((item) => item.type === 'password');
-    return { fields, pairs, skip: image, password };
+    const method = (button.getAttribute('formmethod') ?? button.form.method).toLowerCase();
+    return { fields, pairs, skip: image, password, method };
   }, SUBMIT_CONTROL));
 }
 
@@ -290,12 +296,17 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
           if (sortedPairs(fields) !== sortedPairs(form.fields)) throw new Error(`the form now has these fields: ${JSON.stringify(form.fields)}. Nothing was sent. Ask again with these values`);
           // the gate compares the request with this set, so a page script that changes a field at the click sends nothing.
           tab.setSubmit({ pairs: form.pairs, skip: form.skip });
+          let sent = true;
           try {
             await control.click();
             await page.waitForLoadState('domcontentloaded');
+            // a get form sends nothing that the gate counts. the tool said "sent" when the page sent nothing at all,
+            // for example a form that opens a new tab, which the browser refuses (r4 probe).
+            if (form.method !== 'get') sent = await tab.waitForSent(SUBMIT_WAIT_MS);
           } finally {
             tab.setSubmit(undefined);
           }
+          if (!sent) throw new Error(`the click ran, but the page sent no data within ${SUBMIT_WAIT_MS / 1000} s, so the form was not sent. See the blocked requests and the snapshot`);
           return `sent the form with ${button}`;
         }, 'open');
         // the owner approved this call. a page that changed means the call did not act, but the approval must not

@@ -32,8 +32,8 @@ export interface Body {
 export interface TabRules {
   allows(host: string): boolean;
   submitting(): ApprovedForm | undefined;
-  // top is true for a navigation of the page itself, not of a frame in it.
-  onBlocked(blocked: Blocked, top: boolean): void;
+  // top is true for a navigation of the page itself, not of a frame in it. sends is true for a method other than get.
+  onBlocked(blocked: Blocked, top: boolean, sends: boolean): void;
   onSent(sent: Sent): void;
   // a request that the gate let through to a host off the allowlist, for example an image of a cdn.
   onReached(host: string): void;
@@ -92,6 +92,12 @@ export async function judge(check: ReturnType<typeof cachedCheck>, rules: TabRul
   if (!READ_METHODS.has(method) && !rules.submitting()) {
     return { ok: false, reason: `the page tried to send data (${method}) outside an approved submit. To send a form, use browser_submit, which the owner approves` };
   }
+  // a page can answer the click of a submit with a post of its own, with other fields, to another site (r4 probe). the
+  // owner approved a form for the sites of the task, so data goes only there. a script post to the site itself stays
+  // possible, because many sites send their forms that way.
+  if (!READ_METHODS.has(method) && !rules.allows(parsed.hostname)) {
+    return { ok: false, reason: `${parsed.hostname} is not on the allowlist of this task, so the page may not send data to it. Nothing was sent there` };
+  }
   // a page script can change a field between the check and the click, for example on pointerdown or submit. the form
   // that a page sends is a document request, so its body must be the set that the check read.
   const form = rules.submitting();
@@ -147,7 +153,7 @@ function sameForm(body: Body | undefined, form: ApprovedForm): boolean {
 
 // both layers can see the same request, so each verdict goes to the tab rules through this one place.
 function report(rules: TabRules, url: string, method: string, top: boolean, verdict: Verdict, body?: Body): void {
-  if (!verdict.ok) return rules.onBlocked({ url, reason: verdict.reason }, top);
+  if (!verdict.ok) return rules.onBlocked({ url, reason: verdict.reason }, top, !READ_METHODS.has(method));
   if (!READ_METHODS.has(method)) rules.onSent({ method, url, ...(body?.data ? { body: body.data.slice(0, 2000) } : {}) });
   // a page script can put text that the agent typed into the address of a subresource. the gate lets it out, so the
   // step records where it went.

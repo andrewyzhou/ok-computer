@@ -1,5 +1,6 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { BlockList, isIP } from 'node:net';
+import { networkInterfaces } from 'node:os';
 
 // the agent must not reach the owner's own machine or network: the dashboard, a router page, or a printer. a page can
 // ask for such an address, and a name can point to one, so the check runs on the address that the connection uses.
@@ -46,13 +47,33 @@ function embeddedV4(ip: string): string | undefined {
   return [high >> 8, high & 255, low >> 8, low & 255].join('.');
 }
 
+// a global ipv6 address of this pc is not in a private range, and the router gives each device of the lan an address of
+// the same /64. a probe reached a server on this pc that listened on every address (r4). so each address of this pc,
+// and the /64 of each of its ipv6 addresses, is the owner's own. the addresses change, for example with a new network
+// or a new temporary ipv6 address, so the list is read again after a short time.
+let own: { at: number; list: BlockList } | undefined;
+function ownNetwork(): BlockList {
+  if (own && performance.now() - own.at < 10_000) return own.list;
+  const list = new BlockList();
+  for (const each of Object.values(networkInterfaces()).flat()) {
+    const address = each?.address.replace(/%.*$/, '');
+    // a node block list matches an ipv4 address against the ipv6 rules too, as ::ffff:a.b.c.d. the /64 of ::1 would
+    // then hold every ipv4 address. the private ranges already cover the loopback and the link-local addresses.
+    if (!each || !address || PRIVATE.check(address, each.family === 'IPv4' ? 'ipv4' : 'ipv6')) continue;
+    if (each.family === 'IPv4') list.addAddress(address, 'ipv4');
+    else list.addSubnet(address, 64, 'ipv6');
+  }
+  own = { at: performance.now(), list };
+  return list;
+}
+
 export function isPublicAddress(ip: string): boolean {
   const family = isIP(ip);
-  if (family === 4) return !PRIVATE.check(ip, 'ipv4');
+  if (family === 4) return !PRIVATE.check(ip, 'ipv4') && !ownNetwork().check(ip, 'ipv4');
   if (family !== 6) return false;
   const inner = embeddedV4(ip);
   if (inner) return isPublicAddress(inner);
-  return !PRIVATE.check(ip, 'ipv6');
+  return !PRIVATE.check(ip, 'ipv6') && !ownNetwork().check(ip, 'ipv6');
 }
 
 export type Resolve = (host: string) => Promise<string[]>;

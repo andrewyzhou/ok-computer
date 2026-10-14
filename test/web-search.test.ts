@@ -1,9 +1,10 @@
+import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getSetting } from '../src/db/settings.js';
 import type { BrowserWorker } from '../src/browser/worker.js';
 import { openDb } from '../src/db/index.js';
 import { createWebSearchTool, resumeEngines, type Engine } from '../src/web/search.js';
-import { createBrowserHarness, hasChrome } from './browser-harness.js';
+import { createBrowserHarness, hasChrome, traceEntries } from './browser-harness.js';
 import { startFixture, type Fixture } from './web-fixture.js';
 
 let site: Fixture;
@@ -50,6 +51,18 @@ describe.skipIf(!hasChrome())('web_search through the browser', { timeout: 60_00
     expect(out.content).toContain('https://wiki.example/Shirt');
     expect(s.h.tasks()).toMatchObject([{ kind: 'search', status: 'closed' }]);
     expect(s.h.steps()).toMatchObject([{ action: 'search', target: JSON.stringify('google: autumn shirts'), screenshotBlob: expect.any(String) }]);
+  });
+
+  it('keeps the query of a search out of the trace of a task that is open at the same time', async () => {
+    const s = setup();
+    await s.h.run('browser_open', { url: site.url('shop.test', '/about') });
+    // not a real secret: a value with the shape of an api key.
+    const out = await s.search('what is sk-ant-api03-PROBESECRETvalue0123456789');
+    expect(out.isError).toBeFalsy();
+    await s.h.run('browser_close', {});
+    const trace = [...traceEntries(join(s.h.dir, 'traces', 'task-1.zip')).values()].map((bytes) => bytes.toString('latin1')).join('\n');
+    expect(trace).toContain('/about');
+    expect(trace).not.toContain('PROBESECRET');
   });
 
   it('falls back to duckduckgo after a captcha, and the pause survives a restart', async () => {

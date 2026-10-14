@@ -52,7 +52,10 @@ async function within<T>(work: Promise<T>, ms: number): Promise<T | typeof TIMED
   }
 }
 
-const TIMEOUTS: Timeouts ={ action: 10_000, navigation: 30_000, capture: 5_000 };
+// the snapshot of a page with 10,000 table rows took longer than 5 s, and a step with no snapshot and no screenshot
+// counts as a hung page, so the task ended (r4 probe). the cost is that a hung page holds its tab longer before it
+// closes.
+const TIMEOUTS: Timeouts = { action: 10_000, navigation: 30_000, capture: 15_000 };
 const IDLE_MS = 10 * 60_000;
 // a page that the gate keeps blocking, for example with a fetch post in a loop, put 174,000 entries into one list in a
 // minute, and the row of the next step grew to 293 MB. each list keeps its first entries and counts the others.
@@ -102,6 +105,9 @@ export interface ActTab {
   snapshot: number;
   // the form data set of an approved submit while it runs, else undefined.
   setSubmit(form: ApprovedForm | undefined): void;
+  // true when the gate let a request with data out in this step. it stops early when the gate refused the page's own
+  // send, because then the form cannot leave.
+  waitForSent(ms: number): Promise<boolean>;
 }
 
 interface Tab {
@@ -119,6 +125,8 @@ interface Tab {
   more: { blocked: number; sent: number; reached: number };
   // a navigation of the page itself was blocked in this step.
   topBlocked: boolean;
+  // the gate refused a page navigation that sends data, for example a form that a script changed at the click.
+  sendRefused: boolean;
   // the address after the last step that did not end on the error page of chrome.
   lastPage?: string;
   console: string[];
@@ -184,9 +192,19 @@ const shownForms = (value: string): string[] => {
   return [value, shown, escaped].filter((form) => form.length > 0);
 };
 
-// the longest value goes first, so a value that holds a shorter one is masked whole.
-export const maskPasswords = (snapshot: string, secrets: string[]) =>
-  [...new Set(secrets.flatMap(shownForms))].sort((a, b) => b.length - a.length).reduce((text, secret) => text.split(secret).join('••••••'), snapshot);
+// a page with many password fields, each with its own value, held the event loop for 246 s when each form of each
+// value went through the whole snapshot (r4 probe: 3,000 values). one pass with all forms takes about 0.1 s for that
+// page. above the cap the snapshot is not given, because a page that a person uses has few passwords.
+const MAX_PASSWORDS = 200;
+
+// the longest value goes first in the pattern, so a value that holds a shorter one is masked whole.
+export function maskPasswords(snapshot: string, secrets: string[]): string {
+  const values = [...new Set(secrets)];
+  if (!values.length) return snapshot;
+  if (values.length > MAX_PASSWORDS) throw new Error(`the page has ${values.length} password fields with a value, more than ${MAX_PASSWORDS}, so no snapshot is given`);
+  const forms = [...new Set(values.flatMap(shownForms))].sort((a, b) => b.length - a.length);
+  return snapshot.replace(new RegExp(forms.map((form) => form.replace(/[\\^$.*+?()[\]{}|/-]/g, '\\$&')).join('|'), 'g'), '••••••');
+}
 
 // playwright resolves a ref against the last snapshot of the page, and the next snapshot can give the same ref to
 // another element. the number of the snapshot in each ref lets a tool refuse a ref that the model read earlier.
@@ -370,10 +388,11 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     tab.rules = {
       allows: (host) => allowedBy(tab.allowlist, host),
       submitting: () => tab.submit,
-      onBlocked: (blocked, top) => {
+      onBlocked: (blocked, top, sends) => {
         // the search reads a consent wall only from a block of its own page, not of a frame or of the proxy.
         block(tab, top ? { ...blocked, top } : blocked);
         if (top) tab.topBlocked = true;
+        if (top && sends) tab.sendRefused = true;
       },
       // the route and the cdp layer both see the first request of a page, so one request comes here twice.
       onSent: (sent) => {
@@ -686,9 +705,13 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   timer.unref();
 
   let opening: Promise<unknown> = Promise.resolve();
-  async function claim(input: StepInput, host: string): Promise<Tab | BrowserRefusal> {
+  async function claim(input: StepInput, url: URL): Promise<Tab | BrowserRefusal> {
+    const host = url.hostname;
     const tab = tasks.get(input.sessionKey);
     if (tab && !allowedBy(tab.allowlist, host)) {
+      // the refusal comes before chrome, so no gate sees it. the next row of the task keeps it with the blocks of the
+      // gate, so the owner sees where the agent tried to go.
+      block(tab, { url: url.href, reason: 'browser_open refused it, because it is not on the allowlist of this task' });
       return { refused: `${host} is not on the allowlist of this task (${[...tab.allowlist].join(', ')}). Use browser_allow_domain to ask the owner, or browser_close and start a new task.` };
     }
     if (tab) return tab;
@@ -711,10 +734,9 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       // a page of chrome itself, such as chrome://history, never passes the gate, so only web addresses open.
       const shape = checkUrlShape(url);
       if (!shape.ok) return { refused: `${shape.reason}. Nothing was opened.` };
-      const host = shape.url.hostname;
       // the check and the start of a task wait for chrome and a new tab. two opens at the same moment, in one turn or
       // from two sessions, would each start a task, so they run one at a time.
-      const claimed = opening.then(() => claim(input, host));
+      const claimed = opening.then(() => claim(input, shape.url));
       opening = claimed.catch(() => undefined);
       const tab = await claimed;
       if ('refused' in tab) return tab;
@@ -726,7 +748,22 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     async act(input, action, scope = 'session') {
       const tab = scope === 'open' ? ownTask() : tasks.get(input.sessionKey);
       if (!tab) return { refused: `No page is open${scope === 'open' ? '' : ' in this session'}. Use browser_open first.` };
-      return step(tab, input, (page) => action(page, { allowlist: tab.allowlist, snapshot: tab.snapshot, setSubmit: (form) => void (tab.submit = form) }));
+      return step(tab, input, (page) =>
+        action(page, {
+          allowlist: tab.allowlist,
+          snapshot: tab.snapshot,
+          setSubmit: (form) => {
+            tab.submit = form;
+            tab.sendRefused = false;
+          },
+          waitForSent: async (ms) => {
+            const end = performance.now() + ms;
+            const sent = () => tab.sent.length + tab.more.sent > 0;
+            while (!sent() && !tab.sendRefused && performance.now() < end) await new Promise((resolve) => setTimeout(resolve, 50));
+            return sent();
+          },
+        }),
+      );
     },
     async inTab(input, hosts, work) {
       const ctx = await contextOrRefusal();

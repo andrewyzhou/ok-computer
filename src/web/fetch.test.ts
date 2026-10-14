@@ -1,3 +1,6 @@
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { networkInterfaces } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { fixtureEgress, startFixture, type Fixture } from '../../test/web-fixture.js';
 import { checkHost, isPublicAddress, publicEgress } from './egress.js';
@@ -59,6 +62,22 @@ describe('egress', () => {
       expect(out, url).toMatchObject({ isError: true, content: expect.stringContaining('local network') });
     }
     expect(site.hits).toEqual([]);
+  });
+
+  // a server on this pc that listens on every address, as node does without a host, answers on the global ipv6 address
+  // of the pc. the test skips on a pc without one.
+  const globalV6 = Object.values(networkInterfaces())
+    .flat()
+    .find((each) => each && each.family === 'IPv6' && !each.internal && /^[23]/.test(each.address))?.address;
+  it.skipIf(!globalV6)('refuses the global ipv6 address of this pc for a live server', async () => {
+    const server = createServer((_req, res) => res.end('INNER-SERVICE-DATA'));
+    const port = await new Promise<number>((resolve) => server.listen(0, '::', () => resolve((server.address() as AddressInfo).port)));
+    try {
+      const out = await createWebFetchTool({ egress: publicEgress, limits }).run({ url: `http://[${globalV6}]:${port}/` }, { runId: 'r', sessionKey: 'main', timeZone: 'UTC', clock: () => new Date(), signal: never });
+      expect(out).toMatchObject({ isError: true, content: expect.stringContaining('local network') });
+    } finally {
+      server.close();
+    }
   });
 
   it('refuses a name when one of its addresses is private', async () => {

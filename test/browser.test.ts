@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { siteOf } from '../src/browser/gate.js';
 import { browserLogin } from '../src/browser/login.js';
-import { profileBusy } from '../src/browser/worker.js';
+import { maskPasswords, profileBusy } from '../src/browser/worker.js';
 import { openDb } from '../src/db/index.js';
 import { registerSecret } from '../src/observability/redact.js';
 import { createBrowserHarness, hasChrome, killChrome, traceEntries } from './browser-harness.js';
@@ -39,6 +39,21 @@ const refOf = (text: string, pattern: RegExp) => {
   if (!ref) throw new Error(`no ref for ${pattern} in:\n${text}`);
   return ref;
 };
+
+describe('the password mask', () => {
+  it('masks the longest value whole, and masks 3,000 long values in one pass', () => {
+    expect(maskPasswords('- textbox: abcdef and abc', ['abc', 'abcdef'])).toBe('- textbox: •••••• and ••••••');
+    expect(maskPasswords('a.b+c and axb+c', ['a.b+c'])).toBe('•••••• and axb+c');
+    // each form of each value went through the whole snapshot once, and this page held the event loop for 246 s.
+    const values = Array.from({ length: 3000 }, (_, i) => String(i).padStart(8, '0') + 'p'.repeat(592));
+    const snapshot = values.map((value, i) => `- textbox [ref=e${i + 3}]: ${value}`).join('\n');
+    const started = performance.now();
+    const masked = maskPasswords(snapshot, values.slice(0, 200));
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(masked.match(/p{592}/g)).toHaveLength(2800);
+    expect(() => maskPasswords(snapshot, values)).toThrow('more than 200');
+  });
+});
 
 describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 }, () => {
   it('records a step with a snapshot and a screenshot, and starts the allowlist with the first site', async () => {
@@ -230,6 +245,36 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(sent.isError).toBe(false);
     expect(sent.content).toContain('Message sent');
     expect(posts()).toEqual([expect.objectContaining({ path: '/send', body: 'msg=hi' })]);
+  });
+
+  // the gate let data out only while the click ran, and the tool said "sent" also when the page sent nothing.
+  it.each([
+    ['a script post at the click', 'sync', '/api/order'],
+    ['a script post after a wait', 'await', '/api/order'],
+    ['a submit of the page after a wait', 'delayed', '/order'],
+  ])('sends a form that the page sends with %s', async (_name, mode, target) => {
+    const h = harness();
+    const url = site.url('shop.test', `/script-form?mode=${mode}`);
+    await h.run('browser_open', { url });
+    site.hits.length = 0;
+    const out = await h.run('browser_submit', { url, button: 'Place order', fields: { qty: '1' } });
+    expect(out.isError).toBe(false);
+    expect(site.hitsOn('shop.test').filter((hit) => hit.method === 'POST').map((hit) => hit.path)).toEqual([target]);
+    expect(out.content).toContain(`POST ${site.url('shop.test', target)}`);
+  });
+
+  it('says that nothing was sent when the page sends nothing, and sends no data off the allowlist at the click', async () => {
+    const h = harness();
+    for (const mode of ['blank', 'offsite']) {
+      const url = site.url('shop.test', `/script-form?mode=${mode}`);
+      await h.run('browser_open', { url });
+      site.hits.length = 0;
+      const out = await h.run('browser_submit', { url, button: 'Place order', fields: { qty: '1' } });
+      expect(out, mode).toMatchObject({ isError: true, content: expect.stringContaining('the page sent no data within 5 s, so the form was not sent') });
+      expect(out.content, mode).not.toContain("with the owner's approval");
+      expect(site.hits.filter((hit) => hit.method === 'POST'), mode).toEqual([]);
+    }
+    expect(JSON.parse(String(h.steps().at(-1)!.blockedRequests))).toContainEqual(expect.objectContaining({ url: site.url('evil.test', '/exfil'), reason: expect.stringContaining('may not send data to it') }));
   });
 
   // the check read a map of the controls, so a name sent twice showed one value, a multiple select showed one option,
@@ -548,6 +593,8 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     await h.run('browser_allow_domain', { url: site.url('shop.test'), domain: 'evil.test', reason: 'test' });
     expect((await h.run('browser_open', { url: site.url('evil.test') })).isError).toBe(false);
     expect(site.hitsOn('evil.test').length).toBeGreaterThan(0);
+    // the refused open came before chrome, so no gate saw it. the next row of the task keeps it.
+    expect(JSON.parse(String(h.steps().at(-1)!.blockedRequests))).toContainEqual(expect.objectContaining({ url: site.url('evil.test'), reason: expect.stringContaining('browser_open refused it') }));
   });
 
   it('opens only web addresses, and never puts a public suffix on the allowlist', async () => {

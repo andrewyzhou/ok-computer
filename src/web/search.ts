@@ -177,7 +177,9 @@ export function createWebSearchTool(deps: SearchDeps): Tool {
             { sessionKey: ctx.sessionKey, runId: ctx.runId, action: 'search', target: `${engine.id}: ${query}`, ...(ctx.toolCallId ? { toolCallId: ctx.toolCallId } : {}) },
             engine.hosts,
             async (page) => {
-              await page.goto(engine.url(query), { waitUntil: 'domcontentloaded' });
+              // the trace belongs to the context, so it recorded the address of a search that ran while a task was open,
+              // with a secret in the query (r4 probe). a search belongs to no task, so it stays out of the trace.
+              await untraced(page, () => page.goto(engine.url(query), { waitUntil: 'domcontentloaded' }));
               return readPage(page, engine.id);
             },
           );
