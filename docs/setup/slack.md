@@ -1,6 +1,6 @@
 # Connect Slack
 
-Optional. Each Slack workspace is one integration. The agent can search and read your Slack messages, and it sends a message only after you approve it. Every 15 minutes a poll reads your new direct messages, without a model call, and keeps them as signals.
+Optional. Each Slack workspace is one integration. The agent can search and read your Slack messages, and it sends a message only after you approve it. Every 15 minutes a poll reads your new direct messages, without a model call, and stores them for a later step. Nothing shows them to you yet: the heartbeat digest and the Signals page read only Google signals for now.
 
 Read [integrations.md](integrations.md) first. This guide adds the Slack parts.
 

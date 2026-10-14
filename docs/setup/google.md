@@ -59,21 +59,18 @@ Open the dashboard on this PC (`okc open`), then go to **Google**.
 - **Only the primary calendar** of each account is read and written. A deadline that is only on another calendar (a class calendar, a subscribed feed) is reported as not on the primary calendar, and free/busy ignores the other calendars. To have such deadlines count, add them to the primary calendar.
 - **The heartbeat checklist** can be changed by a heartbeat run only when that run read no outside text. A heartbeat that saw new mail cannot change it; change it in chat or on the dashboard.
 - **Approvals.** These always ask you: sending mail, unsubscribing, an event with guests (Google sends them invitations), and changing or deleting an event. The card shows the sender and the exact unsubscribe link, the recipients, or the current title of the event.
-- **Write tools.** Archive, labels, mark as read, drafts and private events also ask you until the reviewer model exists. To let the agent do them without asking, add rules to `okc.policy.json` (next to `okc.config.json`) and restart:
+- **Write tools.** Archive, labels, mark as read, drafts and private events go to the reviewer model first. It reads your last message and the exact call, and it lets the call run or holds it; when the reviewer fails, the call asks you. An allow rule in `okc.policy.json` (next to `okc.config.json`) skips the reviewer:
 
   ```json
   {
     "rules": [
-      { "tool": "google__gmail_archive", "effect": "allow" },
-      { "tool": "google__gmail_mark_read", "effect": "allow" },
-      { "tool": "google__gmail_label", "effect": "allow" },
       { "tool": "google__gmail_draft", "effect": "allow" },
       { "tool": "google__calendar_create_event", "effect": "allow", "note": "private events only; an event with guests still asks" }
     ]
   }
   ```
 
-  An allow rule on a write tool also holds after the agent read mail. It never lets an event invite people, and the label tool cannot move mail to the trash or to spam.
+  An allow rule on a write tool also holds after the agent read mail, and then nothing checks the call. Text in one mail could make the agent archive or mark as read your other mail, which hides it from your inbox. So do not add allow rules for `google__gmail_archive`, `google__gmail_mark_read` or `google__gmail_label` unless you accept that. An allow rule never lets an event invite people, and the label tool cannot move mail to the trash or to spam.
 - **Unsubscribe** uses only the sender's own `List-Unsubscribe` header: a one-click link (only when Gmail saw a valid DKIM signature of the sender's domain that covers the unsubscribe headers, and never to an address inside your network) or a mail (only with `send: true`, only with the same DKIM check, and only to one address in the sender's own domain or a subdomain of it, so a sender cannot make your account mail a stranger; a list whose unsubscribe address is at another domain, or at a parent of the sender's domain, is refused). Otherwise the agent gives you the link.
 
 ## 5. When something goes wrong
