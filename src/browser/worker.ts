@@ -153,6 +153,8 @@ interface Tab {
   // the address after the last step that did not end on the error page of chrome.
   lastPage?: string;
   console: string[];
+  // the dialogs of the page since the last step, as the step says them.
+  dialogs: string[];
   lastUsed: number;
   queue: Promise<unknown>;
   crashed?: string;
@@ -448,7 +450,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   async function newTab(ctx: BrowserContext, kind: Tab['kind'], step: StepInput, allowlist: string[]): Promise<Tab> {
     const page = await ctx.newPage();
     owned.add(page);
-    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), blocked: [], sent: [], seen: new Map(), reached: new Set(), more: { blocked: 0, sent: 0, reached: 0 }, formSent: false, anySent: false, sendBlocked: 0, lastSendAt: 0, console: [], lastUsed: performance.now(), queue: Promise.resolve(), snapshot: 0, runId: step.runId } as unknown as Tab;
+    const tab = { id: newId(), kind, sessionKey: step.sessionKey, page, allowlist: new Set(allowlist), blocked: [], sent: [], seen: new Map(), reached: new Set(), more: { blocked: 0, sent: 0, reached: 0 }, formSent: false, anySent: false, sendBlocked: 0, lastSendAt: 0, console: [], dialogs: [], lastUsed: performance.now(), queue: Promise.resolve(), snapshot: 0, runId: step.runId } as unknown as Tab;
     tab.rules = {
       allows: (host) => allowedBy(tab.allowlist, host),
       submitting: () => tab.submit,
@@ -488,6 +490,17 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     page.on('crash', () => (tab.crashed = 'the page crashed'));
     page.on('console', (message) => message.type() === 'error' && tab.console.length < 20 && tab.console.push(message.text().slice(0, 300)));
     page.on('pageerror', (error) => tab.console.length < 20 && tab.console.push(error.message.slice(0, 300)));
+    // with no handler, playwright dismisses each dialog. an approved form that asked confirm() was then never sent, and
+    // no step said why (r7 probe). the owner approved the submit, so a dialog while it runs is accepted. a dialog at
+    // another moment is dismissed, but a dialog before the page unloads is accepted, so the agent can leave the page.
+    // each step names the dialogs of the page.
+    page.on('dialog', (dialog) => {
+      const accept = tab.submit !== undefined || dialog.type() === 'beforeunload';
+      const line = `The page showed a ${dialog.type()} dialog ${JSON.stringify(dialog.message().slice(0, 300))}, and the browser ${accept ? 'accepted' : 'dismissed'} it`;
+      if (tab.dialogs.length < 20) tab.dialogs.push(line);
+      if (tab.console.length < 20) tab.console.push(line);
+      void (accept ? dialog.accept() : dialog.dismiss()).catch(() => undefined);
+    });
     // the tab gets no address before both layers of the gate are in place.
     try {
       await guardTab(await ctx.newCDPSession(page), deps.egress, tab.rules);
@@ -712,7 +725,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       }
       // a navigation can still run. the snapshot waits for the document, with the capture limit.
       await tab.page.waitForLoadState('domcontentloaded', { timeout: t.capture }).catch(() => undefined);
-      const stayed = await leaveErrorPage(tab, urlBefore);
+      const stayed = [await leaveErrorPage(tab, urlBefore), ...tab.dialogs.splice(0).map((line) => `${line}.`)].filter(Boolean).join(' ');
       if (stayed) note = note ? `${note}. ${stayed}` : stayed;
       const shot = await capture(tab);
       const urlAfter = tab.page.url();

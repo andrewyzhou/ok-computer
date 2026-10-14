@@ -364,6 +364,16 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
       }
       case 'shop.test/about':
         return send(200, html('<h1>About the shop</h1><p>We sell shirts.</p>', 'About'));
+      case 'shop.test/confirm':
+        // a form that asks before it sends, and a button that asks before it changes the page.
+        return send(
+          200,
+          html(
+            `<form action="/buy" method="post" onsubmit="return confirm('Delete it?')"><input type="hidden" name="item" value="socks"><button>Delete</button></form>
+             <button onclick="if (confirm('Remove item?')) s.textContent = 'removed'">Remove</button><p id="s">kept</p>`,
+            'Confirm',
+          ),
+        );
       case 'shop.test/buy':
         return send(200, html(`<h1>Order placed</h1><p>${req.method} ${body}</p>`, 'Done'));
       case 'shop.test/redir-evil':

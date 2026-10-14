@@ -320,6 +320,23 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(sent.map((each) => (each.body?.includes('name="qty"') ? 'form' : each.body))).toEqual(['op=validate', 'op=validate', 'form']);
   });
 
+  // playwright dismissed each dialog, so an approved form that asked confirm() was never sent, and no step said why (r7
+  // probe).
+  it('accepts a dialog of an approved submit, dismisses other dialogs, and names each dialog in the step', async () => {
+    const h = harness();
+    const url = site.url('shop.test', '/confirm');
+    const page = await h.run('browser_open', { url });
+    const click = await h.run('browser_click', { ref: refOf(page.content, /button "Remove"/), element: 'Remove' });
+    expect(click.content).toContain('The page showed a confirm dialog "Remove item?", and the browser dismissed it.');
+    expect(click.content).toContain('kept');
+    site.hits.length = 0;
+    const out = await h.run('browser_submit', { url, button: 'Delete', fields: {} });
+    expect(out.isError, out.content).toBe(false);
+    expect(out.content).toContain('The page showed a confirm dialog "Delete it?", and the browser accepted it.');
+    expect(site.hitsOn('shop.test').filter((hit) => hit.method === 'POST')).toEqual([expect.objectContaining({ path: '/buy', body: 'item=socks' })]);
+    expect(JSON.parse(String(h.steps().at(-1)!.consoleErrors))).toContain('The page showed a confirm dialog "Delete it?", and the browser accepted it');
+  });
+
   it('says that the form was not sent when the gate refused it, also when the page sent a beacon at the click', async () => {
     const h = harness();
     const url = site.url('shop.test', '/script-form?mode=changed');
