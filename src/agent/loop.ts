@@ -12,7 +12,7 @@ import { TOOL_CALL, type ToolRegistry } from '../tools/registry.js';
 import { repairSession } from './recovery.js';
 import { buildVolatilePrompt } from './system-prompt.js';
 
-export type Trigger = 'message' | 'automation' | 'heartbeat' | 'consolidation' | 'system';
+export type Trigger = 'message' | 'automation' | 'heartbeat' | 'consolidation' | 'system' | 'subagent';
 export type RunStatus = 'running' | 'completed' | 'failed' | 'aborted';
 
 export interface AgentDeps {
@@ -49,6 +49,11 @@ export interface RunInput {
   onText?: (text: string) => void;
   // onActivity gets the names of the tools that run now, and undefined when they end. a channel shows them.
   onActivity?: (tools: string | undefined) => void;
+  // a sub-agent profile sets its own limit of model calls.
+  maxIterations?: number;
+  // the guard gives the final text that goes to the owner's chat. it runs before the run ends, so a crash during its
+  // review leaves a run that the sweep closes, and not a completed run whose reply never came to the chat.
+  guardReply?: (text: string, run: { runId: string; signal: AbortSignal }) => Promise<string>;
 }
 
 export interface RunResult {
@@ -66,6 +71,7 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
   const { db, slots, tools, strategy, config, clock } = deps;
   const runId = input.runId ?? (deps.newId ?? randomUUID)();
   const logger = deps.logger.child({ runId, sessionKey: input.sessionKey });
+  const maxIterations = input.maxIterations ?? config.agent.maxIterations;
   const timeoutMs = input.trigger === 'message' ? config.agent.chatTimeoutMs : config.agent.backgroundTimeoutMs;
 
   db.prepare('INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES (?, ?, ?, ?, ?, ?)').run(
@@ -112,7 +118,8 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
           now: clock(),
           timeZone: config.timeZone,
           channel: input.channel,
-          ...(deps.contextLines ? { extra: deps.contextLines(clock()) } : {}),
+          // a sub-agent gets only its task. the goals and the automations of the owner are not part of it.
+          ...(deps.contextLines && input.trigger !== 'subagent' ? { extra: deps.contextLines(clock()) } : {}),
         }),
       },
     });
@@ -137,8 +144,8 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
         };
 
     for (let iteration = 1; ; iteration++) {
-      if (iteration > config.agent.maxIterations) {
-        const error = `the task stopped after ${config.agent.maxIterations} model calls without a final answer`;
+      if (iteration > maxIterations) {
+        const error = `the task stopped after ${maxIterations} model calls without a final answer`;
         append({ type: 'note', payload: { text: error } });
         return { ...finish('failed', '', error), stoppedAtLimit: true };
       }
@@ -172,7 +179,8 @@ export async function runAgent(deps: AgentDeps, input: RunInput): Promise<RunRes
       });
       if (!response.toolCalls.length) {
         if (response.stopReason === 'max_tokens') logger.warn('reply was cut at the token limit');
-        return finish('completed', response.text);
+        const text = input.guardReply ? await input.guardReply(response.text, { runId, signal: abort.signal }) : response.text;
+        return finish('completed', text);
       }
 
       // every tool call gets a result, also when the reply was cut. a call without a result makes the next request fail.

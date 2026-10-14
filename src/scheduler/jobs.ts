@@ -21,6 +21,7 @@ export const AUTOMATION_TOOLS: readonly string[] = [
   'automations_create',
   'automations_list',
   'automations_update',
+  'delegate',
   'goal_update',
   'goals_list',
   'goals_set',

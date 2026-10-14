@@ -5,10 +5,10 @@ import { safeEnd, safeStart } from '../text.js';
 import { defineTool } from './registry.js';
 
 // the limit keeps a page under the handle limit, also inside the untrusted wrapper, so a page never gets a handle of
-// its own. the output of a search also repeats the query, so the query has a limit too.
+// its own. the query has a limit too, because each of its words is a part of one search pattern.
 export const READ_LIMIT = 3500;
 export const QUERY_LIMIT = 200;
-// the header of a search and its last line take at most this many characters, without the query.
+// the header of a search and its last line take at most this many characters.
 const SEARCH_FRAME = 200;
 const AROUND = 150;
 // the search looks at most at this many more matches after the passages are full.
@@ -26,12 +26,15 @@ export function createResultReadTool(deps: { db: Db; blobs: BlobStore }) {
     }),
     risk: 'read',
     async run({ handle, query, from, length }) {
-      const row = deps.db.prepare('SELECT rawResultBlob, untrustedSource FROM tool_calls WHERE resultHandle = ?').get(handle);
+      const row = deps.db.prepare('SELECT rawResultBlob, untrustedSource, isError FROM tool_calls WHERE resultHandle = ?').get(handle);
       const text = row?.rawResultBlob ? deps.blobs.read(String(row.rawResultBlob)) : undefined;
       if (text === undefined) return { content: `no stored result has the handle ${handle}`, isError: true };
       const source = row?.untrustedSource ? { untrustedSource: String(row.untrustedSource) } : {};
+      // a part of an error keeps the error mark. an error can quote the call of the model, and the exfiltration guard
+      // does not count the text of an error as read from outside (urlSeen).
+      const error = row?.isError ? { isError: true } : {};
       const content = query ? search(text, handle, query) : page(text, handle, from, length);
-      return { content, ...source };
+      return { content, ...source, ...error };
     },
   });
 }
@@ -50,8 +53,10 @@ function page(text: string, handle: string, from: number, length: number): strin
 function search(text: string, handle: string, query: string): string {
   const words = [...new Set(query.split(/\s+/).filter(Boolean))].sort((a, b) => b.length - a.length);
   const pattern = new RegExp(words.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
-  // the passages share the limit with the header, the query in it, and the last line.
-  const budget = READ_LIMIT - query.length - SEARCH_FRAME;
+  // the passages share the limit with the header and the last line. the output does not repeat the query: the result
+  // keeps the untrusted source of the stored row, and the exfiltration guard counts a url in it as read from outside
+  // (urlSeen). a query is text of the model, so a url in it would count as read.
+  const budget = READ_LIMIT - SEARCH_FRAME;
   const passages: string[] = [];
   let used = 0;
   let full = false;
@@ -90,9 +95,9 @@ function search(text: string, handle: string, query: string): string {
     span = [start, end];
   }
   if (span) add(span);
-  if (!count) return `no passage of ${handle} (${text.length} characters) matches "${query}"`;
+  if (!count) return `no passage of ${handle} (${text.length} characters) matches the query`;
   const rest = count - passages.length;
   const total = stopped ? `more than ${count}` : String(count);
   const more = rest ? `\n\n[${stopped ? 'more than ' : ''}${rest} more passages match. use a narrower query, or from and length.]` : '';
-  return `${total} passages of ${handle} (${text.length} characters) match "${query}":\n\n${passages.join('\n\n')}${more}`;
+  return `${total} passages of ${handle} (${text.length} characters) match the query:\n\n${passages.join('\n\n')}${more}`;
 }

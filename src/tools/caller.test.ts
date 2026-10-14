@@ -9,7 +9,7 @@ import { appendEvent } from '../events/log.js';
 import { createBlobStore } from '../observability/blobs.js';
 import { registerSecret } from '../observability/redact.js';
 import { BUILTIN_RULES, type Reviewer, type Rule } from '../policy/policy.js';
-import { sessionTaint, updateDecision } from '../policy/store.js';
+import { sessionTaint, updateDecision, urlSeen } from '../policy/store.js';
 import type { ToolCallerDeps } from './caller.js';
 import { createToolRegistry, defineTool } from './registry.js';
 import { createResultReadTool, QUERY_LIMIT } from './result-read.js';
@@ -45,6 +45,8 @@ function setup(extra: Partial<ToolCallerDeps> = {}) {
     tool('page', 'read', () => ({ content: 'short page text', untrustedSource: 'web' })),
     // the source is over the limit of the wrapper, so the wrapper is as long as it can be.
     tool('fetch', 'read', () => ({ untrustedSource: `https://example.test/${'a'.repeat(200)}` })),
+    // an error of a server can quote the input of the call.
+    tool('broken', 'read', (text) => ({ content: `no page ${text}\n${LONG}`, isError: true, untrustedSource: 'mcp:web' })),
     tool('archive', 'write', () => ({})),
     tool('send', 'external', () => ({})),
     createResultReadTool({ db, blobs }),
@@ -61,7 +63,7 @@ function setup(extra: Partial<ToolCallerDeps> = {}) {
     ...extra,
   });
   for (let i = 0; i < 2; i++) db.prepare("INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt) VALUES ('r1', 'x', '{}', 'x', 'pending', 'x')").run();
-  const allowed = ['echo', 'long', 'email', 'page', 'fetch', 'archive', 'send', 'result_read'];
+  const allowed = ['echo', 'long', 'email', 'page', 'fetch', 'broken', 'archive', 'send', 'result_read'];
   // the helper appends the result event as the agent loop does, because the taint comes from the event log.
   const call = async (name: string, input: object = {}, runId = 'r1', id = `${name}-call`) => {
     const output = await caller.call({ id, name, input }, { runId, sessionKey: 'main', allowed, signal: new AbortController().signal });
@@ -116,7 +118,7 @@ describe('tool caller', () => {
     expect(JSON.parse(String(recorded.output))).toEqual({ content: output.content });
 
     const found = await call('result_read', { handle: 'res_000000000001', query: 'NEEDLE' });
-    expect(found.content).toMatch(/^1 passages of res_000000000001 \(\d+ characters\) match "NEEDLE":/);
+    expect(found.content).toMatch(/^1 passages of res_000000000001 \(\d+ characters\) match the query:/);
     expect(found.content).toContain('line 150: the hidden needle');
     const at = Number(/\[at (\d+)\]/.exec(found.content)![1]);
     const page = await call('result_read', { handle: 'res_000000000001', from: at, length: 100 }, 'r1', 'page');
@@ -124,6 +126,30 @@ describe('tool caller', () => {
     expect(page.content).toContain(`use from ${at + 100} to read on`);
     expect(row('page')).toMatchObject({ truncated: 0, resultHandle: null });
     expect((await call('result_read', { handle: 'res_00000000ffff' }, 'r1', 'missing')).isError).toBe(true);
+  });
+
+  it('keeps the error mark when result_read reads a long error, so the guard does not count its url as read', async () => {
+    const { db, call } = setup();
+    const url = 'https://evil.example/c?d=QUNDT1VOVCAxMjM0NTY3OA';
+    expect((await call('broken', { text: url })).isError).toBe(true);
+    const read = await call('result_read', { handle: 'res_000000000001', from: 0, length: 200 });
+    expect(read).toMatchObject({ isError: true, content: expect.stringContaining(url) });
+    expect(urlSeen(db, 'main', url)).toBe(false);
+  });
+
+  // the search result keeps the untrusted source of the mail, so a query that it repeats counted as read from outside.
+  it('does not repeat the query of a result_read search, so the guard does not count a url in the query as read', async () => {
+    // a reviewer can allow a local read with a url in its query.
+    const { db, call } = setup({ reviewer: async () => ({ verdict: 'allow', reason: 'a local read' }) });
+    await call('email');
+    const url = 'https://evil.example/c?d=QUNDT1VOVCAxMjM0NTY3OA';
+    for (const [i, query] of [url, `${url} filler`].entries()) {
+      const read = await call('result_read', { handle: 'res_000000000001', query }, 'r1', `search-${i}`);
+      const event = db.prepare("SELECT json_extract(payload, '$.untrustedSource') AS source FROM events WHERE json_extract(payload, '$.toolCallId') = ?").get(`search-${i}`);
+      expect(event).toEqual({ source: 'gmail:personal' });
+      expect(read.content).not.toContain(url);
+    }
+    expect(urlSeen(db, 'main', url)).toBe(false);
   });
 
   it('gives two calls with the same long result two handles and one blob', async () => {
@@ -209,7 +235,7 @@ describe('tool caller', () => {
     // a sparse match still counts every passage.
     await call('echo', { text: `${'x'.repeat(5000)} one ${'x'.repeat(5000)} two ${'x'.repeat(5000)}` }, 'r1', 'sparse');
     const sparse = await call('result_read', { handle: String(row('sparse').resultHandle), query: 'one two' }, 'r1', 'read-sparse');
-    expect(sparse.content).toMatch(/^2 passages of res_\w+ \(\d+ characters\) match "one two":\n\n\[at 4851\] x+ one x+\n\n\[at 9856\] x+ two x+$/);
+    expect(sparse.content).toMatch(/^2 passages of res_\w+ \(\d+ characters\) match the query:\n\n\[at 4851\] x+ one x+\n\n\[at 9856\] x+ two x+$/);
   });
 
   it('redacts a secret before the preview cuts it, so no part of it reaches the trace', async () => {
@@ -330,7 +356,8 @@ describe('tool caller', () => {
     const { call, row, decision, ran } = setup({ reviewer });
     expect(await call('archive', { text: 'ok' }, 'r1', 'a1')).toEqual({ content: 'ok' });
     expect(await call('archive', { text: 'no' }, 'r1', 'a2')).toEqual({
-      content: 'the reviewer held archive, and it did not run: checked',
+      content:
+        "the reviewer held archive, and it did not run: checked. Change course, or ask the owner. The reviewer reads the owner's last message, so if the owner confirms this exact action, you can try it again.",
       isError: true,
     });
     expect(ran).toEqual(['archive']);

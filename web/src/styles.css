@@ -609,3 +609,13 @@ li.wrap {
   border: 1px solid var(--border);
   margin: 8px 0;
 }
+
+/* a child run sits inside the delegate call that started it, with a rail in the accent color. */
+.subagent {
+  margin-top: 6px;
+  padding: 6px 0 2px 10px;
+  border-left: 3px solid var(--accent);
+}
+.timeline.child {
+  margin-top: 6px;
+}

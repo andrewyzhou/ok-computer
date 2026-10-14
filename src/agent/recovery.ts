@@ -7,6 +7,7 @@ import { silentLogger, type Logger } from '../observability/logger.js';
 import { redactedJson } from '../observability/redact.js';
 import type { Clock } from '../time.js';
 import { integrationOf } from '../integrations/names.js';
+import { REPLY_CALL_ID, REPLY_NOTE } from '../policy/reply.js';
 import { TOOL_CALL } from '../tools/registry.js';
 
 export const interruptedText = (name: string) =>
@@ -52,7 +53,38 @@ export function repairSession(db: Db, sessionKey: string, clock: Clock, logger: 
     }
     appendEvent(db, { sessionKey, runId, type: 'tool_result', payload }, clock());
   }
+  // the log holds the final reply before the guard checks it, so the model must know that the owner did not get it.
+  // each run starts with this repair, so only the newest reply decision of the session can be a lost one.
+  const newest = db
+    .prepare(
+      `SELECT policy_decisions.runId FROM policy_decisions JOIN runs ON runs.id = policy_decisions.runId
+       WHERE runs.sessionKey = ? AND policy_decisions.toolCallId = ? ORDER BY policy_decisions.id DESC LIMIT 1`,
+    )
+    .get(sessionKey, REPLY_CALL_ID);
+  if (newest && replyLost(db, String(newest.runId), true)) {
+    appendEvent(db, { sessionKey, runId: String(newest.runId), type: 'note', payload: { text: LOST_REPLY } }, clock());
+  }
   return dangling.length;
+}
+
+export const LOST_REPLY = `${REPLY_NOTE}: the app stopped while the reviewer checked it, so the chat did not get it.`;
+
+// the reply guard writes a verdict, or a note when the reply does not go as it is. a reply decision with neither
+// belongs to a run whose process stopped during the review. the sweep tells the owner also when the repair already
+// wrote the note for the model, so it does not count that note.
+export function replyLost(db: Db, runId: string, countLostNote: boolean): boolean {
+  const row = db
+    .prepare(
+      `SELECT runs.sessionKey FROM policy_decisions JOIN runs ON runs.id = policy_decisions.runId
+       WHERE policy_decisions.runId = ? AND policy_decisions.toolCallId = ? AND policy_decisions.reviewerVerdict IS NULL`,
+    )
+    .get(runId, REPLY_CALL_ID);
+  if (!row) return false;
+  const notes = db
+    .prepare(`SELECT json_extract(payload, '$.text') AS text FROM events WHERE sessionKey = ? AND runId = ? AND type = 'note'`)
+    .all(String(row.sessionKey), runId)
+    .map((each) => String(each.text));
+  return !notes.some((text) => text.startsWith(REPLY_NOTE) && (countLostNote || text !== LOST_REPLY));
 }
 
 interface ResultPayload {

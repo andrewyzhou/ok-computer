@@ -71,6 +71,7 @@ describe('cli chat through the full loop', () => {
       'browser_snapshot',
       'browser_submit',
       'browser_type',
+      'delegate',
       'goal_update',
       'goals_list',
       'goals_set',

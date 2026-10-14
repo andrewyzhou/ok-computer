@@ -116,6 +116,20 @@ describe('approvals', () => {
     );
   });
 
+  it('lists at most five sources in the approval message (verification round 4)', async () => {
+    const { db, sent, request } = setup();
+    for (let i = 0; i < 8; i++) {
+      const payload = { toolCallId: `m${i}`, name: 'mail_read', content: 'x', isError: false, untrustedSource: `gmail:${i}${'w'.repeat(i ? 0 : 500)}` };
+      appendEvent(db, { sessionKey: 'main', runId: null, type: 'tool_result', payload }, new Date('2026-10-12T21:00:00Z'));
+    }
+    await request();
+    const line = sent[0]!.text.split('\n').at(-1)!;
+    expect(line.match(/read by mail_read/g)).toHaveLength(5);
+    expect(line).toMatch(/; and 3 more\.$/);
+    expect(line).toContain(`gmail:0${'w'.repeat(193)} (read by`);
+    expect(sent[0]!.text.length).toBeLessThan(1_000);
+  });
+
   it('runs the tool after approval and gives the result to the session', async () => {
     const { db, flow, delivered, request } = setup();
     await request();

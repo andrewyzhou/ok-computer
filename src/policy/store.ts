@@ -40,8 +40,9 @@ export function recordDecision(db: Db, record: DecisionRecord, now: Date): numbe
   return Number(row!.id);
 }
 
-// the caller writes the decision before it asks the reviewer or the owner, so their answers come later.
-export function updateDecision(db: Db, id: number, change: { reason?: string; review?: ReviewResult; approvalId?: number }): void {
+// the caller writes the decision before it asks the reviewer or the owner, so their answers come later. a reviewer that
+// fails gives no review, but its model call is linked too, so the run page shows it.
+export function updateDecision(db: Db, id: number, change: { reason?: string; review?: ReviewResult; approvalId?: number; reviewerModelCallId?: number | undefined }): void {
   db.prepare(
     `UPDATE policy_decisions SET reason = COALESCE(?, reason), reviewerModelCallId = COALESCE(?, reviewerModelCallId),
        reviewerVerdict = COALESCE(?, reviewerVerdict), reviewerReason = COALESCE(?, reviewerReason),
@@ -49,7 +50,7 @@ export function updateDecision(db: Db, id: number, change: { reason?: string; re
      WHERE id = ?`,
   ).run(
     redacted(change.reason),
-    change.review?.modelCallId ?? null,
+    change.review?.modelCallId ?? change.reviewerModelCallId ?? null,
     change.review?.verdict ?? null,
     redacted(change.review?.reason),
     change.approvalId ?? null,
@@ -89,17 +90,58 @@ export function sessionTaint(db: Db, sessionKey: string): TaintSource[] {
     if (!sources.has(each.source)) sources.set(each.source, each);
   };
   for (const row of rows) {
-    if (row.source !== null) {
-      add({
-        source: String(row.source),
-        toolName: String(row.name),
-        runId: row.runId === null ? null : String(row.runId),
-        toolCallId: String(row.toolCallId),
-        at: String(row.createdAt),
-      });
+    if (row.source !== null && !sources.has(String(row.source))) {
+      const runId = row.runId === null ? null : String(row.runId);
+      const toolCallId = String(row.toolCallId);
+      add({ source: String(row.source), toolName: toolNameOf(db, String(row.name), runId, toolCallId), runId, toolCallId, at: String(row.createdAt) });
     }
     // a system event carries the sources of another session, for example of an automation run.
     if (row.taint !== null) for (const each of JSON.parse(String(row.taint)) as TaintSource[]) add(each);
   }
   return [...sources.values()];
 }
+
+// the event of an integration call names tool_call, the model's own call. the owner needs the tool that read the
+// content, so the name comes from the trace row when it exists. the row gives only the name: the event alone decides
+// the taint. the lookup runs one time for each source, so a long session does not make the check slow.
+function toolNameOf(db: Db, name: string, runId: string | null, toolCallId: string): string {
+  if (name !== 'tool_call' || runId === null) return name;
+  const row = db.prepare('SELECT name FROM tool_calls WHERE runId = ? AND toolCallId = ? ORDER BY id LIMIT 1').get(runId, toolCallId);
+  return row ? String(row.name) : name;
+}
+
+// a url that the session already read carries no new data. only text from outside counts: a successful tool result
+// with an untrusted source. text of the agent does not count, also when it is wrapped as untrusted, because an
+// injected model can put a data url in it: a hold or an error that quotes the call, an unknown tool name, or the
+// answer of a sub-agent. the source of that answer starts with "sub:", and result_read copies the source, so the
+// answer does not count when the model reads it again through its handle. a system event does not count, because it
+// is model text too, for example the task of a sub-agent or the result of an automation. a tool in MODEL_TEXT_TOOLS
+// does not count, because its output repeats text that the model wrote, under the taint of that text. the newest 2,000
+// events bound the work of one check. the payload is redacted json text, so a url with a secret or an escaped character does not match, and goes to review. the url must
+// end where the read url ends, so the model cannot send a part of a longer url and choose where the part ends.
+// automations_list repeats the names and the prompts of the automations, which the model wrote.
+const MODEL_TEXT_TOOLS = ['automations_list'];
+export function urlSeen(db: Db, sessionKey: string, url: string): boolean {
+  const rows = db
+    .prepare(
+      `SELECT payload FROM (
+         SELECT payload FROM events
+         WHERE sessionKey = ? AND type = 'tool_result'
+           AND seq > (SELECT COALESCE(MAX(seq), 0) FROM events WHERE sessionKey = ? AND type = 'session_reset')
+         ORDER BY seq DESC LIMIT 2000)
+       WHERE json_extract(payload, '$.untrustedSource') IS NOT NULL AND json_extract(payload, '$.isError') = 0
+         AND json_extract(payload, '$.untrustedSource') NOT LIKE 'sub:%'
+         AND json_extract(payload, '$.name') NOT IN (${MODEL_TEXT_TOOLS.map(() => '?').join(', ')}) AND instr(payload, ?) > 0`,
+    )
+    .all(sessionKey, sessionKey, ...MODEL_TEXT_TOOLS, url);
+  return rows.some((row) => {
+    const payload = String(row.payload);
+    for (let at = payload.indexOf(url); at >= 0; at = payload.indexOf(url, at + 1)) {
+      if (!URL_CHAR.test(payload.charAt(at + url.length))) return true;
+    }
+    return false;
+  });
+}
+
+// a character that can continue a url. a backslash cannot, because it starts an escape in the json text.
+const URL_CHAR = /[A-Za-z0-9\-._~%!$&'()*+,;=:@/?#[\]]/;

@@ -57,6 +57,8 @@ export interface PolicyDecisionRow {
   // the untrusted sources that the session had read when the policy decided.
   taint: Array<{ source: string; toolName: string; runId: string | null; toolCallId: string; at: string }>;
   createdAt: string;
+  // the model call of the reviewer. the run timeline shows it here, inside the tool call that it checked.
+  reviewerCall?: ModelCallRow;
 }
 
 export interface ToolCallRow {
@@ -80,12 +82,24 @@ export interface ToolCallRow {
   // preview, a wrapped text, or a late result. such a row without a blob lost its raw text in a failed blob write.
   rawResultBlob: string | null;
   // one word from outcomeOf in outcome.ts: ran, failed, invalid, denied, held, waiting, approved, declined, expired,
-  // abandoned, late, interrupted or unsent.
+  // abandoned, late, interrupted or unsent. a delegate call whose child still runs has no row yet, and is running.
   outcome: string;
   policy: PolicyDecisionRow | null;
   // the integration that ran the tool, and the json-rpc messages of the call. a built-in tool has none.
   serverId: string | null;
   mcpMessages: McpMessageRow[];
+  // the child run that a delegate call started. the run page shows its timeline inside the call.
+  child?: SubagentLink;
+}
+
+// the link between a child run and the delegate call of its parent. a child that never started has no status.
+export interface SubagentLink {
+  parentRunId: string;
+  toolCallId: string;
+  childRunId: string;
+  profile: string;
+  status: string | null;
+  costUsd: number | null;
 }
 
 // a payload over 8 kb is in the blob store. payload is then null, and the page loads it on demand. unsent marks a
@@ -162,8 +176,9 @@ export interface IntegrationDetail extends IntegrationSummary {
 }
 
 // a model call holds the tool calls that its response asked for. a tool call that ran after an approval has no
-// such model call, so it is an item of its own.
-export type TimelineItem = { kind: 'model'; call: ModelCallRow; tools: ToolCallRow[] } | { kind: 'tool'; call: ToolCallRow };
+// such model call, so it is an item of its own. reviews are the reviewer calls with no verdict that checked the tool
+// calls of the turn.
+export type TimelineItem = { kind: 'model'; call: ModelCallRow; tools: ToolCallRow[]; reviews?: ModelCallRow[] } | { kind: 'tool'; call: ToolCallRow };
 
 export interface BlobBody {
   hash: string;
@@ -191,6 +206,8 @@ export interface EventRow {
 
 export interface RunDetail {
   run: RunRow;
+  // a child run names the delegate call of its parent.
+  parent: SubagentLink | null;
   timeline: TimelineItem[];
   events: EventRow[];
 }

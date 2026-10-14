@@ -103,8 +103,9 @@ export function search(visible: Discoverable[], query: string, limit: number): T
       shown++;
     }
     const more = visible.length - shown;
-    // the names are text of the servers too, so the answer keeps their source.
-    return { content: `No tool matched "${query}". The tools are: ${names}${more ? `, and ${more} more` : ''}.`, ...untrusted(visible.slice(0, shown)) };
+    // the names are text of the servers too, so the answer keeps their source. the answer does not repeat the query:
+    // the query is text of the model, and the exfiltration guard counts a url in a result with a source as read.
+    return { content: `No tool matched the query. The tools are: ${names}${more ? `, and ${more} more` : ''}.`, ...untrusted(visible.slice(0, shown)) };
   }
   const blocks: string[] = [];
   let used = 0;

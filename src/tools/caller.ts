@@ -6,8 +6,8 @@ import type { ToolCall } from '../models/types.js';
 import type { BlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
 import { redact, redactedJson } from '../observability/redact.js';
-import { decide, type ReviewResult, type Reviewer, type Risk, type Rule, type TaintSource } from '../policy/policy.js';
-import { decisionOfApproval, recordDecision, sessionTaint, updateDecision } from '../policy/store.js';
+import { decide, reviewCallOf, SUBAGENT_PREFIX, type ReviewResult, type Reviewer, type Risk, type Rule, type TaintSource } from '../policy/policy.js';
+import { decisionOfApproval, recordDecision, sessionTaint, updateDecision, urlSeen } from '../policy/store.js';
 import type { RunQueue } from '../sessions/queue.js';
 import type { Clock } from '../time.js';
 import { errorText, type Attribution, type Tool, type ToolContext, type ToolOutput, type ToolRegistry } from './registry.js';
@@ -109,6 +109,15 @@ function untilStopped<T>(work: Promise<T>, signal: AbortSignal, onLateError: (er
   });
   return Promise.race([work, stopped]).finally(() => signal.removeEventListener('abort', onAbort));
 }
+
+// a hold goes back to the agent. the text gives the way out: the reviewer reads the owner's last message, so the owner
+// can confirm the action. a child cannot ask the owner, so it reports the hold to its parent.
+const holdNext = (sessionKey: string) =>
+  sessionKey.startsWith('sub:')
+    ? 'Return to the parent agent and say which call it held.'
+    : "Change course, or ask the owner. The reviewer reads the owner's last message, so if the owner confirms this exact action, you can try it again.";
+
+const sentence = (text: string) => (/[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`);
 
 export const abandonedText = (name: string) =>
   `${name} did not finish before the run stopped. It can still finish later, so its effect is unknown. Check the result before you try it again.`;
@@ -276,7 +285,18 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
     // an input that makes a call external, for example an invitation, always asks the owner. an allow rule on the tool
     // was written for its usual risk.
     const alwaysApprove = tool.needsApproval === true || (tool.riskFor !== undefined && risk === 'external');
-    const verdict = decide({ tool: tool.name, risk, alwaysApprove, input, sessionKey: ctx.sessionKey, taint: sources }, deps.rules);
+    const verdict = decide(
+      {
+        tool: tool.name,
+        risk,
+        alwaysApprove,
+        input,
+        sessionKey: ctx.sessionKey,
+        taint: sources,
+        seen: (url) => urlSeen(db, ctx.sessionKey, url),
+      },
+      deps.rules,
+    );
     let reason =
       verdict.decision === 'review' && !deps.reviewer ? `${verdict.reason}. there is no reviewer model yet, so the owner decides` : verdict.reason;
     const decisionId = recordDecision(
@@ -287,6 +307,13 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
     const gate = { decisionId, taint, risk, ...(account ? { account } : {}) };
 
     const askOwner = async (): Promise<ToolOutput> => {
+      // a sub-agent never asks the owner (see policy.ts). a review without a usable reviewer would ask, so it becomes a
+      // hold, and the decision row says why.
+      if (ctx.sessionKey.startsWith(SUBAGENT_PREFIX)) {
+        const held = { verdict: 'hold' as const, reason: `${reason}. a sub-agent cannot ask the owner, so the call did not run` };
+        updateDecision(db, decisionId, { review: held });
+        return { content: `${tool.name} did not run: ${held.reason}. Return to the parent agent and say which call needs the owner.`, isError: true };
+      }
       try {
         const asked = await untilStopped(deps.requestApproval(tool, input, toolCtx, { decisionId, reason, taint }), ctx.signal, (err) =>
           logger.error('approval request failed after its run stopped', { runId: ctx.runId, toolCallId: call.id, tool: tool.name, err }),
@@ -320,7 +347,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         logger.warn('reviewer failed, so the owner decides', { runId: ctx.runId, toolCallId: call.id, tool: tool.name, err });
         // the error goes on the card in the chat, so it is redacted here and not only in the store.
         reason = `${reason}. the reviewer failed (${redact(errorText(err))}), so the owner decides`;
-        updateDecision(db, decisionId, { reason });
+        updateDecision(db, decisionId, { reason, reviewerModelCallId: reviewCallOf(err) });
         return { ...gate, held: await askOwner() };
       }
       if (review === STOPPED) {
@@ -329,7 +356,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
       }
       updateDecision(db, decisionId, { review });
       if (review.verdict === 'hold') {
-        return { ...gate, held: { content: `the reviewer held ${tool.name}, and it did not run: ${review.reason}`, isError: true } };
+        return { ...gate, held: { content: `the reviewer held ${tool.name}, and it did not run: ${sentence(review.reason)} ${holdNext(ctx.sessionKey)}`, isError: true } };
       }
     }
     return gate;

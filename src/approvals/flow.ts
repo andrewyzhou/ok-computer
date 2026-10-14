@@ -3,7 +3,7 @@ import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
 import { redact, redactedJson } from '../observability/redact.js';
-import type { TaintSource } from '../policy/policy.js';
+import { dataUrls, linkOf, SOURCE_LIMIT, SOURCE_NAME_LIMIT, type TaintSource } from '../policy/policy.js';
 import { decisionForApproval } from '../policy/store.js';
 import type { OwnerMessenger } from '../sessions/owner.js';
 import type { RunQueue } from '../sessions/queue.js';
@@ -138,11 +138,10 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
       const approval = createApproval(db, { runId: ctx.runId, toolName: tool.name, input, summary, decisionId: why.decisionId }, clock());
       logger.info('approval requested', { approvalId: approval.id, tool: tool.name, runId: ctx.runId });
       // the owner sees the reason with the request. the taint can come from an older run, so the message names it.
-      const reached = await deps.owner.send(
-        cardText(approval, why.reason, why.taint, ctx.timeZone),
-        buttonsFor(approval.id, deps.alwaysAllow === true && alwaysAllowable(tool)),
-        { details: exactInput(input) },
-      );
+      const card = cardOf(approval, why.reason, why.taint, ctx.timeZone, input);
+      const reached = await deps.owner.send(card.text, buttonsFor(approval.id, deps.alwaysAllow === true && alwaysAllowable(tool)), {
+        details: card.details,
+      });
       // the model must not tell the owner to press a button that the owner never got.
       if (!reached) {
         logger.warn('the request for an approval did not reach the owner', { approvalId: approval.id, runId: ctx.runId });
@@ -161,11 +160,11 @@ export function createApprovalFlow(deps: ApprovalFlowDeps): ApprovalFlow {
       if (!approval) return { text: `No approval has the id ${id}.` };
       if (approval.status !== 'pending') return { text: `Approval #${id} is ${approval.status}, so it cannot be approved now.` };
       const decision = decisionForApproval(db, id);
-      const card = cardText(approval, decision?.reason ?? 'the policy asks the owner', decision?.taint ?? [], deps.timeZone);
+      const card = cardOf(approval, decision?.reason ?? 'the policy asks the owner', decision?.taint ?? [], deps.timeZone, approval.input);
       return {
-        text: `This is the real request #${id}. Check each field, then press Approve.\n\n${card}`,
+        text: `This is the real request #${id}. Check each field, then press Approve.\n\n${card.text}`,
         buttons: buttonsFor(id, false),
-        details: exactInput(approval.input),
+        details: card.details,
       };
     },
 
@@ -241,10 +240,35 @@ export function approvalNote(db: Db, approval: Approval, text: (summary: string)
   return { text: text(wrapIfTainted(taint, approval.summary)), taint };
 }
 
-function cardText(approval: Approval, reason: string, taint: TaintSource[], timeZone: string): string {
+// the details hold the exact input, so in a tainted session their links break in the same way as the text.
+function cardOf(approval: Approval, reason: string, taint: TaintSource[], timeZone: string, input: unknown): { text: string; details: string } {
   const lines = [`Approval needed (#${approval.id}): ${approval.summary}`, `Why: ${reason}.`];
-  if (taint.length) lines.push(`Untrusted content in this session: ${taint.map((each) => taintText(each, timeZone)).join('; ')}.`);
-  return lines.join('\n');
+  const details = exactInput(input);
+  if (!taint.length) return { text: lines.join('\n'), details };
+  const more = taint.length > SOURCE_LIMIT ? `; and ${taint.length - SOURCE_LIMIT} more` : '';
+  lines.push(`Untrusted content in this session: ${taint.slice(0, SOURCE_LIMIT).map((each) => taintText(each, timeZone)).join('; ')}${more}.`);
+  const card = lines.join('\n');
+  const safe = { text: withoutLiveLinks(card), details: withoutLiveLinks(details) };
+  return safe.text === card && safe.details === details ? safe : { ...safe, text: `${safe.text}\n${BROKEN_LINKS}` };
+}
+
+// in a tainted session the model can put data in a link in a field, and the reason repeats the link. a chat app
+// fetches a link preview of the card before the owner decides, so the data leaves the pc also when the owner denies
+// the call. so the card shows each link with data with "[.]" and "[:]", and no chat app makes a link of it.
+export const BROKEN_LINKS = 'Links that can carry data show with [.] and [:], so that the chat app does not open them. The dashboard shows them as they are.';
+const LINK_MARKS = /[.:．。｡：]/g;
+const broken = (text: string) => text.replace(LINK_MARKS, (mark) => `[${mark}]`);
+
+export function withoutLiveLinks(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => {
+      const links = [...new Set(dataUrls(line).map((each) => linkOf(each.url)))].sort((a, b) => b.length - a.length);
+      // the finder reads the nfkc form. a link that the line does not hold verbatim makes the marks break in all of it.
+      if (links.some((link) => !line.includes(link))) return broken(line);
+      return links.reduce((out, link) => out.split(link).join(broken(link)), line);
+    })
+    .join('\n');
 }
 
 const buttonsFor = (id: number, always: boolean): Button[][] => [
@@ -263,5 +287,5 @@ const exactInput = (input: unknown) => JSON.stringify(JSON.parse(redactedJson(in
 function taintText(taint: TaintSource, timeZone: string): string {
   const at = new Date(taint.at);
   const run = taint.runId ? ` in run ${taint.runId.slice(0, 8)}` : '';
-  return `${taint.source} (read by ${taint.toolName} on ${localDay(at, timeZone)} at ${localTime(at, timeZone)}${run})`;
+  return `${headOf(taint.source, SOURCE_NAME_LIMIT)} (read by ${taint.toolName} on ${localDay(at, timeZone)} at ${localTime(at, timeZone)}${run})`;
 }

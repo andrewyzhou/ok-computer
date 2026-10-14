@@ -2,6 +2,8 @@ import type { Config } from '../config/schema.js';
 import type { Db } from '../db/index.js';
 import { goalStats, listGoals, type Goal } from '../goals/store.js';
 import { redact, redactValue } from '../observability/redact.js';
+import { REPLY_CALL_ID, REPLY_NOTE, REPLY_TOOL } from '../policy/reply.js';
+import { REVIEW_TOOL } from '../policy/reviewer.js';
 import { outcomeOf } from './outcome.js';
 import { getChecklist, inActiveHours } from '../scheduler/heartbeat.js';
 import { describeSchedule } from '../scheduler/schedule.js';
@@ -26,6 +28,7 @@ import type {
   RunDetail,
   RunRow,
   SessionRow,
+  SubagentLink,
   TimelineItem,
   ToolCallRow,
   ToolCatalog,
@@ -214,10 +217,12 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
   const modelRows = db
     .prepare(
       `SELECT model_calls.*, (SELECT json_array_length(tools) FROM tool_catalog_snapshots
-         WHERE hash = model_calls.toolCatalogHash) AS toolCount
+         WHERE hash = model_calls.toolCatalogHash) AS toolCount,
+         EXISTS (SELECT 1 FROM tool_catalog_snapshots, json_each(tool_catalog_snapshots.tools)
+           WHERE hash = model_calls.toolCatalogHash AND json_extract(json_each.value, '$.name') = ?) AS isReview
        FROM model_calls WHERE runId = ? ORDER BY id`,
     )
-    .all(id);
+    .all(REVIEW_TOOL, id);
   const decisions = new Map(
     db
       .prepare(
@@ -232,22 +237,151 @@ export function getRunDetail(db: Db, id: string): RunDetail | undefined {
     .prepare('SELECT * FROM tool_calls WHERE runId = ? ORDER BY id')
     .all(id)
     .map((row) => toToolCall(row, decisions, messages));
+  // a reviewer call goes inside the tool call that it checked, not among the turns of the agent.
+  const reviews = new Map([...decisions.values()].flatMap((decision) => (decision.reviewerModelCallId === null ? [] : [[decision.reviewerModelCallId, decision] as const])));
+  const links = subagentLinks(db, 'subagent_runs.parentRunId = ?', id);
+  // a delegate call has no tool_calls row while its child runs, so its placeholder finds its decision by the call id.
+  // the decision then shows its reviewer call, which is not a turn of the agent.
+  const decisionOf = (toolCallId: string) => {
+    const row = db.prepare('SELECT id FROM policy_decisions WHERE runId = ? AND toolCallId = ? ORDER BY id DESC LIMIT 1').get(id, toolCallId);
+    return row ? (decisions.get(Number(row.id)) ?? null) : null;
+  };
   const placed = new Set<number>();
+  const pending = new Set<SubagentLink>();
   const timeline: TimelineItem[] = [];
   for (const row of modelRows) {
-    const response = row.response ? (JSON.parse(String(row.response)) as { toolCalls?: Array<{ id: string }> }) : undefined;
+    const reviewed = reviews.get(Number(row.id));
+    if (reviewed) {
+      reviewed.reviewerCall = toModelCall(row);
+      continue;
+    }
+    const last = timeline.at(-1);
+    // a reviewer call that gave no verdict (an error, a retry, or an answer that is not clear) has no link from a
+    // decision. tool calls of one turn run at the same time, so it goes with the turn whose tool calls it checked.
+    if (row.isReview === 1 && last?.kind === 'model') {
+      (last.reviews ??= []).push(toModelCall(row));
+      continue;
+    }
+    const response = row.response ? (JSON.parse(String(row.response)) as { toolCalls?: Array<{ id: string; input: unknown }> }) : undefined;
     const asked: ToolCallRow[] = [];
     for (const requested of response?.toolCalls ?? []) {
       const tool = tools.find((call) => call.toolCallId === requested.id && !placed.has(call.id));
-      if (!tool) continue;
-      placed.add(tool.id);
-      asked.push(tool);
+      if (tool) {
+        placed.add(tool.id);
+        asked.push(tool);
+        continue;
+      }
+      // the delegate row is written when the child ends. until then, the call shows as running with its child. a
+      // crash can stop both runs before the row exists, and the row comes only at the next run of the session. so a
+      // call of a closed run, or with a closed child, shows as interrupted.
+      const link = links.find((each) => each.toolCallId === requested.id);
+      const live = run.status === 'running' && (link?.status === null || link?.status === 'running');
+      if (link) {
+        asked.push(pendingDelegate(id, requested, link, -1 - links.indexOf(link), live, decisionOf(requested.id)));
+        pending.add(link);
+      }
     }
     timeline.push({ kind: 'model', call: toModelCall(row), tools: asked });
   }
   for (const tool of tools) if (!placed.has(tool.id)) timeline.push({ kind: 'tool', call: tool });
+  for (const link of links) {
+    const tool = tools.find((call) => call.name === 'delegate' && call.toolCallId === link.toolCallId);
+    if (tool) tool.child = link;
+    // an approved delegate call runs after its run ended, and no model call asked for it under its id (approval-N).
+    // its row comes when the child ends, so until then it shows as a call of its own with the child. the run is
+    // closed, so only the status of the child tells if it still runs.
+    else if (!pending.has(link)) {
+      const approval = db.prepare('SELECT input FROM approvals WHERE id = ?').get(Number(link.toolCallId.replace(/^approval-/, '')));
+      const requested = { id: link.toolCallId, input: approval ? JSON.parse(String(approval.input)) : null };
+      const live = link.status === null || link.status === 'running';
+      timeline.push({ kind: 'tool', call: pendingDelegate(id, requested, link, -1 - links.indexOf(link), live, decisionOf(requested.id)) });
+    }
+  }
   const events = db.prepare('SELECT * FROM events WHERE runId = ? ORDER BY id').all(id).map(toEventRow);
-  return { run, timeline, events };
+  const reply = decisionOf(REPLY_CALL_ID);
+  if (reply) timeline.push({ kind: 'tool', call: replyCheck(id, run.status === 'running', reply, events) });
+  return { run, parent: subagentLinks(db, 'subagent_runs.childRunId = ?', id)[0] ?? null, timeline, events };
+}
+
+// the reply guard has no tool call, so its decision shows as a call of reply_to_owner. the item holds the reviewer call
+// and says what went to the chat, because the log keeps the full reply.
+function replyCheck(runId: string, live: boolean, policy: PolicyDecisionRow, events: EventRow[]): ToolCallRow {
+  const reply = events.findLast((event) => event.type === 'assistant_message');
+  const note = events.findLast((event) => event.type === 'note' && String(event.payload.text).startsWith(REPLY_NOTE));
+  const allowed = policy.reviewerVerdict === 'allow';
+  const content = note
+    ? String(note.payload.text)
+    : allowed
+      ? 'The reviewer allowed the links, so the reply went to the chat as it is.'
+      : live
+        ? 'The reviewer checks the links in the reply. The reply goes to the chat after the check.'
+        : 'The app stopped while the reviewer checked the reply, so the reply did not go to the chat.';
+  return {
+    id: -1_000_000,
+    runId,
+    toolCallId: REPLY_CALL_ID,
+    name: REPLY_TOOL,
+    input: { text: reply ? String(reply.payload.text) : '' },
+    output: { content },
+    isError: !allowed && !live && !note,
+    durationMs: 0,
+    createdAt: policy.createdAt,
+    source: 'builtin',
+    riskLevel: 'write',
+    tainted: true,
+    untrustedSource: null,
+    truncated: false,
+    resultHandle: null,
+    rawResultBlob: null,
+    outcome: note ? 'held' : allowed ? 'ran' : live ? 'running' : 'interrupted',
+    policy,
+    serverId: null,
+    mcpMessages: [],
+  };
+}
+
+// the call has no tool_calls row yet, so its id is negative and unique in the run.
+function pendingDelegate(runId: string, requested: { id: string; input: unknown }, link: SubagentLink, rowId: number, live: boolean, policy: PolicyDecisionRow | null): ToolCallRow {
+  return {
+    id: rowId,
+    runId,
+    toolCallId: requested.id,
+    name: 'delegate',
+    input: requested.input,
+    output: { content: live ? 'The sub-agent is still running.' : 'The app stopped while the sub-agent ran, so the call has no result.' },
+    isError: !live,
+    durationMs: 0,
+    createdAt: '',
+    source: 'builtin',
+    riskLevel: null,
+    tainted: false,
+    untrustedSource: null,
+    truncated: false,
+    resultHandle: null,
+    rawResultBlob: null,
+    outcome: live ? 'running' : 'interrupted',
+    policy,
+    serverId: null,
+    mcpMessages: [],
+    child: link,
+  };
+}
+
+function subagentLinks(db: Db, where: string, id: string): SubagentLink[] {
+  return db
+    .prepare(
+      `SELECT subagent_runs.*, runs.status, (SELECT SUM(costUsd) FROM model_calls WHERE runId = subagent_runs.childRunId) AS costUsd
+       FROM subagent_runs LEFT JOIN runs ON runs.id = subagent_runs.childRunId WHERE ${where} ORDER BY subagent_runs.id`,
+    )
+    .all(id)
+    .map((row) => ({
+      parentRunId: String(row.parentRunId),
+      toolCallId: String(row.toolCallId),
+      childRunId: String(row.childRunId),
+      profile: String(row.profile),
+      status: str(row.status),
+      costUsd: num(row.costUsd),
+    }));
 }
 
 export function getModelCallBody(db: Db, id: number): ModelCallBody | undefined {

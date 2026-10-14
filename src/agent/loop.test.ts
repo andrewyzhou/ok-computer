@@ -62,6 +62,15 @@ describe('agent loop', () => {
     expect(events().at(-1)?.type).toBe('note');
   });
 
+  it('uses the iteration limit of the run when it has one, as a sub-agent profile sets it', async () => {
+    let n = 0;
+    const loop = () => toolStep({ id: `t${++n}`, name: 'now', input: {} });
+    const { run, model } = createHarness([loop(), loop(), loop()], { maxIterations: 3 });
+    const result = await run('loop forever', { maxIterations: 2 });
+    expect(result.error).toContain('stopped after 2 model calls');
+    expect(model.calls).toHaveLength(2);
+  });
+
   it('gives an error result to tool calls in a reply that was cut off', async () => {
     const { db, run, rows, model } = createHarness([
       { toolCalls: [{ id: 't1', name: 'now', input: {} }], stopReason: 'max_tokens' },

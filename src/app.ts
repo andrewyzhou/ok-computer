@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { createDelegateTool, PROFILES, profileOf, SUBAGENT_INSTRUCTIONS } from './agent/delegate.js';
 import { runAgent, type AgentDeps } from './agent/loop.js';
-import { closeStaleWork, interruptedText, repairSession } from './agent/recovery.js';
+import { closeStaleWork, interruptedText, repairSession, replyLost } from './agent/recovery.js';
 import { buildStablePrompt } from './agent/system-prompt.js';
 import { createAlwaysAllow } from './approvals/always.js';
 import { approvalNote, createApprovalFlow, type ApprovalFlow } from './approvals/flow.js';
@@ -38,6 +40,8 @@ import type { ModelClient, ModelRequest } from './models/types.js';
 import { createBlobStore } from './observability/blobs.js';
 import type { Logger } from './observability/logger.js';
 import { BUILTIN_RULES, type Rule } from './policy/policy.js';
+import { guardReply } from './policy/reply.js';
+import { createReviewer } from './policy/reviewer.js';
 import { scheduleContext } from './scheduler/context.js';
 import {
   createHeartbeat,
@@ -121,6 +125,7 @@ function sessionTools(sessionKey: string): readonly string[] {
   if (sessionKey.startsWith(HEARTBEAT_PREFIX)) return HEARTBEAT_TOOLS;
   if (sessionKey.startsWith(CONSOLIDATION_PREFIX)) return CONSOLIDATION_TOOLS;
   if (sessionKey.startsWith(WORKSHOP_PREFIX)) return WORKSHOP_TOOLS;
+  if (sessionKey.startsWith('sub:')) return profileOf(sessionKey)?.tools ?? [];
   return AUTOMATION_TOOLS;
 }
 
@@ -223,19 +228,33 @@ export function createApp(deps: AppDeps): App {
     : undefined;
   // the scheduler is created below. the tools call replan only after the start.
   const replan = () => scheduler.replan();
+  const builtIn = [
+    nowTool,
+    ...createGoalTools({ db, replan }),
+    ...createAutomationTools({ db, replan }),
+    ...createHeartbeatTools({ db }),
+    ...createMemoryTools({ db, memoryDir }),
+    ...createConsolidationTools({ db, memoryDir }),
+    createMessageOwnerTool(owner),
+    ...createSkillTools({ skillsDir: config.paths.skills }),
+    createSkillWriteTool({ skillsDir: config.paths.skills }),
+    createResultReadTool({ db, blobs }),
+    ...web.tools,
+  ];
+  // a profile names built-in tools and google tools. a name that this app does not have is left out.
+  const registered = new Set([...builtIn, ...(google?.tools ?? [])].map((tool) => tool.name));
   const tools = createToolRegistry(
     [
-      nowTool,
-      ...createGoalTools({ db, replan }),
-      ...createAutomationTools({ db, replan }),
-      ...createHeartbeatTools({ db }),
-      ...createMemoryTools({ db, memoryDir }),
-      ...createConsolidationTools({ db, memoryDir }),
-      createMessageOwnerTool(owner),
-      ...createSkillTools({ skillsDir: config.paths.skills }),
-      createSkillWriteTool({ skillsDir: config.paths.skills }),
-      createResultReadTool({ db, blobs }),
-      ...web.tools,
+      ...builtIn,
+      createDelegateTool({
+        db,
+        clock,
+        queue,
+        newId: deps.newId ?? randomUUID,
+        toolsOf: (profile) => withIntegrations(`sub:${profile}`, PROFILES[profile].tools.filter((name) => registered.has(name))),
+        // the child does not use agent(), because a child that stops reports to its parent, not to the owner.
+        runChild: (input) => runAgent(agentDeps, input),
+      }),
       ...integrations.tools,
       ...(google?.tools ?? []),
     ],
@@ -243,11 +262,14 @@ export function createApp(deps: AppDeps): App {
     integrations.find,
     integrations.explain,
   );
+  const slots = createSlotRunner({ db, config, clients: deps.clients, logger, clock });
+  const reviewer = createReviewer({ db, slots });
   const caller = createToolCaller({
     db,
     blobs,
     tools,
     rules,
+    reviewer,
     requestApproval: approvals.request,
     queue,
     logger,
@@ -255,7 +277,6 @@ export function createApp(deps: AppDeps): App {
     timeZone: config.timeZone,
   });
 
-  const slots = createSlotRunner({ db, config, clients: deps.clients, logger, clock });
   const strategy = createTrimAndCompact({ db, slots, logger, clock, windowTokens: config.context.windowTokens });
   const agentDeps: AgentDeps = {
     db,
@@ -280,13 +301,18 @@ export function createApp(deps: AppDeps): App {
           ? { personaFiles: ['USER.md'], extraInstructions: CONSOLIDATION_INSTRUCTIONS }
           : {}),
         ...(sessionKey.startsWith(WORKSHOP_PREFIX) ? { personaFiles: ['USER.md'], extraInstructions: WORKSHOP_INSTRUCTIONS } : {}),
+        // a sub-agent needs no persona and no facts about the owner for its task, so it gets none.
+        ...(sessionKey.startsWith('sub:') ? { personaFiles: [], extraInstructions: SUBAGENT_INSTRUCTIONS } : {}),
       }),
     contextLines: (now) => scheduleContext(db, now, config.timeZone),
     activeRuns,
     ...ids,
   };
   const agent = async (input: Parameters<typeof runAgent>[1]) => {
-    const result = await runAgent(agentDeps, { ...input, allowedTools: withIntegrations(input.sessionKey, input.allowedTools) });
+    // the router and the automation runner send the final text to the owner's chat, so it goes through the guard.
+    const guard = (text: string, run: { runId: string; signal: AbortSignal }) =>
+      guardReply({ db, reviewer, logger, clock }, { ...run, sessionKey: input.sessionKey }, text);
+    const result = await runAgent(agentDeps, { ...input, allowedTools: withIntegrations(input.sessionKey, input.allowedTools), guardReply: guard });
     // the router tells the owner about a stopped message run in its reply. a background run has no reply, so the owner gets a message here.
     if (result.stoppedAtLimit && input.trigger !== 'message') {
       await owner.send(`The ${input.trigger} run did not finish: ${result.error}.`);
@@ -411,6 +437,10 @@ export function createApp(deps: AppDeps): App {
       }
       const stale = closeStaleWork(db, now, staleMs, { runs: activeRuns, approvals: approvals.active });
       if (stale.runs.length) logger.warn('closed the runs of a stopped process', { runs: stale.runs.map((run) => run.id) });
+      // the owner waits for the reply of such a run. the message has no link, because the reply was not checked.
+      for (const run of stale.runs.filter((each) => replyLost(db, each.id, false))) {
+        void owner.send(`The app stopped while the reviewer checked a reply (run ${run.id.slice(0, 8)}), so the reply did not come to the chat. The run page on the dashboard shows it.`);
+      }
       // the next run of a session repairs its calls. an isolated automation and the heartbeat have a session for
       // each run, so no next run comes, and the sweep repairs it. that session belongs to the stale run alone, so no
       // live turn of another process can be in it. a shared session can have such a turn, so the sweep leaves it.

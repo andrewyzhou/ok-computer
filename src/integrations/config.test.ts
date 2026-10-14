@@ -74,6 +74,13 @@ describe('integration registry', () => {
     expect(parseIntegrations({ integrations: [{ ...slack, url: 'file:///etc/passwd' }] }).ok).toBe(false);
   });
 
+  it('accepts a sub-agent session only for a profile that exists', () => {
+    expect(parseIntegrations({ integrations: [{ ...slack, sessions: ['main', 'sub:inbox'] }] }).ok).toBe(true);
+    for (const name of ['sub:inbx', 'sub:code', 'sub:']) {
+      expect(parseIntegrations({ integrations: [{ ...slack, sessions: [name] }] }), name).toMatchObject({ ok: false, error: expect.stringContaining('"sub:inbox"') });
+    }
+  });
+
   it('refuses a package that a runner downloads without an exact version', () => {
     const stdio = (command: string, args: string[]) => parseIntegrations({ integrations: [{ id: 'fs', kind: 'mcp-stdio', command, args, tools: { allow: ['read_file'] } }] });
     for (const args of [['-y', '@scope/some-mcp-server'], ['-y', 'some-mcp-server@next'], ['some-mcp-server@^1.2.0'], ['some-mcp-server@*'], ['-y', '--package=tool@1.x', 'tool']]) {

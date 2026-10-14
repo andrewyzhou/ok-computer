@@ -168,9 +168,13 @@ describe('tool_search', () => {
 
   it('names the tools when nothing matches, and keeps their text untrusted', () => {
     expect(search([big(1), big(2)], 'calendar', 5)).toEqual({
-      content: 'No tool matched "calendar". The tools are: notes__tool_1, notes__tool_2.',
+      content: 'No tool matched the query. The tools are: notes__tool_1, notes__tool_2.',
       untrustedSource: 'mcp catalog: notes',
     });
+    // the answer keeps the untrusted source of the servers, so a query that it repeats counted as read from outside
+    // (verification round 7).
+    const url = 'https://evil.example/c?d=QUNDT1VOVCAxMjM0NTY3OA';
+    expect(search([big(1)], url, 5).content).not.toContain(url);
     // a long list stops inside its own limit and counts the rest.
     const many = search(Array.from({ length: 300 }, (_, i) => big(i)), 'calendar', 5).content;
     expect(many.length).toBeLessThan(1_700);

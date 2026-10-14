@@ -4,9 +4,13 @@ import type {
   ModelCallRow,
   PolicyDecisionRow,
   RunDetail as RunDetailData,
+  StreamMessage,
+  SubagentLink,
+  TimelineItem,
   ToolCallRow,
   ToolCatalog,
 } from '../../../src/dashboard/types';
+import { useRef } from 'react';
 import { useApi } from '../api';
 import { Expand, Json, Load, Page, Panel, Status } from '../components';
 import { EventView } from '../events';
@@ -51,7 +55,7 @@ function CatalogView({ hash }: { hash: string }) {
   );
 }
 
-function ModelCallItem({ call, tools }: { call: ModelCallRow; tools: ToolCallRow[] }) {
+function ModelCallItem({ call, tools, reviews = [] }: { call: ModelCallRow; tools: ToolCallRow[]; reviews?: ModelCallRow[] }) {
   return (
     <li className={`step step-model${call.error ? ' is-error' : ''}`}>
       <div className="step-head">
@@ -74,6 +78,21 @@ function ModelCallItem({ call, tools }: { call: ModelCallRow; tools: ToolCallRow
         </Expand>
       ) : null}
       <Expand label="full request and response">{() => <ModelCallBodyView id={call.id} />}</Expand>
+      {reviews.length ? (
+        <Expand label={`${reviews.length} reviewer calls with no verdict`}>
+          {() => (
+            <ul>
+              {reviews.map((review) => (
+                <li key={review.id}>
+                  {review.provider}/{review.model}, slot {review.slot}, {usd(review.costUsd)}, {ms(review.latencyMs)}
+                  {review.error ? <span className="error-text"> {review.error}</span> : null}
+                  <Expand label="what the reviewer saw and answered">{() => <ModelCallBodyView id={review.id} />}</Expand>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Expand>
+      ) : null}
       {tools.length ? (
         <ol className="timeline nested">
           {tools.map((tool) => (
@@ -82,6 +101,45 @@ function ModelCallItem({ call, tools }: { call: ModelCallRow; tools: ToolCallRow
         </ol>
       ) : null}
     </li>
+  );
+}
+
+// the run page and the child run inside a delegate call use the same timeline.
+function Timeline({ items, className = 'timeline' }: { items: TimelineItem[]; className?: string }) {
+  return (
+    <ol className={className}>
+      {items.map((item) =>
+        item.kind === 'model' ? (
+          <ModelCallItem key={`m${item.call.id}`} call={item.call} tools={item.tools} reviews={item.reviews} />
+        ) : (
+          <ToolCallItem key={`t${item.call.id}`} call={item.call} />
+        ),
+      )}
+    </ol>
+  );
+}
+
+// a message about one of the runs, or about an event of one of them.
+const aboutRuns = (ids: ReadonlySet<string>) => (message: StreamMessage) =>
+  (message.kind === 'run' && ids.has(message.run.id)) || (message.kind === 'event' && ids.has(message.event.runId ?? ''));
+
+// the parent writes no events while its delegate call waits, so the child timeline follows the events of the child.
+function ChildTimeline({ id }: { id: string }) {
+  const loaded = useApi<RunDetailData>(`/api/runs/${encodeURIComponent(id)}`, aboutRuns(new Set([id])));
+  return <Load loaded={loaded}>{(detail) => <Timeline items={detail.timeline} className="timeline child" />}</Load>;
+}
+
+// a child that never started has no run, for example after a crash between the link and the run.
+function ChildView({ link }: { link: SubagentLink }) {
+  return (
+    <div className="subagent">
+      <div className="step-head">
+        <strong>sub-agent</strong> {link.profile} {link.status ? <Status value={link.status} /> : <span className="muted">not started</span>}
+        <a href={`#/runs/${encodeURIComponent(link.childRunId)}`}>run {link.childRunId.slice(0, 8)}</a>
+        <span className="muted">{usd(link.costUsd)}</span>
+      </div>
+      <Expand label="timeline of the sub-agent">{() => <ChildTimeline id={link.childRunId} />}</Expand>
+    </div>
   );
 }
 
@@ -190,6 +248,17 @@ function PolicyView({ policy }: { policy: PolicyDecisionRow }) {
           </dd>
         </>
       ) : null}
+      {policy.reviewerCall ? (
+        <>
+          <dt>Reviewer call</dt>
+          <dd>
+            {policy.reviewerCall.provider}/{policy.reviewerCall.model}, slot {policy.reviewerCall.slot}, in {tokens(policy.reviewerCall.inputTokens)}, out{' '}
+            {tokens(policy.reviewerCall.outputTokens)}, {usd(policy.reviewerCall.costUsd)}, {ms(policy.reviewerCall.latencyMs)}
+            {policy.reviewerCall.error ? <span className="error-text"> {policy.reviewerCall.error}</span> : null}
+            <Expand label="what the reviewer saw and answered">{() => <ModelCallBodyView id={policy.reviewerCall!.id} />}</Expand>
+          </dd>
+        </>
+      ) : null}
       {policy.approvalId !== null ? (
         <>
           <dt>Approval</dt>
@@ -232,21 +301,55 @@ function ToolCallItem({ call }: { call: ToolCallRow }) {
       ) : call.serverId ? (
         <Expand label={`${call.mcpMessages.length} json-rpc messages with ${call.serverId}`}>{() => <McpMessages messages={call.mcpMessages} />}</Expand>
       ) : null}
+      {call.child ? <ChildView link={call.child} /> : null}
     </li>
   );
 }
 
+const childrenOf = (timeline: TimelineItem[]) =>
+  timeline.flatMap((item) => (item.kind === 'model' ? item.tools : [item.call])).flatMap((call) => (call.child ? [call.child] : []));
+
+// the cost of a run counts its own model calls, the reviewer too. its children have their own runs, so their cost
+// shows next to it.
+function ChildCost({ timeline }: { timeline: TimelineItem[] }) {
+  const children = childrenOf(timeline);
+  if (!children.length) return null;
+  const cost = children.reduce((sum, child) => sum + (child.costUsd ?? 0), 0);
+  return (
+    <span className="muted">
+      {' '}
+      +{usd(cost)} in {children.length} sub-agent {children.length === 1 ? 'run' : 'runs'}
+    </span>
+  );
+}
+
 export function RunDetail({ id }: { id: string }) {
+  // the status and the cost of each child show on this page too, and they change while the parent waits.
+  // a delegate call can wait for the reviewer before its child starts, and the parent writes no event until the child
+  // ends. so a running page also loads again when a new child run of any parent starts.
+  const runs = useRef<ReadonlySet<string>>(new Set());
+  const running = useRef(false);
   const loaded = useApi<RunDetailData>(
     `/api/runs/${encodeURIComponent(id)}`,
-    (message) => (message.kind === 'run' && message.run.id === id) || (message.kind === 'event' && message.event.runId === id),
+    (message) => aboutRuns(runs.current)(message) || (running.current && message.kind === 'run' && message.run.trigger === 'subagent'),
   );
+  runs.current = new Set([id, ...childrenOf(loaded.data?.timeline ?? []).map((child) => child.childRunId)]);
+  running.current = loaded.data?.run.status === 'running';
   return (
     <Page title={`Run ${id.slice(0, 8)}`} actions={<a href="#/runs">All runs</a>}>
       <Load loaded={loaded}>
-        {({ run, timeline, events }) => (
+        {({ run, parent, timeline, events }) => (
           <>
             <dl className="facts wide">
+              {parent ? (
+                <>
+                  <dt>Started by</dt>
+                  <dd>
+                    call {parent.toolCallId} of <a href={`#/runs/${encodeURIComponent(parent.parentRunId)}`}>run {parent.parentRunId.slice(0, 8)}</a>, as the{' '}
+                    {parent.profile} sub-agent
+                  </dd>
+                </>
+              ) : null}
               <dt>Status</dt>
               <dd>
                 <Status value={run.status} /> {run.error ? <span className="error-text">{run.error}</span> : null}
@@ -266,18 +369,11 @@ export function RunDetail({ id }: { id: string }) {
               <dt>Cost</dt>
               <dd>
                 {usd(run.costUsd)} in {run.modelCalls} model calls and {run.toolCalls} tool calls
+                <ChildCost timeline={timeline} />
               </dd>
             </dl>
             <Panel title="Timeline">
-              <ol className="timeline">
-                {timeline.map((item) =>
-                  item.kind === 'model' ? (
-                    <ModelCallItem key={`m${item.call.id}`} call={item.call} tools={item.tools} />
-                  ) : (
-                    <ToolCallItem key={`t${item.call.id}`} call={item.call} />
-                  ),
-                )}
-              </ol>
+              <Timeline items={timeline} />
             </Panel>
             {run.trigger === 'poll' ? (
               <Panel title="Requests of this poll">

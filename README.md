@@ -38,6 +38,8 @@ To check the Telegram v2 features against the real bot once, run `node --env-fil
 
 To connect Gmail and Google Calendar (optional), see [docs/setup/google.md](docs/setup/google.md). New mail and calendar changes become signals that the heartbeat reads; sending, unsubscribing and invitations always ask you.
 
+A call that changes data (risk `write`, for example an archive in an integration) goes to a reviewer model on the `utility` slot, not to you. The reviewer holds a call that you did not ask for, a failed review comes to you, and you still approve everything that leaves the PC. Run `npm run smoke:reviewer` once (about 30 calls of the utility slot) to see how well the reviewer holds injected actions.
+
 A small supervisor restarts the agent if it stops. The logon task means it runs whenever you are signed in to Windows.
 
 `npm run chat` uses the same database as the background agent. That is fine, but do not chat with it while the agent is answering you in Telegram at the same moment: two processes in one conversation can give the same tool call two results. `npm run chat` never connects to MCP servers: only the background agent does, so each server runs once and an OAuth token is refreshed by one process.
