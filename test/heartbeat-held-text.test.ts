@@ -129,6 +129,10 @@ for (const [label, error] of [
   ['a bad key', new ModelError('request', 'invalid x-api-key', 401)],
   ['a retired model', new ModelError('request', 'model: not_found', 404)],
   ['an empty credit balance', new ModelError('request', 'Your credit balance is too low to access the Anthropic API.', 400)],
+  // verification round 4: these setup errors are a 400 like a content filter. the run without signals fails too.
+  ['a max_tokens above the limit', new ModelError('request', '400 max_tokens: 100000 > 64000, which is the maximum allowed number of output tokens', 400)],
+  ['a model without tools', new ModelError('request', '400 registry.ollama.ai/library/m does not support tools', 400)],
+  ['an effort that the model does not take', new ModelError('request', "400 output_config.effort: 'max' is not supported by this model", 400)],
 ] as const) {
   it(`keeps the text of the signals through ${label}`, async () => {
     let outage = true;

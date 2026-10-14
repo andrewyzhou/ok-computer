@@ -108,9 +108,13 @@ function readTaint(db: Db, runId: string): TaintSource[] {
 // a refusal, the step limit and a request that the provider rejected (for example its content filter) can come from
 // the text of the input. a refusal counts also when the next model of the chain then failed. a transient error or a
 // crash comes from the model or the app.
-function inputCanCause(db: Db, result: RunResult): boolean {
-  if (result.stoppedAtLimit || result.rejected) return true;
-  return !!db.prepare("SELECT 1 FROM model_calls WHERE runId = ? AND stopReason = 'refusal' LIMIT 1").get(result.runId);
+// a rejected request can also come from the setup of the owner, for example a max_tokens or an effort that the model
+// does not take, or a model without tools. the error text does not tell the two apart, so the check runs again
+// without the signals: only when that run completes did the signals cause the error.
+async function inputCanCause(db: Db, result: RunResult, withoutSignals: () => Promise<RunResult>): Promise<boolean> {
+  if (result.stoppedAtLimit) return true;
+  if (db.prepare("SELECT 1 FROM model_calls WHERE runId = ? AND stopReason = 'refusal' LIMIT 1").get(result.runId)) return true;
+  return !!result.rejected && (await withoutSignals()).status === 'completed';
 }
 
 export function createHeartbeatTools(deps: { db: Db }): Tool[] {
@@ -193,46 +197,60 @@ export function createHeartbeat(deps: HeartbeatDeps): (automation: Automation) =
     // the taint of the recent notifications that it read. else each notification gives the taint to the next ones, and
     // one mail taints every later heartbeat and the main session for ever.
     const recentTaint = recent.flatMap((each) => readTaint(db, each.runId));
-    const text = [
-      'Heartbeat check.',
-      '',
-      'Checklist:',
-      checklist || '- none',
-      ...(digest?.shown.length
-        ? [
-            '',
-            "New signals from the owner's accounts: the ones with a detector hit first, then the newest. Tell the owner about a signal only when it needs attention soon, for example a deadline that is not on the calendar. Each signal is shown one time.",
-            digest.text,
-          ]
-        : []),
-      '',
-      'Recent notifications to the owner:',
-      recent.length ? wrapIfTainted(recentTaint, recent.map((each) => `- ${each.text}`).join('\n')) : '- none',
-    ].join('\n');
+    const textWith = (signals: string[]) =>
+      [
+        'Heartbeat check.',
+        '',
+        'Checklist:',
+        checklist || '- none',
+        ...signals,
+        '',
+        'Recent notifications to the owner:',
+        recent.length ? wrapIfTainted(recentTaint, recent.map((each) => `- ${each.text}`).join('\n')) : '- none',
+      ].join('\n');
     // the digest and the recent notifications can quote outside text, so the run starts with their taint. the
     // heartbeat has no external tools.
-    const read = [...checklistTaint(db), ...(digest?.taint ?? [])];
-    const inherited = [...read, ...recentTaint];
+    const start = (runId: string, text: string, read: TaintSource[], allowedTools: readonly string[]) => {
+      const inherited = [...read, ...recentTaint];
+      const sessionKey = `${HEARTBEAT_PREFIX}${runId}`;
+      return queue.enqueue(sessionKey, () =>
+        deps.agent({
+          runId,
+          sessionKey,
+          trigger: 'heartbeat',
+          slot: automation.slot,
+          channel: owner.chat()?.channel ?? 'cli',
+          allowedTools,
+          events: [{ type: 'system_event', payload: { text, ...(inherited.length ? { taint: inherited, readTaint: read } : {}) } }],
+          signal: deps.signal,
+        }),
+      );
+    };
+    const signalLines = digest?.shown.length
+      ? [
+          '',
+          "New signals from the owner's accounts: the ones with a detector hit first, then the newest. Tell the owner about a signal only when it needs attention soon, for example a deadline that is not on the calendar. Each signal is shown one time.",
+          digest.text,
+        ]
+      : [];
     const runId = newId();
     const sessionKey = `${HEARTBEAT_PREFIX}${runId}`;
-    const result = await queue.enqueue(sessionKey, () =>
-      deps.agent({
-        runId,
-        sessionKey,
-        trigger: 'heartbeat',
-        slot: automation.slot,
-        channel: owner.chat()?.channel ?? 'cli',
-        allowedTools: HEARTBEAT_TOOLS,
-        events: [{ type: 'system_event', payload: { text, ...(inherited.length ? { taint: inherited, readTaint: read } : {}) } }],
-        signal: deps.signal,
-      }),
-    );
+    const result = await start(runId, textWith(signalLines), [...checklistTaint(db), ...(digest?.taint ?? [])], HEARTBEAT_TOOLS);
+    // the check without signals has the same checklist, notifications and model settings. it has no
+    // heartbeat_respond, so it cannot send or record a notification.
+    const withoutSignals = () =>
+      start(
+        newId(),
+        textWith(['', 'This run only checks that the model works, so it shows no signals. Do not call tools. Reply NO_REPLY.']),
+        checklistTaint(db),
+        HEARTBEAT_TOOLS.filter((name) => name !== 'heartbeat_respond'),
+      );
     // a failed run leaves the signals unhandled, so the next heartbeat shows them again. a failure that the input can
     // cause counts against the shown signals, so a signal whose text makes every run fail loses that text, and the
     // scheduler does not turn the heartbeat off. an outage of the model or an aborted run (a stop of the app) does not
     // count, because the text would else be lost for a failure that the text did not cause.
     if (result.status !== 'completed') {
-      if (result.status === 'failed' && digest?.shown.length && inputCanCause(db, result)) deps.signals!.failed(digest);
+      if (result.status === 'failed' && digest?.shown.length && (await inputCanCause(db, result, withoutSignals))) deps.signals!.failed(digest);
       return { status: 'failed', runId, error: result.error ?? result.status };
     }
 
