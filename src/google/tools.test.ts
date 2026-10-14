@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer as createHttpsServer } from 'node:https';
 import type { AddressInfo, Socket } from 'node:net';
-import { tmpdir } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CLIENT_ID, createGoogleHarness, refreshOf, type GoogleHarness } from '../../test/google-harness.js';
@@ -11,7 +11,7 @@ import { createToolRegistry, type ToolContext, type ToolOutput } from '../tools/
 import { googleConfigSchema } from './config.js';
 import { createGoogleTools, googleToolNames } from './tools.js';
 import { requestContext } from './trace.js';
-import { isPrivateAddress, oneClick, planUnsubscribe, unsubscribeTargets, type OneClickResult } from './unsubscribe.js';
+import { oneClick, planUnsubscribe, unsubscribeTargets, type OneClickResult } from './unsubscribe.js';
 
 let h: GoogleHarness;
 afterEach(async () => h?.close());
@@ -356,11 +356,16 @@ describe('gmail_unsubscribe', () => {
   });
 
   // a sender writes the header, so a link can point at the pc, the router or a metadata address.
-  it('never posts to a private address', async () => {
-    for (const address of ['127.0.0.1', '10.1.2.3', '192.168.1.1', '169.254.169.254', '::1', 'fe80::1', 'fd00::1', '::ffff:127.0.0.1', '::ffff:7f00:1', '0.0.0.0', '100.64.0.1']) {
-      expect(isPrivateAddress(address), address).toBe(true);
+  it('never posts to a private address or an address of this pc', async () => {
+    // a global ipv6 address of this pc is not in a private range. the web tools refuse it, so this post refuses it too.
+    const own = Object.values(networkInterfaces())
+      .flat()
+      .flatMap((each) => (each && !each.internal ? [each.address.replace(/%.*$/, '')] : []));
+    const addresses = ['127.0.0.1', '10.1.2.3', '192.168.1.1', '169.254.169.254', '::1', 'fe80::1', 'fd00::1', '::ffff:127.0.0.1', '::ffff:7f00:1', '0.0.0.0', '100.64.0.1'];
+    for (const address of [...addresses, '2002:7f00:1::1', '2002:c0a8:101::1', ...own]) {
+      const host = address.includes(':') ? `[${address}]` : address;
+      expect(await oneClick(`https://${host}:1/u`), address).toMatchObject({ ok: false, sent: false, refused: true });
     }
-    for (const address of ['8.8.8.8', '2606:4700::1111']) expect(isPrivateAddress(address), address).toBe(false);
     expect(await oneClick('https://127.0.0.1:1/u')).toMatchObject({ ok: false, sent: false, text: expect.stringContaining('private address') });
     expect(await oneClick('https://[::1]:1/u')).toMatchObject({ ok: false, sent: false });
     // a name that resolves to a private address is refused inside the connect, after the dns answer.

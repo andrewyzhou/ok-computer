@@ -1,7 +1,8 @@
 import { lookup as dnsLookup, type LookupAddress } from 'node:dns';
 import { request } from 'node:https';
-import { BlockList, isIP, type LookupFunction } from 'node:net';
+import { isIP, type LookupFunction } from 'node:net';
 import type { gmail_v1 } from '@googleapis/gmail';
+import { isPublicAddress } from '../web/egress.js';
 import { fromAddress, header } from './mime.js';
 
 // the targets of a List-Unsubscribe header, in their order. only https and mailto count. an http link would send
@@ -139,46 +140,15 @@ function tags(value: string): Record<string, string> {
   );
 }
 
-// a sender writes the header, so a link can point at the pc itself, the router, or a cloud metadata address. a post
-// there with the owner's approval is still a request that the owner did not mean.
-const PRIVATE = new BlockList();
-for (const [net, prefix] of [
-  ['0.0.0.0', 8],
-  ['10.0.0.0', 8],
-  ['100.64.0.0', 10],
-  ['127.0.0.0', 8],
-  ['169.254.0.0', 16],
-  ['172.16.0.0', 12],
-  ['192.0.0.0', 24],
-  ['192.168.0.0', 16],
-  ['198.18.0.0', 15],
-  ['224.0.0.0', 3],
-] as const) {
-  PRIVATE.addSubnet(net, prefix, 'ipv4');
-}
-for (const [net, prefix] of [
-  ['::', 127],
-  ['fc00::', 7],
-  ['fe80::', 10],
-  ['ff00::', 8],
-  ['64:ff9b::', 96],
-] as const) {
-  PRIVATE.addSubnet(net, prefix, 'ipv6');
-}
-
-// the block list also checks an ipv4 address inside ipv6 (::ffff:127.0.0.1 and ::ffff:7f00:1) against the ipv4 rules.
-export function isPrivateAddress(address: string): boolean {
-  const family = isIP(address);
-  if (family === 0) return true;
-  return PRIVATE.check(address, family === 4 ? 'ipv4' : 'ipv6');
-}
-
+// a sender writes the header and the dns of its domain, so a link can point at the pc itself, the lan, the router, or a
+// cloud metadata address. a post there with the owner's approval is still a request that the owner did not mean. the
+// web tools use the same address policy.
 // the check runs inside the connect, on the address that the socket uses. a check before the request would leave a
 // gap where a second dns answer (dns rebinding) gives a private address.
 export const publicOnlyLookup: LookupFunction = (hostname, options, callback) => {
   dnsLookup(hostname, { ...options, all: true }, (err, addresses: LookupAddress[]) => {
     if (err) return callback(err, '', 0);
-    const bad = addresses.find((each) => isPrivateAddress(each.address));
+    const bad = addresses.find((each) => !isPublicAddress(each.address));
     if (bad || !addresses.length) {
       const refused = Object.assign(new Error(`${hostname} resolves to a private address (${bad?.address ?? 'none'})`), { code: 'EPRIVATE' });
       return callback(refused, '', 0);
@@ -214,7 +184,7 @@ export function oneClick(target: string, lookup: LookupFunction = publicOnlyLook
   if (url.protocol !== 'https:') return Promise.resolve({ ok: false, sent: false, refused: true, text: 'a one-click unsubscribe needs an https link' });
   const host = url.hostname.replace(/^\[|\]$/g, '');
   // a literal address skips the lookup, so it is checked here.
-  if (isIP(host) && isPrivateAddress(host)) return Promise.resolve({ ok: false, sent: false, refused: true, text: `the unsubscribe link points at a private address (${host})` });
+  if (isIP(host) && !isPublicAddress(host)) return Promise.resolve({ ok: false, sent: false, refused: true, text: `the unsubscribe link points at a private address (${host})` });
   return new Promise((resolve) => {
     let connected = false;
     const req = request(
