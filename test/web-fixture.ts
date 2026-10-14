@@ -385,6 +385,10 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
         );
       case 'shop.test/latin1':
         return res.writeHead(200, { 'content-type': 'text/plain; charset=iso-8859-1' }).end(Buffer.from([0x63, 0x61, 0x66, 0xe9]));
+      case 'shop.test/untyped':
+        return res.writeHead(200).end(html('<script>var hidden = 1;</script><article><h1>No type</h1><p>The page has no content type.</p></article>', 'No type'));
+      case 'shop.test/bom':
+        return res.writeHead(200, { 'content-type': 'text/plain; charset=windows-1252' }).end(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('Café news')]));
       case 'shop.test/pdf':
         return send(200, '%PDF-1.4 '.repeat(1000), 'application/pdf');
       case 'shop.test/bomb':

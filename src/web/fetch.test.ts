@@ -135,6 +135,10 @@ describe('fetchText against a hostile site', () => {
   it('decodes the charset of the header', async () => {
     expect(await fetchFixture(site.url('shop.test', '/latin1'))).toMatchObject({ ok: true, text: 'café' });
   });
+
+  it('lets a byte order mark win over the charset of the header', async () => {
+    expect(await fetchFixture(site.url('shop.test', '/bom'))).toMatchObject({ ok: true, text: 'Café news' });
+  });
 });
 
 describe('extraction', () => {
@@ -232,6 +236,13 @@ describe('web_fetch', () => {
     expect(out.untrustedSource).toBe(`web:shop.test:${site.port}`);
     expect(out.content).toContain('Title: Shirts in autumn');
     expect(out.content).toContain('Cotton shirts keep warm');
+  });
+
+  it('reads a page with no content type as html, so the model gets no script', async () => {
+    const out = await tool.run({ url: site.url('shop.test', '/untyped') }, ctx);
+    expect(out.content).toContain('Title: No type');
+    expect(out.content).toContain('The page has no content type.');
+    expect(out.content).not.toContain('var hidden');
   });
 
   it('says why a page was refused, also as untrusted text, because a redirect address comes from the server', async () => {

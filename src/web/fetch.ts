@@ -57,9 +57,18 @@ function charsetOf(contentType: string, head: Buffer): string {
   return /<meta[^>]+charset\s*=\s*["']?([\w-]+)/i.exec(head.subarray(0, 2048).toString('latin1'))?.[1] ?? 'utf-8';
 }
 
+// a browser lets a byte order mark win over the header and the meta charset. a page with a utf-8 mark and a wrong
+// header came back as mojibake (r7 probe).
+function bomOf(bytes: Buffer): string | undefined {
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return 'utf-8';
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return 'utf-16le';
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return 'utf-16be';
+  return undefined;
+}
+
 function decodeText(bytes: Buffer, contentType: string): string {
   try {
-    return new TextDecoder(charsetOf(contentType, bytes)).decode(bytes);
+    return new TextDecoder(bomOf(bytes) ?? charsetOf(contentType, bytes)).decode(bytes);
   } catch {
     // an unknown label throws. utf-8 with replacement characters is still readable.
     return new TextDecoder('utf-8').decode(bytes);

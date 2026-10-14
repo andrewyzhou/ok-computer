@@ -10,6 +10,9 @@ import { FETCH_LIMITS, fetchText, type FetchLimits } from './fetch.js';
 export const FETCH_CHARS = 20_000;
 
 const HTML = /^\s*(text\/html|application\/xhtml\+xml)\b/i;
+// a server can send a page with no content type. a browser reads such a page as html, and the model got the raw
+// markup with its scripts (r7 probe).
+const isHtml = (type: string, text: string) => HTML.test(type) || (!type.trim() && /^\s*<(!doctype\s+html|html)\b/i.test(text));
 
 export function createWebFetchTool(deps: { egress: Egress; limits?: FetchLimits }): Tool {
   return defineTool({
@@ -29,7 +32,7 @@ export function createWebFetchTool(deps: { egress: Egress; limits?: FetchLimits 
         // the reason already says that the address is not valid.
       }
       if (!got.ok) return { content: `web_fetch did not get ${url}: ${got.reason}`, isError: true, untrustedSource: host };
-      const page = HTML.test(got.contentType) ? await extractIsolated(got.text, got.url) : { title: '', text: got.text };
+      const page = isHtml(got.contentType, got.text) ? await extractIsolated(got.text, got.url) : { title: '', text: got.text };
       const lines = [
         page.title ? `Title: ${page.title}` : undefined,
         `Address: ${got.url}${got.redirects.length ? ` (after ${got.redirects.length} redirect${got.redirects.length > 1 ? 's' : ''})` : ''}`,
