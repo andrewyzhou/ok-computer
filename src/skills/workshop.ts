@@ -345,8 +345,6 @@ export interface WorkshopDeps {
   queue: RunQueue;
   agent: (input: RunInput) => Promise<RunResult>;
   signal: AbortSignal;
-  // false in npm run chat. its card would go to the terminal, and the owner reads telegram.
-  background: boolean;
   newId?: () => string;
 }
 
@@ -358,7 +356,6 @@ export function createWorkshop(deps: WorkshopDeps): (automation: Automation) => 
   // window before either one sends a draft, so the owner would get two drafts of one task.
   let running = false;
   return async (automation) => {
-    if (!deps.background) return { status: 'skipped', error: 'left to the background service' };
     if (running) return { status: 'skipped', error: 'a skill review is running now' };
     running = true;
     try {

@@ -53,7 +53,6 @@ import {
 } from './scheduler/heartbeat.js';
 import { AUTOMATION_TOOLS, createJobRunner } from './scheduler/jobs.js';
 import { createScheduler, type Scheduler, type SetTimer } from './scheduler/scheduler.js';
-import type { Automation } from './scheduler/store.js';
 import { createAutomationTools } from './scheduler/tools.js';
 import { createCommands, signInLink } from './sessions/commands.js';
 import { createOwnerMessenger } from './sessions/owner.js';
@@ -90,7 +89,8 @@ export interface AppDeps {
   mcpTransport?: IntegrationsDeps['transport'];
   // false in npm run chat. see start(). the browser follows the same switch: one chrome can use its profile.
   connectIntegrations?: boolean;
-  // false in npm run chat. background jobs that message the owner, such as the skill review, run only in the service.
+  // false in npm run chat. only the service runs the scheduler, so a reminder, a check-in or the skill review never
+  // goes to the terminal of a chat process.
   background?: boolean;
   // the policy file that "always allow" writes. without it, approval cards have no "always allow" button.
   policyPath?: string;
@@ -370,7 +370,7 @@ export function createApp(deps: AppDeps): App {
     heartbeat,
     consolidation: createConsolidation({ db, clock, config, memoryDir, queue, agent, signal: shutdown.signal, ...ids }),
     ...(polls ? { polls } : {}),
-    workshop: createWorkshop({ db, clock, config, queue, agent, signal: shutdown.signal, background: deps.background !== false, ...ids }),
+    workshop: createWorkshop({ db, clock, config, queue, agent, signal: shutdown.signal, ...ids }),
     ...(google ? { sourcePolls: { google: google.poll } } : {}),
     signal: shutdown.signal,
     ...ids,
@@ -387,13 +387,6 @@ export function createApp(deps: AppDeps): App {
     onTick: (now) => sweep(now),
     staleMs,
     ...(deps.setTimer ? { setTimer: deps.setTimer } : {}),
-    // npm run chat leaves the skill review to the service. if chat claimed it, the review of that day would not run. it
-    // does not poll either, and its claim of a due poll would use up the slot of the service, which then skipped it.
-    owns: (automation: Automation) => {
-      const type = automation.payload.type;
-      if (deps.background === false && type === 'workshop') return false;
-      return !(deps.connectIntegrations === false && (type === 'poll' || type === 'integration_poll'));
-    },
   });
 
   const router = createRouter({
@@ -495,7 +488,7 @@ export function createApp(deps: AppDeps): App {
       syncPolls(db, entries, clock(), config.timeZone);
       syncGooglePoll(db, config, clock());
       // missed jobs can take minutes, so the start does not wait for them.
-      void scheduler.start().catch((err: unknown) => logger.error('scheduler start failed', { err }));
+      if (deps.background !== false) void scheduler.start().catch((err: unknown) => logger.error('scheduler start failed', { err }));
       // a server can need many seconds to start, so the start does not wait. tool_search reads the stored catalog.
       // a second process (npm run chat) keeps the same tools and catalogs but does not connect.
       void integrations.start().catch((err: unknown) => logger.error('integrations start failed', { err }));

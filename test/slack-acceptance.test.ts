@@ -35,7 +35,7 @@ function slackEntries() {
 
 const call = (id: string, name: string, args: Record<string, unknown>) => toolStep({ id, name: 'tool_call', input: { name, arguments: args } });
 
-async function slackApp(steps: Parameters<typeof createTestApp>[0], options: { connect?: boolean } = {}) {
+async function slackApp(steps: Parameters<typeof createTestApp>[0]) {
   let t: ReturnType<typeof createTestApp> | undefined;
   const fake: SlackFake = createSlackFake(() => Math.floor((t?.clock() ?? new Date(START)).getTime() / 1000));
   const transport = async (): Promise<Transport> => {
@@ -45,11 +45,11 @@ async function slackApp(steps: Parameters<typeof createTestApp>[0], options: { c
   };
   t = createTestApp(steps, {
     start: START,
-    deps: { integrations: slackEntries(), mcpTransport: transport, ...(options.connect === false ? { connectIntegrations: false } : {}) },
+    deps: { integrations: slackEntries(), mcpTransport: transport },
   });
   apps.push(t);
   await t.app.start();
-  if (options.connect !== false) await expect.poll(() => t!.app.integrations.status()[0]!.state.status).toBe('connected');
+  await expect.poll(() => t!.app.integrations.status()[0]!.state.status).toBe('connected');
   const poll = () => t!.rows("SELECT id, enabled, nextRunAt, consecutiveFailures FROM automations WHERE json_extract(payload, '$.type') = 'integration_poll'")[0] as {
     id: string;
     enabled: number;
@@ -117,15 +117,5 @@ describe('slack acceptance', () => {
     const told = t.printed().match(/failed 5 times in a row, so I turned it off\. The last error was: [^\n]*/g);
     expect(told).toEqual([expect.stringMatching(/could not be read: it has no message that the reader knows\. The JSON-RPC messages of the call show the raw answer\.$/)]);
     expect(t.printed()).not.toMatch(/new look|widget/);
-  });
-
-  // a claim in the chat process would use up the slot of the service, which then skipped the poll.
-  it('leaves the poll to the service in the chat process, which never connects', async () => {
-    const { t, fake, poll } = await slackApp([], { connect: false });
-    const due = poll().nextRunAt!;
-    await t.at(due);
-    expect(t.rows('SELECT status, error FROM automation_runs')).toEqual([]);
-    expect(poll().nextRunAt).toBe(due);
-    expect(fake.calls).toEqual([]);
   });
 });

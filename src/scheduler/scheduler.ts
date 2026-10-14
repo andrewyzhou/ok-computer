@@ -23,9 +23,6 @@ export interface SchedulerDeps {
   setTimer?: SetTimer;
   // the scheduler calls this at the start of each tick, for small periodic work.
   onTick?: (now: Date) => void;
-  // false for an automation that another process runs. this process then does not claim it, so it does not take the
-  // run from that process. without it, the scheduler runs every automation.
-  owns?: (automation: Automation) => boolean;
   // a job that started this long ago belongs to a process that stopped. the app uses the age limit of stale runs.
   staleMs: number;
 }
@@ -58,23 +55,21 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const setTimer = deps.setTimer ?? realTimer;
   let cancel: (() => void) | undefined;
   let stopped = true;
-  const owns = deps.owns ?? (() => true);
   const running = new Set<string>();
 
   const arm = () => {
     cancel?.();
     cancel = undefined;
     if (stopped) return;
-    // an automation of another process can stay due here for a long time, so it does not set the timer.
-    const earliest = listAutomations(db).find((automation) => automation.enabled && automation.nextRunAt !== null && owns(automation))?.nextRunAt;
+    const earliest = listAutomations(db).find((automation) => automation.enabled && automation.nextRunAt !== null)?.nextRunAt;
     const delay = earliest ? Math.max(0, Date.parse(earliest) - clock().getTime()) : MAX_SLEEP_MS;
     const run = () => void tick().catch((err: unknown) => logger.error('scheduler tick failed', { err }));
     cancel = setTimer(run, Math.min(delay, MAX_SLEEP_MS));
   };
 
   // the claim moves nextRunAt before the job starts, so a second tick during a long job does not run it again. it is
-  // a compare and set on the nextRunAt that the tick read. a second process on the same database (npm run chat)
-  // ticks at the same time, and only one of the two claims wins.
+  // a compare and set on the nextRunAt that the tick read. the instance lock keeps one scheduler on a database, and
+  // the compare and set still lets only one of two ticks win.
   const claim = (automation: Automation, now: Date): boolean => {
     const next =
       automation.schedule.kind === 'at'
@@ -189,9 +184,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const now = clock();
     deps.onTick?.(now);
     reviveOneShots(now);
-    const runs = dueAutomations(db, now)
-      .filter(owns)
-      .map((automation) => fire(automation, now));
+    const runs = dueAutomations(db, now).map((automation) => fire(automation, now));
     arm();
     await Promise.all(runs);
     arm();

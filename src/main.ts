@@ -14,6 +14,7 @@ import { loadIntegrations } from './integrations/config.js';
 import { createKeyringStore } from './integrations/secrets.js';
 import { createClients } from './models/clients.js';
 import { exitOnFatal, exitOnUncaught, exitWhenIdle } from './exit.js';
+import { holdInstanceLock } from './instance.js';
 import { createLogger, pruneLogs, type Logger } from './observability/logger.js';
 import { registerSecret } from './observability/redact.js';
 import { loadPolicy } from './policy/policy.js';
@@ -49,6 +50,11 @@ async function main(): Promise<void> {
   const logger = createLogger({ dir: logDir, consoleLevel: 'warn' });
   fatalLogger = logger;
   pruneLogs(logDir, new Date());
+  // one process runs the scheduler and the telegram polling on a database. npm run chat runs neither, so it needs no
+  // lock and works next to the service.
+  if (!chatMode && !(await holdInstanceLock(config.paths.data))) {
+    exitOnFatal(new Error(`another ok computer process runs on the data folder ${config.paths.data}. stop it first, for example with okc stop.`), logger);
+  }
   const clients = createClients(config, secrets);
   if (!clients.ok) {
     logger.error('model setup failed', { error: clients.error });

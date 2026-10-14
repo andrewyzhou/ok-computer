@@ -110,8 +110,9 @@ describe('scheduler', () => {
     expect(executed).toEqual(['job']);
   });
 
-  // the service and npm run chat share the database, and both arm their timer for the same nextRunAt. the second
-  // process here reads the due jobs, and then the first process claims and runs them before the second claims.
+  // two processes on one database can arm their timer for the same nextRunAt, for example an older build without the
+  // instance lock. the second process here reads the due jobs, and then the first process claims and runs them before
+  // the second claims.
   it('runs a due job one time when a second process ticks at the same moment', async () => {
     const { db, create, executed, now } = setup();
     create({ name: 'once', schedule: { kind: 'at', at: new Date(now().getTime() + MIN).toISOString() } });
@@ -224,37 +225,6 @@ describe('scheduler', () => {
     expect(getAutomation(db, job.id)?.consecutiveFailures).toBe(0);
   });
 
-  it('does not claim a job that another process runs, and does not set its timer for it', async () => {
-    const { db, create, now } = setup();
-    const job = create({ name: 'review', schedule: { kind: 'every', everyMs: 60 * MIN } });
-    db.prepare('UPDATE automations SET nextRunAt = ?').run(new Date(now().getTime() - MIN).toISOString());
-    const executed: string[] = [];
-    const timers: number[] = [];
-    const chat = createScheduler({
-      db,
-      clock: now,
-      logger: silentLogger,
-      config: { timeZone: TZ, scheduler: { missedGraceMs: 2 * 60 * MIN } },
-      staleMs: 40 * MIN,
-      async execute(automation) {
-        executed.push(automation.name);
-        return { status: 'completed' };
-      },
-      async notifyOwner() {},
-      setTimer(_fn, ms) {
-        timers.push(ms);
-        return () => {};
-      },
-      owns: (automation) => automation.name !== 'review',
-    });
-    await chat.start();
-    expect(executed).toEqual([]);
-    expect(getAutomation(db, job.id)!.nextRunAt).toBe(new Date(now().getTime() - MIN).toISOString());
-    // the due job of the other process would give a timer of 0 ms, and the scheduler would tick without a pause.
-    expect(timers.every((ms) => ms === MIN)).toBe(true);
-    chat.stop();
-  });
-
   it('keeps a timer for the next job, at most one minute away', async () => {
     const { scheduler, create, timers } = setup();
     create({ schedule: { kind: 'at', at: '2026-10-12T17:00:20Z' } });
@@ -290,37 +260,6 @@ describe('scheduler', () => {
     await scheduler.runNow(job.id);
     expect(planned).toEqual(['2026-10-12T17:00:00.000Z']);
     expect(getAutomation(db, job.id)?.nextRunAt).toBe('2026-10-12T18:00:00.000Z');
-  });
-});
-
-// npm run chat shares the database and does not poll. its claim of a due poll used up the slot of the background app.
-describe('automations of another process', () => {
-  it('neither claims a poll that this process does not own nor keeps its timer at zero for it', async () => {
-    const db = openDb(':memory:');
-    let now = new Date('2026-10-12T17:00:00Z');
-    const timers: number[] = [];
-    const executed: string[] = [];
-    const scheduler = createScheduler({
-      db,
-      clock: () => now,
-      logger: silentLogger,
-      config: { timeZone: TZ, scheduler: { missedGraceMs: 2 * 60 * MIN } },
-      staleMs: 40 * MIN,
-      execute: async (automation) => (executed.push(automation.name), { status: 'completed' }),
-      notifyOwner: async () => {},
-      setTimer: (_fn, ms) => (timers.push(ms), () => {}),
-      owns: (automation) => automation.payload.type !== 'poll',
-    });
-    const poll = createAutomation(db, { name: 'google poll', schedule: { kind: 'every', everyMs: 15 * MIN }, payload: { type: 'poll', source: 'google' }, slot: 'utility', createdBy: 'system' }, now, TZ);
-    createAutomation(db, { name: 'note', schedule: { kind: 'every', everyMs: 60 * MIN }, payload: { type: 'system_event', text: 'hi' }, createdBy: 'owner' }, now, TZ);
-    if (!poll.ok) throw new Error(poll.error);
-    now = new Date(now.getTime() + 16 * MIN);
-    await scheduler.start();
-    expect(executed).toEqual([]);
-    expect(getAutomation(db, poll.value.id)!.nextRunAt).toBe(poll.value.nextRunAt);
-    // the next timer is for the note in 44 minutes, capped at one minute, and never zero for the due poll.
-    expect(timers.at(-1)).toBe(MIN);
-    scheduler.stop();
   });
 });
 

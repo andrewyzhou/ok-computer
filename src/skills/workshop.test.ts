@@ -152,7 +152,7 @@ describe('the workshop job', () => {
   function job(db: Db, now: Date, agent: WorkshopDeps['agent']) {
     let n = 0;
     const config = { timeZone: tz, paths: { skills: skillsDir } } as WorkshopDeps['config'];
-    return createWorkshop({ db, clock: () => now, config, queue: createRunQueue(), agent, signal: new AbortController().signal, background: true, newId: () => `review-${++n}` });
+    return createWorkshop({ db, clock: () => now, config, queue: createRunQueue(), agent, signal: new AbortController().signal, newId: () => `review-${++n}` });
   }
 
   it('does not review a window again after a failed review that sent a draft', async () => {
@@ -247,7 +247,7 @@ describe('the workshop job', () => {
       config: { timeZone: tz, paths: { skills: join(mkdtempSync(join(tmpdir(), 'okc-workshop-')), 'skills') } } as WorkshopDeps['config'],
       queue: createRunQueue(),
       signal: new AbortController().signal,
-      background: true,
+     
       newId: (() => { let n = 0; return () => `review-${++n}`; })(),
       agent: async (input) => {
         const runId = input.runId!;
@@ -287,7 +287,7 @@ describe('the workshop job', () => {
       config,
       queue: createRunQueue(),
       signal: new AbortController().signal,
-      background: true,
+     
       newId: () => `review-${++n}`,
       agent: async (input) => {
         const runId = input.runId!;
@@ -461,7 +461,7 @@ describe('the workshop job', () => {
       config: { timeZone: tz, paths: { skills: skillsDir } } as WorkshopDeps['config'],
       queue: createRunQueue(),
       signal: new AbortController().signal,
-      background: true,
+     
       newId: () => `review-${++n}`,
       agent: async (input) => {
         const runId = input.runId!;

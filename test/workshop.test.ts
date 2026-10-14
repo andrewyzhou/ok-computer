@@ -24,7 +24,7 @@ const draft = {
   why: 'The owner corrected the calendar choice on 2026-10-12.',
 };
 
-function setup(steps: FakeStep[], options: { rules?: typeof BUILTIN_RULES; background?: boolean } = {}) {
+function setup(steps: FakeStep[], options: { rules?: typeof BUILTIN_RULES } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'okc-workshop-'));
   const skillsDir = join(root, 'skills');
   const t = createTestApp(steps, {
@@ -33,7 +33,7 @@ function setup(steps: FakeStep[], options: { rules?: typeof BUILTIN_RULES; backg
       slots: { main: { chain: ['fake/m'] }, heartbeat: { chain: ['fake/m'] }, consolidation: { chain: ['fake/m'] } },
       paths: { workspace: root, data: join(root, 'data'), skills: skillsDir },
     },
-    deps: { rules: options.rules ?? BUILTIN_RULES, ...(options.background === undefined ? {} : { background: options.background }) },
+    deps: { rules: options.rules ?? BUILTIN_RULES },
   });
   const skill = (folder: string, text: string) => {
     mkdirSync(join(skillsDir, folder), { recursive: true });
@@ -167,20 +167,6 @@ describe('skill workshop', () => {
     expect(until(t)).toBe(pdt('00:00', '2026-10-16'));
   });
 
-  it('leaves the review to the background service in the chat process', async () => {
-    const t = setup([...task], { background: false });
-    await runTask(t);
-    await t.at(pdt('09:00', '2026-10-13'));
-    expect(t.model.calls).toHaveLength(3);
-    expect(t.rows("SELECT id FROM automation_runs WHERE automationId = (SELECT id FROM automations WHERE name = 'skills: daily review')")).toEqual([]);
-    expect(t.rows("SELECT nextRunAt FROM automations WHERE name = 'skills: daily review'")).toEqual([{ nextRunAt: new Date(pdt('09:00', '2026-10-13')).toISOString() }]);
-    expect(until(t)).toBeUndefined();
-    expect(t.rows('SELECT id FROM approvals')).toEqual([]);
-    // a run now from the chat process is left to the service too.
-    const id = String(t.rows("SELECT id FROM automations WHERE name = 'skills: daily review'")[0]!.id);
-    expect(await t.app.scheduler.runNow(id)).toEqual({ status: 'skipped', error: 'left to the background service' });
-  });
-
   it('reviews the task of a draft again when the owner approved it and it expired before it ran, as the owner is told', async () => {
     const steps = [toolStep({ id: 'w1', name: 'skill_write', input: draft }), textStep('NO_REPLY')];
     const t = setup([...task, ...steps, ...steps]);
@@ -224,20 +210,6 @@ describe('skill workshop', () => {
     expect(input).toContain('Skill review of the main session from 2026-10-12 00:00 to 2026-10-14 00:00: 1 long or corrected task.');
     expect(input).toContain('calendar-booking\\\": its card did not reach the owner, so it is not written');
     expect(t.rows('SELECT id, status FROM approvals')).toEqual([{ id: 1, status: 'expired' }, { id: 2, status: 'pending' }]);
-  });
-
-  it('runs the review in the service when the chat process ticks first at 09:00', async () => {
-    const t = setup([...task, toolStep({ id: 'w1', name: 'skill_write', input: draft }), textStep('NO_REPLY')]);
-    await runTask(t);
-    const chat = createTestApp([], {
-      start: pdt('09:00', '2026-10-13'),
-      config: { slots: { main: { chain: ['fake/m'] }, heartbeat: { chain: ['fake/m'] }, consolidation: { chain: ['fake/m'] } }, paths: { workspace: mkdtempSync(join(tmpdir(), 'okc-chat-')), skills: t.skillsDir } },
-      deps: { db: t.db, rules: BUILTIN_RULES, background: false },
-    });
-    await chat.at(pdt('09:00', '2026-10-13'));
-    await t.at(pdt('09:00', '2026-10-13'));
-    expect(t.rows("SELECT status FROM automation_runs WHERE automationId = (SELECT id FROM automations WHERE name = 'skills: daily review')")).toEqual([{ status: 'completed' }]);
-    expect(t.rows("SELECT toolName, status FROM approvals")).toEqual([{ toolName: 'skill_write', status: 'pending' }]);
   });
 
   it('never overwrites a skill or a hand edit that came after the draft, and keeps the fields and the old text of a change', async () => {
