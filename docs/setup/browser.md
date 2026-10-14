@@ -29,7 +29,7 @@ A normal Chrome window opens on the agent profile. Sign in to the sites that the
 
 Everything a page or a search shows is outside text: it taints the session, so a later `external` action always asks you.
 
-One browser task runs at a time. Another conversation that wants the browser gets "busy" until the task ends (`browser_close`, or 10 minutes without an action). A task that waits for you to approve a submit or a new domain stays open until you answer.
+One browser task runs at a time. Another conversation that wants the browser gets "busy" until the task ends (`browser_close`, or 10 minutes without an action). A task that waits for you to approve a submit or a new domain stays open until you answer. The task of a sub-agent or of an isolated automation run goes to the next conversation that uses the browser once that run ends, so the parent can check the page after it sends the form, and close it.
 
 ## 3. Clicks and typing
 
@@ -74,7 +74,7 @@ Nothing removes screenshots and traces yet. Screenshots grow in `data/blobs`, an
 |---|---|---|
 | "The agent browser profile is in use by another Chrome window" | `okc browser login` is open | Close that window. |
 | "The browser runs only in the background app" | The message came from `npm run chat` | Use Telegram or the background app. |
-| "The browser is busy with a task of another session" | Another conversation has the open task | Wait, or tell that conversation to call `browser_close`. |
+| "The browser is busy with a task of another session" | Another conversation has the open task, and its run still works or a submit of it waits for you | Wait, or tell that conversation to call `browser_close`. The task of a sub-agent or an isolated automation that finished is never busy: the next conversation takes it over. |
 | "Google is paused until 14:15 (a CAPTCHA)" | Google asked for a CAPTCHA | Nothing; DuckDuckGo answers until then. Each new CAPTCHA makes the pause longer: 15 minutes, 1 hour, 6 hours, then a day. To end it sooner, solve one with `okc browser login https://www.google.com/`; closing that window ends the pause. A pause that ends on another day shows its date. |
 | A submit you approved says "the form was not sent" | The page did not send the form, for example because it opens a new tab, a script changed a field at the click, or the page sent its data to a site off the allowlist | Look at the blocked and sent requests of the step on the Browser page. The form was not sent; a request marked "sent by the page" did leave. |
 | A submit you approved says "the form was sent, but the gate refused ... later requests" | The page sent the form, then something more that was blocked, for example a post to a site off the allowlist or a post more than a second later | Look at the step on the Browser page, and check on the site whether the order or message went through. |

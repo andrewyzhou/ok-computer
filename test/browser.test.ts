@@ -926,6 +926,33 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(await h.run('browser_snapshot', {}, 'main')).toMatchObject({ isError: true, content: expect.stringContaining('in this session') });
   });
 
+  it('gives the task of a child whose run ended to the next session, but not while its submit waits for the owner', async () => {
+    const h = harness();
+    const at = new Date().toISOString();
+    const child = (id: string) => {
+      h.db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES (?, ?, 'subagent', 'main', 'running', ?)").run(id, `sub:browser:${id}`, at);
+      return { key: `sub:browser:${id}`, end: () => h.db.prepare("UPDATE runs SET status = 'completed' WHERE id = ?").run(id) };
+    };
+    const first = child('c1');
+    await h.run('browser_open', { url: site.url('shop.test') }, first.key);
+    // while the child runs, its page stays its own.
+    expect(await h.run('browser_snapshot', {}, 'main')).toMatchObject({ isError: true });
+    first.end();
+    const pending = Number(
+      h.db.prepare("INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt) VALUES ('c1', 'browser_submit', '{}', 's', 'pending', ?) RETURNING id").get(new Date().toISOString())!.id,
+    );
+    expect(await h.run('browser_open', { url: site.url('shop.test') }, 'auto:job:r9')).toMatchObject({ isError: true, content: expect.stringContaining('busy') });
+    h.db.prepare("UPDATE approvals SET status = 'approved', startedAt = ? WHERE id = ?").run(new Date().toISOString(), pending);
+    // the parent checks the page after the submit, and closes the task.
+    expect(await h.run('browser_snapshot', {}, 'main')).toMatchObject({ isError: false, content: expect.stringContaining('Buy now') });
+    expect(await h.run('browser_close', {}, 'main')).toMatchObject({ content: 'the task ended' });
+    // a task of a child that ended without a close does not make the next child wait.
+    await h.run('browser_open', { url: site.url('shop.test') }, child('c2').key);
+    h.db.prepare("UPDATE runs SET status = 'failed' WHERE id = 'c2'").run();
+    expect(await h.run('browser_open', { url: site.url('shop.test', '/about') }, child('c3').key)).toMatchObject({ isError: false });
+    expect(h.tasks()).toMatchObject([{ status: 'closed' }, { sessionKey: 'sub:browser:c2', status: 'open' }]);
+  });
+
   it('saves a trace zip when the task ends', async () => {
     const h = harness();
     await h.run('browser_open', { url: site.url('shop.test') });

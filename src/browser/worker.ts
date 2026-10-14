@@ -393,7 +393,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
         // no tool works with a file, and a download is a file that a page puts on this pc without a step.
         acceptDownloads: false,
         // the default is a folder in %TEMP%, and a hard stop of the app (okc stop) left the raw trace there for good, outside
-        // data and okc prune (r8 probe).
+        // the data folder (r8 probe).
         tracesDir: rawTraces,
         viewport: { width: 1280, height: 800 },
         args: [
@@ -857,6 +857,25 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
     return row !== undefined;
   }
 
+  // a sub-agent session and the session of an isolated automation have one run, and the run id ends the key. after that
+  // run ends, no tool acts in the session again, so its task goes to the next session that uses the browser. without
+  // this, the parent could not check or close the page after it sent the form of its child, and each other session
+  // got "busy" until the idle close. a task whose submit or new domain waits for the owner is never taken.
+  function taskOf(sessionKey: string): Tab | undefined {
+    const own = tasks.get(sessionKey);
+    if (own) return own;
+    const other = ownTask();
+    if (!other || waitsForOwner(other)) return undefined;
+    const runId = other.sessionKey.split(':').at(-1);
+    const run = db.prepare('SELECT status FROM runs WHERE id = ? AND sessionKey = ?').get(runId ?? '', other.sessionKey);
+    if (!run || run.status === 'running') return undefined;
+    logger.info('a browser task goes to another session, because the run of its session ended', { taskId: other.id, from: other.sessionKey, to: sessionKey });
+    tasks.delete(other.sessionKey);
+    other.sessionKey = sessionKey;
+    tasks.set(sessionKey, other);
+    return other;
+  }
+
   // a task that waits long frees the browser for other sessions, and chrome closes when nothing uses it, so the owner
   // can open the profile with okc browser login.
   const timer = setInterval(() => {
@@ -877,7 +896,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
   let opening: Promise<unknown> = Promise.resolve();
   async function claim(input: StepInput, url: URL): Promise<Tab | BrowserRefusal> {
     const host = url.hostname;
-    const tab = tasks.get(input.sessionKey);
+    const tab = taskOf(input.sessionKey);
     if (tab && !allowedBy(tab.allowlist, host)) {
       // the refusal comes before chrome, so no gate sees it. the next row of the task keeps it with the blocks of the
       // gate, so the owner sees where the agent tried to go.
@@ -920,7 +939,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       });
     },
     async act(input, action, scope = 'session') {
-      const tab = scope === 'open' ? ownTask() : tasks.get(input.sessionKey);
+      const tab = scope === 'open' ? ownTask() : taskOf(input.sessionKey);
       if (!tab) return { refused: `No page is open${scope === 'open' ? '' : ' in this session'}. Use browser_open first.` };
       return step(tab, input, (page) =>
         action(page, {
@@ -994,7 +1013,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       return { allowlist: [...tab.allowlist] };
     },
     async close(sessionKey, reason) {
-      const tab = tasks.get(sessionKey);
+      const tab = taskOf(sessionKey);
       if (!tab) return false;
       await serial(tab, () => endTab(tab, 'closed', reason));
       return true;
