@@ -21,6 +21,7 @@ function setup(results: Array<JobResult['status']> = []) {
     clock,
     logger: silentLogger,
     config: { timeZone: TZ, scheduler: { missedGraceMs: 2 * 60 * MIN } },
+    staleMs: 40 * MIN,
     async execute(automation) {
       executed.push(automation.name);
       planned.push(automation.nextRunAt);
@@ -135,6 +136,7 @@ describe('scheduler', () => {
         clock: () => later,
         logger: silentLogger,
         config: { timeZone: TZ, scheduler: { missedGraceMs: 2 * 60 * MIN } },
+        staleMs: 40 * MIN,
         async execute(automation) {
           executed.push(`${name} ran ${automation.name}`);
           return { status: 'completed' };
@@ -233,6 +235,7 @@ describe('scheduler', () => {
       clock: now,
       logger: silentLogger,
       config: { timeZone: TZ, scheduler: { missedGraceMs: 2 * 60 * MIN } },
+      staleMs: 40 * MIN,
       async execute(automation) {
         executed.push(automation.name);
         return { status: 'completed' };
@@ -302,6 +305,7 @@ describe('automations of another process', () => {
       clock: () => now,
       logger: silentLogger,
       config: { timeZone: TZ, scheduler: { missedGraceMs: 2 * 60 * MIN } },
+      staleMs: 40 * MIN,
       execute: async (automation) => (executed.push(automation.name), { status: 'completed' }),
       notifyOwner: async () => {},
       setTimer: (_fn, ms) => (timers.push(ms), () => {}),
@@ -317,5 +321,71 @@ describe('automations of another process', () => {
     // the next timer is for the note in 44 minutes, capped at one minute, and never zero for the due poll.
     expect(timers.at(-1)).toBe(MIN);
     scheduler.stop();
+  });
+});
+
+// okc stop ends the process at once. a one-shot job that runs at that moment had no time and stayed enabled.
+describe('a one-shot job of a stopped process', () => {
+  const start = new Date('2026-10-12T17:00:00Z');
+  const processOn = (db: ReturnType<typeof openDb>, clock: () => Date, executed: string[], hang = false) =>
+    createScheduler({
+      db,
+      clock,
+      logger: silentLogger,
+      config: { timeZone: TZ, scheduler: { missedGraceMs: 2 * 60 * MIN } },
+      staleMs: 40 * MIN,
+      execute: (automation) => (executed.push(automation.name), hang ? new Promise<JobResult>(() => {}) : Promise.resolve({ status: 'completed' })),
+      notifyOwner: async () => {},
+      setTimer: () => () => {},
+    });
+  const oneShot = (db: ReturnType<typeof openDb>) => {
+    const created = createAutomation(db, { name: 'reminder', schedule: { kind: 'at', at: '2026-10-12T17:10:00Z' }, payload: { type: 'system_event', text: 'hi' }, createdBy: 'owner' }, start, TZ);
+    if (!created.ok) throw new Error(created.error);
+    return created.value.id;
+  };
+
+  it('runs again in the next process when the grace period allows it', async () => {
+    const db = openDb(':memory:');
+    let now = new Date(start.getTime() + 10 * MIN);
+    const executed: string[] = [];
+    const id = oneShot(db);
+    void processOn(db, () => now, executed, true).tick();
+    await Promise.resolve();
+    expect(getAutomation(db, id)).toMatchObject({ enabled: true, nextRunAt: null });
+
+    now = new Date(start.getTime() + 60 * MIN);
+    await processOn(db, () => now, executed).tick();
+    expect(executed).toEqual(['reminder', 'reminder']);
+    expect(getAutomation(db, id)).toMatchObject({ enabled: false, nextRunAt: null });
+  });
+
+  it('is recorded as missed and turned off after the grace period', async () => {
+    const db = openDb(':memory:');
+    let now = new Date(start.getTime() + 10 * MIN);
+    const executed: string[] = [];
+    const id = oneShot(db);
+    void processOn(db, () => now, executed, true).tick();
+    await Promise.resolve();
+
+    now = new Date(start.getTime() + 5 * 60 * MIN);
+    await processOn(db, () => now, executed).tick();
+    expect(executed).toEqual(['reminder']);
+    expect(getAutomation(db, id)!.enabled).toBe(false);
+    expect(db.prepare('SELECT status FROM automation_runs').all()).toEqual([{ status: 'skipped' }]);
+  });
+
+  it('stays claimed while its own process still runs it', async () => {
+    const db = openDb(':memory:');
+    let now = new Date(start.getTime() + 10 * MIN);
+    const executed: string[] = [];
+    const id = oneShot(db);
+    const live = processOn(db, () => now, executed, true);
+    void live.tick();
+    await Promise.resolve();
+
+    now = new Date(start.getTime() + 60 * MIN);
+    await live.tick();
+    expect(executed).toEqual(['reminder']);
+    expect(getAutomation(db, id)!.nextRunAt).toBeNull();
   });
 });

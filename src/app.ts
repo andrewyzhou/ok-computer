@@ -375,6 +375,8 @@ export function createApp(deps: AppDeps): App {
     signal: shutdown.signal,
     ...ids,
   });
+  // a run or a job that is older than this belongs to a process that stopped.
+  const staleMs = Math.max(config.agent.chatTimeoutMs, config.agent.backgroundTimeoutMs) + STALE_MARGIN_MS;
   const scheduler = createScheduler({
     db,
     clock,
@@ -383,6 +385,7 @@ export function createApp(deps: AppDeps): App {
     execute: runJob,
     notifyOwner: async (text) => void (await owner.send(text)),
     onTick: (now) => sweep(now),
+    staleMs,
     ...(deps.setTimer ? { setTimer: deps.setTimer } : {}),
     // npm run chat leaves the skill review to the service. if chat claimed it, the review of that day would not run. it
     // does not poll either, and its claim of a due poll would use up the slot of the service, which then skipped it.
@@ -427,7 +430,6 @@ export function createApp(deps: AppDeps): App {
 
   // the sweep closes the work of a stopped process and tells the sessions and the owner. it runs at the start and on
   // each scheduler tick. events go through the session queue, so they never land inside an active run.
-  const staleMs = Math.max(config.agent.chatTimeoutMs, config.agent.backgroundTimeoutMs) + STALE_MARGIN_MS;
   // the note to the session carries the taint of the decision, because the summary is text that the model wrote. the
   // owner gets the same words with the plain summary.
   const tell = (approval: Approval, words: (summary: string) => string, toOwner: boolean) => {

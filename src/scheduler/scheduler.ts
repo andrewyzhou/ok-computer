@@ -26,6 +26,8 @@ export interface SchedulerDeps {
   // false for an automation that another process runs. this process then does not claim it, so it does not take the
   // run from that process. without it, the scheduler runs every automation.
   owns?: (automation: Automation) => boolean;
+  // a job that started this long ago belongs to a process that stopped. the app uses the age limit of stale runs.
+  staleMs: number;
 }
 
 export interface Scheduler {
@@ -57,6 +59,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let cancel: (() => void) | undefined;
   let stopped = true;
   const owns = deps.owns ?? (() => true);
+  const running = new Set<string>();
 
   const arm = () => {
     cancel?.();
@@ -108,6 +111,15 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const fire = async (automation: Automation, now: Date): Promise<void> => {
     const lateMs = now.getTime() - Date.parse(automation.nextRunAt!);
     if (!claim(automation, now)) return;
+    running.add(automation.id);
+    try {
+      await runClaimed(automation, now, lateMs);
+    } finally {
+      running.delete(automation.id);
+    }
+  };
+
+  const runClaimed = async (automation: Automation, now: Date, lateMs: number): Promise<void> => {
 
     // the scheduler runs a missed job one time only. this prevents a burst of old reminders after the pc starts.
     if (lateMs > config.scheduler.missedGraceMs) {
@@ -158,9 +170,25 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     );
   };
 
+  // the claim of a one-shot job sets nextRunAt to null, and only the end of the run disables the job. when the process
+  // stops during the run, the job stays enabled with no time and never runs. the job gets its planned time back. the
+  // rule for missed jobs then runs it again or records it as missed.
+  const reviveOneShots = (now: Date) => {
+    const cutoff = now.getTime() - deps.staleMs;
+    for (const automation of listAutomations(db)) {
+      if (automation.schedule.kind !== 'at' || !automation.enabled || automation.nextRunAt !== null) continue;
+      if (running.has(automation.id) || (automation.lastRunAt !== null && Date.parse(automation.lastRunAt) > cutoff)) continue;
+      db.prepare('UPDATE automations SET nextRunAt = ? WHERE id = ? AND enabled = 1 AND nextRunAt IS NULL').run(
+        new Date(automation.schedule.at).toISOString(),
+        automation.id,
+      );
+    }
+  };
+
   const tick = async (): Promise<void> => {
     const now = clock();
     deps.onTick?.(now);
+    reviveOneShots(now);
     const runs = dueAutomations(db, now)
       .filter(owns)
       .map((automation) => fire(automation, now));
