@@ -11,7 +11,7 @@ const modelRef = z
   .string()
   .regex(/^[a-z][a-z-]*\/.+$/, 'use the form "provider/model", for example "anthropic/claude-haiku-5-5"');
 
-const slotSchema = z.object({
+const slotSchema = z.strictObject({
   chain: z.array(modelRef).min(1),
   effort: z.enum(EFFORTS).optional(),
   maxTokens: z.number().int().positive().default(16000),
@@ -32,7 +32,15 @@ const DEFAULT_SLOTS: Record<Slot, z.input<typeof slotSchema>> = {
   compaction: { chain: ['anthropic/claude-sonnet-5-5'], effort: 'medium' },
 };
 
-const priceSchema = z.object({
+// a slot in the config file changes only the fields that it gives, so { "effort": "high" } keeps the default chain.
+function partialSlot(slot: Slot) {
+  return z.preprocess(
+    (value) => (value && typeof value === 'object' && !Array.isArray(value) ? { ...DEFAULT_SLOTS[slot], ...value } : value),
+    slotSchema,
+  ).prefault(DEFAULT_SLOTS[slot]);
+}
+
+const priceSchema = z.strictObject({
   input: z.number().nonnegative(),
   cachedInput: z.number().nonnegative(),
   cacheWrite: z.number().nonnegative(),
@@ -66,19 +74,16 @@ const timeOfDay = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'use 24-hour tim
 const MAX_TIMER_MS = 2_147_483_647;
 const timeoutMs = z.number().int().positive().max(MAX_TIMER_MS, `use at most ${MAX_TIMER_MS} ms (about 24 days), the limit of a node timer`);
 
-export const configSchema = z.object({
+export const configSchema = z.strictObject({
   timeZone: timeZone.default('America/Los_Angeles'),
   slots: z
-    .object(
-      Object.fromEntries(SLOTS.map((slot) => [slot, slotSchema.prefault(DEFAULT_SLOTS[slot])])) as Record<
-        Slot,
-        z.ZodPrefault<typeof slotSchema>
-      >,
+    .strictObject(
+      Object.fromEntries(SLOTS.map((slot) => [slot, partialSlot(slot)])) as Record<Slot, ReturnType<typeof partialSlot>>,
     )
     .prefault({}),
   pricing: z.record(z.string(), priceSchema).default({}),
   agent: z
-    .object({
+    .strictObject({
       maxIterations: z.number().int().positive().default(20),
       chatTimeoutMs: timeoutMs.default(10 * 60_000),
       backgroundTimeoutMs: timeoutMs.default(30 * 60_000),
@@ -87,47 +92,47 @@ export const configSchema = z.object({
   // the window is a budget for the input of one model call, not the limit of the model. a long session compacts
   // when it nears the budget, so the cost of each call stays bounded.
   context: z
-    .object({
+    .strictObject({
       windowTokens: z.number().int().min(1000).default(200_000),
     })
     .prefault({}),
   paths: z
-    .object({
+    .strictObject({
       data: z.string().default('data'),
       workspace: z.string().default('workspace'),
       skills: z.string().default('skills'),
     })
     .prefault({}),
   scheduler: z
-    .object({
+    .strictObject({
       missedGraceMs: z.number().int().nonnegative().default(2 * 60 * 60_000),
     })
     .prefault({}),
   heartbeat: z
-    .object({
+    .strictObject({
       every: z
         .string()
         .regex(/^(0|[1-9]\d*[mh])$/, 'use a value like "15m", "30m", "1h", or "0" to turn the heartbeat off')
         .default('30m'),
       activeHours: z
-        .object({ start: timeOfDay.default('08:00'), end: timeOfDay.default('23:00') })
+        .strictObject({ start: timeOfDay.default('08:00'), end: timeOfDay.default('23:00') })
         .prefault({}),
     })
     .prefault({}),
   routine: z
-    .object({
+    .strictObject({
       askAt: timeOfDay.default('19:00'),
       reminders: z.array(timeOfDay).default(['20:00', '21:00', '22:00']),
       resultsAt: timeOfDay.default('23:45'),
     })
     .prefault({}),
   memory: z
-    .object({
+    .strictObject({
       consolidateAt: timeOfDay.default('03:00'),
     })
     .prefault({}),
   dashboard: z
-    .object({
+    .strictObject({
       port: z.number().int().min(1).max(65535).default(4317),
       // the https address of the dashboard on another device, for example a tailscale serve url. /dashboard sends a
       // sign-in link to it, and the server accepts its host name only when DASHBOARD_TOKEN is set.

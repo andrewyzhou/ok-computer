@@ -65,6 +65,22 @@ describe('parseConfig', () => {
     }
   });
 
+  // a typo such as "heartbeet" or "efort" was dropped without a word, and the owner thought the setting worked.
+  it('rejects an unknown key at any level, with its name', () => {
+    for (const raw of [{ heartbeet: {} }, { heartbeat: { evry: '1h' } }, { slots: { main: { efort: 'high' } } }]) {
+      const result = parseConfig(raw);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toMatch(/heartbeet|evry|efort/);
+    }
+  });
+
+  // a slot needed its full chain, so { "effort": "high" } alone was refused.
+  it('keeps the default chain of a slot that the file changes in part', () => {
+    const result = parseConfig({ slots: { main: { effort: 'high' } } });
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value.slots.main).toMatchObject({ chain: ['anthropic/claude-sonnet-5-5', 'anthropic/claude-opus-5-5'], effort: 'high', cacheTtl: '1h' });
+  });
+
   it('rejects a model reference without a provider', () => {
     const result = parseConfig({ slots: { main: { chain: ['claude-haiku-5-5'] } } });
     expect(result.ok).toBe(false);
