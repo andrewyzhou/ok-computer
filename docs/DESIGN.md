@@ -207,7 +207,7 @@ Decisions from M3:
 
 ### 8.3 Provider rules that affect context
 
-Before writing the Anthropic adapter and the context strategy, invoke the `claude-api` skill and read its TypeScript README, the prompt caching guide, and the model migration guide sections about preserved thinking and compaction. Current Claude models bind thinking blocks to the conversation that produced them, and editing earlier turns can make requests fail. The context view must follow the guidance there. In particular: keep the rendered prefix byte-stable between turns when nothing changed, replay assistant blocks unchanged, and handle the change of prefix after a compaction in the way the skill documents. Write tests for these cases with the fake provider.
+Before writing the Anthropic adapter and the context strategy, read the Anthropic TypeScript SDK README, the prompt caching guide, and the model migration guide sections about preserved thinking and compaction. Current Claude models bind thinking blocks to the conversation that produced them, and editing earlier turns can make requests fail. The context view must follow the guidance there. In particular: keep the rendered prefix byte-stable between turns when nothing changed, replay assistant blocks unchanged, and handle the change of prefix after a compaction in the way the guide documents. Write tests for these cases with the fake provider.
 
 Decisions from M1:
 
@@ -277,7 +277,7 @@ Failover: retry the same model once on a transient error (429, 5xx, network) wit
 
 A pricing table in config gives input, cached input, cache write, and output prices per million tokens per model. Every model call attempt, failed or not, writes a `model_calls` row: `runId, slot, provider, model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUsd, latencyMs, stopReason, error, request, response, createdAt`. `request` and `response` hold the full redacted JSON for the run detail view. Unknown models get a cost of null, not zero.
 
-Current Claude prices per million tokens (verify against the skill before use): Opus 5.5 $4 input, $0.20 cached input, $20 output. Sonnet 5.5 $2, $0.20, $10. Haiku 5.5 $0.10 input, $0.50 output.
+Current Claude prices per million tokens (verify against the Anthropic pricing page before use): Opus 5.5 $4 input, $0.20 cached input, $20 output. Sonnet 5.5 $2, $0.20, $10. Haiku 5.5 $0.10 input, $0.50 output.
 
 ## 10. Channels
 
@@ -568,9 +568,9 @@ Example:
   fix: revert cursor motion smear, event-driven halo with working hover + looser shake-to-find
   ```
 
-- End every commit message with a blank line and `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- Do not add co-author or tool attribution lines to commit messages.
 - Never commit `.env`, `data/`, or anything with personal data or secrets. Check `git status` before each commit.
-- Do not push. There is no remote.
+- Push to `origin` only when the owner asks.
 
 ### 21.3 Code
 
