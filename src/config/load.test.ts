@@ -10,7 +10,7 @@ describe('parseConfig', () => {
     const result = parseConfig({});
     if (!result.ok) throw new Error(result.error);
     const config = result.value;
-    expect(config.timeZone).toBe('America/Los_Angeles');
+    expect(config.timeZone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
     expect(config.slots.main.chain).toEqual(['anthropic/claude-sonnet-5-5', 'anthropic/claude-opus-5-5']);
     expect(config.slots.heartbeat.chain).toEqual(['anthropic/claude-haiku-5-5']);
     expect(config.slots.main.maxTokens).toBe(16000);

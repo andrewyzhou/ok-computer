@@ -80,7 +80,8 @@ const MAX_TIMER_MS = 2_147_483_647;
 const timeoutMs = z.number().int().positive().max(MAX_TIMER_MS, `use at most ${MAX_TIMER_MS} ms (about 24 days), the limit of a node timer`);
 
 export const configSchema = z.strictObject({
-  timeZone: timeZone.default('America/Los_Angeles'),
+  // the default is the time zone of the computer, so a new install needs no setting for it.
+  timeZone: timeZone.default(() => Intl.DateTimeFormat().resolvedOptions().timeZone),
   slots: z
     .strictObject(
       Object.fromEntries(SLOTS.map((slot) => [slot, partialSlot(slot)])) as Record<Slot, ReturnType<typeof partialSlot>>,

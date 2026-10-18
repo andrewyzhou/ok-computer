@@ -317,7 +317,7 @@ Table `automations`: `id, name, schedule (json), payload (json), sessionMode (is
 Schedule kinds:
 - `{ kind: 'at', at: iso }`: one-shot. Disable after a successful run.
 - `{ kind: 'every', everyMs, anchor? }`: fixed interval.
-- `{ kind: 'cron', expr, tz }`: cron expression through croner. Default time zone from config (`America/Los_Angeles`).
+- `{ kind: 'cron', expr, tz }`: cron expression through croner. Default time zone from config (the time zone of the computer when the config has none).
 
 Payloads:
 - `{ type: 'agent', prompt, condition? }`: a run with this prompt in a fresh isolated session (or the main session when `sessionMode` is `main`). With `condition: 'no_goals_today'` the run is skipped in code, without a model call, when today already has goals.
