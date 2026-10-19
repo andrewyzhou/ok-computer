@@ -2,7 +2,7 @@ import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } fro
 import { join } from 'node:path';
 import { LEVELS, type Level } from '../observability/logger.js';
 import type { Clock } from '../time.js';
-import { notBuilt } from './params.js';
+import { dayBounds } from './queries.js';
 import type { LogLine } from './types.js';
 
 // the logger starts a new file at each utc date.
@@ -46,10 +46,33 @@ export interface LogsInput {
   runId?: string;
 }
 
+function readFile(file: string): LogLine[] {
+  return existsSync(file) ? parse(readFileSync(file, 'utf8')) : [];
+}
+
+// a local day overlaps the utc dates of its start and of its last moment, so it reads one or two files, in date order.
+function linesOfDay(dir: string, day: string, timeZone: string): LogLine[] {
+  const [start, end] = dayBounds(day, day, timeZone).map(Date.parse) as [number, number];
+  const first = new Date(start).toISOString().slice(0, 10);
+  const last = new Date(end - 1).toISOString().slice(0, 10);
+  const lines: LogLine[] = [];
+  for (let date = first; date <= last; date = new Date(Date.parse(`${date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)) {
+    lines.push(...readFile(join(dir, `okc-${date}.log`)));
+  }
+  // a line that does not parse has no time, so it cannot belong to the day.
+  return lines.filter((line) => {
+    const at = typeof line.ts === 'string' && line.ts !== '' ? Date.parse(line.ts) : NaN;
+    return at >= start && at < end;
+  });
+}
+
 // the lines of /api/logs. without a day it reads the file of today, as readLogs does.
 export function readLogsFor(dir: string, now: Date, timeZone: string, input: LogsInput): LogLine[] {
-  if (input.day !== undefined || input.runId !== undefined) return notBuilt(`the day and runId filters of the logs in ${timeZone}`);
-  return readLogs(dir, now, input.level, input.limit);
+  const lines = input.day === undefined ? readFile(logFile(dir, now)) : linesOfDay(dir, input.day, timeZone);
+  return lines
+    .filter((line) => atLeast(line, input.level))
+    .filter((line) => input.runId === undefined || line.runId === input.runId)
+    .slice(-input.limit);
 }
 
 // the tail gives the complete lines that the logger wrote since the last call. it starts at the end of the file, and

@@ -6,7 +6,6 @@ import type { Rule } from '../policy/policy.js';
 import { REPLY_CALL_ID, REPLY_NOTE, REPLY_TOOL } from '../policy/reply.js';
 import { REVIEW_TOOL } from '../policy/reviewer.js';
 import { outcomeOf } from './outcome.js';
-import { notBuilt } from './params.js';
 import { getChecklist, inActiveHours } from '../scheduler/heartbeat.js';
 import { describeSchedule } from '../scheduler/schedule.js';
 import { listAutomations, type Automation } from '../scheduler/store.js';
@@ -83,9 +82,8 @@ export interface RunFilter {
 }
 
 export function listRuns(db: Db, filter: RunFilter, timeZone: string): RunRow[] {
-  if (filter.sessionKey !== undefined || filter.before !== undefined) notBuilt('the sessionKey and before filters of the runs');
   const where: string[] = [];
-  const params: string[] = [];
+  const params: (string | number)[] = [];
   for (const key of ['trigger', 'slot', 'status'] as const) {
     if (filter[key]) {
       where.push(`runs.${key} = ?`);
@@ -95,6 +93,17 @@ export function listRuns(db: Db, filter: RunFilter, timeZone: string): RunRow[] 
   if (filter.day) {
     where.push('runs.startedAt >= ? AND runs.startedAt < ?');
     params.push(...dayBounds(filter.day, filter.day, timeZone));
+  }
+  if (filter.sessionKey !== undefined) {
+    where.push('runs.sessionKey = ?');
+    params.push(filter.sessionKey);
+  }
+  if (filter.before !== undefined) {
+    // the page goes on after the before run in the order of the list, and the rowid breaks a tie of startedAt.
+    const before = db.prepare('SELECT startedAt, rowid FROM runs WHERE id = ?').get(filter.before);
+    if (!before) return [];
+    where.push('(runs.startedAt < ? OR (runs.startedAt = ? AND runs.rowid < ?))');
+    params.push(String(before.startedAt), String(before.startedAt), Number(before.rowid));
   }
   const sql = `${RUN_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
     ORDER BY runs.startedAt DESC, runs.rowid DESC LIMIT ${Math.min(filter.limit ?? 200, 1000)}`;
