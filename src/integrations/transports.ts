@@ -7,6 +7,7 @@ import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotoc
 import type { Logger } from '../observability/logger.js';
 import type { HttpEntry, StdioEntry } from './config.js';
 import { STDERR_LINES_PER_MINUTE } from './mcp.js';
+import { groupStdioTransport } from './process-group.js';
 import type { SecretStore } from './secrets.js';
 
 const run = promisify(execFile);
@@ -26,13 +27,18 @@ export async function stdioTransport(entry: StdioEntry, secrets: SecretStore, lo
     if (secret === undefined) throw new Error(`the secret ${value.secretRef} for ${name} is not in the credential manager`);
     env[name] = secret;
   }
-  const transport = new StdioClientTransport({
-    command: entry.command,
-    args: entry.args,
-    env,
-    ...(entry.cwd ? { cwd: entry.cwd } : {}),
-    stderr: 'pipe',
-  });
+  // on macos and linux the server leads its own process group, and the close ends the whole group. windows has no
+  // process groups of this kind, so there the close ends the process tree from a process list.
+  const transport =
+    process.platform === 'win32'
+      ? new StdioClientTransport({
+          command: entry.command,
+          args: entry.args,
+          env,
+          ...(entry.cwd ? { cwd: entry.cwd } : {}),
+          stderr: 'pipe',
+        })
+      : groupStdioTransport({ command: entry.command, args: entry.args, env, ...(entry.cwd ? { cwd: entry.cwd } : {}) }, entry.id, logger);
   const stderr = transport.stderr as Readable | null;
   if (stderr) {
     let windowStart = now();
@@ -54,7 +60,7 @@ export async function stdioTransport(entry: StdioEntry, secrets: SecretStore, lo
       logger.info('mcp server stderr', { integration: entry.id, line: line.length > STDERR_LINE_LIMIT ? `${line.slice(0, STDERR_LINE_LIMIT)}…` : line });
     });
   }
-  if (process.platform === 'win32') killTreeOnClose(transport, entry.id, logger);
+  if (transport instanceof StdioClientTransport) killTreeOnClose(transport, entry.id, logger);
   return transport;
 }
 
