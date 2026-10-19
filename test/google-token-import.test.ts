@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SCOPES } from '../src/google/config.js';
+import { redact } from '../src/observability/redact.js';
 import { CLIENT_ID, createGoogleHarness, type GoogleHarness } from './google-harness.js';
 
 let h: GoogleHarness;
@@ -53,6 +54,14 @@ describe('google token import', () => {
     await server();
     expect(await h.accounts.importToken('work', { refreshToken: DESKTOP, clientId: CLIENT_ID })).toEqual({ ok: false, status: 404, error: 'google account not found' });
     expect(h.fake.requests).toEqual([]);
+  });
+
+  // the redactor keeps each source for good, so a made-up alias must not add one. the 404 never echoes the token.
+  it('gives the token of an unknown alias no source in the redactor', async () => {
+    await server();
+    const token = '1//made-up-alias-token-0123456789abcdef';
+    await h.accounts.importToken('made-up', { refreshToken: token, clientId: CLIENT_ID });
+    expect(redact(`x ${token} x`)).toBe(`x ${token} x`);
   });
 
   it('answers 409 for a token of another client', async () => {

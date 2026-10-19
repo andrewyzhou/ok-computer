@@ -316,9 +316,11 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
   }
 
   async function importToken(alias: string, input: { refreshToken: string; clientId: string }): Promise<TokenImport> {
+    // a made-up alias gets a 404 that never echoes the token. it is checked first, so it adds no source to the
+    // redactor, which keeps each source for good.
+    if (!aliases.includes(alias)) return { ok: false, status: 404, error: 'google account not found' };
     // the token goes to the redactor before anything else, so no log line or trace row of a failure can hold it.
     registerSecret(input.refreshToken, `google:${alias}:import`);
-    if (!aliases.includes(alias)) return { ok: false, status: 404, error: 'google account not found' };
     if (input.clientId !== config.clientId) {
       return { ok: false, status: 409, error: `the token is for the client ${input.clientId}, but clientId in okc.config.json is ${config.clientId}.` };
     }
