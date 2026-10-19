@@ -6,6 +6,8 @@ on:
   push:
     branches: [master]
   pull_request:
+  # a manual run checks a branch on the three systems before it merges, for example a fix for one system.
+  workflow_dispatch:
 
 permissions:
   contents: read
