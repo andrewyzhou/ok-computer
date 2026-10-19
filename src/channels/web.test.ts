@@ -83,25 +83,85 @@ describe('web channel', () => {
     expect(web.chat.submit('/status')).toEqual({ turnId: 'web:id3', state: 'running' });
   });
 
-  it('sends a pressed button as a button message with empty text, and gives false before the start', async () => {
-    const { web } = setup();
-    expect(web.chat.press('approve:1')).toBe(false);
+  const pressable = (events: ChatStreamEvent[]) =>
+    events.flatMap((event) => (event.kind === 'reply' ? event.buttons.flat().map((button) => button.data) : []));
+
+  it('sends a pressed button as a button message with empty text and no messageId, and refuses it before the start', async () => {
+    const { web, events } = setup();
+    await web.send({ chatId: 'web', text: 'a card', buttons: [[{ text: 'Approve', data: 'approve:1' }, { text: 'Deny', data: 'deny:2' }]] });
+    const [approve, deny] = pressable(events);
+    expect(web.chat.press(approve!)).toBe('not running');
     const got: InboundMessage[] = [];
     await web.start((message) => got.push(message));
-    expect(web.chat.press('approve:1', 'web:turn')).toBe(true);
-    expect(web.chat.press('deny:2')).toBe(true);
+    expect(web.chat.press(approve!, 'web:turn')).toBe('pressed');
+    expect(web.chat.press(deny!)).toBe('pressed');
     expect(got[0]).toEqual({
       channel: 'web',
       senderId: 'owner',
       chatId: 'web',
       text: '',
       button: 'approve:1',
-      messageId: 'web:id1',
       receivedAt: AT.toISOString(),
       replyToMessageId: 'web:turn',
     });
     expect(got[1]).not.toHaveProperty('replyToMessageId');
     expect(got[1]?.button).toBe('deny:2');
+  });
+
+  // a reply holds markdown that the model can write. a button in it with the data of a real approval must do nothing,
+  // also while the real card is out.
+  it('refuses the data of a button without a valid mark', async () => {
+    const { web, events } = setup();
+    const got: InboundMessage[] = [];
+    await web.start((message) => got.push(message));
+    await web.send({ chatId: 'web', text: 'card', buttons: [[{ text: 'Approve', data: 'approval:1:approve' }]] });
+    const [signed] = pressable(events);
+    expect(signed).toMatch(/^approval:1:approve\.[\w-]{16}$/);
+    for (const forged of ['approval:1:approve', 'approval:1:deny', `approval:1:deny.${signed!.split('.')[1]}`, `${signed}x`]) {
+      expect(web.chat.press(forged)).toBe('not issued');
+    }
+    expect(got).toEqual([]);
+    // the mark of another process does not count.
+    const other = setup();
+    await other.web.send({ chatId: 'web', text: 'card', buttons: [[{ text: 'Deny', data: 'approval:1:deny' }]] });
+    expect(web.chat.press(pressable(other.events)[0]!)).toBe('not issued');
+
+    // the mirror of a telegram reply signs its buttons too.
+    web.turns.replied(telegram(), { chatId: '42', text: 'card', buttons: [[{ text: 'Deny', data: 'approval:1:deny' }]] });
+    expect(web.chat.press(pressable(events).at(-1)!)).toBe('pressed');
+    expect(got.map((message) => message.button)).toEqual(['approval:1:deny']);
+  });
+
+  it('logs each send and press with no text and no button data', async () => {
+    const info = vi.fn();
+    const logger = { ...silentLogger, info } as Logger;
+    const { web, events } = setup({ logger });
+    await web.start(() => {});
+    await web.send({ chatId: 'web', text: 'secret text', runId: 'r1', replyTo: 'web:abc', buttons: [[{ text: 'A', data: 'approval:9:approve' }, { text: 'B', data: 'approval:9:deny' }]] });
+    web.chat.press(pressable(events)[0]!, 'web:abc');
+    expect(info.mock.calls).toEqual([
+      ['web send', { runId: 'r1', turnId: 'web:abc', buttons: 2 }],
+      ['web button pressed', { turnId: 'web:abc' }],
+    ]);
+  });
+
+  it('gives a reply to a button press of another channel no turn', async () => {
+    const { web, events } = setup();
+    web.turns.replied(telegram({ button: 'approval:1:approve', text: '' }), { chatId: '42', text: 'Approved #1.' });
+    expect(events).toEqual([expect.objectContaining({ kind: 'reply', turnId: null, text: 'Approved #1.' })]);
+  });
+
+  it('sends an error before the failed state of a turn that failed with a reason', async () => {
+    const { web, events } = setup();
+    web.turns.ended(telegram(), 'failed', 'Sorry, I could not finish that.');
+    web.turns.ended(telegram({ messageId: 'telegram:6' }), 'failed');
+    web.turns.ended(telegram({ messageId: 'telegram:7' }), 'stopped', 'ignored');
+    expect(events).toEqual([
+      { kind: 'error', turnId: 'telegram:5', error: 'Sorry, I could not finish that.' },
+      { kind: 'state', turnId: 'telegram:5', state: 'failed' },
+      { kind: 'state', turnId: 'telegram:6', state: 'failed' },
+      { kind: 'state', turnId: 'telegram:7', state: 'stopped' },
+    ]);
   });
 
   describe('progress', () => {
@@ -215,8 +275,10 @@ describe('web channel', () => {
     const buttons = [[{ text: 'Approve', data: 'approve:1' }, { text: 'Deny', data: 'deny:1' }]];
     expect(await web.send({ chatId: 'web', text: 'the answer', markdown: true, runId: 'r1', details: 'more', buttons, replyTo: 'web:abc' })).toEqual({ messageId: 'web-out:1' });
     expect(await web.send({ chatId: 'web', text: 'a card' })).toEqual({ messageId: 'web-out:2' });
+    // each button carries a mark after its data.
+    const marked = buttons.map((row) => row.map((button) => ({ text: button.text, data: expect.stringMatching(new RegExp(`^${button.data}\\.[\\w-]{16}$`)) })));
     expect(events.filter((event) => event.kind === 'reply')).toEqual([
-      { kind: 'reply', turnId: 'web:abc', messageId: 'web-out:1', runId: 'r1', text: 'the answer', markdown: true, details: 'more', buttons, at: AT.toISOString() },
+      { kind: 'reply', turnId: 'web:abc', messageId: 'web-out:1', runId: 'r1', text: 'the answer', markdown: true, details: 'more', buttons: marked, at: AT.toISOString() },
       { kind: 'reply', turnId: null, messageId: 'web-out:2', runId: null, text: 'a card', markdown: false, details: null, buttons: [], at: AT.toISOString() },
     ]);
     expect(web.chat.snapshot()[0]).toMatchObject({ text: '', activity: null });

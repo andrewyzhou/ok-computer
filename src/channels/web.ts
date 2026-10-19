@@ -1,9 +1,10 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { ChatSendResponse, ChatStreamEvent, ChatTurnSnapshot } from '../dashboard/types.js';
 import type { Logger } from '../observability/logger.js';
 import { NO_REPLY } from '../sessions/router.js';
 import type { TurnHooks } from '../sessions/turns.js';
 import type { Clock } from '../time.js';
+import { buttonSigner } from './telegram-buttons.js';
 import type { ChannelAdapter, InboundMessage, OutboundMessage, ReplyProgress } from './types.js';
 
 export const WEB = 'web';
@@ -20,9 +21,10 @@ export interface WebChat {
   // submit gives the text to the router as an owner message of the web channel. it gives the turn id and the state of
   // the turn right after the router took it, or undefined when the channel does not run.
   submit(text: string): ChatSendResponse | undefined;
-  // press gives the data of a button to the router, the same path as a pressed telegram button. it gives false when
-  // the channel does not run.
-  press(data: string, turnId?: string): boolean;
+  // press gives the data of a button to the router, the same path as a pressed telegram button. data is the signed
+  // data of a button of a reply event. it gives 'pressed', 'not running' when the channel does not run, or 'not issued'
+  // for data without a valid mark.
+  press(data: string, turnId?: string): PressResult;
   // stop calls the stop callback of the progress of the turn. it gives false for a turn that is not known, that waits
   // in the queue, or that has ended.
   stop(turnId: string): boolean;
@@ -49,9 +51,13 @@ export interface WebChannelOptions {
   // the progress sends the rest at once.
   textTickMs?: number;
   logger?: Logger;
+  // the secret of the button marks. by default each process makes a new one, so a card from before a restart needs
+  // a fresh one, for example from /approve <n>.
+  buttonSecret?: string;
 }
 
 export const TEXT_TICK_MS = 100;
+export type PressResult = 'pressed' | 'not running' | 'not issued';
 
 // a turn that has not ended. the snapshot is what a new client gets. stop is the stop callback of the progress of the
 // turn while it runs, and cancel clears its text timer.
@@ -77,6 +83,10 @@ export function createWebChannel(options: WebChannelOptions = {}): WebChannel {
   // a cli message has no messageId, so its turn id is made once and kept with the message object.
   const generated = new WeakMap<InboundMessage, string>();
   let sentCount = 0;
+  // a reply can hold markdown that the model wrote, with the data of a real approval and a false label. so each button
+  // of a reply event carries a mark from a key that the model never sees, as on telegram, and a press of a button
+  // without a valid mark does nothing.
+  const signer = buttonSigner(options.buttonSecret ?? randomBytes(32).toString('hex'));
 
   // the turn id names the channel, as in 'telegram:<message id>'. a web message id already starts with 'web:', and
   // the telegram channel keeps its message id a bare number, because its reactions read the number back.
@@ -129,7 +139,7 @@ export function createWebChannel(options: WebChannelOptions = {}): WebChannel {
       text: out.text,
       markdown: out.markdown ?? false,
       details: out.details ?? null,
-      buttons: (out.buttons ?? []).map((row) => row.map((button) => ({ text: button.text, data: button.data }))),
+      buttons: (out.buttons ?? []).map((row) => row.map((button) => ({ text: button.text, data: signer.sign(button.data) }))),
       at: clock().toISOString(),
     };
   };
@@ -213,24 +223,31 @@ export function createWebChannel(options: WebChannelOptions = {}): WebChannel {
       const turnId = WEB_TURN_PREFIX + newId();
       handler({ channel: WEB, senderId: WEB_SENDER_ID, chatId: WEB_CHAT_ID, text, messageId: turnId, receivedAt: clock().toISOString() });
       // the router calls turns.queued before its first await, so the turn is in the map when the handler returns. a
-      // command such as /status makes no turn and answers at once, so it counts as running.
+      // command such as /status makes no run and answers at once, so it counts as running, and its turn ends as done
+      // after the answer.
       return { turnId, state: turns.get(turnId)?.snap.state === 'queued' ? 'queued' : 'running' };
     },
-    press(data, turnId) {
+    press(signed, turnId) {
       const handler = onMessage;
-      if (!running || !handler) return false;
-      // the router handles a button message before the model path, so the data never goes to the model.
+      if (!running || !handler) return 'not running';
+      const data = signer.check(signed);
+      if (data === undefined) {
+        logger?.warn('web button refused, because no card of the web had it', { turnId: turnId ?? null });
+        return 'not issued';
+      }
+      logger?.info('web button pressed', { turnId: turnId ?? null });
+      // the router handles a button message before the model path, so the data never goes to the model. a press is
+      // not a turn, so it has no messageId, and its reply has no turn.
       handler({
         channel: WEB,
         senderId: WEB_SENDER_ID,
         chatId: WEB_CHAT_ID,
         text: '',
         button: data,
-        messageId: WEB_TURN_PREFIX + newId(),
         receivedAt: clock().toISOString(),
         ...(turnId ? { replyToMessageId: turnId } : {}),
       });
-      return true;
+      return 'pressed';
     },
     stop(turnId) {
       const stop = turns.get(turnId)?.stop;
@@ -278,10 +295,12 @@ export function createWebChannel(options: WebChannelOptions = {}): WebChannel {
       // send() of the web channel already put this reply on the stream.
       if (message.channel === WEB) return;
       sentCount++;
-      emit(replyEvent(turnIdOf(message), `${message.channel}-out:${sentCount}`, out));
+      // a button press is not a turn, so its reply has no turn on the web.
+      emit(replyEvent(message.button === undefined ? turnIdOf(message) : null, `${message.channel}-out:${sentCount}`, out));
     },
-    ended(message, end) {
+    ended(message, end, error) {
       const turnId = turnIdOf(message);
+      if (end === 'failed' && error !== undefined) emit({ kind: 'error', turnId, error });
       emit({ kind: 'state', turnId, state: end });
       turns.get(turnId)?.cancel?.();
       turns.delete(turnId);
@@ -308,6 +327,7 @@ export function createWebChannel(options: WebChannelOptions = {}): WebChannel {
     async send(out) {
       sentCount++;
       const messageId = `web-out:${sentCount}`;
+      logger?.info('web send', { runId: out.runId ?? null, turnId: out.replyTo ?? null, buttons: out.buttons?.flat().length ?? 0 });
       emit(replyEvent(out.replyTo ?? null, messageId, out));
       return { messageId };
     },

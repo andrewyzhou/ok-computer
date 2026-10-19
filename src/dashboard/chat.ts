@@ -1,6 +1,7 @@
 import type { Context, Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
+import { readBody as body } from './http.js';
 import type { DashboardDeps } from './server.js';
 import type { ChatButtonResponse, ChatSendResponse, ChatStopResponse, ChatStreamEvent } from './types.js';
 
@@ -10,17 +11,15 @@ import type { ChatButtonResponse, ChatSendResponse, ChatStopResponse, ChatStream
 // the chat stream sends event: ping this often, so a proxy or the browser does not close a quiet stream.
 export const CHAT_PING_MS = 25_000;
 // a client that is this many events behind gets its stream closed. the page then connects again and gets a fresh
-// snapshot, so the server never holds an endless queue for a slow client.
+// snapshot, so the server never holds an endless queue for a slow client. the writes need a later turn of the event
+// loop, so a burst of more events than this in one synchronous run also closes a client that reads fast. a run sends
+// its text at most once for each tick, so such a burst does not come from normal runs.
 export const CHAT_MAX_PENDING = 1_000;
 
 const sendBody = z.object({ text: z.string().min(1).max(16_000) }).strict();
 const buttonBody = z.object({ data: z.string().min(1).max(256), turnId: z.string().min(1).max(200).optional() }).strict();
 const stopBody = z.object({ turnId: z.string().min(1).max(200) }).strict();
 
-const body = async <T>(c: Context, schema: z.ZodType<T>): Promise<T | undefined> => {
-  const parsed = schema.safeParse(await c.req.json().catch(() => undefined));
-  return parsed.success ? parsed.data : undefined;
-};
 const notRunning = (c: Context) => c.json({ error: 'the web chat is not running' }, 503);
 
 export function mountChat(server: Hono, deps: DashboardDeps): void {
@@ -41,12 +40,15 @@ export function mountChat(server: Hono, deps: DashboardDeps): void {
     return c.json(sent satisfies ChatSendResponse);
   });
 
-  // the data of a button goes to the router like a pressed telegram button. it never goes to the model.
+  // the data of a button goes to the router like a pressed telegram button. it never goes to the model. only the data
+  // of a button that the web channel sent counts, so a button that the model wrote into a reply does nothing.
   server.post('/api/chat/button', async (c) => {
     const input = await body(c, buttonBody);
     if (!input) return c.json({ error: 'give the data of a button' }, 400);
     const chat = running();
-    if (!chat || !chat.press(input.data, input.turnId)) return notRunning(c);
+    const pressed = chat?.press(input.data, input.turnId) ?? 'not running';
+    if (pressed === 'not running') return notRunning(c);
+    if (pressed === 'not issued') return c.json({ error: 'that button is not from one of my cards' }, 400);
     return c.json({ ok: true } satisfies ChatButtonResponse);
   });
 

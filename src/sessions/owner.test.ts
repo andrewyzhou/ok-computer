@@ -70,7 +70,48 @@ describe('owner messenger', () => {
     owner.remember({ channel: 'web', chatId: 'web' });
     expect(getSetting(db, 'owner_chat')).toEqual({ channel: 'telegram', chatId: '777' });
     await owner.send('alert');
-    expect(sent.map(([id, out]) => `${id} ${out.chatId}`)).toEqual(['telegram 777']);
+    // the web chat gets a copy, so an open tab shows the alert too.
+    expect(sent.map(([id, out]) => `${id} ${out.chatId}`)).toEqual(['telegram 777', 'web web']);
+  });
+
+  it('copies each proactive message to the web chat with its buttons and no replyTo, and keeps the result of the target', async () => {
+    const sent: Array<[string, OutboundMessage]> = [];
+    const db = openDb(':memory:');
+    const failingWeb: ChannelAdapter = {
+      ...channel('web', sent),
+      send: async () => {
+        throw new Error('the web chat failed');
+      },
+    };
+    const buttons = [[{ text: 'Approve', data: 'approval:1:approve' }]];
+    const preferred = { channel: 'telegram', chatId: '777' };
+    const owner = createOwnerMessenger({
+      db,
+      channels: new Map([
+        ['telegram', channel('telegram', sent)],
+        ['web', channel('web', sent)],
+      ]),
+      logger: silentLogger,
+      clock: () => new Date(),
+      preferred,
+    });
+    expect(await owner.send('Approval needed (#1)', buttons, { runId: 'r1' })).toBe(true);
+    expect(sent).toEqual([
+      ['telegram', { chatId: '777', text: 'Approval needed (#1)', buttons, runId: 'r1' }],
+      ['web', { chatId: 'web', text: 'Approval needed (#1)', buttons, runId: 'r1' }],
+    ]);
+
+    const broken = createOwnerMessenger({
+      db,
+      channels: new Map([
+        ['telegram', channel('telegram', sent)],
+        ['web', failingWeb],
+      ]),
+      logger: silentLogger,
+      clock: () => new Date(),
+      preferred,
+    });
+    expect(await broken.send('still sent')).toBe(true);
   });
 
   it('skips an old saved web chat for the preferred chat, and then for the cli', () => {
@@ -94,7 +135,8 @@ describe('owner messenger', () => {
     const owner = createOwnerMessenger({ db, channels: new Map([['web', channel('web', sent)]]), logger: silentLogger, clock: () => new Date() });
     owner.remember({ channel: 'web', chatId: 'web' });
     expect(owner.chat()).toBeUndefined();
+    // the copy reaches the web chat, but no chat that must deliver it is known.
     expect(await owner.send('lost')).toBe(false);
-    expect(sent).toEqual([]);
+    expect(sent).toEqual([['web', { chatId: 'web', text: 'lost' }]]);
   });
 });

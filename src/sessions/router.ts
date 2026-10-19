@@ -118,10 +118,12 @@ export function createRouter(deps: RouterDeps): Router {
       }
       const fromOwner = deps.isOwner(message);
       // each reply names the message that it answers, and the hooks mirror it to the viewers of other channels. the
-      // reply to an unknown sender is not part of the owner's conversation, so the hooks never see it.
+      // reply to an unknown sender is not part of the owner's conversation, so the hooks never see it. a button press
+      // is not a turn, so its reply names no message.
+      const replyTo = message.button === undefined ? message.messageId : undefined;
       const send = async (card: Card & { markdown?: boolean; runId?: string }) => {
         try {
-          const out = { chatId: message.chatId, ...card, ...(message.messageId !== undefined ? { replyTo: message.messageId } : {}) };
+          const out = { chatId: message.chatId, ...card, ...(replyTo !== undefined ? { replyTo } : {}) };
           await channel.send(out);
           if (fromOwner) hook((turns) => turns.replied(message, out));
           return true;
@@ -168,33 +170,54 @@ export function createRouter(deps: RouterDeps): Router {
       hook((turns) => turns.owner(message));
       // /stop and the commands answer at once. a message that waits in the queue would wait for the run it stops.
       // an approved call or an automation of the main session also holds the queue, but only the router's own run
-      // has a stop.
-      const held = !current && !replying && queue.busy(MAIN_SESSION);
-      if (message.text.trim().toLowerCase() === '/stop') {
-        if (stopCurrent()) return;
-        if (replying) return reply('The reply is already going out, so there is nothing to stop.');
-        return reply(held ? 'An approved call or an automation runs now, and /stop cannot stop it. The dashboard shows it.' : 'Nothing runs now.');
-      }
-      const state: RunState = {
-        queued,
-        ...(current ? { runningSince: current.since } : {}),
-        ...(current?.tools ? { tools: current.tools } : {}),
-        ...(held ? { held } : {}),
-        ...(replying ? { replying } : {}),
-      };
-      const cards = deps.commands?.(message.text, state);
-      if (cards) {
-        for (const card of cards) await send(card);
-        return;
-      }
-      const command = APPROVAL_COMMAND.exec(message.text.trim());
-      if (command) {
+      // has a stop. the answer gives undefined for a message that is not a command. it is not async, so a message for
+      // the model reaches queued() below in the same tick.
+      const answerNow = (): Promise<unknown> | undefined => {
+        const held = !current && !replying && queue.busy(MAIN_SESSION);
+        if (message.text.trim().toLowerCase() === '/stop') {
+          if (stopCurrent()) return Promise.resolve();
+          if (replying) return reply('The reply is already going out, so there is nothing to stop.');
+          return reply(held ? 'An approved call or an automation runs now, and /stop cannot stop it. The dashboard shows it.' : 'Nothing runs now.');
+        }
+        const state: RunState = {
+          queued,
+          ...(current ? { runningSince: current.since } : {}),
+          ...(current?.tools ? { tools: current.tools } : {}),
+          ...(held ? { held } : {}),
+          ...(replying ? { replying } : {}),
+        };
+        const cards = deps.commands?.(message.text, state);
+        if (cards)
+          return (async () => {
+            for (const card of cards) await send(card);
+          })();
+        const command = APPROVAL_COMMAND.exec(message.text.trim());
+        if (!command) return undefined;
         if (!deps.approvals || !deps.approvalCard) return reply('Approvals are not available.');
         const id = Number(command[2]);
         if (command[1]!.toLowerCase() === 'deny') return resolve(deps.approvals, id, 'deny', 'command');
         // the assistant can send a false card with the id of a real approval. the stored card comes back with its
         // buttons, so the owner sees the real input before the call runs.
-        await send(deps.approvalCard(id));
+        const card = deps.approvalCard;
+        return (async () => send(card(id)))();
+      };
+      // a command makes no run, but a viewer of the stream waits for the end of each owner message. so the turn of a
+      // command ends as done after its answer, or as failed when the answer throws.
+      let answered: Promise<unknown> | undefined;
+      try {
+        answered = answerNow();
+      } catch (err) {
+        hook((turns) => turns.ended(message, 'failed'));
+        throw err;
+      }
+      if (answered) {
+        let end: TurnEnd = 'failed';
+        try {
+          await answered;
+          end = 'done';
+        } finally {
+          hook((turns) => turns.ended(message, end));
+        }
         return;
       }
 
@@ -205,14 +228,20 @@ export function createRouter(deps: RouterDeps): Router {
       const busy = queue.busy(MAIN_SESSION);
       hook((turns) => turns.queued(message, busy));
       queued++;
-      // each queued task ends its turn exactly once, after its last reply went out. a task that throws ends it as
-      // failed.
+      // each queued task ends its turn exactly once, after its last reply went out. a failed turn gives the hooks the
+      // text that the owner got. a task that throws still tells the owner, ends as failed and rejects, so the caller
+      // logs the error.
+      let failure: string | undefined;
       const task = async () => {
         let end: TurnEnd = 'failed';
         try {
           end = await answer();
+        } catch (err) {
+          failure = 'Sorry, I could not finish that.';
+          await reply(failure);
+          throw err;
         } finally {
-          hook((turns) => turns.ended(message, end));
+          hook((turns) => turns.ended(message, end, end === 'failed' ? failure : undefined));
         }
       };
       const answer = async (): Promise<TurnEnd> => {
@@ -277,7 +306,8 @@ export function createRouter(deps: RouterDeps): Router {
         }
         if (result.status !== 'completed') {
           progress?.done(false);
-          await reply(`Sorry, I could not finish that: ${result.error ?? result.status}.`);
+          failure = `Sorry, I could not finish that: ${result.error ?? result.status}.`;
+          await reply(failure);
           return 'failed';
         }
         const text = result.text.trim();

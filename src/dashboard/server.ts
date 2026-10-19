@@ -45,6 +45,7 @@ import { mountBrowser } from './browser.js';
 import { mountChat } from './chat.js';
 import { mountChats } from './chats.js';
 import { mountDeploy } from './deploy.js';
+import { readBody } from './http.js';
 import { mountInbox } from './inbox.js';
 import { mountSandbox } from './sandbox.js';
 import { mountSearch } from './search.js';
@@ -130,10 +131,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
     await next();
   });
 
-  const body = async <T>(c: Context, schema: z.ZodType<T>): Promise<T | undefined> => {
-    const parsed = schema.safeParse(await c.req.json().catch(() => undefined));
-    return parsed.success ? parsed.data : undefined;
-  };
+  const body = readBody;
   const notFound = (c: Context, what: string) => c.json({ error: `${what} not found` }, 404);
 
   // the owner signs in one time with a code or the token. the token then never goes into a url, a bookmark or the

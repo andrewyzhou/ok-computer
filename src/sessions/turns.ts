@@ -7,7 +7,7 @@ export type TurnEnd = 'done' | 'failed' | 'stopped';
 
 export interface TurnHooks {
   // an owner message passed the owner check, and it is not a button press. this also comes for a command such as
-  // /status, which gets a reply and no turn.
+  // /status, which gets a reply and no run, and then ends as done.
   owner(message: InboundMessage): void;
   // the message went into the queue of the main session. busy is true when the queue held another task before it,
   // so the message waits.
@@ -16,10 +16,12 @@ export interface TurnHooks {
   // or undefined when the channel of the message shows its own progress to them. the router calls it next to the
   // progress of the channel (see teeProgress).
   started(message: InboundMessage, runId: string, stop: () => void, guard: (text: string) => string): ReplyProgress | undefined;
-  // a reply to the message went out on its channel. out.replyTo is the messageId of the message.
+  // a reply to the message went out on its channel. out.replyTo is the messageId of the message. the reply to a button
+  // press has no replyTo, because a press is not a turn.
   replied(message: InboundMessage, out: OutboundMessage): void;
-  // the turn ended. done is a completed run, also one whose reply was NO_REPLY or did not go out.
-  ended(message: InboundMessage, end: TurnEnd): void;
+  // the turn ended. done is a completed run, also one whose reply was NO_REPLY or did not go out, and a command that
+  // answered. a failed run gives error, the text that the owner got about the failure.
+  ended(message: InboundMessage, end: TurnEnd, error?: string): void;
 }
 
 // tee gives one progress that calls each given progress in turn. a progress that throws does not stop the others.

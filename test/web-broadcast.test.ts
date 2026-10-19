@@ -47,7 +47,7 @@ function fakeWeb() {
   const chat: WebChat = {
     running: () => onMessage !== undefined,
     submit: () => undefined,
-    press: () => false,
+    press: () => 'not running',
     stop: () => false,
     snapshot: () => [],
     subscribe: () => () => {},
@@ -162,7 +162,7 @@ describe('telegram turns on the web', () => {
 });
 
 describe('proactive messages after a web message', () => {
-  it('sends message_owner from a background run to telegram, not to the web', async () => {
+  it('sends message_owner from a background run to telegram, and a copy with no turn to the web', async () => {
     const t = setup([
       toolStep({
         id: 'a1',
@@ -181,10 +181,13 @@ describe('proactive messages after a web message', () => {
     expect(getSetting(t.db, 'owner_chat')).toBeUndefined();
     await t.at(pdt('10:00'));
     expect(t.rich()).toEqual(['The build is green.']);
-    expect(t.web.sent.map((out) => out.text)).toEqual(['Done.']);
+    expect(t.web.sent.map((out) => [out.text, out.replyTo])).toEqual([
+      ['Done.', 'web:1'],
+      ['The build is green.', undefined],
+    ]);
   });
 
-  it('sends the approval card of a run that a web message started to telegram, not to the web', async () => {
+  it('sends the approval card of a run that a web message started to telegram, and a copy with its buttons to the web', async () => {
     const t = setup(
       [toolStep({ id: 'c1', name: 'tool_call', input: { name: 'notes__add_note', arguments: { note: 'buy milk' } } }), textStep('It waits for you.')],
       { integrations: true },
@@ -195,6 +198,9 @@ describe('proactive messages after a web message', () => {
     t.web.say('add a note');
     await until(() => t.telegram.sent().some((m) => String(m.text).startsWith('Approval needed')));
     await t.app.idle();
-    expect(t.web.sent.some((out) => out.text.startsWith('Approval needed'))).toBe(false);
+    const copies = t.web.sent.filter((out) => out.text.startsWith('Approval needed'));
+    expect(copies).toHaveLength(1);
+    expect(copies[0]).not.toHaveProperty('replyTo');
+    expect(copies[0]!.buttons?.flat().length).toBeGreaterThan(0);
   });
 });

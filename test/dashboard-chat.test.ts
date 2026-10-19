@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { WebChat } from '../src/channels/web.js';
+import type { PressResult, WebChat } from '../src/channels/web.js';
 import { parseConfig } from '../src/config/load.js';
 import { CHAT_MAX_PENDING, CHAT_PING_MS } from '../src/dashboard/chat.js';
 import { createDashboard, type DashboardDeps } from '../src/dashboard/server.js';
@@ -17,7 +17,7 @@ function fakeChat(options: { snapshot?: ChatTurnSnapshot[] } = {}) {
   const state = {
     running: true,
     submitResult: { turnId: 'web:1', state: 'running' } as ChatSendResponse | undefined,
-    pressResult: true,
+    pressResult: 'pressed' as PressResult,
     stopResult: true,
     snapshot: options.snapshot ?? [],
     // it runs right after a listener is added, so a test can emit before the snapshot is written.
@@ -224,7 +224,7 @@ describe('POST /api/chat/button', () => {
     ]);
   });
 
-  it('gives 400 for empty data and 503 when the chat does not take the press', async () => {
+  it('gives 400 for empty data and a button it did not send, and 503 when the chat does not run', async () => {
     const fake = fakeChat();
     const server = dashboard(fake.chat);
     for (const body of [{}, { data: '' }, { data: 'x'.repeat(257) }, { data: 'a', other: 1 }]) {
@@ -232,10 +232,14 @@ describe('POST /api/chat/button', () => {
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: 'give the data of a button' });
     }
-    fake.state.pressResult = false;
+    fake.state.pressResult = 'not running';
     const refused = await post(server, '/api/chat/button', { data: 'approve:1' });
     expect(refused.status).toBe(503);
     expect(await refused.json()).toEqual({ error: 'the web chat is not running' });
+    fake.state.pressResult = 'not issued';
+    const forged = await post(server, '/api/chat/button', { data: 'approve:1' });
+    expect(forged.status).toBe(400);
+    expect(await forged.json()).toEqual({ error: 'that button is not from one of my cards' });
     expect((await post(dashboard(undefined), '/api/chat/button', { data: 'approve:1' })).status).toBe(503);
   });
 });

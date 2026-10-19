@@ -238,6 +238,41 @@ describe('the web chat at its edges', () => {
     expect(t.web.chat.snapshot()).toEqual([]);
   });
 
+  it('gives an end state on the stream to each turn that the send route said runs', async () => {
+    const t = await setup([]);
+    const reader = await t.stream();
+    const { turnId, state } = await t.send('/status');
+    expect(state).toBe('running');
+    await waitFor(() => of(reader.events, 'reply').length > 0, 'the status reply');
+    expect(of(reader.events, 'reply')[0]!.turnId).toBe(turnId);
+    // the page waits for an end of each turn that runs. a command answers at once, so its turn must end too.
+    await waitFor(() => ['done', 'failed', 'stopped'].some((end) => hasState(reader, turnId, end)), 'an end of the command turn', 500);
+  });
+
+  it('ends the turn of a /stop that stopped a telegram run, next to the stopped telegram turn', async () => {
+    const t = await setup([held(['Busy'], 'never', new Promise(() => {}))]);
+    const reader = await t.stream();
+    t.telegram.push(textUpdate(OWNER, 'work hard'));
+    await waitFor(() => streamed(reader.events, 'telegram:1') === 'Busy', 'the telegram draft');
+    const { turnId, state } = await t.send('/stop');
+    expect([turnId, state]).toEqual(['web:u1', 'running']);
+    await waitFor(() => hasState(reader, 'web:u1', 'done'), 'the end of the /stop turn');
+    await waitFor(() => hasState(reader, 'telegram:1', 'stopped'), 'the stopped state');
+    expect(of(reader.events, 'owner').map((event) => event.turnId)).toEqual(['telegram:1', 'web:u1']);
+  });
+
+  it('sends the error of a failed turn before its failed state', async () => {
+    const t = await setup([failing]);
+    const reader = await t.stream();
+    const { turnId } = await t.send('try it');
+    await waitFor(() => hasState(reader, turnId, 'failed'), 'the failed state');
+    const turn = forTurn(reader.events, turnId);
+    expect(turn.slice(-2)).toEqual([
+      { kind: 'error', turnId, error: expect.stringMatching(/^Sorry, I could not finish that/) },
+      { kind: 'state', turnId, state: 'failed' },
+    ]);
+  });
+
   it('gives the queued state to each message sent at once, and runs them one at a time in order', async () => {
     const release = gate();
     const t = await setup([held(['One'], 'First.', release.wait), textStep('Second.'), textStep('Third.')]);
@@ -331,7 +366,10 @@ describe('the web chat at its edges', () => {
     const t = await setup([textStep('unused')]);
     const reader = await t.stream();
     await waitFor(() => reader.events.length >= 2, 'the snapshot');
-    for (const data of ['/new', '/stop', 'hello model']) {
+    // only the data of a button that the web channel sent counts, so a card puts these on buttons first.
+    await t.web.send({ chatId: 'web', text: 'a card', buttons: [['/new', '/stop', 'hello model'].map((data) => ({ text: data, data }))] });
+    await waitFor(() => of(reader.events, 'reply').length === 1, 'the card');
+    for (const { data } of of(reader.events, 'reply')[0]!.buttons.flat()) {
       const pressed = await t.post('/api/chat/button', { data });
       expect(pressed.status).toBe(200);
       expect(await pressed.json()).toEqual({ ok: true });

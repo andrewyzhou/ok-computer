@@ -248,6 +248,7 @@ function recordTurns(progress?: (stop: () => void) => ReplyProgress | undefined)
   const calls: string[] = [];
   const replies: OutboundMessage[] = [];
   const stops: Array<() => void> = [];
+  const errors: string[] = [];
   const turns: TurnHooks = {
     owner: (m) => void calls.push(`owner ${m.text}`),
     queued: (m, busy) => void calls.push(`queued ${m.text} ${busy}`),
@@ -260,9 +261,12 @@ function recordTurns(progress?: (stop: () => void) => ReplyProgress | undefined)
       calls.push(`replied ${m.text} ${out.text}`);
       replies.push(out);
     },
-    ended: (m, end) => void calls.push(`ended ${m.text} ${end}`),
+    ended: (m, end, error) => {
+      calls.push(`ended ${m.text} ${end}`);
+      if (error !== undefined) errors.push(error);
+    },
   };
-  return { turns, calls, replies, stops };
+  return { turns, calls, replies, stops, errors };
 }
 
 const owned = (text: string, messageId = `id-${text}`): InboundMessage => ({ ...message(text), messageId });
@@ -320,17 +324,18 @@ describe('router turn hooks', () => {
     const trusted = setup(completed, () => true, approvals, { turns });
     await trusted.router.handle({ ...owned('1'), button: 'approval:3:approve' });
     expect(calls).toEqual(['replied 1 approve 3']);
-    expect(replies[0]?.replyTo).toBe('id-1');
+    // a press is not a turn, so its reply names no message.
+    expect(replies[0]).not.toHaveProperty('replyTo');
   });
 
-  it('mirrors the reply of a command, and does not queue it', async () => {
+  it('mirrors the reply of a command, does not queue it, and ends it as done', async () => {
     const { turns, calls, replies } = recordTurns();
     const { router } = setup(completed, () => true, undefined, {
       turns,
       commands: (text) => (text === '/status' ? [{ text: 'status' }] : undefined),
     });
     await router.handle(owned('/status'));
-    expect(calls).toEqual(['owner /status', 'replied /status status']);
+    expect(calls).toEqual(['owner /status', 'replied /status status', 'ended /status done']);
     expect(replies[0]).toEqual({ chatId: 'c1', text: 'status', replyTo: 'id-/status' });
   });
 
@@ -361,17 +366,19 @@ describe('router turn hooks', () => {
       'queued think long false',
       'started think long run-s',
       'owner /stop',
+      'ended /stop done',
       'replied think long Stopped.',
       'ended think long stopped',
     ]);
   });
 
-  it('ends a failed run and a run that threw as failed, and still rejects the throw', async () => {
-    const { turns, calls } = recordTurns();
+  it('ends a failed run and a run that threw as failed with the text the owner got, and still rejects the throw', async () => {
+    const { turns, calls, errors } = recordTurns();
     const failed = setup(async () => ({ runId: 'r', status: 'failed', text: '', error: 'the model request failed' }), () => true, undefined, { turns });
     await failed.router.handle(owned('one'));
     expect(calls.at(-1)).toBe('ended one failed');
     expect(failed.sent).toEqual(['Sorry, I could not finish that: the model request failed.']);
+    expect(errors).toEqual(['Sorry, I could not finish that: the model request failed.']);
 
     const threw = setup(
       async () => {
@@ -382,8 +389,9 @@ describe('router turn hooks', () => {
       { turns, newId: () => 'run-t' },
     );
     await expect(threw.router.handle(owned('two'))).rejects.toThrow('boom');
-    expect(calls.slice(-2)).toEqual(['started two run-t', 'ended two failed']);
-    expect(threw.sent).toEqual([]);
+    expect(calls.slice(-3)).toEqual(['started two run-t', 'replied two Sorry, I could not finish that.', 'ended two failed']);
+    expect(threw.sent).toEqual(['Sorry, I could not finish that.']);
+    expect(errors.at(-1)).toBe('Sorry, I could not finish that.');
   });
 
   it('gives the progress of started the text and activity next to the progress of the channel, with one stop', async () => {

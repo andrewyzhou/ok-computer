@@ -688,13 +688,15 @@ export interface ChatSendRequest {
   text: string;
 }
 
-// queued means that the session runs another turn now, and this turn waits for it.
+// queued means that the session runs another turn now, and this turn waits for it. a command such as /status is
+// running, and it ends as done right after its answer.
 export interface ChatSendResponse {
   turnId: string;
   state: 'queued' | 'running';
 }
 
-// the data of a button from a reply. turnId is the turn of the reply that had the button, when it had one.
+// the data of a button from a reply, as it came. it carries a mark that the server checks, so data that the page did
+// not get on a button gives 400. turnId is the turn of the reply that had the button, when it had one.
 export interface ChatButtonRequest {
   data: string;
   turnId?: string;
@@ -708,7 +710,7 @@ export interface ChatStopRequest {
   turnId: string;
 }
 
-// stopped is false when the turn already ended or is not known.
+// stopped is false when the turn already ended, is not known, or still waits in the queue.
 export interface ChatStopResponse {
   stopped: boolean;
 }
@@ -726,7 +728,10 @@ export interface ChatTurnSnapshot {
 // the events of /api/chat/stream. snapshot is the first event of each connection, and it holds the turns that have not
 // ended. text gives the new part of the streamed text. reset true means that the page drops the streamed text first,
 // because a new model call started or the full text changed in another way. the reply is the guarded final text, and
-// it replaces the streamed text. a reply with no turnId is not an answer to a turn, for example an approval card.
+// it replaces the streamed text. a reply with no turnId is not an answer to a turn: a copy of a proactive message such
+// as an approval card, or the answer to a button press. the text of a reply and of a text event is model text, and it
+// is not trusted: the page renders its markdown with no raw html, loads no image without a click, and makes only
+// http(s) links clickable. error comes right before the failed state of a turn, with the text that the owner got.
 export type ChatStreamEvent =
   | { kind: 'snapshot'; turns: ChatTurnSnapshot[] }
   | { kind: 'owner'; turnId: string; channel: string; text: string; at: string }

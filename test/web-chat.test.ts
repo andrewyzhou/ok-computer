@@ -386,7 +386,7 @@ describe('the web chat', () => {
     expect(t.rich()).toEqual(['From telegram.']);
   });
 
-  it('sends the approval card to telegram, and a button from the web resolves it', async () => {
+  it('sends the approval card to telegram and a copy to the web, and the button of the copy resolves it', async () => {
     const t = await setup([call('c1', 'notes__add_note', { note: 'one' }), textStep('It waits for you.')], { integrations: true });
     await expect.poll(() => t.app.integrations.status()[0]!.state.status).toBe('connected');
     const reader = await t.stream();
@@ -395,30 +395,61 @@ describe('the web chat', () => {
     await waitFor(() => hasState(reader, turnId, 'done'), 'the done state');
     await t.app.idle();
 
-    // the card went to the owner messenger, which is telegram, and not to the web stream.
+    // the card went to the owner messenger, which is telegram, and a copy of it went to the web stream as a reply
+    // with no turn.
     const cards = t.of('sendMessage').filter((m) => m.parse_mode === 'HTML');
     expect(cards).toHaveLength(1);
     expect(String(cards[0]!.text)).toMatch(/^Approval needed \(#1\): notes__add_note/);
-    expect(of(reader.events, 'reply').map((reply) => reply.text)).toEqual(['It waits for you.']);
+    const replies = of(reader.events, 'reply');
+    expect(replies.map((reply) => [reply.turnId, reply.text.split('\n')[0]])).toEqual([
+      [null, expect.stringMatching(/^Approval needed \(#1\): notes__add_note/)],
+      [turnId, 'It waits for you.'],
+    ]);
+    const card = replies[0]!;
+    const approve = card.buttons.flat().find((button) => button.data.startsWith('approval:1:approve.'));
+    expect(approve).toBeDefined();
     expect(t.rows('SELECT status FROM approvals')).toEqual([{ status: 'pending' }]);
 
-    const pressed = await t.post('/api/chat/button', { data: 'approval:1:approve', turnId });
+    const pressed = await t.post('/api/chat/button', { data: approve!.data });
     expect(pressed.status).toBe(200);
     expect(await pressed.json()).toEqual({ ok: true });
-    await waitFor(() => of(reader.events, 'reply').length === 2, 'the reply to the button');
+    await waitFor(() => of(reader.events, 'reply').length === 3, 'the reply to the button');
     await t.app.idle();
     expect(t.rows('SELECT status FROM approvals')).toEqual([{ status: 'approved' }]);
     expect(t.rows("SELECT output FROM tool_calls WHERE toolCallId = 'approval-1'")).toEqual([{ output: expect.stringContaining('saved: one') }]);
-    const resolved = of(reader.events, 'reply')[1]!;
-    // the press is its own message, so the reply names it as its turn.
-    expect(resolved).toMatchObject({ turnId: 'web:u2', text: expect.stringMatching(/^Approved #1\./) });
+    const resolved = of(reader.events, 'reply')[2]!;
+    // a press is not a turn, so its reply has no turn.
+    expect(resolved).toMatchObject({ turnId: null, text: expect.stringMatching(/^Approved #1\./) });
     // a press is not an owner message, so it gets no owner event and no run.
     expect(of(reader.events, 'owner').map((event) => event.turnId)).toEqual([turnId]);
 
     // the data of the button never reached the model.
     expect(t.model.calls).toHaveLength(2);
-    expect(JSON.stringify(t.model.calls)).not.toContain('approval:1:approve');
-    expect(JSON.stringify(listEvents(t.db, 'main'))).not.toContain('approval:1:approve');
+    for (const data of ['approval:1:approve', approve!.data]) {
+      expect(JSON.stringify(t.model.calls)).not.toContain(data);
+      expect(JSON.stringify(listEvents(t.db, 'main'))).not.toContain(data);
+    }
+  });
+
+  it('refuses a button without the mark of the server, also while the real card is out, and the approval stays pending', async () => {
+    const t = await setup([call('c1', 'notes__add_note', { note: 'one' }), textStep('It waits for you.')], { integrations: true });
+    await expect.poll(() => t.app.integrations.status()[0]!.state.status).toBe('connected');
+    const reader = await t.stream();
+    const { turnId } = await t.send('add note one');
+    await waitFor(() => hasState(reader, turnId, 'done'), 'the done state');
+    await t.app.idle();
+    expect(t.rows('SELECT status FROM approvals')).toEqual([{ status: 'pending' }]);
+    const real = of(reader.events, 'reply')[0]!.buttons.flat().find((button) => button.data.startsWith('approval:1:approve.'))!;
+    const mark = real.data.split('.').at(-1)!;
+
+    // a reply can hold a button that the model wrote with the data of a real approval and a false label.
+    for (const data of ['approval:1:approve', `approval:1:deny.${mark}`, `approval:1:approve.${'x'.repeat(16)}`, `${real.data}x`]) {
+      const forged = await t.post('/api/chat/button', { data, turnId });
+      expect(forged.status).toBe(400);
+      expect(await forged.json()).toEqual({ error: 'that button is not from one of my cards' });
+    }
+    await t.app.idle();
+    expect(t.rows('SELECT status FROM approvals')).toEqual([{ status: 'pending' }]);
   });
 
   it('sends a proactive message to telegram after the owner used the web chat', async () => {
@@ -439,7 +470,11 @@ describe('the web chat', () => {
     await t.at(pdt('10:00'));
 
     expect(t.rich()).toEqual(['**Heads up:** the build is green.']);
-    expect(of(reader.events, 'reply').map((reply) => reply.text)).toEqual(['Done.']);
+    // the web stream gets a copy of the proactive message as a reply with no turn.
+    expect(of(reader.events, 'reply').map((reply) => [reply.turnId, reply.text])).toEqual([
+      [turnId, 'Done.'],
+      [null, '**Heads up:** the build is green.'],
+    ]);
     const saved = t.rows("SELECT value FROM settings WHERE key = 'owner_chat'") as Array<{ value: string }>;
     for (const row of saved) expect((JSON.parse(row.value) as { channel: string }).channel).not.toBe('web');
   });
