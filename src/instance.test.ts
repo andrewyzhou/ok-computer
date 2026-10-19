@@ -90,6 +90,19 @@ describe('the instance lock', () => {
     expect(existsSync(name)).toBe(false);
   });
 
+  // each test run and each start with a new data folder would otherwise leave one more socket file in the temp folder.
+  it.runIf(process.platform !== 'win32' && process.platform !== 'linux')('removes its socket file when its process exits without a release', async () => {
+    const data = mkdtempSync(join(tmpdir(), 'okc-lock-'));
+    const url = pathToFileURL(join(import.meta.dirname, 'instance.ts')).href;
+    const body = `const { holdInstanceLock } = await import(${JSON.stringify(url)});\nawait holdInstanceLock(${JSON.stringify(data)});\nconsole.log('held');\nprocess.exit(0);`;
+    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', body], { stdio: ['ignore', 'pipe', 'inherit'] });
+    let held = false;
+    child.stdout.on('data', (chunk: Buffer) => (held ||= chunk.toString().includes('held')));
+    await new Promise((exit) => child.once('exit', exit));
+    expect(held).toBe(true);
+    expect(existsSync(lockName(data))).toBe(false);
+  });
+
   it.runIf(process.platform !== 'win32' && process.platform !== 'linux')('does not remove a file that is not a socket', async () => {
     const data = mkdtempSync(join(tmpdir(), 'okc-lock-'));
     writeFileSync(lockName(data), 'x');

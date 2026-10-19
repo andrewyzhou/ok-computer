@@ -66,8 +66,17 @@ function listen(name: string): Promise<InstanceLock | 'in-use'> {
     server.listen(name, () => {
       // the lock does not keep the process alive.
       server.unref();
-      // close also removes a socket file.
-      done({ release: () => new Promise((closed) => server.close(() => closed())) });
+      // close also removes a socket file. a process that ends without a release, for example through process.exit,
+      // does not close the server, so the exit handler removes the file. only a crash still leaves the file.
+      const removeFile = () => rmSync(name, { force: true });
+      if (isFile(name)) process.once('exit', removeFile);
+      done({
+        release: () =>
+          new Promise((closed) => {
+            process.off('exit', removeFile);
+            server.close(() => closed());
+          }),
+      });
     });
   });
 }
