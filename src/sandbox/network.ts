@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { networkInterfaces } from 'node:os';
@@ -20,6 +20,10 @@ import type { ContainerSpec, DockerClient, NetworkGate, NetworkPlan } from './ty
 // second small container, the relay (sandbox/relay.mjs), sits on the internal network and on a normal bridge network.
 // it pipes each connection to the proxy of the call and to no other address. the code container gets the relay as its
 // HTTP_PROXY and HTTPS_PROXY. a direct connection, a udp packet or a dns query to an outside server finds no route.
+//
+// the proxy listens on the docker0 address on linux and on loopback elsewhere, so another container or a local
+// process can reach it too. each call has its own random credential, which the code container gets in its proxy
+// variables, and the proxy refuses a request without it. the relay pipes raw bytes, so the credential passes through it.
 
 // the relay listens on this port in its container.
 export const RELAY_PORT = 3128;
@@ -33,6 +37,20 @@ export const MIN_ENGINE_MAJOR = 26;
 
 export const networkName = (instance: string, execId: number) => `okc-net-${instance}-${execId}`;
 export const relayName = (instance: string, execId: number) => `okc-relay-${instance}-${execId}`;
+
+// the user name of the proxy credential. the password is new for each call.
+export const PROXY_USER = 'okc';
+
+// credentialCheck gives the authorize check of the proxy for one password. it compares in constant time, so the
+// answer time does not tell how much of a guess was right.
+export function credentialCheck(password: string, exempt: (host: string) => boolean = () => false) {
+  const expected = Buffer.from(`Basic ${Buffer.from(`${PROXY_USER}:${password}`).toString('base64')}`);
+  return (authorization: string | undefined, host: string): string | undefined => {
+    if (exempt(host)) return undefined;
+    const given = Buffer.from(authorization ?? '');
+    return given.length === expected.length && timingSafeEqual(given, expected) ? undefined : 'the request had no valid credential for the proxy of this call';
+  };
+}
 
 const HOST_NAME = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
 
@@ -161,6 +179,9 @@ export function createNetworkGate(deps: NetworkGateDeps): NetworkGate {
     // the relay sends a tunnel request for this name when it listens. the name is new for each call and ends in
     // .invalid, so it is never a real host.
     const readyHost = `ready-${randomBytes(8).toString('hex')}.okc.invalid`;
+    // the password of the proxy credential of this call. the relay does not know it, so its ready request needs none.
+    // the ready name is random and is always refused, so that request lets nothing out.
+    const password = randomBytes(24).toString('hex');
     const passed = new Set<string>();
     const refused: Array<{ target: string; reason: string }> = [];
     let signalReady = () => undefined as void;
@@ -202,6 +223,7 @@ export function createNetworkGate(deps: NetworkGateDeps): NetworkGate {
             return allowedBy(list, host) ? undefined : `${host} is not in the allowlist of this call`;
           },
           listen: found.listen,
+          authorize: credentialCheck(password, (host) => host === readyHost),
         },
       );
       const port = new URL(made.proxy.url).port;
@@ -225,7 +247,7 @@ export function createNetworkGate(deps: NetworkGateDeps): NetworkGate {
       throw err;
     }
 
-    const proxyUrl = `http://${relay}:${RELAY_PORT}`;
+    const proxyUrl = `http://${PROXY_USER}:${password}@${relay}:${RELAY_PORT}`;
     return {
       networkMode: network,
       env: [

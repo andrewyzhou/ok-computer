@@ -178,7 +178,8 @@ describe('open and close', () => {
     const relay = relayName('inst', 7);
     expect(plan.networkMode).toBe(network);
     expect(fake.networks.get(network)).toEqual({ internal: true, labels });
-    const proxy = `http://${relay}:${RELAY_PORT}`;
+    const proxy = plan.env[0]!.slice('HTTP_PROXY='.length);
+    expect(proxy).toMatch(new RegExp(`^http://okc:[0-9a-f]{48}@${relay}:${RELAY_PORT}$`));
     expect(plan.env).toEqual([`HTTP_PROXY=${proxy}`, `HTTPS_PROXY=${proxy}`, `http_proxy=${proxy}`, `https_proxy=${proxy}`, 'NO_PROXY=', 'no_proxy=', 'NODE_USE_ENV_PROXY=1']);
     expect(plan.extraHosts).toEqual([]);
 
@@ -241,6 +242,7 @@ describe('the proxy of a call', () => {
   beforeAll(async () => {
     site = createServer((req, res) => {
       hits.push(req.headers.host ?? '');
+      if (req.headers['proxy-authorization'] !== undefined) hits.push('the credential reached the host');
       res.end('ok');
     });
     await new Promise<void>((resolve) => site.listen(0, '127.0.0.1', resolve));
@@ -248,9 +250,16 @@ describe('the proxy of a call', () => {
   });
   afterAll(() => new Promise<void>((resolve) => site.close(() => resolve())));
 
-  const through = (proxyPort: string, target: string) =>
+  // the code container sends the credential that its proxy variables name, as curl and pip do.
+  const credentialOf = (plan: { env: string[] }) => {
+    const url = new URL(plan.env[0]!.slice('HTTP_PROXY='.length));
+    return `Basic ${Buffer.from(`${url.username}:${url.password}`).toString('base64')}`;
+  };
+  let credential: string | undefined;
+  const through = (proxyPort: string, target: string, auth: string | null = credential ?? null) =>
     new Promise<number>((resolve, reject) => {
-      request({ host: '127.0.0.1', port: proxyPort, path: target, headers: { host: new URL(target).host } }, (res) => {
+      const headers = { host: new URL(target).host, ...(auth !== null ? { 'proxy-authorization': auth } : {}) };
+      request({ host: '127.0.0.1', port: proxyPort, path: target, headers }, (res) => {
         res.resume();
         resolve(res.statusCode ?? 0);
       })
@@ -262,6 +271,7 @@ describe('the proxy of a call', () => {
     const fake = fakeDocker();
     const plan = await gateWith(fake).open(9, ['shop.test']);
     const proxyPort = fake.containers.get(relayName('inst', 9))!.Cmd[3]!;
+    credential = credentialOf(plan);
     try {
       expect(await through(proxyPort, `http://api.shop.test:${port}/`)).toBe(200);
       expect(await through(proxyPort, `http://evil.test:${port}/`)).toBe(403);
@@ -279,10 +289,30 @@ describe('the proxy of a call', () => {
     await expect(through(proxyPort, `http://api.shop.test:${port}/`)).rejects.toThrow();
   });
 
+  it('refuses a request without the credential of the call', async () => {
+    const fake = fakeDocker();
+    const plan = await gateWith(fake).open(12, ['shop.test']);
+    const proxyPort = fake.containers.get(relayName('inst', 12))!.Cmd[3]!;
+    const other = await gateWith(fakeDocker()).open(13, ['shop.test']);
+    try {
+      expect(await through(proxyPort, `http://api.shop.test:${port}/`, null)).toBe(407);
+      expect(await through(proxyPort, `http://api.shop.test:${port}/`, 'Basic b2tjOndyb25n')).toBe(407);
+      // the credential of another call does not open this one.
+      expect(await through(proxyPort, `http://api.shop.test:${port}/`, credentialOf(other))).toBe(407);
+      expect(plan.passed()).toEqual([]);
+      expect(plan.refused()).toHaveLength(3);
+      expect(plan.refused()[0]?.reason).toMatch(/no valid credential/);
+    } finally {
+      await plan.close();
+      await other.close();
+    }
+  });
+
   it('refuses an allowed host whose address is private', async () => {
     const fake = fakeDocker();
     const plan = await gateWith(fake).open(10, ['owner.example']);
     const proxyPort = fake.containers.get(relayName('inst', 10))!.Cmd[3]!;
+    credential = credentialOf(plan);
     try {
       expect(await through(proxyPort, `http://owner.example:${port}/`)).toBe(403);
       expect(plan.refused()[0]?.reason).toMatch(/points to 127\.0\.0\.9/);
@@ -295,6 +325,7 @@ describe('the proxy of a call', () => {
     const fake = fakeDocker();
     const plan = await gateWith(fake).open(11, ['www.shop.test']);
     const proxyPort = fake.containers.get(relayName('inst', 11))!.Cmd[3]!;
+    credential = credentialOf(plan);
     try {
       expect(await through(proxyPort, `http://www.shop.test:${port}/`)).toBe(200);
       expect(plan.refused()).toEqual([]);

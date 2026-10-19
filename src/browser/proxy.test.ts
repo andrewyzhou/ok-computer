@@ -102,6 +102,73 @@ describe('the allowHost option', () => {
   });
 });
 
+// the proxy of a sandbox call asks for the credential of that call, so another local process cannot use it.
+describe('the authorize option', () => {
+  const egress = { resolve: async () => ['127.0.0.1'], addressAllowed: () => true };
+  const refused: string[] = [];
+  const seen: string[] = [];
+  let site: Server;
+  let sitePort = 0;
+  let gated: EgressProxy;
+  beforeAll(async () => {
+    site = createServer((socket) => {
+      socket.once('data', (data) => {
+        seen.push(data.toString());
+        socket.end('HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok');
+      });
+    });
+    await new Promise<void>((resolve) => site.listen(0, '127.0.0.1', resolve));
+    sitePort = (site.address() as { port: number }).port;
+    gated = await startEgressProxy(egress, (_target, reason) => refused.push(reason), undefined, {
+      authorize: (header, host) => (header === 'Basic right' || host === 'free.test' ? undefined : 'no credential'),
+    });
+  });
+  afterAll(async () => {
+    await gated.close();
+    site.close();
+  });
+
+  const plain = (auth?: string) =>
+    new Promise<number>((resolve, reject) => {
+      const target = new URL(gated.url);
+      const headers = auth ? { 'proxy-authorization': auth } : {};
+      request({ host: target.hostname, port: target.port, path: `http://site.test:${sitePort}/`, headers }, (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      })
+        .on('error', reject)
+        .end();
+    });
+  const tunnel = (host: string, auth?: string) =>
+    new Promise<string>((resolve, reject) => {
+      const target = new URL(gated.url);
+      const line = auth ? `Proxy-Authorization: ${auth}\r\n` : '';
+      const socket = connect(Number(target.port), target.hostname, () => socket.write(`CONNECT ${host}:${sitePort} HTTP/1.1\r\n${line}\r\n`));
+      socket.once('data', (data) => {
+        resolve(data.toString().split('\r\n')[0]!);
+        socket.destroy();
+      });
+      socket.on('error', reject);
+    });
+
+  it('answers 407 to a plain request without the credential, and keeps the credential from the host', async () => {
+    expect(await plain()).toBe(407);
+    expect(await plain('Basic wrong')).toBe(407);
+    expect(refused).toEqual(['no credential', 'no credential']);
+    expect(seen).toEqual([]);
+    expect(await plain('Basic right')).toBe(200);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.toLowerCase()).not.toContain('proxy-authorization');
+  });
+
+  it('answers 407 to a tunnel without the credential', async () => {
+    expect(await tunnel('site.test')).toBe('HTTP/1.1 407 Proxy Authentication Required');
+    expect(await tunnel('site.test', 'Basic right')).toBe('HTTP/1.1 200 Connection Established');
+    // the check gets the host, so a caller can let one name through without a credential.
+    expect(await tunnel('free.test')).toBe('HTTP/1.1 200 Connection Established');
+  });
+});
+
 describe('the listen option', () => {
   const egress = { resolve: async () => ['127.0.0.1'], addressAllowed: () => true };
 
