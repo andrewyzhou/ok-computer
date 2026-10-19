@@ -22,6 +22,9 @@ export const payloadSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('workshop') }),
   // a poll in code of a source that is not an integration entry, for example google. it makes no model call.
   z.object({ type: z.literal('poll'), source: z.string().min(1) }),
+  // a job of the inbox (phase 5 m8) that runs in code. it reads mail and makes model calls on the utility or batch slot,
+  // and each change of mail or of the calendar goes through a tool that the owner approves.
+  z.object({ type: z.literal('inbox'), job: z.enum(['newsletters', 'subscriptions', 'digest']) }),
 ]);
 export type Payload = z.infer<typeof payloadSchema>;
 

@@ -75,6 +75,10 @@ The backend is chosen by `SecretStoreConfig` (`keyring`, `file` with mode 0600, 
 
 An approval that an inbox action asks for shows on the Approvals page, in the stream (`approval`), and in Telegram, the same way as any approval.
 
+- Each job runs in code in the session `inbox:<job>:<runId>`, and each dashboard action in `inbox:action:<runId>`. The approved actions are the tools `inbox_unsubscribe`, `inbox_archive_sender`, `inbox_cancel_subscription`, `inbox_draft_reply` and `inbox_create_event`. They are in the registry, but no session lists them, so only the inbox code calls them through the tool caller.
+- Without a `google` block in the config, the lists answer from the tables (empty), and the `POST` routes give `503`.
+- `SubscriptionRow` also has `sourceMessageIds` (every receipt, newest first) and `confidence` (0 to 1), which the subscription finder needs to show why a row is there.
+
 ### M9: code sandbox (`src/dashboard/sandbox.ts`, `src/sandbox/`)
 
 | Method | Path | Query / body | Response | Notes |

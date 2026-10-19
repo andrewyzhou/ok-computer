@@ -6,6 +6,7 @@ import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import { checkinPrompt, writeDayResults } from '../goals/routine.js';
 import { getGoal, listGoals, startCheckin } from '../goals/store.js';
+import type { InboxJob } from '../dashboard/types.js';
 import type { Logger } from '../observability/logger.js';
 import type { TaintSource } from '../policy/policy.js';
 import { sessionTaint } from '../policy/store.js';
@@ -51,6 +52,8 @@ export interface JobDeps {
   // the poll in code of each source that is not an integration entry, for example google, by its source name.
   sourcePolls?: Record<string, () => Promise<JobResult>>;
   workshop: (automation: Automation) => Promise<JobResult>;
+  // the inbox jobs of phase 5 m8. only an app with a google block has them.
+  inboxJobs?: (job: InboxJob) => Promise<JobResult>;
   signal: AbortSignal;
   newId?: () => string;
 }
@@ -162,6 +165,9 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
       }
       case 'workshop':
         return deps.workshop(automation);
+      case 'inbox':
+        // the config can remove the google block while the automation stays.
+        return deps.inboxJobs ? deps.inboxJobs(payload.job) : { status: 'skipped', error: 'the inbox jobs need the google integration' };
     }
   };
 }

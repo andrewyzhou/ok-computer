@@ -27,6 +27,7 @@ import {
 import { appendToDailyNote, sessionExcerpt } from './memory/daily.js';
 import { createMemoryTools } from './memory/tools.js';
 import { createGoogle, syncGooglePoll, type Google } from './google/google.js';
+import { createInbox, installInboxJobs, type Inbox } from './inbox/inbox.js';
 import type { GoogleEndpoints } from './google/accounts.js';
 import { finishDigest, noteFailedDigest, signalDigest, type Digest } from './signals/digest.js';
 import { sessionProfile, type IntegrationEntry } from './integrations/config.js';
@@ -117,6 +118,7 @@ export interface App {
   rules: readonly Rule[];
   integrations: Integrations;
   google?: Google;
+  inbox?: Inbox;
 }
 
 // a run ends at its timeout. the margin covers the end of the run itself, so a live run is never closed as stale.
@@ -184,6 +186,26 @@ export function createApp(deps: AppDeps): App {
         polls: deps.connectIntegrations !== false,
         signal: shutdown.signal,
         ...(deps.googleEndpoints ? { endpoints: deps.googleEndpoints } : {}),
+        ...ids,
+      })
+    : undefined;
+  // the inbox jobs (phase 5 m8) use the google accounts. the slot runner, the caller and the agent come later, and
+  // the jobs call them only after the start.
+  const inbox = google
+    ? createInbox({
+        db,
+        clock,
+        logger,
+        blobs,
+        timeZone: config.timeZone,
+        google,
+        googleConfig: config.google!,
+        slots: { call: (...args) => slots.call(...args) },
+        caller: () => caller,
+        owner,
+        agent: (input) => agent(input),
+        queue,
+        signal: shutdown.signal,
         ...ids,
       })
     : undefined;
@@ -267,6 +289,7 @@ export function createApp(deps: AppDeps): App {
       }),
       ...integrations.tools,
       ...(google?.tools ?? []),
+      ...(inbox?.tools ?? []),
     ],
     logger,
     integrations.find,
@@ -372,6 +395,7 @@ export function createApp(deps: AppDeps): App {
     ...(polls ? { polls } : {}),
     workshop: createWorkshop({ db, clock, config, queue, agent, signal: shutdown.signal, ...ids }),
     ...(google ? { sourcePolls: { google: google.poll } } : {}),
+    ...(inbox ? { inboxJobs: (job: Parameters<Inbox['runJob']>[0]) => inbox.runJob(job) } : {}),
     signal: shutdown.signal,
     ...ids,
   });
@@ -487,6 +511,7 @@ export function createApp(deps: AppDeps): App {
       syncHeartbeat(db, config, clock());
       syncPolls(db, entries, clock(), config.timeZone);
       syncGooglePoll(db, config, clock());
+      if (inbox && installInboxJobs(db, config, clock())) logger.info('inbox jobs installed');
       // missed jobs can take minutes, so the start does not wait for them.
       if (deps.background !== false) void scheduler.start().catch((err: unknown) => logger.error('scheduler start failed', { err }));
       // a server can need many seconds to start, so the start does not wait. tool_search reads the stored catalog.
@@ -506,6 +531,7 @@ export function createApp(deps: AppDeps): App {
     },
     integrations,
     ...(google ? { google } : {}),
+    ...(inbox ? { inbox } : {}),
     // without compaction hooks the strategy only renders. it does not call a model or append an event.
     contextView: (sessionKey) =>
       strategy.build({

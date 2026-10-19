@@ -812,6 +812,10 @@ export interface SubscriptionRow {
   // the gmail message of the last receipt.
   sourceMessageId: string;
   sourceSubject: string | null;
+  // every receipt of the merchant that the finder used, newest first. sourceMessageId is the first of them.
+  sourceMessageIds: string[];
+  // 0 to 1: how sure the finder is that the charge repeats. one receipt alone gives a low value.
+  confidence: number;
   cancelUrl: string | null;
   state: SubscriptionState;
   approvalId: number | null;
