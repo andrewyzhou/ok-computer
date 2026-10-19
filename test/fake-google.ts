@@ -32,6 +32,8 @@ interface Mailbox {
   // a start id below this one gets a 404, as google does for a history id that is too old.
   oldestHistoryId: number;
   drafts: Map<string, { message: FakeMessage; sent?: string }>;
+  // the labels that labels.create made, after the system labels.
+  labels: Array<{ id: string; name: string }>;
   events: Map<string, FakeEvent & { version: number }>;
   calendarVersion: number;
   // a sync token older than this version gets a 410.
@@ -65,6 +67,9 @@ export interface FakeGoogle {
   revoke(refreshToken: string): void;
   deliver(alias: string, message: FakeMessage): void;
   upsertEvent(alias: string, event: FakeEvent): void;
+  // search picks the messages of a messages.list call with a q, newest first. without it, the list has the inbox mail.
+  // the fake does not parse gmail search syntax, so a test that sends a query sets this to answer it.
+  search?: (alias: string, q: string, messages: FakeMessage[]) => FakeMessage[];
   fault(fault: Fault): void;
   clearFaults(): void;
   // the scopes that the next code exchange grants.
@@ -160,9 +165,16 @@ export async function startFakeGoogle(): Promise<FakeGoogle> {
       });
     }
     if (path === '/gmail/v1/users/me/messages' && req.method === 'GET') {
-      const all = [...box.messages.values()].filter((each) => (each.labelIds ?? ['INBOX']).includes('INBOX')).reverse();
+      const newest = [...box.messages.values()].reverse();
+      const q = url.searchParams.get('q');
+      const all = q && fake.search ? fake.search(alias, q, newest) : newest.filter((each) => (each.labelIds ?? ['INBOX']).includes('INBOX'));
       const max = Number(url.searchParams.get('maxResults') ?? 100);
-      return json(res, 200, { messages: all.slice(0, max).map((each) => ({ id: each.id, threadId: each.threadId ?? each.id })), resultSizeEstimate: all.length });
+      const from = Number(url.searchParams.get('pageToken') ?? 0);
+      return json(res, 200, {
+        messages: all.slice(from, from + max).map((each) => ({ id: each.id, threadId: each.threadId ?? each.id })),
+        resultSizeEstimate: all.length,
+        ...(from + max < all.length ? { nextPageToken: String(from + max) } : {}),
+      });
     }
     if ((match = /^\/gmail\/v1\/users\/me\/messages\/([^/]+)$/.exec(path)) && req.method === 'GET') {
       const message = box.messages.get(match[1]!);
@@ -187,11 +199,21 @@ export async function startFakeGoogle(): Promise<FakeGoogle> {
       sent.push({ alias, raw: draft.message.body ?? '' });
       return json(res, 200, { id: draft.message.id, labelIds: ['SENT'] });
     }
+    if (path === '/gmail/v1/users/me/drafts' && req.method === 'GET') {
+      return json(res, 200, { drafts: [...box.drafts.entries()].map(([id, draft]) => ({ id, message: { id: draft.message.id } })) });
+    }
     if ((match = /^\/gmail\/v1\/users\/me\/drafts\/([^/]+)$/.exec(path))) {
       const draft = box.drafts.get(match[1]!);
       return draft ? json(res, 200, { id: match[1], message: { id: draft.message.id } }) : apiError(res, 404, 'Requested entity was not found.', 'notFound');
     }
-    if (path === '/gmail/v1/users/me/labels') return json(res, 200, { labels: [{ id: 'INBOX', name: 'INBOX' }, { id: 'Label_1', name: 'school' }] });
+    if (path === '/gmail/v1/users/me/labels' && req.method === 'POST') {
+      const name = (JSON.parse(body) as { name: string }).name;
+      if (box.labels.some((each) => each.name === name)) return apiError(res, 409, 'Label name exists or conflicts', 'duplicate');
+      const label = { id: `Label_${box.labels.length + 1}`, name };
+      box.labels.push(label);
+      return json(res, 200, label);
+    }
+    if (path === '/gmail/v1/users/me/labels') return json(res, 200, { labels: [{ id: 'INBOX', name: 'INBOX' }, ...box.labels] });
     if (path === '/gmail/v1/users/me/messages/batchModify') {
       const change = JSON.parse(body) as { ids: string[]; addLabelIds?: string[]; removeLabelIds?: string[] };
       for (const id of change.ids) {
@@ -301,6 +323,7 @@ export async function startFakeGoogle(): Promise<FakeGoogle> {
         historyId: 1000,
         oldestHistoryId: 0,
         drafts: new Map(),
+        labels: [{ id: 'Label_1', name: 'school' }],
         events: new Map(),
         calendarVersion: 1,
         oldestSyncVersion: 0,

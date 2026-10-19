@@ -28,6 +28,7 @@ import {
 import { appendToDailyNote, sessionExcerpt } from './memory/daily.js';
 import { createMemoryTools } from './memory/tools.js';
 import { createGoogle, syncGooglePoll, type Google } from './google/google.js';
+import { createInbox, installInboxJobs, type Inbox } from './inbox/inbox.js';
 import type { GoogleEndpoints } from './google/accounts.js';
 import { finishDigest, noteFailedDigest, signalDigest, type Digest } from './signals/digest.js';
 import { sessionProfile, type IntegrationEntry } from './integrations/config.js';
@@ -120,6 +121,7 @@ export interface App {
   google?: Google;
   // the web chat of the dashboard. it exists when the web channel is one of the channels.
   chat?: WebChat;
+  inbox?: Inbox;
 }
 
 // a run ends at its timeout. the margin covers the end of the run itself, so a live run is never closed as stale.
@@ -191,6 +193,29 @@ export function createApp(deps: AppDeps): App {
         ...ids,
       })
     : undefined;
+  // the runs that work in this process. the sweep of stale runs leaves them alone.
+  const activeRuns = new Set<string>();
+  // the inbox jobs (phase 5 m8) use the google accounts. the slot runner, the caller and the agent come later, and
+  // the jobs call them only after the start.
+  const inbox = google
+    ? createInbox({
+        db,
+        clock,
+        logger,
+        blobs,
+        timeZone: config.timeZone,
+        google,
+        googleConfig: config.google!,
+        slots: { call: (...args) => slots.call(...args) },
+        caller: () => caller,
+        owner,
+        agent: (input) => agent(input),
+        queue,
+        signal: shutdown.signal,
+        activeRuns,
+        ...ids,
+      })
+    : undefined;
   // /status shows each google account with the mcp integrations, so the owner can see on the phone that a sign-in works.
   const googleStates = () =>
     google
@@ -208,7 +233,6 @@ export function createApp(deps: AppDeps): App {
     ...integrations.allowedNames(sessionKey),
     ...(google?.toolNames(sessionProfile(sessionKey)) ?? []),
   ];
-  const activeRuns = new Set<string>();
 
   const approvals = createApprovalFlow({
     db,
@@ -271,6 +295,7 @@ export function createApp(deps: AppDeps): App {
       }),
       ...integrations.tools,
       ...(google?.tools ?? []),
+      ...(inbox?.tools ?? []),
     ],
     logger,
     integrations.find,
@@ -376,6 +401,7 @@ export function createApp(deps: AppDeps): App {
     ...(polls ? { polls } : {}),
     workshop: createWorkshop({ db, clock, config, queue, agent, signal: shutdown.signal, ...ids }),
     ...(google ? { sourcePolls: { google: google.poll } } : {}),
+    ...(inbox ? { inboxJobs: (job: Parameters<Inbox['runJob']>[0]) => inbox.runJob(job) } : {}),
     signal: shutdown.signal,
     ...ids,
   });
@@ -494,6 +520,7 @@ export function createApp(deps: AppDeps): App {
       syncHeartbeat(db, config, clock());
       syncPolls(db, entries, clock(), config.timeZone);
       syncGooglePoll(db, config, clock());
+      if (inbox && installInboxJobs(db, config, clock())) logger.info('inbox jobs installed');
       // missed jobs can take minutes, so the start does not wait for them.
       if (deps.background !== false) void scheduler.start().catch((err: unknown) => logger.error('scheduler start failed', { err }));
       // a server can need many seconds to start, so the start does not wait. tool_search reads the stored catalog.
@@ -513,6 +540,7 @@ export function createApp(deps: AppDeps): App {
     },
     integrations,
     ...(google ? { google } : {}),
+    ...(inbox ? { inbox } : {}),
     // without compaction hooks the strategy only renders. it does not call a model or append an event.
     contextView: (sessionKey) =>
       strategy.build({

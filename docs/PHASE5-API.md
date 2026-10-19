@@ -75,9 +75,26 @@ The backend is chosen by `SecretStoreConfig` (`keyring`, `file` with mode 0600, 
 | GET | `/api/inbox/digests/:id` | none | `InboxDigest` | `404`. |
 | GET | `/api/inbox/drafts` | `InboxListQuery` (`state` is a `DraftState`) | `DraftView[]` | Before paging by id. Drafts are never sent. |
 | GET | `/api/inbox/proposals` | `InboxListQuery` (`state` is a `ProposalState`) | `CalendarProposalView[]` | Before paging by id. The owner decides through the existing `POST /api/approvals/:id`, so there is no decision route here. |
-| POST | `/api/inbox/run` | `InboxRunRequest` `{ job }` | `202 { started: true }` | Runs the automation of the job now, like `POST /api/automations/:id/run`. `404` when the job's automation is missing. |
+| POST | `/api/inbox/run` | `InboxRunRequest` `{ job }` | `202 { started: true }` | Runs the automation of the job now, like `POST /api/automations/:id/run`. `404` when the job's automation is missing, `409` while a run of the job is still going. |
 
 An approval that an inbox action asks for shows on the Approvals page, in the stream (`approval`), and in Telegram, the same way as any approval.
+
+- Each job runs in code in the session `inbox:<job>:<runId>`, and each dashboard action in `inbox:action:<runId>`. The first event of each run is a `system_event` with the task of the run, so the reviewer reads what the run may do. One run of a job goes at a time: a second start is skipped.
+- The tools of the inbox code are in the registry, but no session lists them, so only the inbox code calls them through the tool caller. Nothing in them sends mail, and a `mailto` unsubscribe is only shown, never used.
+
+  | Tool | Risk | Who decides |
+  |---|---|---|
+  | `inbox_unsubscribe` | external | the owner approves each call |
+  | `inbox_archive_sender` | write | the owner approves each call |
+  | `inbox_cancel_subscription` | external | the owner approves each call |
+  | `inbox_create_event` | write | the owner approves each call |
+  | `inbox_draft_reply` | write | the reviewer checks each call of the tainted digest session. It needs no owner approval, because a draft never leaves the account, as for `gmail_draft` |
+
+- An approved https unsubscribe and an approved cancellation start a browser help run in `auto:inbox:<runId>` on the `main` slot, because it drives the browser and web tools over many turns. The facts from mail (the list, the merchant, the link) go in an untrusted block. The row stays `unsubscribe_pending` or `cancel_pending` while the run works, and each form send asks the owner. The row is `unsubscribed` or `cancelled` when the run completes, and `active` again (with `error`) when it fails or the owner denies its steps. An approved call that refuses, for example because a later sweep or scan changed the row, also gives the row back to `active`.
+- Every unsubscribe, one-click or https, needs a DKIM signature of the From domain that covers `List-Unsubscribe`. The sweep takes the link of a sender from its newest signed message.
+- Without a `google` block in the config, the lists answer from the tables (empty), and the `POST` routes give `503`, also `POST /api/inbox/run`.
+- `SubscriptionRow` also has `sourceMessageIds` (every receipt, newest first) and `confidence` (0 to 1), which the subscription finder needs to show why a row is there.
+- For M6 to move into DESIGN-NEXT §12: the automation payload is `{ type: 'inbox', job }`. The app installs three system automations one time: `inbox: daily digest` at 07:30 every day, `inbox: newsletter sweep` at 09:00 on Saturday and `inbox: subscription finder` at 10:00 on Sunday, in the time zone of the app. The owner changes the time or turns a job off on the Automations page, and the app never puts a deleted one back. The tables are in `019_inbox.sql`. A job that could read no account fails, so the scheduler backs off.
 
 ### M9: code sandbox (`src/dashboard/sandbox.ts`, `src/sandbox/`)
 

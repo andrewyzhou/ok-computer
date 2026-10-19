@@ -30,6 +30,9 @@ export interface Google {
   toolNames(profile: string): string[];
   // poll is the job of the poll automation: sync every account, run the detectors, then label the new mail.
   poll(): Promise<JobResult>;
+  // the one-click unsubscribe post (rfc 8058), with its row in the request trace. the inbox jobs use it after an
+  // approval, as gmail_unsubscribe does.
+  oneClick(target: string): Promise<OneClickResult>;
   close(): Promise<void>;
 }
 
@@ -106,7 +109,8 @@ export function createGoogle(deps: GoogleDeps): Google {
     done({ ...(result.status ? { status: result.status } : {}), ...(result.ok ? {} : { error: result.text }) });
     return result;
   };
-  const tools = createGoogleTools({ accounts, config, logger, oneClick: deps.oneClick ? (target) => deps.oneClick!(target) : recordedOneClick });
+  const postOneClick = deps.oneClick ? (target: string) => deps.oneClick!(target) : recordedOneClick;
+  const tools = createGoogleTools({ accounts, config, logger, oneClick: postOneClick });
 
   // the detectors run before the classifier, so a label never hides a hit. the date detector uses the calendars that
   // this poll could read. a calendar that failed can then give a false hit, but never hide a deadline.
@@ -189,6 +193,7 @@ export function createGoogle(deps: GoogleDeps): Google {
       // message. a google outage of one account must not do that.
       return { status: 'completed', runId, ...(note ? { error: note } : {}) };
     },
+    oneClick: postOneClick,
     close: () => accounts.close(),
   };
 }
