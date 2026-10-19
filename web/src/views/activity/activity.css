@@ -1,0 +1,32 @@
+/* the activity list of background sessions. */
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.activity-title {
+  color: var(--ink);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.activity-title:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.activity-more {
+  display: flex;
+  justify-content: center;
+}
+.activity-key {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.activity-preview {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.activity-hint {
+  font-size: var(--text-sm);
+}
