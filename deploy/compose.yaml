@@ -8,13 +8,16 @@
 # deploy/env.example lists the variables.
 #
 # the containers reach the instance role of the host for aws. that needs a hop limit of 2 for the instance metadata.
+# so every process in every container of the host holds the role: the app, its mcp servers, chrome and litestream.
+# the role may only read okc-host/env, the env of the host, and it may change only the okc/* secrets of the app.
 
 services:
   tailscale:
     image: tailscale/tailscale:v1.104.1
     hostname: ${OKC_TS_HOSTNAME:-okc}
     environment:
-      - TS_AUTHKEY=${TS_AUTHKEY:?set TS_AUTHKEY to a tailscale auth key}
+      # the key is needed only for the first join. ts-state then keeps the node, so the key can leave deploy/.env.
+      - TS_AUTHKEY=${TS_AUTHKEY:-}
       - TS_STATE_DIR=/var/lib/tailscale
       # userspace networking needs no NET_ADMIN and no tun device. serve still reaches 127.0.0.1 of the shared network.
       - TS_USERSPACE=true
@@ -32,7 +35,7 @@ services:
     command: restore -if-db-not-exists -if-replica-exists -config /etc/litestream.yml /okc/data/okc.sqlite
     environment:
       - OKC_BACKUP_BUCKET=${OKC_BACKUP_BUCKET:?set OKC_BACKUP_BUCKET to the backup bucket}
-      - AWS_REGION=${AWS_REGION:-}
+      - AWS_REGION=${AWS_REGION:?set AWS_REGION to the region of the bucket}
     volumes:
       - ./litestream.yml:/etc/litestream.yml:ro
       - ${OKC_RUN:?set OKC_RUN to the absolute path of the run directory}/data:/okc/data
@@ -62,8 +65,9 @@ services:
       - ${OKC_RUN:?set OKC_RUN to the absolute path of the run directory}:/okc
       # the data mount is explicit, because the VOLUME of the image would otherwise put an anonymous volume over it.
       - ${OKC_RUN}/data:/okc/data
-    # an explicit list and no env_file, so TS_AUTHKEY never reaches the app.
+    # an explicit list and no env_file, so TS_AUTHKEY is not in the environment of the app.
     environment:
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_COMPAT_BASE_URL=${OPENAI_COMPAT_BASE_URL:-}
       - OPENAI_COMPAT_API_KEY=${OPENAI_COMPAT_API_KEY:-}
@@ -82,13 +86,14 @@ services:
         condition: service_started
     environment:
       - OKC_BACKUP_BUCKET=${OKC_BACKUP_BUCKET:?set OKC_BACKUP_BUCKET to the backup bucket}
-      - AWS_REGION=${AWS_REGION:-}
+      - AWS_REGION=${AWS_REGION:?set AWS_REGION to the region of the bucket}
     volumes:
       - ./litestream.yml:/etc/litestream.yml:ro
       - ${OKC_RUN:?set OKC_RUN to the absolute path of the run directory}/data:/okc/data
     restart: unless-stopped
 
-  # m9 adds a docker socket proxy service here later, for the code sandbox.
+  # the code sandbox of m9 is off on the server for now, because the image has no docker access. m9 adds a docker
+  # socket proxy service here, with only the container endpoints that the sandbox needs.
 
 volumes:
   ts-state:

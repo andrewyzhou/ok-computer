@@ -81,10 +81,10 @@ The S3 requests grow with the number of database writes. A busy agent writes mor
 
 ## 3. Secrets Manager
 
-Two kinds of secrets live here. Every name starts with `okc/`.
+Two kinds of secrets live here, under two prefixes:
 
-- `okc/env` holds the lines of `deploy/.env`. You write it. The first deploy reads it into `deploy/.env` with the `aws` command (section 7).
-- `okc/google.client`, `okc/google.<alias>` and the other refs of the app. The app writes them itself, through the `aws` backend of the `secrets` block. You never write these by hand.
+- `okc-host/env` holds the lines of `deploy/.env`. You write it. The first deploy reads it into `deploy/.env` with the `aws` command (section 7). The instance role can only read it. The app never uses the `okc-host/` prefix: the config refuses it as the prefix of the `secrets` block, and the store refuses a ref whose name would start with it. So the app cannot overwrite or delete the env of the host.
+- `okc/google.client`, `okc/google.<alias>` and the other refs of the app. The app writes them itself, through the `aws` backend of the `secrets` block. You write these by hand only for an integration secret (section 12).
 
 A ref with a character that a secret name cannot hold is written with `@` and two hex digits. For example the ref `linear:oauth-tokens` is the secret `okc/linear@3aoauth-tokens`.
 
@@ -110,21 +110,27 @@ A ref with a character that a secret name cannot hold is written with `@` and tw
 3. Store it, then delete the local file:
 
    ```sh
-   aws secretsmanager create-secret --region <region> --name okc/env --secret-string file://env.server
+   aws secretsmanager create-secret --region <region> --name okc-host/env --secret-string file://env.server
    rm env.server
    ```
 
-   To change it later, use `aws secretsmanager put-secret-value --secret-id okc/env --secret-string file://env.server`.
+   To change it later, use `aws secretsmanager put-secret-value --secret-id okc-host/env --secret-string file://env.server`.
+
+   After the first join of the server to the tailnet, remove the `TS_AUTHKEY` line from `okc-host/env` and from `deploy/.env`. The `ts-state` volume keeps the identity of the node, so the key is not needed again on this host.
 
 ## 4. IAM role and instance profile
 
-The instance gets one role. It can use the `okc/*` secrets and the backup bucket, and nothing else.
+The instance gets one role. It can read `okc-host/env`, use the `okc/*` secrets and the backup bucket, and nothing else.
 
-The role needs to write secrets too, not only read them:
+**Every process in every container on the host holds this role.** The containers get its credentials from the instance metadata service (the hop limit of 2 in section 5). That includes the app, the MCP servers that the app starts, Chrome and the pages it opens, Litestream, and later the code sandbox. So any code that runs on the host can read `okc-host/env` and every `okc/*` secret, and can change the `okc/*` secrets. Keep this in mind when you add an MCP server or a skill. To keep `okc-host/env` away from the containers too, remove the `OkcHostEnv` statement from the policy after the first deploy. For a later change, fetch `deploy/.env` with your own admin profile on your computer and paste it in the Session Manager shell instead of step 4 of section 7.
+
+The role needs to write the `okc/*` secrets too, not only read them:
 
 - The token import (`npm run google:push`, section 11) stores `okc/google.<alias>`, and the client upload stores `okc/google.client`. The first write of a ref creates its secret.
 - Google sometimes rotates a refresh token. The app then stores the new one at once, or the next start has a dead token.
-- A delete of a ref deletes its secret at once, without a recovery window. A write to a secret that someone else marked for deletion restores it first.
+- A delete of a ref deletes its secret at once, without a recovery window. AWS ends such a delete some seconds later, so a write of the same ref in that time waits and tries again for up to 15 seconds. A write to a secret that someone else marked for deletion with a recovery window restores it first.
+
+This is more than the spec of the role asked for (read only). Without the writes, the token import, the client upload and a rotated refresh token cannot be stored on the server.
 
 1. Save the trust policy as `trust.json`:
 
@@ -147,6 +153,12 @@ The role needs to write secrets too, not only read them:
    {
      "Version": "2012-10-17",
      "Statement": [
+       {
+         "Sid": "OkcHostEnv",
+         "Effect": "Allow",
+         "Action": "secretsmanager:GetSecretValue",
+         "Resource": "arn:aws:secretsmanager:<region>:<account>:secret:okc-host/env-*"
+       },
        {
          "Sid": "OkcSecrets",
          "Effect": "Allow",
@@ -175,7 +187,7 @@ The role needs to write secrets too, not only read them:
    }
    ```
 
-   The secrets use the default key of Secrets Manager, so the role needs no KMS permission.
+   The secrets use the default key of Secrets Manager, so the role needs no KMS permission. AWS adds six random characters to the name of each secret in its ARN, so `okc-host/env-*` matches that one secret only.
 
 3. Create the role and the instance profile:
 
@@ -248,7 +260,7 @@ Do not attach other policies to this role. Session Manager works without them (s
 
 1. In the Tailscale admin console, under **DNS**: turn on **MagicDNS** and **HTTPS Certificates**.
 2. Under **Access controls**, add a tag for the server, for example `tag:okc`, with yourself as its owner. Make sure that your own devices may reach `tag:okc`.
-3. Under **Settings → Keys**, generate an auth key. Make it **reusable**, give it the tag `tag:okc`, and do not make it ephemeral. A tagged machine does not expire. The key goes into `okc/env` as `TS_AUTHKEY` (section 3).
+3. Under **Settings → Keys**, generate an auth key. Make it **one-off** (not reusable), give it the tag `tag:okc`, and do not make it ephemeral: an ephemeral node leaves the tailnet when it is offline for a while, for example during a restart. A tagged machine does not expire. The key goes into `okc-host/env` as `TS_AUTHKEY` (section 3). A one-off key adds one machine only, so code on the host that reads the key cannot add more machines to the tailnet. After the first join, remove the key (section 3, step 3). A new host needs a new key.
 4. The `tailscale` service of `deploy/compose.yaml` runs `tailscale serve` to the dashboard port. It uses `serve`, never `funnel`. Funnel puts the dashboard on the public internet. Do not change that, and never add `ports:` to the compose file.
 5. `DASHBOARD_TOKEN` must be set on the server (D11). The search pages return chat text, and the dashboard accepts the `ts.net` name only while the token is set.
 
@@ -288,13 +300,13 @@ All of these steps run on the instance, in a Session Manager shell.
    }
    ```
 
-   The prefix defaults to `okc/`. For a server without Secrets Manager, use `{ "backend": "file", "path": "data/secrets.json" }` instead; the file has mode 0600. Add the `google` block with the same `clientId` and accounts as on the desktop (see [google.md](google.md)). Put `okc.policy.json` and `okc.integrations.json` next to it if you use them. Then `sudo chown 10001:10001 /opt/okc/run/*.json`.
+   The prefix defaults to `okc/`. For a server without Secrets Manager, use `{ "backend": "file", "path": "data/secrets.json" }` instead; the file has mode 0600. The config refuses a path of the secret file inside `workspace` or `skills`, because the agent can read those folders. Add the `google` block with the same `clientId` and accounts as on the desktop (see [google.md](google.md)). Put `okc.policy.json` and `okc.integrations.json` next to it if you use them. Then `sudo chown 10001:10001 /opt/okc/run/*.json`.
 
 4. **Fetch `deploy/.env` from Secrets Manager.** The file is never committed:
 
    ```sh
    cd /opt/okc/app
-   sudo sh -c 'umask 077; aws secretsmanager get-secret-value --region <region> --secret-id okc/env --query SecretString --output text > deploy/.env'
+   sudo sh -c 'umask 077; aws secretsmanager get-secret-value --region <region> --secret-id okc-host/env --query SecretString --output text > deploy/.env'
    sudo chmod 600 deploy/.env
    ```
 
@@ -357,7 +369,7 @@ All of these steps run on the instance, in a Session Manager shell.
 
    If the update changed the database, the older code may not start on it. Then also restore the database to a time before the update (section 9, point in time). Run `sudo git switch master` before the next update.
 
-After a change to `okc/env`, fetch `deploy/.env` again (section 7, step 4) and run the same `up -d` command. Compose restarts the services whose settings changed.
+After a change to `okc-host/env`, fetch `deploy/.env` again (section 7, step 4) and run the same `up -d` command. Compose restarts the services whose settings changed.
 
 ## 9. Backups and restore
 
@@ -383,7 +395,7 @@ The time is UTC.
 **Full restore to a new host.**
 
 1. If the old host still runs, stop it: `sudo docker compose -f deploy/compose.yaml --env-file deploy/.env down`. Two hosts must never write to the same bucket path.
-2. In the Tailscale admin console, remove the old machine, so the new one gets the same name and `dashboard.publicUrl` stays right.
+2. In the Tailscale admin console, remove the old machine, so the new one gets the same name and `dashboard.publicUrl` stays right. Generate a new one-off auth key (section 6, step 3) and put it into `okc-host/env` as `TS_AUTHKEY`.
 3. Make the new instance (section 5) with the same role.
 4. Do steps 1 to 4 of section 7. Keep `data/` empty.
 5. Get the files from the newest snapshot. Make a volume from it in the zone of the instance, attach it, and copy:
@@ -443,14 +455,14 @@ Two hosts that poll the same bot make each other fail: Telegram gives each updat
 
 1. **Stop the old host's Telegram.**
    - On a desktop: delete the two lines from `.env`, then `okc restart`.
-   - On a server: delete the two lines from `okc/env` and from `deploy/.env`, then `sudo docker compose -f deploy/compose.yaml --env-file deploy/.env up -d --force-recreate app`.
+   - On a server: delete the two lines from `okc-host/env` and from `deploy/.env`, then `sudo docker compose -f deploy/compose.yaml --env-file deploy/.env up -d --force-recreate app`.
 2. **Check that it no longer polls.** The log of the start says `telegram is off, because TELEGRAM_BOT_TOKEN or TELEGRAM_OWNER_ID is not set`. On a server:
 
    ```sh
    sudo docker compose -f deploy/compose.yaml --env-file deploy/.env logs --since 5m app | grep telegram
    ```
 
-3. **Set them on the new host.** On a server, add the two lines to `okc/env` with `put-secret-value`, fetch `deploy/.env` again (section 7, step 4). On a desktop, add them to `.env`.
+3. **Set them on the new host.** On a server, add the two lines to `okc-host/env` with `put-secret-value`, fetch `deploy/.env` again (section 7, step 4). On a desktop, add them to `.env`.
 4. **Restart the new host** (`up -d --force-recreate app`, or `okc restart`). The log says `telegram polling started`.
 5. **Send a test message** to the bot. Only the new host answers.
 
@@ -485,7 +497,12 @@ The server cannot do the Google sign-in, because the answer of Google goes to a 
 
 **Once the server is live, remove the `google` block from the desktop's `okc.config.json`** and run `okc restart`. Otherwise both hosts poll the same mailbox, both make signals, and both tell you about the same mail. You can add the block again later to sign in for a new push.
 
-## 12. Troubleshooting
+## 12. What the server cannot do yet
+
+- **Sign-ins that need a browser.** The server has no display. An MCP integration with OAuth (for example Slack, see [slack.md](slack.md)) waits for its callback on `127.0.0.1:4318` of the machine where the sign-in page opens, so it does not finish on the server. `okc browser login` needs a Chrome window that you can see. Both are out of scope for this deploy, so keep such integrations and the browser profile sign-ins on the desktop. An integration that takes a token (a `secretRef`) works: store its value as the secret `okc/<ref>`, with the `@` escape of section 3.
+- **The code sandbox.** The image has no Docker access, so the sandbox tool is off on the server and the rest of the app runs. A later change adds a Docker socket proxy service to the compose file, with only the container endpoints that the sandbox needs.
+
+## 13. Troubleshooting
 
 | You see | Why | Fix |
 |---|---|---|
@@ -493,8 +510,9 @@ The server cannot do the Google sign-in, because the answer of Google goes to a 
 | The app log says that no AWS credentials were found, or a request to the metadata service timed out | The metadata hop limit is 1, so the containers get no answer | `aws ec2 modify-instance-metadata-options --instance-id <id> --http-tokens required --http-put-response-hop-limit 2`, then restart the services |
 | `EACCES` or `permission denied` under `/okc` | The run folder is not owned by uid 10001 | `sudo chown -R 10001:10001 /opt/okc/run` |
 | `another ok computer process runs on the data folder` | A second app uses the same `data/`: an old container, or a second compose project on the same run folder | `sudo docker ps`, stop the other one, then `up -d` again. Never point two hosts or two projects at one run folder |
-| `restore` fails | The bucket name, the region or the S3 permission is wrong | Check `OKC_BACKUP_BUCKET` and `AWS_REGION` in `deploy/.env` and the policy of section 4 |
-| The dashboard does not load | Tailscale is off on your device, or the `tailscale` service has not joined | `sudo docker compose -f deploy/compose.yaml --env-file deploy/.env logs tailscale`. An expired `TS_AUTHKEY` needs a new key in `okc/env` |
-| `forbidden` on the dashboard | `dashboard.publicUrl` does not match the Tailscale name, or `DASHBOARD_TOKEN` is not set | Fix `okc.config.json` or `okc/env`, then restart the app |
+| `restore` fails | The bucket name, the region or the S3 permission is wrong. Compose stops at once when `AWS_REGION` is not set | Check `OKC_BACKUP_BUCKET` and `AWS_REGION` in `deploy/.env` and the policy of section 4 |
+| The dashboard does not load | Tailscale is off on your device, or the `tailscale` service has not joined | `sudo docker compose -f deploy/compose.yaml --env-file deploy/.env logs tailscale`. A first join with a used or expired `TS_AUTHKEY` needs a new one-off key in `okc-host/env` |
+| `forbidden` on the dashboard | `dashboard.publicUrl` does not match the Tailscale name, or `DASHBOARD_TOKEN` is not set | Fix `okc.config.json` or `okc-host/env`, then restart the app |
+| A set of a secret fails with `still deleting the secret` | A delete of the same ref has not ended at AWS after 15 seconds | Try again in a minute |
 | The bot answers twice or not at all, and the log shows Telegram errors | Two hosts poll the bot | Section 10 |
 | `google:push` says that the client does not match | The desktop and the server have different `clientId` | Use the same client on both |

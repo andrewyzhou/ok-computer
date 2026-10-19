@@ -88,6 +88,8 @@ Move decisions into DESIGN-NEXT §12 and update the README table. Run end to end
 ### M7: deploy
 A multi-arch Dockerfile (Node 24 + Chrome + Docker CLI access for M9 through a socket proxy, or a sibling sandbox runner), a compose file, the `SecretStore` server backend, Google tokens moved to a remote host (sign in on a desktop, then send the refresh token to the server through an authenticated dashboard endpoint), Litestream to S3, a Tailscale sidecar, a GitHub Actions CI matrix plus an image build, and `docs/setup/aws.md` with the runbook (including how to move the live Telegram role).
 
+The Docker access for M9 moved to M9. The socket proxy can create containers, so it must allow only the endpoints that the sandbox uses, and those come with the sandbox. Until M9 adds the proxy service to `deploy/compose.yaml`, the sandbox tool is off on the server.
+
 ### M8: inbox jobs (Gmail, owner accounts)
 - **Newsletter sweep:** group senders by List-Id or From, show read rates, unsubscribe through RFC 8058 one-click (`List-Unsubscribe-Post`) or the https link after approval, and archive or label the old mail.
 - **Paid subscription finder:** find receipts and recurring charges, then build a table (merchant, amount, cadence, last charge, source mail). Cancellation help with the cancel link, or a browser task, each step approved.

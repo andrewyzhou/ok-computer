@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../src/config/load.js';
 
 const repo = join(import.meta.dirname, '..');
-const read = (path: string) => readFileSync(join(repo, path), 'utf8');
+// a checkout on windows can turn lf into crlf, so the text is read with lf line ends. .gitattributes asks for lf.
+const read = (path: string) => readFileSync(join(repo, path), 'utf8').replace(/\r\n/g, '\n');
 
 // the checks read the files as text, so they need no yaml parser. comments are left out, because a comment may name
 // a key that the file must not hold.
@@ -52,6 +53,23 @@ describe('deploy/compose.yaml', () => {
     expect(app).not.toContain('TS_AUTHKEY');
     expect(app).not.toContain('env_file');
     expect(service(compose, 'tailscale')).toContain('TS_AUTHKEY=');
+  });
+
+  // ts-state keeps the node after the first join, so the owner can remove the key from deploy/.env.
+  it('needs TS_AUTHKEY only for the first join', () => {
+    expect(service(compose, 'tailscale')).toContain('TS_AUTHKEY=${TS_AUTHKEY:-}');
+  });
+
+  // an empty region gives litestream an error that does not name the cause.
+  it('needs AWS_REGION for the restore and for litestream', () => {
+    for (const name of ['restore', 'litestream']) expect(service(compose, name), name).toMatch(/AWS_REGION=\$\{AWS_REGION:\?/);
+  });
+
+  // loadSecrets reads CLAUDE_API_KEY first, so the app must get both names.
+  it('gives the app each name of the model key that the app reads', () => {
+    const app = service(compose, 'app');
+    expect(app).toContain('CLAUDE_API_KEY=${CLAUDE_API_KEY:-}');
+    expect(app).toContain('ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}');
   });
 
   it('pins each image to an exact tag', () => {
@@ -103,6 +121,13 @@ describe('Dockerfile', () => {
     expect(dockerfile).toMatch(/^WORKDIR \/okc$/m);
   });
 
+  // a copy of the whole context would put any file that .dockerignore misses into a layer of the build cache.
+  it('copies only what the build reads into the build stage', () => {
+    expect(dockerfile).not.toMatch(/^COPY \. \.$/m);
+    expect(dockerfile).toMatch(/^COPY src \.\/src$/m);
+    expect(dockerfile).toMatch(/^COPY web \.\/web$/m);
+  });
+
   it('gives channel chrome a browser on both arches', () => {
     expect(dockerfile).toContain('google-chrome-stable');
     expect(dockerfile).toContain('ln -s /usr/bin/chromium /opt/google/chrome/chrome');
@@ -115,6 +140,13 @@ describe('.dockerignore', () => {
     for (const entry of ['node_modules', 'dist', 'data', '.env', '.env.*', 'okc.*.json', '.git', 'skills']) {
       expect(lines).toContain(entry);
     }
+  });
+});
+
+// a windows checkout would otherwise give a crlf entrypoint, and /bin/sh in the image fails on it.
+describe('.gitattributes', () => {
+  it('checks out every text file with lf', () => {
+    expect(read('.gitattributes').split('\n')).toContain('* text=auto eol=lf');
   });
 });
 

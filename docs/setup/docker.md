@@ -30,7 +30,9 @@ Put an `okc.config.json` in `run/` with the file backend:
 }
 ```
 
-The app writes `run/data/secrets.json` with mode 0600. Do not commit `run/`.
+The app writes `run/data/secrets.json` with mode 0600. Git ignores `run/`, and the build leaves it out of the build context, so neither the repo nor an image gets its secrets. Do not put the secret file in `workspace` or `skills`; the config refuses that, because the agent can read those folders.
+
+The file backend refuses a secret file that other users can read. On Windows, and with some file sharing setups of Docker Desktop on macOS, a bind-mounted folder shows every file as mode 0777 or 0755, and `chmod` has no effect there. Then each read of the secrets fails with `can be read by other users`. In that case keep `run/data` on a named volume (`-v okc-data:/okc/data` in place of the second `-v` below) or inside the WSL file system, or use the `aws` backend. On a native Windows desktop the file backend makes no mode check and sets no access list, so it gives no protection there; use the default `keyring` backend on a desktop.
 
 On Linux, the container user must own the folder, its `data` folder and `okc.config.json` before the first start: `sudo chown -R 10001:10001 run`. Otherwise Docker makes the missing folders as root and the app cannot write them. Docker Desktop on macOS and Windows does not need this.
 
@@ -47,13 +49,15 @@ Copy `deploy/env.example` to `deploy/.env` first and set `OKC_RUN` to the full p
 **With a plain `docker run`:**
 
 ```sh
-docker run -i --init --name okc-local --env-file run/.env \
+docker run -i --init --shm-size=1g --name okc-local --env-file run/.env \
   -v $PWD/run:/okc -v $PWD/run/data:/okc/data okc:local
 ```
 
+`--shm-size=1g` gives Chrome the shared memory it needs. With the default of 64 MB, the browser tools crash or fail on heavy pages (compose sets `shm_size: 1gb`).
+
 Keep `-i`. Without Telegram the app starts a CLI channel, and that channel stops the app when stdin ends. `--init` gives the container an init process, because the image has none (compose sets `init: true`). The second `-v` is needed, because the `VOLUME` of the image would otherwise put an empty volume over `run/data`.
 
-`run/.env` holds `ANTHROPIC_API_KEY` and `DASHBOARD_TOKEN`. Leave out `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID` while another host is the live Telegram host (see [aws.md](aws.md), section 10).
+`run/.env` holds `ANTHROPIC_API_KEY` (or `CLAUDE_API_KEY`) and `DASHBOARD_TOKEN`. Leave out `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID` while another host is the live Telegram host (see [aws.md](aws.md), section 10).
 
 ## 4. Reach the dashboard
 
