@@ -190,9 +190,7 @@ export function SearchPage({ query }: RouteProps) {
     { id: 'all', label: 'All' },
     ...SCOPES.map((each) => {
       const group = known?.find((g) => g.scope === each.id);
-      // the tabs take a number as their count, so a count with a plus goes in the label.
-      if (group?.more) return { id: each.id, label: `${each.label} ${countText(group)}` };
-      return { id: each.id, label: each.label, ...(group ? { count: group.hits.length } : {}) };
+      return { id: each.id, label: each.label, ...(group ? { count: group.more ? countText(group) : group.hits.length } : {}) };
     }),
   ];
 
@@ -255,8 +253,8 @@ export function SearchPage({ query }: RouteProps) {
       {/* one block holds the field, the tabs and the results, so the page sets their spacing and the tabs stay at
           the top while the results scroll. */}
       <div className="search-page">
-        <div className="search-page-field" onKeyDown={onFieldKey}>
-          <SearchField label="Search everything" placeholder="Search chats, runs, tool calls, memory…" value={text} onChange={onType} />
+        <div className="search-page-field">
+          <SearchField label="Search everything" placeholder="Search chats, runs, tool calls, memory…" value={text} onChange={onType} onKeyDown={onFieldKey} />
         </div>
         {q ? (
           <FilterBar label="search scopes">

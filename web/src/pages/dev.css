@@ -175,11 +175,6 @@
   border-bottom: 1px solid var(--rule);
 }
 
-/* policy. the filter bar above the first section has its own rule, so the section leaves out its rule. */
-.page-body > #policy-decisions {
-  border-top: 0;
-  padding-top: 0;
-}
 @media (max-width: 759.98px) {
   .policy-rules .dev-id {
     white-space: normal;

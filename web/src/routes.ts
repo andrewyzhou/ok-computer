@@ -70,6 +70,7 @@ export type IconName =
   | 'plus'
   | 'send'
   | 'stop'
+  | 'play'
   | 'external'
   | 'check'
   | 'copy'

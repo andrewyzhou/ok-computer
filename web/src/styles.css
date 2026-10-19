@@ -960,6 +960,11 @@ button.sb-item.dev-toggle.is-on:hover {
 .filterbar .tabs {
   margin-right: 12px;
 }
+/* the filter bar has its own rule, so a section right under it leaves out its rule. */
+.filterbar + .page-body > .section:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
 
 .select {
   position: relative;

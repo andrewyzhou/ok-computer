@@ -195,6 +195,7 @@ const PATHS: Record<IconName, ReactNode> = {
   plus: <path d="M12 5v14M5 12h14" />,
   send: <path d="M12 19V5M6 11l6-6 6 6" />,
   stop: <rect x="7" y="7" width="10" height="10" rx="1.5" />,
+  play: <path d="M8 5.5v13l10.5-6.5z" />,
   external: <path d="M14 4.5h5.5V10M19.5 4.5 11 13M17 14v4.5a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1H10" />,
   check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
   copy: (

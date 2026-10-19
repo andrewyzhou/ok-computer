@@ -170,7 +170,7 @@ describe('the search page', () => {
 
     // the tabs show the counts of the answer for every scope, with a plus when the scope has more.
     const tabs = within(screen.getByRole('tablist', { name: 'Scope' }));
-    expect(tabs.getByRole('tab', { name: /^Runs 2\+/ })).toBeTruthy();
+    expect(tabs.getByRole('tab', { name: /^Runs/ }).querySelector('.count')?.textContent).toBe('2+');
     expect(tabs.getByRole('tab', { name: /^Messages/ }).textContent).toBe('Messages1');
 
     fireEvent.click(main.getByRole('button', { name: 'Show all runs' }));

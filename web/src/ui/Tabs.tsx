@@ -3,8 +3,9 @@ import { useRef, type KeyboardEvent } from 'react';
 export interface TabItem<V extends string = string> {
   id: V;
   label: string;
-  // a count after the label, for example the pending approvals. zero shows nothing.
-  count?: number;
+  // a count after the label, for example the pending approvals. zero and the empty text show nothing. a text is for a
+  // count the server does not know in full, for example 2+.
+  count?: number | string;
 }
 
 // tabs that switch the view of one page. the arrow keys, Home and End move between the tabs, as in a tab list.
@@ -49,7 +50,7 @@ export function Tabs<V extends string>({
             onKeyDown={(event) => keys(event, index)}
           >
             {item.label}
-            {item.count ? <span className="count">{item.count}</span> : null}
+            {item.count !== undefined && item.count !== 0 && item.count !== '' ? <span className="count">{item.count}</span> : null}
           </button>
         );
       })}

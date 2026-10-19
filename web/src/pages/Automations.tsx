@@ -211,6 +211,7 @@ export function Automations() {
             </Button>
             <Button
               size="sm"
+              icon="play"
               busy={busy === `run:${automation.id}`}
               aria-label={`Run ${automation.name} now`}
               onClick={() => act(`run:${automation.id}`, send(`/api/automations/${id}/run`, 'POST', {}), `${automation.name} started.`)}

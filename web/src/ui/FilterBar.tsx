@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from 'react';
+import type { KeyboardEvent, ReactNode, Ref } from 'react';
 import { Icon } from '../icons';
 import type { IconName } from '../routes';
 
@@ -56,12 +56,17 @@ export function SearchField({
   onChange,
   placeholder,
   inputRef,
+  onKeyDown,
+  maxLength,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   inputRef?: Ref<HTMLInputElement>;
+  // a key handler of the input, for example Enter to search or arrow down to move into the results.
+  onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
+  maxLength?: number;
 }) {
   return (
     <label className="search-field">
@@ -73,6 +78,8 @@ export function SearchField({
         placeholder={placeholder ?? label}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onKeyDown={onKeyDown}
+        maxLength={maxLength}
       />
     </label>
   );
