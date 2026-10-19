@@ -14,4 +14,9 @@ export function idOf(value: string | undefined): number | undefined {
   return Number(value);
 }
 
-export const isDay = (value: string | undefined): value is string => value !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(value);
+// a day of the calendar as yyyy-mm-dd. a value of that shape that names no date, for example 2026-13-45, is not a day.
+export function isDay(value: string | undefined): value is string {
+  if (value === undefined || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const time = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value;
+}

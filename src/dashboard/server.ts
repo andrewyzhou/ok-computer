@@ -50,7 +50,7 @@ import { mountInbox } from './inbox.js';
 import { mountSandbox } from './sandbox.js';
 import { mountSearch } from './search.js';
 import { mountSpans } from './spans.js';
-import { isDay } from './params.js';
+import { isDay, limitOf } from './params.js';
 import { createFeed } from './stream.js';
 import type { ContextView, MemoryFile, Meta } from './types.js';
 
@@ -102,6 +102,11 @@ export function createDashboard(deps: DashboardDeps): Hono {
   const webDir = deps.webDir ?? WEB_DIR;
   const blobs = createBlobStore(db, join(config.paths.data, 'blobs'), clock);
   const server = new Hono();
+  // a route that throws, for example on a damaged trace row, answers with a json error that the page can show.
+  server.onError((err, c) => {
+    logger.error('dashboard request failed', { path: c.req.path, error: errorText(err) });
+    return c.json({ error: 'a row could not be read' }, 500);
+  });
 
   // each sign-in gets a random id (see login.ts). a restart or a new token signs out every browser. an id of one host
   // does not open the other host.
@@ -182,6 +187,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
     const query = c.req.query();
     const limit = Number(query.limit);
     if (query.before && !getRun(db, query.before)) return c.json({ error: 'give before as the id of a run' }, 400);
+    if (query.day && !isDay(query.day)) return c.json({ error: 'give day as yyyy-mm-dd' }, 400);
     return c.json(
       listRuns(
         db,
@@ -189,7 +195,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
           ...(query.trigger ? { trigger: query.trigger } : {}),
           ...(query.slot ? { slot: query.slot } : {}),
           ...(query.status ? { status: query.status } : {}),
-          ...(query.day && /^\d{4}-\d{2}-\d{2}$/.test(query.day) ? { day: query.day } : {}),
+          ...(query.day ? { day: query.day } : {}),
           ...(query.sessionKey ? { sessionKey: query.sessionKey } : {}),
           ...(query.before ? { before: query.before } : {}),
           ...(limit > 0 ? { limit } : {}),
@@ -333,14 +339,13 @@ export function createDashboard(deps: DashboardDeps): Hono {
 
   server.get('/api/logs', (c) => {
     const level = c.req.query('level') ?? 'debug';
-    const limit = Number(c.req.query('limit')) || 500;
     const day = c.req.query('day');
     const runId = c.req.query('runId');
     if (day !== undefined && !isDay(day)) return c.json({ error: 'give day as yyyy-mm-dd' }, 400);
     return c.json(
       readLogsFor(logDir, clock(), tz, {
         level: isLevel(level) ? level : 'debug',
-        limit: Math.min(limit, 5000),
+        limit: limitOf(c.req.query('limit'), 5000, 500),
         ...(day ? { day } : {}),
         ...(runId ? { runId } : {}),
       }),
