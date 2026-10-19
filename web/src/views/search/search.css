@@ -1,0 +1,128 @@
+/* the classes of the search page only. the names start with search- but stay clear of .search-field, which is the
+   shared field of styles.css. each color and size comes from the tokens of styles.css. */
+
+.search-page {
+  min-width: 0;
+}
+.search-page-field {
+  margin-bottom: var(--space-3);
+}
+.search-page .filterbar {
+  margin: 0 0 var(--space-5);
+}
+.search-page-field .search-field {
+  width: 100%;
+  height: 44px;
+  padding: 0 16px;
+  background: var(--bg-raised);
+}
+.search-page-field .search-field input {
+  font-size: var(--text-lg);
+}
+
+.search-note {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.search-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+/* the tabs end with a hairline, so the first group does not draw a second one. */
+.search-results > .section:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.search-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.search-section-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
+
+.search-hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.search-hit {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.search-hit:first-child {
+  padding-top: 2px;
+}
+.search-hit:last-child {
+  border-bottom: 0;
+}
+.search-hit.is-on .search-hit-title {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.search-hit-icon {
+  margin-top: 2px;
+  color: var(--muted);
+}
+.search-hit-main {
+  flex: 1;
+  min-width: 0;
+}
+.search-hit-title {
+  color: var(--ink);
+  font-weight: 500;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  border-radius: var(--radius-sm);
+}
+.search-hit-title:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.search-hit-title:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.search-hit-snippet {
+  margin: 3px 0 0;
+  color: var(--ink-2);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.search-hit-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.search-hit-meta > * {
+  overflow-wrap: anywhere;
+}
+.search-hit-details {
+  flex: none;
+}
+
+.search-id {
+  overflow-wrap: anywhere;
+}
+.search-details-snippet {
+  margin: var(--space-3) 0;
+  color: var(--ink-2);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.search-hits + .search-note {
+  margin-top: var(--space-3);
+}
