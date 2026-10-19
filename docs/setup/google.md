@@ -93,3 +93,13 @@ The tests use a fake Google server. Check these with your real accounts once, af
 4. **Unsubscribe.** Ask the agent to unsubscribe from a real newsletter. Check the card (sender and link), approve it, and check the poll run or the call on the Runs page for the POST to the sender.
 5. **Send** (only with `send: true`). Ask the agent to send a short mail to yourself. Approve it and check that it arrived once.
 6. **Invitation.** Ask for an event with a second address of yours as a guest. Check that it asks for approval, and that the invitation arrives after you approve it.
+
+## 7. Using a server
+
+A server cannot do the sign-in, because the answer of Google goes to `127.0.0.1` of the machine that signs in. Connect each account on the desktop, upload the client file on the server's Google page, then send each account to the server from the desktop:
+
+```sh
+OKC_REMOTE_TOKEN=<server DASHBOARD_TOKEN> npm run google:push -- <alias> --to https://<host>.<tailnet>.ts.net
+```
+
+[aws.md, section 11](aws.md#11-google-on-a-server) explains the details, what a disconnect does on each host, and why the desktop should stop polling once the server is live.
