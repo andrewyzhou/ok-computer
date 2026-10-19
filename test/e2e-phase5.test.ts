@@ -321,8 +321,9 @@ describe('phase 5 end to end', () => {
         ref: { kind: 'approval', approvalId: 1 },
       }),
     ]);
+    // a tool span has the outcome word of the run detail as its status.
     expect(spans.spans.find((each) => each.label === 'now')).toMatchObject({
-      status: 'ok',
+      status: 'ran',
       ref: { kind: 'tool', toolCallId: 'n1' },
     });
     const addNote = spans.spans.find((each) => each.label === 'notes__add_note' && each.kind === 'tool')!;
@@ -375,9 +376,9 @@ describe('phase 5 end to end', () => {
     expect(pageAfter.messages.at(-1)!.text).toContain('saved: descale the kettle');
     const spansAfter = await get<RunSpans>(`/api/runs/${encodeURIComponent(runId)}/spans`);
     expect(spansAfter.spans.filter((each) => each.kind === 'approval')).toEqual([expect.objectContaining({ status: 'approved' })]);
-    // the tool call that ran after the approval is in the spans of the run, with its call to the mcp server.
+    // the tool call that ran after the approval sits under the approval, with its call to the mcp server.
     const ran = spansAfter.spans.find((each) => each.kind === 'tool' && each.ref.kind === 'tool' && each.ref.toolCallId === 'approval-1');
-    expect(ran).toMatchObject({ label: 'notes__add_note', status: 'ok' });
+    expect(ran).toMatchObject({ label: 'notes__add_note', status: 'ran', parentId: 'approval:1' });
     expect(spansAfter.spans.filter((each) => each.kind === 'mcp' && each.parentId === ran!.id)).toHaveLength(1);
 
     // the event log only grew, so each id is larger than the one before it.
