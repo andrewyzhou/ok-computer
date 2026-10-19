@@ -631,9 +631,15 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     const out = await h.run('browser_snapshot', {});
     const blocked = JSON.parse(String(h.steps().at(-1)!.blockedRequests)) as Array<{ url: string; reason: string }>;
     expect(blocked).toHaveLength(201);
-    expect(blocked.slice(0, 200).every((each) => each.url.includes('/api/x?'))).toBe(true);
-    expect(blocked.at(-1)!.reason).toBe('250 more blocked requests were not kept');
-    expect(out.content).toContain('Blocked 450 requests:');
+    const [, more] = /^(\d+) more blocked requests were not kept$/.exec(blocked.at(-1)!.reason)!;
+    const total = 200 + Number(more);
+    expect(out.content).toContain(`Blocked ${total} requests:`);
+    // chrome itself calls a google host a moment after it starts, and the proxy records that block in every open tab.
+    // so a few blocks of other hosts can join the 450 posts of the page, but no post of the page is lost.
+    const others = blocked.slice(0, 200).filter((each) => !each.url.includes('/api/x?'));
+    expect(others.every((each) => !each.url.includes('shop.test'))).toBe(true);
+    expect(total - 450).toBeGreaterThanOrEqual(others.length);
+    expect(total - 450).toBeLessThanOrEqual(5);
   });
 
   it('lets an image button send one click position, and refuses a field of that name that a script adds', async () => {
