@@ -67,6 +67,17 @@ describe('the agent pages load against the seeded database', () => {
     expect(details().getByRole('heading', { name: 'consolidation-log.md' })).toBeTruthy();
   });
 
+  it('opens the file of the path in the hash, as a memory hit of the search links it, and keeps a pick in the hash', async () => {
+    open('#/memory?path=weekly%2F2026-W42.md');
+    await waitFor(() => expect(details().getByRole('heading', { name: 'weekly/2026-W42.md' })).toBeTruthy());
+    const row = inMain().getByText('weekly/2026-W42.md').closest('tr')!;
+    expect(row.getAttribute('aria-current')).toBe('true');
+    fireEvent.click(inMain().getByText('consolidation-log.md'));
+    expect(location.hash).toBe('#/memory?path=consolidation-log.md');
+    await waitFor(() => expect(details().getByRole('heading', { name: 'consolidation-log.md' })).toBeTruthy());
+    expect(await screen.findByText(/weekly trends saved/)).toBeTruthy();
+  });
+
   it('filters the memory files', async () => {
     open('#/memory');
     await inMain().findByText('consolidation-log.md');
