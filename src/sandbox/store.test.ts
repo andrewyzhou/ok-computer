@@ -1,5 +1,10 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { getSandboxExec } from '../dashboard/sandbox.js';
 import { openDb } from '../db/index.js';
+import { createBlobStore } from '../observability/blobs.js';
 import { registerSecret } from '../observability/redact.js';
 import { DEFAULT_LIMITS } from './limits.js';
 import { addFiles, closeStale, finishExec, STALE_ERROR, startExec } from './store.js';
@@ -152,5 +157,23 @@ describe('the code in the trace', () => {
     const row = db.prepare('SELECT egress, notCollected FROM sandbox_execs WHERE id = ?').get(id) as { egress: string; notCollected: string };
     expect(JSON.parse(row.egress)).toEqual(egress);
     expect(JSON.parse(row.notCollected)).toEqual([{ path: 'out.csv', reason: 'no such file in /work' }]);
+  });
+
+  it('keeps a key out of the egress and the paths that were not collected', () => {
+    const db = openDb(':memory:');
+    const key = 'store-egress-key-9f8e7d6c5b4a';
+    registerSecret(key);
+    const id = startExec(db, exec({ network: 'allowlist', allowlist: ['pypi.org'] }), at('2026-10-18T10:00:00Z'));
+    const egress = { passed: [], refused: [{ target: `http://x.test/?k=${key}`, reason: 'x.test is not in the allowlist of this call' }] };
+    const notCollected = [{ path: `out-${key}.csv`, reason: `no such file: out-${key}.csv` }];
+    finishExec(db, id, end({ egress, notCollected }), at('2026-10-18T10:00:01Z'));
+    const row = db.prepare('SELECT egress, notCollected FROM sandbox_execs WHERE id = ?').get(id) as { egress: string; notCollected: string };
+    expect(row.egress).not.toContain(key);
+    expect(row.notCollected).not.toContain(key);
+    expect(JSON.parse(row.egress).refused[0].target).toBe('http://x.test/?k=[redacted]');
+    const blobs = createBlobStore(db, join(mkdtempSync(join(tmpdir(), 'okc-store-')), 'blobs'), () => new Date('2026-10-18T10:00:02Z'));
+    const detail = getSandboxExec(db, blobs, id)!;
+    expect(JSON.stringify(detail.egress)).not.toContain(key);
+    expect(JSON.stringify(detail.notCollected)).not.toContain(key);
   });
 });

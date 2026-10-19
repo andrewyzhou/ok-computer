@@ -1,5 +1,5 @@
 import type { Db } from '../db/index.js';
-import { redact } from '../observability/redact.js';
+import { redact, redactedJson } from '../observability/redact.js';
 import type { ExecEnd, FileRow, NewExec } from './types.js';
 
 // the trace rows of the sandbox: sandbox_execs and sandbox_files (020_sandbox.sql). the row of an exec is written
@@ -33,6 +33,8 @@ export function startExec(db: Db, exec: NewExec, now: Date): number {
   return Number(row!.id);
 }
 
+// the egress and the paths that were not collected are redacted like the command. a refused plain-http request keeps
+// its full url, and a path or a reason can come from the model, so a key in either never reaches the row.
 // the update changes only a running row. a stale sweep and a late finish can meet on one row, and the first one
 // sticks, so the row never says two things.
 export function finishExec(db: Db, id: number, end: ExecEnd, now: Date): void {
@@ -52,8 +54,8 @@ export function finishExec(db: Db, id: number, end: ExecEnd, now: Date): void {
     end.truncated ? 1 : 0,
     end.error,
     Math.round(end.durationMs),
-    end.egress ? JSON.stringify(end.egress) : null,
-    JSON.stringify(end.notCollected ?? []),
+    end.egress ? redactedJson(end.egress) : null,
+    redactedJson(end.notCollected ?? []),
     now.toISOString(),
     id,
   );
