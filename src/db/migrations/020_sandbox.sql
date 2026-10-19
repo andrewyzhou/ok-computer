@@ -1,12 +1,17 @@
 -- phase 5 m9: the code sandbox. 004 made sandbox_execs and 006 dropped it, because no code wrote it then. this
 -- migration makes it again with the columns that the sandbox writes.
 
--- one row for each sandbox_exec call, also a call that failed before docker ran it. the tool writes the row with
--- status running before the container starts, so a crash leaves a row that the start sweep closes. runId has no
+-- one row for each sandbox_exec call that passed its checks and got a scratch volume, also a call that then failed
+-- before docker ran it. a call that the tool refuses before that (docker off, busy, a bad allowlist or path, a missing
+-- blob, a volume that could not be made) appears only in tool_calls. the tool writes the row with status running
+-- before the container starts, so a crash leaves a row that the start sweep closes. runId has no
 -- reference to runs: the row is a record, and a missing run row must not drop it. the dashboard joins the row to its
 -- tool call and its policy decision by run and call id. command is the code that ran, and language says how it ran.
 -- allowlist is a json array of host names (empty when network is none). limits is a json SandboxLimits. stdoutBytes and
 -- stderrBytes count every byte that the command wrote, also the bytes after the cut. taskId names the scratch volume.
+-- command is redacted like every other text of the trace, while the container gets the code as the model sent it.
+-- egress is a json SandboxEgress (the hosts that the proxy let through and the requests that it refused) for a call
+-- with network access, and null otherwise. notCollected is a json array of the collect paths that did not come back.
 CREATE TABLE sandbox_execs (
   id INTEGER PRIMARY KEY,
   runId TEXT,
@@ -31,6 +36,8 @@ CREATE TABLE sandbox_execs (
   truncated INTEGER NOT NULL DEFAULT 0,
   error TEXT,
   durationMs INTEGER NOT NULL DEFAULT 0,
+  egress TEXT,
+  notCollected TEXT NOT NULL DEFAULT '[]',
   createdAt TEXT NOT NULL,
   endedAt TEXT
 );

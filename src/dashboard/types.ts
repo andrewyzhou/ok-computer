@@ -1008,6 +1008,13 @@ export interface SandboxPolicyView {
   approvalStatus: string | null;
 }
 
+// the egress of a call with network access: the hosts that the proxy let through, and the requests that it refused
+// with the reason.
+export interface SandboxEgress {
+  passed: string[];
+  refused: Array<{ target: string; reason: string }>;
+}
+
 // stdout and stderr hold at most 64 kb each. the full text is in the blob.
 export interface SandboxExecDetail extends SandboxExecRow {
   cwd: string;
@@ -1019,6 +1026,10 @@ export interface SandboxExecDetail extends SandboxExecRow {
   stderrBlob: string | null;
   error: string | null;
   files: SandboxFile[];
+  // null for a call without network access, and for a call that ended before its network was made.
+  egress: SandboxEgress | null;
+  // the collect paths that did not come back, with the reason.
+  notCollected: Array<{ path: string; reason: string }>;
   policy: SandboxPolicyView | null;
   endedAt: string | null;
 }

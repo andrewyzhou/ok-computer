@@ -5,9 +5,11 @@ import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../config/load.js';
 import { openDb, type Db } from '../db/index.js';
 import { blobPath, createBlobStore, sha256 } from '../observability/blobs.js';
+import { createByteStore } from '../observability/byte-blobs.js';
 import { silentLogger } from '../observability/logger.js';
 import { registerSecret } from '../observability/redact.js';
 import { DEFAULT_LIMITS, DETAIL_TEXT_BYTES, SANDBOX_IMAGE } from '../sandbox/limits.js';
+import { startExec } from '../sandbox/store.js';
 import { parseSandboxQuery } from './sandbox.js';
 import { createDashboard, type DashboardDeps } from './server.js';
 import type { SandboxExecDetail, SandboxPage, SandboxStatus } from './types.js';
@@ -287,5 +289,73 @@ describe('GET /api/sandbox/execs/:id', () => {
     expect(await getJson(dashboard, '/api/sandbox/execs/999', 404)).toEqual({ error: 'sandbox exec not found' });
     expect(await getJson(dashboard, '/api/sandbox/execs/abc', 404)).toEqual({ error: 'sandbox exec not found' });
     expect(await getJson(dashboard, '/api/sandbox/execs/0', 404)).toEqual({ error: 'sandbox exec not found' });
+  });
+});
+
+describe('GET /api/sandbox/files/:hash', () => {
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 1, 2]);
+  const fileRow = (db: Db, execId: number, path: string, blob: string, mime: string, size: number) =>
+    db.prepare("INSERT INTO sandbox_files (execId, direction, path, blob, size, mime, createdAt) VALUES (?, 'out', ?, ?, ?, ?, ?)").run(execId, path, blob, size, mime, NOW);
+
+  it('serves the exact bytes of a collected file, with its type, and a download for a type that is not an image', async () => {
+    const { db, dataDir, blobs, dashboard } = setup();
+    const bytes = createByteStore(db, join(dataDir, 'blobs'), () => new Date(NOW));
+    const id = insertExec(db);
+    const png = bytes.put(PNG, 'image/png');
+    const zip = bytes.put(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0xff]), 'application/zip');
+    const svg = blobs.put('<svg onload="x()"/>', 'image/svg+xml; charset=utf-8');
+    fileRow(db, id, 'out/chart.png', png, 'image/png', PNG.length);
+    fileRow(db, id, 'out/data.zip', zip, 'application/zip', 5);
+    fileRow(db, id, 'out/pic.svg', svg, 'image/svg+xml; charset=utf-8', 19);
+
+    const image = await dashboard.request(`/api/sandbox/files/${png}`);
+    expect(image.status).toBe(200);
+    expect(image.headers.get('content-type')).toBe('image/png');
+    expect(image.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(image.headers.get('content-disposition')).toBeNull();
+    expect(Buffer.from(await image.arrayBuffer())).toEqual(PNG);
+
+    const archive = await dashboard.request(`/api/sandbox/files/${zip}`);
+    expect(archive.headers.get('content-disposition')).toBe('attachment; filename="data.zip"');
+    expect(Buffer.from(await archive.arrayBuffer())).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0xff]));
+
+    // an svg can hold script, so it downloads and never shows as a page of the dashboard.
+    const drawing = await dashboard.request(`/api/sandbox/files/${svg}`);
+    expect(drawing.headers.get('content-disposition')).toBe('attachment; filename="pic.svg"');
+    expect(await drawing.text()).toBe('<svg onload="x()"/>');
+  });
+
+  it('gives 404 for a blob that no sandbox file names, and for a bad hash', async () => {
+    const { db, dataDir, dashboard } = setup();
+    const other = createByteStore(db, join(dataDir, 'blobs'), () => new Date(NOW)).put(PNG, 'image/png');
+    expect(await getJson(dashboard, `/api/sandbox/files/${other}`, 404)).toEqual({ error: 'sandbox file not found' });
+    expect(await getJson(dashboard, '/api/sandbox/files/nothex', 404)).toEqual({ error: 'sandbox file not found' });
+  });
+
+  it('shows the code of an exec without a key that the model pasted into it', async () => {
+    const { db, dashboard } = setup();
+    registerSecret(SECRET);
+    const id = startExec(
+      db,
+      {
+        runId: 'run-9',
+        toolCallId: 'c9',
+        sessionKey: 'main',
+        taskId: 't',
+        language: 'bash',
+        command: `curl -H "x-key: ${SECRET}" https://pypi.org`,
+        image: SANDBOX_IMAGE,
+        cwd: '/work',
+        network: 'none',
+        allowlist: [],
+        limits: DEFAULT_LIMITS,
+      },
+      new Date(NOW),
+    );
+    const detail = (await getJson(dashboard, `/api/sandbox/execs/${id}`)) as SandboxExecDetail;
+    expect(detail.command).not.toContain(SECRET);
+    expect(detail.command).toContain('[redacted]');
+    const page = (await getJson(dashboard, '/api/sandbox')) as SandboxPage;
+    expect(JSON.stringify(page)).not.toContain(SECRET);
   });
 });

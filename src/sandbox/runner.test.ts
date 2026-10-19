@@ -2,7 +2,7 @@ import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { createLogger } from '../observability/logger.js';
 import { DockerError } from './docker.js';
-import { DEFAULT_LIMITS, FILE_LIMITS, LABELS, SANDBOX_USER, SCRATCH_BYTES, TMP_MOUNT, WORK_DIR } from './limits.js';
+import { DEFAULT_LIMITS, FILE_LIMITS, LABELS, SANDBOX_USER, SCRATCH_BYTES, TMP_MOUNT, WALL_MARGIN_S, WORK_DIR } from './limits.js';
 import { packTar } from './tar.js';
 import { commandFor, containerName, containerSpec, createRunner, sweepContainers, type TarParts } from './runner.js';
 import type { ContainerSpec, ContainerState, DockerClient, ExecRequest, FileIn, NetworkPlan } from './types.js';
@@ -47,7 +47,9 @@ describe('containerSpec', () => {
     const spec = containerSpec(request({ limits: { cpus: 1.5, memoryMb: 256, timeoutMs: 1000, outputBytes: 10, pids: 64 }, env: ['A=1'], labels: { extra: 'x' } }), 'inst');
     expect(spec).toEqual({
       Image: 'okc-sandbox:1',
-      Cmd: ['python3', '-c', 'print(1)'],
+      Entrypoint: [''],
+      // the wall time of 1 s and the margin, so the container ends itself when the app is gone.
+      Cmd: ['timeout', '-s', 'KILL', String(1 + WALL_MARGIN_S), 'python3', '-c', 'print(1)'],
       Env: ['HOME=/work', 'LANG=C.UTF-8', 'TMPDIR=/tmp', 'A=1'],
       WorkingDir: WORK_DIR,
       User: SANDBOX_USER,
@@ -68,6 +70,7 @@ describe('containerSpec', () => {
         Memory: 256 * 1024 * 1024,
         MemorySwap: 256 * 1024 * 1024,
         PidsLimit: 64,
+        Ulimits: [{ Name: 'fsize', Soft: SCRATCH_BYTES, Hard: SCRATCH_BYTES }],
         Tmpfs: { [TMP_MOUNT.path]: TMP_MOUNT.options },
         Mounts: [{ Type: 'volume', Source: 'okc-work-inst-task', Target: WORK_DIR, ReadOnly: false }],
         ExtraHosts: [],
@@ -399,6 +402,25 @@ describe('createRunner', () => {
     };
     expect((await runnerOf(fake.docker).run(request())).status).toBe('ok');
   });
+
+  it('collects each file once', async () => {
+    let exit: (code: number) => void = () => {};
+    const archives: Record<string, Buffer> = {
+      '/work/out': packTar([{ path: 'out/a.txt', bytes: Buffer.from('A') }], new Date(0)),
+      '/work/out/a.txt': packTar([{ path: 'a.txt', bytes: Buffer.from('A') }], new Date(0)),
+    };
+    const docker = {
+      createContainer: async () => 'c1', putArchive: async () => {},
+      attach: async () => { const stdout = new PassThrough(); const stderr = new PassThrough(); stdout.end(); stderr.end(); return { stdout, stderr, close: () => undefined }; },
+      wait: () => new Promise<number>((resolve) => (exit = resolve)), start: async () => exit(0),
+      inspect: async () => ({ image: 'sha256:x', running: false, exitCode: 0, oomKilled: false }),
+      getArchive: async (_id: string, path: string) => { const found = archives[path]; if (!found) throw new DockerError('none', 404); return found; },
+      archiveSize: async () => 0, kill: async () => {}, removeContainer: async () => {},
+    } as unknown as DockerClient;
+    const result = await createRunner({ docker, logger, instance: 'i' }).run({ execId: 1, image: 'okc-sandbox:1', argv: ['true'], env: [], limits: { cpus: 1, memoryMb: 64, timeoutMs: 5_000, outputBytes: 100, pids: 8 }, volume: 'v', files: [], collect: ['out', 'out/a.txt', 'out/a.txt'], labels: {}, signal: new AbortController().signal });
+    expect(result.status).toBe('ok');
+    expect(result.collected.map((file) => file.path)).toEqual(['out/a.txt']);
+  });
 });
 
 describe('sweepContainers', () => {
@@ -416,5 +438,50 @@ describe('sweepContainers', () => {
     expect(await sweepContainers(fake.docker, 'inst', (execId) => execId === 1)).toBe(2);
     expect(labels).toEqual([`${LABELS.instance}=inst`]);
     expect(fake.removed).toEqual(['stale', 'nolabel']);
+  });
+});
+
+describe('the runner and an engine under load', () => {
+  it('starts the container only after the engine registered the wait', async () => {
+    const fake = fakeDocker();
+    let registered = false;
+    let registeredAtStart: boolean | undefined;
+    const wait = fake.docker.wait.bind(fake.docker);
+    fake.docker.wait = (id, signal) => {
+      const exit = wait(id, signal);
+      return Object.assign(exit, { registered: new Promise<void>((resolve) => setTimeout(() => ((registered = true), resolve()), 30)) });
+    };
+    const start = fake.docker.start.bind(fake.docker);
+    fake.docker.start = async (id, signal) => {
+      registeredAtStart = registered;
+      return start(id, signal);
+    };
+    const result = await runnerOf(fake.docker).run(request());
+    expect(result).toMatchObject({ status: 'ok', exitCode: 0 });
+    expect(registeredAtStart).toBe(true);
+  });
+
+  it('kills a command that writes more than the size of /work while it runs', async () => {
+    const fake = fakeDocker({ script: () => {}, scratchSize: SCRATCH_BYTES + 1 });
+    const result = await createRunner({ docker: fake.docker, logger, instance: 'inst', tar, diskPollMs: 10 }).run(request());
+    expect(result).toMatchObject({ status: 'killed', exitCode: 137, error: 'the command wrote more than 256 MB to /work', scratchBytes: SCRATCH_BYTES + 1 });
+    expect(fake.calls).toContain('kill');
+    expect(fake.removed).toEqual(['c1']);
+  });
+
+  it('gives error and removes the container by its name when the engine does not answer the create', async () => {
+    const fake = fakeDocker();
+    fake.docker.createContainer = () => new Promise<string>(() => undefined);
+    const result = await createRunner({ docker: fake.docker, logger, instance: 'inst', tar, stepMs: 30 }).run(request());
+    expect(result).toMatchObject({ status: 'error', containerId: null, error: 'docker did not create the container: docker did not answer in time' });
+    expect(fake.removed).toEqual([containerName('inst', 7)]);
+  });
+
+  it('ends a call whose attach hangs, and removes its container', async () => {
+    const fake = fakeDocker();
+    fake.docker.attach = () => new Promise(() => undefined);
+    const result = await createRunner({ docker: fake.docker, logger, instance: 'inst', tar, stepMs: 30 }).run(request());
+    expect(result).toMatchObject({ status: 'error', error: 'docker did not answer in time' });
+    expect(fake.removed).toEqual(['c1']);
   });
 });

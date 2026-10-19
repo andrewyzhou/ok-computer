@@ -80,9 +80,13 @@ describe('packTar and unpackTar', () => {
     expect(tar.length).toBe(512 + 1024 + 1024);
   });
 
-  it('throws on a path that cannot split or is absolute', () => {
-    expect(() => packTar([file('x'.repeat(101), 'a')], MTIME)).toThrow(`the path ${'x'.repeat(101)} is too long for the archive`);
-    expect(() => packTar([file(`${'p'.repeat(156)}/name`, 'a')], MTIME)).toThrow('is too long for the archive');
+  it('writes a pax path for a path that cannot split, and throws on an absolute path', () => {
+    const long = ['x'.repeat(101), `${'p'.repeat(156)}/name`, `${'é'.repeat(80)}/${'a'.repeat(150)}.csv`];
+    for (const path of long) {
+      const unpacked = unpackTar(packTar([file(path, 'a')], MTIME), OPEN);
+      expect(unpacked.skipped).toEqual([]);
+      expect(texts(unpacked.files)).toEqual([[path, 'a']]);
+    }
     expect(() => packTar([file('/etc/passwd', 'a')], MTIME)).toThrow();
   });
 
@@ -236,6 +240,16 @@ describe.skipIf(!hasTar)('the system tar', () => {
     execFileSync('tar', ['-xf', path, '-C', target]);
     expect(readFileSync(join(target, 'out/a.txt'), 'utf8')).toBe('alpha');
     expect(readFileSync(join(target, long), 'utf8')).toBe('long');
+  });
+
+  it('extracts a pax path that packTar wrote for a long name', () => {
+    const long = `out/${'g'.repeat(150)}.csv`;
+    const path = join(dir, 'pax.tar');
+    writeFileSync(path, packTar([file(long, 'pax')], MTIME));
+    const target = join(dir, 'pax');
+    mkdirSync(target);
+    execFileSync('tar', ['-xf', path, '-C', target]);
+    expect(readFileSync(join(target, long), 'utf8')).toBe('pax');
   });
 
   it('reads an archive that the system tar wrote', () => {

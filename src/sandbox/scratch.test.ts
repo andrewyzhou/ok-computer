@@ -131,4 +131,48 @@ describe('scratch', () => {
     expect(await scratch.sweep()).toBe(1);
     expect(fake.volumes.has(busy.volume)).toBe(false);
   });
+
+  it('does not keep the sweep from the other idle volumes when one removal fails', async () => {
+    const db = openDb(':memory:');
+    let now = new Date('2026-10-01T00:00:00Z');
+    const removed: string[] = [];
+    let first = '';
+    const docker = {
+      createVolume: async () => {},
+      removeVolume: async (name: string) => { if (name === first) throw new DockerError('the volume driver failed', 500); removed.push(name); },
+      listVolumes: async () => [],
+    } as unknown as DockerClient;
+    const scratch = createScratch({ db, docker, clock: () => now, instance: 'i' });
+    first = (await scratch.volumeFor('main')).volume;
+    const second = (await scratch.volumeFor('auto:1')).volume;
+    now = new Date(now.getTime() + SCRATCH_IDLE_MS + 1);
+    await scratch.sweep().catch(() => 0);
+    expect(removed).toContain(second);
+  });
+});
+
+describe('the scratch sweep and a call at the same time', () => {
+  it('keeps the volume of a task that starts while the sweep lists the volumes', async () => {
+    const db = openDb(':memory:');
+    const volumes = new Map<string, Record<string, string>>();
+    const removed: string[] = [];
+    let scratch: ReturnType<typeof createScratch> | undefined;
+    let made = '';
+    const docker = {
+      createVolume: async (name: string, labels: Record<string, string>) => void volumes.set(name, labels),
+      removeVolume: async (name: string) => {
+        volumes.delete(name);
+        removed.push(name);
+      },
+      // a call of a new task makes its volume while the list is on the way.
+      listVolumes: async () => {
+        made = (await scratch!.volumeFor('auto:9')).volume;
+        return [...volumes.entries()].map(([name, labels]) => ({ name, labels }));
+      },
+    } as unknown as DockerClient;
+    scratch = createScratch({ db, docker, clock: () => new Date('2026-10-01T00:00:00Z'), instance: 'i' });
+    expect(await scratch.sweep()).toBe(0);
+    expect(removed).toEqual([]);
+    expect(volumes.has(made)).toBe(true);
+  });
 });

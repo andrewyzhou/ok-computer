@@ -4,12 +4,12 @@ import type { SandboxLanguage } from '../dashboard/types.js';
 import type { Logger } from '../observability/logger.js';
 import { errorText } from '../tools/registry.js';
 import { DockerError } from './docker.js';
-import { FILE_LIMITS, LABELS, SANDBOX_USER, SCRATCH_BYTES, TMP_MOUNT, WORK_DIR } from './limits.js';
+import { DISK_POLL_MS, DOCKER_STEP_MS, EXEC_MARGIN_MS, FILE_LIMITS, LABELS, SANDBOX_USER, SCRATCH_BYTES, TMP_MOUNT, WALL_MARGIN_S, WORK_DIR } from './limits.js';
 import { packTar, unpackTar } from './tar.js';
 import type { Attached, ContainerSpec, DockerClient, ExecRequest, ExecResult, FileOut, Runner } from './types.js';
 
 // the runner runs one exec in a fresh container: create, put the files in, attach, start, wait with the wall time
-// limit, read the collect paths, and remove the container in every case.
+// limit and the size limit of /work, read the collect paths, and remove the container in every case.
 
 // commandFor gives the argv of the code. the code is one argument, so no shell quoting is needed.
 export function commandFor(language: SandboxLanguage, code: string): string[] {
@@ -24,13 +24,15 @@ export function commandFor(language: SandboxLanguage, code: string): string[] {
 }
 
 // containerSpec gives the body of the create request, with the labels of the instance and the exec. it is a pure
-// function, so a test checks each limit and each security setting without docker.
+// function, so a test checks each limit and each security setting without docker. the command runs under timeout, so
+// the wall time holds also when the app that started it is gone.
 export function containerSpec(request: ExecRequest, instance: string): ContainerSpec {
   const { limits } = request;
   const memory = limits.memoryMb * 1024 * 1024;
   return {
     Image: request.image,
-    Cmd: request.argv,
+    Entrypoint: [''],
+    Cmd: ['timeout', '-s', 'KILL', String(Math.ceil(limits.timeoutMs / 1000) + WALL_MARGIN_S), ...request.argv],
     Env: ['HOME=/work', 'LANG=C.UTF-8', 'TMPDIR=/tmp', ...request.env],
     WorkingDir: WORK_DIR,
     User: SANDBOX_USER,
@@ -51,6 +53,7 @@ export function containerSpec(request: ExecRequest, instance: string): Container
       Memory: memory,
       MemorySwap: memory,
       PidsLimit: limits.pids,
+      Ulimits: [{ Name: 'fsize', Soft: SCRATCH_BYTES, Hard: SCRATCH_BYTES }],
       Tmpfs: { [TMP_MOUNT.path]: TMP_MOUNT.options },
       Mounts: [{ Type: 'volume', Source: request.volume, Target: WORK_DIR, ReadOnly: false }],
       ExtraHosts: request.network?.extraHosts ?? [],
@@ -116,17 +119,56 @@ function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
   });
 }
 
-type Outcome = { kind: 'exit'; code: number } | { kind: 'timeout' } | { kind: 'abort' } | { kind: 'error'; err: unknown };
+// bounded resolves with the promise, or rejects when the signal ends first. it ends a wait for a step of an engine that
+// does not answer.
+function bounded<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error(abortText(signal)));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new Error(abortText(signal)));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      },
+    );
+  });
+}
 
-export function createRunner(deps: { docker: DockerClient; logger: Logger; instance: string; now?: () => number; tar?: TarParts }): Runner {
+const abortText = (signal: AbortSignal) =>
+  signal.reason instanceof Error && signal.reason.name === 'TimeoutError' ? 'docker did not answer in time' : 'the request was stopped';
+
+type Outcome = { kind: 'exit'; code: number } | { kind: 'timeout' } | { kind: 'abort' } | { kind: 'disk' } | { kind: 'error'; err: unknown };
+
+export interface RunnerDeps {
+  docker: DockerClient;
+  logger: Logger;
+  instance: string;
+  now?: () => number;
+  tar?: TarParts;
+  // how often the runner measures /work while the command runs. a test gives a short time.
+  diskPollMs?: number;
+  // the limit of each docker step. a test gives a short time.
+  stepMs?: number;
+}
+
+export function createRunner(deps: RunnerDeps): Runner {
   const { docker, logger, instance } = deps;
   const now = deps.now ?? (() => performance.now());
   const tar = deps.tar ?? { pack: packTar, unpack: unpackTar };
+  const diskPollMs = deps.diskPollMs ?? DISK_POLL_MS;
+  const stepMs = deps.stepMs ?? DOCKER_STEP_MS;
 
-  // collect reads each collect path after the end. the limits count over all paths of the call.
-  async function collect(id: string, paths: string[]): Promise<Pick<ExecResult, 'collected' | 'notCollected'>> {
+  // collect reads each collect path after the end. the limits count over all paths of the call, and a file that two
+  // paths name (a folder and a file in it, or one path twice) comes back once.
+  async function collect(id: string, paths: string[], signal: () => AbortSignal): Promise<Pick<ExecResult, 'collected' | 'notCollected'>> {
     const collected: FileOut[] = [];
     const notCollected: ExecResult['notCollected'] = [];
+    const seen = new Set<string>();
     let total = 0;
     for (const path of paths) {
       const remaining = FILE_LIMITS.totalBytes - total;
@@ -140,7 +182,7 @@ export function createRunner(deps: { docker: DockerClient; logger: Logger; insta
         continue;
       }
       try {
-        const bytes = await docker.getArchive(id, `${WORK_DIR}/${path}`, remaining);
+        const bytes = await docker.getArchive(id, `${WORK_DIR}/${path}`, remaining, signal());
         // the engine names the entries under the base name of the path, so strip takes it off and prefix puts the
         // whole path back. a file gives the path itself, and a folder gives the path and the names under it.
         const unpacked = tar.unpack(bytes, {
@@ -151,6 +193,8 @@ export function createRunner(deps: { docker: DockerClient; logger: Logger; insta
           maxTotalBytes: remaining,
         });
         for (const file of unpacked.files) {
+          if (seen.has(file.path)) continue;
+          seen.add(file.path);
           collected.push(file);
           total += file.bytes.length;
         }
@@ -188,8 +232,16 @@ export function createRunner(deps: { docker: DockerClient; logger: Logger; insta
         error: null,
         scratchBytes: undefined,
       };
+      // each docker step has its own limit, and the whole exec has one too. the steps before the command also end
+      // when the run stops. the steps after it do not, so the trace still gets the image and the exit code.
+      const deadline = AbortSignal.timeout(limits.timeoutMs + EXEC_MARGIN_MS);
+      const before = () => AbortSignal.any([signal, deadline, AbortSignal.timeout(stepMs)]);
+      const after = () => AbortSignal.any([deadline, AbortSignal.timeout(stepMs)]);
+      // the wait has no step limit. it ends when the exec ends.
+      const waitStop = new AbortController();
       let attached: Attached | undefined;
       let out: { stdout: ReturnType<typeof sink>; stderr: ReturnType<typeof sink> } | undefined;
+      let orphan: string | undefined;
       const takeOutput = () => {
         if (!out) return;
         result.stdout = out.stdout.bytes();
@@ -198,30 +250,61 @@ export function createRunner(deps: { docker: DockerClient; logger: Logger; insta
         result.stderrBytes = out.stderr.total();
         result.truncated = result.stdoutBytes > limits.outputBytes || result.stderrBytes > limits.outputBytes;
       };
+      const stopped = () => {
+        result.status = 'killed';
+        result.error = 'the run stopped, so the command was ended';
+      };
 
       try {
         let id: string;
+        const name = containerName(instance, request.execId);
+        // the create does not end with the run. a stopped run still gets its container removed below, by its id.
+        const createSignal = after();
         try {
-          id = await docker.createContainer(containerName(instance, request.execId), containerSpec(request, instance));
+          id = await bounded(docker.createContainer(name, containerSpec(request, instance), createSignal), createSignal);
         } catch (err) {
+          // a create that was cut off can still make the container, so the cleanup removes it by its name.
+          if (createSignal.aborted) orphan = name;
           result.error = `docker did not create the container: ${errorText(err)}`;
           return result;
         }
         result.containerId = id;
 
-        if (request.files.length) await docker.putArchive(id, WORK_DIR, tar.pack(request.files, new Date()));
-        attached = await docker.attach(id);
+        if (request.files.length) {
+          const putSignal = before();
+          await bounded(docker.putArchive(id, WORK_DIR, tar.pack(request.files, new Date()), putSignal), putSignal);
+        }
+        const attachSignal = before();
+        attached = await bounded(docker.attach(id, attachSignal), attachSignal);
         out = { stdout: sink(attached.stdout, limits.outputBytes), stderr: sink(attached.stderr, limits.outputBytes) };
-        // wait goes out before start, so the exit cannot come before the runner listens for it.
-        const waiting = docker.wait(id);
+        // wait goes out before start, and the start waits until the engine has registered the waiter, so the exit
+        // cannot come before the runner listens for it.
+        const waiting = docker.wait(id, waitStop.signal);
         waiting.catch(() => {});
+        if (waiting.registered) await bounded(waiting.registered, before());
+        const startSignal = before();
         const startedAt = now();
-        await docker.start(id);
+        await bounded(docker.start(id, startSignal), startSignal);
 
         let timer: NodeJS.Timeout | undefined;
+        let poll: NodeJS.Timeout | undefined;
         let onAbort: (() => void) | undefined;
         const outcome = await new Promise<Outcome>((resolve) => {
           timer = setTimeout(() => resolve({ kind: 'timeout' }), limits.timeoutMs);
+          // the size check after the end comes too late for a command that fills the disk, so /work is measured
+          // while it runs too.
+          let measuring = false;
+          poll = setInterval(() => {
+            if (measuring) return;
+            measuring = true;
+            docker
+              .archiveSize(id, WORK_DIR, SCRATCH_BYTES, after())
+              .then((size) => {
+                if (size > SCRATCH_BYTES) resolve({ kind: 'disk' });
+              })
+              .catch((err: unknown) => logger.warn('sandbox scratch size failed', { execId: request.execId, err }))
+              .finally(() => (measuring = false));
+          }, diskPollMs);
           onAbort = () => resolve({ kind: 'abort' });
           if (signal.aborted) onAbort();
           else signal.addEventListener('abort', onAbort, { once: true });
@@ -231,6 +314,7 @@ export function createRunner(deps: { docker: DockerClient; logger: Logger; insta
           );
         }).finally(() => {
           clearTimeout(timer);
+          clearInterval(poll);
           if (onAbort) signal.removeEventListener('abort', onAbort);
         });
         result.durationMs = Math.max(0, Math.round(now() - startedAt));
@@ -239,7 +323,7 @@ export function createRunner(deps: { docker: DockerClient; logger: Logger; insta
         if (outcome.kind === 'exit') {
           result.exitCode = outcome.code;
         } else {
-          await docker.kill(id).catch((err: unknown) => logger.warn('sandbox kill failed', { execId: request.execId, err }));
+          await docker.kill(id, after()).catch((err: unknown) => logger.warn('sandbox kill failed', { execId: request.execId, err }));
           const code = await within(waiting, DRAIN_MS);
           if (code !== undefined) result.exitCode = code;
         }
@@ -248,7 +332,7 @@ export function createRunner(deps: { docker: DockerClient; logger: Logger; insta
         await within(Promise.all([out.stdout.ended, out.stderr.ended]), DRAIN_MS);
         takeOutput();
 
-        const state = await docker.inspect(id).catch((err: unknown) => {
+        const state = await docker.inspect(id, after()).catch((err: unknown) => {
           logger.warn('sandbox inspect failed', { execId: request.execId, err });
           return undefined;
         });
@@ -261,8 +345,10 @@ export function createRunner(deps: { docker: DockerClient; logger: Logger; insta
           result.status = 'timeout';
           result.error = `the command ran longer than ${limits.timeoutMs / 1000} s`;
         } else if (outcome.kind === 'abort') {
+          stopped();
+        } else if (outcome.kind === 'disk') {
           result.status = 'killed';
-          result.error = 'the run stopped, so the command was ended';
+          result.error = `the command wrote more than ${Math.round(SCRATCH_BYTES / (1024 * 1024))} MB to ${WORK_DIR}`;
         } else if (state?.oomKilled) {
           result.status = 'killed';
           result.error = `the command used more than ${limits.memoryMb} MB of memory`;
@@ -270,22 +356,31 @@ export function createRunner(deps: { docker: DockerClient; logger: Logger; insta
           result.status = outcome.code === 0 ? 'ok' : 'failed';
         }
 
-        if (request.collect.length) Object.assign(result, await collect(id, request.collect));
-        result.scratchBytes = await docker.archiveSize(id, WORK_DIR, SCRATCH_BYTES).catch((err: unknown) => {
-          logger.warn('sandbox scratch size failed', { execId: request.execId, err });
-          return undefined;
-        });
+        if (request.collect.length) Object.assign(result, await collect(id, request.collect, after));
+        // a command that went over the size of /work needs no second measure: the tool empties /work after it.
+        result.scratchBytes =
+          outcome.kind === 'disk'
+            ? SCRATCH_BYTES + 1
+            : await docker.archiveSize(id, WORK_DIR, SCRATCH_BYTES, after()).catch((err: unknown) => {
+                logger.warn('sandbox scratch size failed', { execId: request.execId, err });
+                return undefined;
+              });
         return result;
       } catch (err) {
         takeOutput();
-        result.status = 'error';
-        result.error = errorText(err);
+        if (signal.aborted) stopped();
+        else {
+          result.status = 'error';
+          result.error = errorText(err);
+        }
         return result;
       } finally {
+        waitStop.abort();
         attached?.close();
-        if (result.containerId) {
-          await docker.removeContainer(result.containerId).catch((err: unknown) =>
-            logger.error('sandbox container remove failed', { execId: request.execId, containerId: result.containerId, err }),
+        const remove = result.containerId ?? orphan;
+        if (remove) {
+          await docker.removeContainer(remove, AbortSignal.timeout(stepMs)).catch((err: unknown) =>
+            logger.error('sandbox container remove failed', { execId: request.execId, containerId: remove, err }),
           );
         }
       }
@@ -296,13 +391,13 @@ export function createRunner(deps: { docker: DockerClient; logger: Logger; insta
 // sweepContainers removes the sandbox containers of this instance whose exec does not run now, for example after a
 // crash. npm run chat and the service share an instance, so keep reads the trace row and not a set of this process:
 // it is true for a running row that is not stale. the function gives the number of containers that it removed.
-export async function sweepContainers(docker: DockerClient, instance: string, keep: (execId: number) => boolean): Promise<number> {
-  const found = await docker.listContainers(`${LABELS.instance}=${instance}`);
+export async function sweepContainers(docker: DockerClient, instance: string, keep: (execId: number) => boolean, signal?: AbortSignal): Promise<number> {
+  const found = await docker.listContainers(`${LABELS.instance}=${instance}`, signal);
   let removed = 0;
   for (const container of found) {
     const exec = container.labels[LABELS.exec];
     if (exec !== undefined && exec !== '' && keep(Number(exec))) continue;
-    await docker.removeContainer(container.id);
+    await docker.removeContainer(container.id, signal);
     removed += 1;
   }
   return removed;

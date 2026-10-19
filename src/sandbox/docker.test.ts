@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { API_VERSION, createDemuxer, createDockerClient, DockerError, endpointOf } from './docker.js';
+import { API_VERSION, createDemuxer, createDockerClient, DockerError, endpointOf, isLoopback } from './docker.js';
 import type { ContainerSpec, DockerClient } from './types.js';
 
 describe('endpointOf', () => {
@@ -44,6 +44,23 @@ describe('endpointOf', () => {
 
   it('does not use the home socket on linux', () => {
     expect(endpointOf({}, 'linux', '/home/a', all)).toEqual({ socketPath: '/var/run/docker.sock' });
+  });
+
+  it('finds docker desktop and rootless docker on linux', () => {
+    expect(endpointOf({}, 'linux', '/home/a', (path) => path === '/home/a/.docker/desktop/docker.sock')).toEqual({ socketPath: '/home/a/.docker/desktop/docker.sock' });
+    expect(endpointOf({ XDG_RUNTIME_DIR: '/run/user/1000' }, 'linux', '/home/a', (path) => path === '/run/user/1000/docker.sock')).toEqual({
+      socketPath: '/run/user/1000/docker.sock',
+    });
+    // the system socket comes first, as for the docker command.
+    expect(endpointOf({ XDG_RUNTIME_DIR: '/run/user/1000' }, 'linux', '/home/a', all)).toEqual({ socketPath: '/var/run/docker.sock' });
+  });
+
+  it('knows which endpoints stay on this machine', () => {
+    expect(isLoopback({ socketPath: '/var/run/docker.sock' })).toBe(true);
+    expect(isLoopback({ host: '127.0.0.1', port: 2375 })).toBe(true);
+    expect(isLoopback({ host: '::1', port: 2375 })).toBe(true);
+    expect(isLoopback({ host: 'localhost', port: 2375 })).toBe(true);
+    expect(isLoopback({ host: '10.0.0.5', port: 2375 })).toBe(false);
   });
 
   it('gives a reason when no socket exists', () => {
@@ -286,6 +303,25 @@ describe.skipIf(process.platform === 'win32')('createDockerClient with a fake en
     handle = reply(200, { StatusCode: 3 });
     expect(await docker.wait('c1')).toBe(3);
     expect(last()).toMatchObject({ method: 'POST', url: `${prefix}/containers/c1/wait?condition=next-exit` });
+  });
+
+  it('says that the wait is registered when the engine sends the headers, before the exit', async () => {
+    let finish: () => void = () => {};
+    handle = (_req, res) => {
+      setTimeout(() => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.flushHeaders();
+        finish = () => res.end(JSON.stringify({ StatusCode: 4 }));
+      }, 30);
+    };
+    const waiting = docker.wait('c1');
+    let exited = false;
+    void waiting.then(() => (exited = true));
+    expect(waiting.registered).toBeDefined();
+    await waiting.registered;
+    expect(exited).toBe(false);
+    finish();
+    expect(await waiting).toBe(4);
   });
 
   it('inspects a container', async () => {

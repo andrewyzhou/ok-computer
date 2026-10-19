@@ -1,4 +1,5 @@
 import type { Db } from '../db/index.js';
+import { redact } from '../observability/redact.js';
 import type { ExecEnd, FileRow, NewExec } from './types.js';
 
 // the trace rows of the sandbox: sandbox_execs and sandbox_files (020_sandbox.sql). the row of an exec is written
@@ -19,7 +20,9 @@ export function startExec(db: Db, exec: NewExec, now: Date): number {
       exec.sessionKey,
       exec.taskId,
       exec.language,
-      exec.command,
+      // the model can paste a key into its code. the trace never keeps a secret, so the row holds the redacted code,
+      // and the container still gets the code as it was sent.
+      redact(exec.command),
       exec.image,
       exec.cwd,
       exec.network,
@@ -35,7 +38,7 @@ export function startExec(db: Db, exec: NewExec, now: Date): number {
 export function finishExec(db: Db, id: number, end: ExecEnd, now: Date): void {
   db.prepare(
     `UPDATE sandbox_execs SET status = ?, exitCode = ?, imageId = ?, containerId = ?, stdoutBlob = ?, stderrBlob = ?, stdoutBytes = ?,
-       stderrBytes = ?, truncated = ?, error = ?, durationMs = ?, endedAt = ?
+       stderrBytes = ?, truncated = ?, error = ?, durationMs = ?, egress = ?, notCollected = ?, endedAt = ?
      WHERE id = ? AND status = 'running'`,
   ).run(
     end.status,
@@ -49,6 +52,8 @@ export function finishExec(db: Db, id: number, end: ExecEnd, now: Date): void {
     end.truncated ? 1 : 0,
     end.error,
     Math.round(end.durationMs),
+    end.egress ? JSON.stringify(end.egress) : null,
+    JSON.stringify(end.notCollected ?? []),
     now.toISOString(),
     id,
   );

@@ -7,7 +7,7 @@ import { startEgressProxy, type EgressProxy } from '../browser/proxy.js';
 import type { Logger } from '../observability/logger.js';
 import { errorText } from '../tools/registry.js';
 import type { Egress } from '../web/egress.js';
-import { LABELS, SANDBOX_IMAGE, SANDBOX_USER } from './limits.js';
+import { DOCKER_STEP_MS, LABELS, SANDBOX_IMAGE, SANDBOX_USER } from './limits.js';
 import type { ContainerSpec, DockerClient, NetworkGate, NetworkPlan } from './types.js';
 
 // a call with network access reaches the internet only through the egress proxy of the app (src/browser/proxy.ts),
@@ -115,9 +115,12 @@ export function createNetworkGate(deps: NetworkGateDeps): NetworkGate {
     });
   const labels = (exec: string) => ({ [LABELS.sandbox]: '1', [LABELS.instance]: instance, [LABELS.exec]: exec });
 
-  // the answer holds for the life of the process. only an engine that does not answer is asked again.
-  let checked: Promise<{ ok: true } | { ok: false; reason: string }> | undefined;
-  async function probe(): Promise<{ ok: true } | { ok: false; reason: string }> {
+  // a yes holds for the life of the process, and so does a reason that cannot change while it runs (the host, or an old
+  // engine). an engine that does not answer, or a network that could not be made, is asked again at the next check,
+  // so a short failure does not turn the network mode off until a restart.
+  type Checked = { ok: true } | { ok: false; reason: string; again?: true };
+  let checked: Promise<Checked> | undefined;
+  async function probe(): Promise<Checked> {
     const found = path();
     if (!found.ok) return found;
     const info = await docker.info(AbortSignal.timeout(3_000));
@@ -129,19 +132,18 @@ export function createNetworkGate(deps: NetworkGateDeps): NetworkGate {
     // network of a process that stopped.
     const name = `okc-net-${instance}-probe-${randomBytes(4).toString('hex')}`;
     try {
-      await docker.createNetwork(name, { internal: true, labels: labels('probe') });
-      await docker.removeNetwork(name);
+      await docker.createNetwork(name, { internal: true, labels: labels('probe') }, AbortSignal.timeout(DOCKER_STEP_MS));
+      await docker.removeNetwork(name, AbortSignal.timeout(DOCKER_STEP_MS));
     } catch (err) {
-      return { ok: false, reason: `docker cannot make an internal network: ${errorText(err)}` };
+      return { ok: false, reason: `docker cannot make an internal network: ${errorText(err)}`, again: true };
     }
     return { ok: true };
   }
-  function check() {
-    checked ??= probe().catch((err: unknown) => {
-      checked = undefined;
-      return { ok: false as const, reason: `docker does not answer: ${errorText(err)}` };
-    });
-    return checked;
+  async function check(): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const mine = (checked ??= probe().catch((err: unknown) => ({ ok: false as const, reason: `docker does not answer: ${errorText(err)}`, again: true as const })));
+    const answer = await mine;
+    if (!answer.ok && answer.again && checked === mine) checked = undefined;
+    return answer.ok ? answer : { ok: false, reason: answer.reason };
   }
 
   async function open(execId: number, allowlist: string[]): Promise<NetworkPlan> {
@@ -151,7 +153,9 @@ export function createNetworkGate(deps: NetworkGateDeps): NetworkGate {
     if (!found.ok) throw new Error(found.reason);
     const bad = checkAllowlist(allowlist);
     if (bad) throw new Error(bad);
-    const list = allowlist.map(normalized);
+    // the proxy compares the site of a host, which drops a leading www., so each entry becomes a site the same way.
+    // an entry www.python.org then lets www.python.org through.
+    const list = allowlist.map((entry) => siteOf(normalized(entry)));
     const network = networkName(instance, execId);
     const relay = relayName(instance, execId);
     // the relay sends a tunnel request for this name when it listens. the name is new for each call and ends in
@@ -176,12 +180,12 @@ export function createNetworkGate(deps: NetworkGateDeps): NetworkGate {
         // the proxy stops first, so nothing gets out while the rest goes away.
         if (made.proxy) await step('proxy', made.proxy.close);
         // a network with a container on it cannot be removed, so the relay goes first.
-        if (made.relay) await step('relay', () => docker.removeContainer(relay));
-        if (made.network) await step('network', () => docker.removeNetwork(network));
+        if (made.relay) await step('relay', () => docker.removeContainer(relay, AbortSignal.timeout(DOCKER_STEP_MS)));
+        if (made.network) await step('network', () => docker.removeNetwork(network, AbortSignal.timeout(DOCKER_STEP_MS)));
       })());
 
     try {
-      await docker.createNetwork(network, { internal: true, labels: labels(String(execId)) });
+      await docker.createNetwork(network, { internal: true, labels: labels(String(execId)) }, AbortSignal.timeout(DOCKER_STEP_MS));
       made.network = true;
       made.proxy = await startEgressProxy(
         egress,
@@ -203,8 +207,12 @@ export function createNetworkGate(deps: NetworkGateDeps): NetworkGate {
       const port = new URL(made.proxy.url).port;
       // the engine may make the container and still answer with an error, so the cleanup removes it by name.
       made.relay = true;
-      const id = await docker.createContainer(relay, relayBody({ image, labels: labels(String(execId)), network, relay, proxyHost: found.proxyHost, port, readyHost, extraHosts: found.extraHosts }));
-      await docker.start(id);
+      const id = await docker.createContainer(
+        relay,
+        relayBody({ image, labels: labels(String(execId)), network, relay, proxyHost: found.proxyHost, port, readyHost, extraHosts: found.extraHosts }),
+        AbortSignal.timeout(DOCKER_STEP_MS),
+      );
+      await docker.start(id, AbortSignal.timeout(DOCKER_STEP_MS));
       let timer: NodeJS.Timeout | undefined;
       await Promise.race([
         ready,
@@ -257,6 +265,7 @@ function relayBody(spec: {
   const memory = 64 * 1024 * 1024;
   const body = {
     Image: spec.image,
+    Entrypoint: [''],
     Cmd: ['node', RELAY_SCRIPT, spec.proxyHost, spec.port, spec.readyHost],
     Env: [],
     WorkingDir: '/',
@@ -278,6 +287,7 @@ function relayBody(spec: {
       Memory: memory,
       MemorySwap: memory,
       PidsLimit: 32,
+      Ulimits: [],
       Tmpfs: {},
       Mounts: [],
       ExtraHosts: spec.extraHosts,
@@ -291,6 +301,10 @@ function relayBody(spec: {
   return body as unknown as ContainerSpec;
 }
 
+// a probe network lives for a moment. npm run chat and the service share the instance, so the sweep of one process
+// leaves a probe network younger than this, which can belong to a probe of the other one.
+const PROBE_AGE_MS = 60_000;
+
 // sweepNetworks removes the sandbox networks of this instance whose exec does not run now, for example after a crash.
 // the relay containers carry the same labels, so sweepContainers in runner.ts removes them first. it gives the number
 // of networks that it removed.
@@ -298,13 +312,16 @@ export async function sweepNetworks(
   docker: Pick<DockerClient, 'listNetworks' | 'removeNetwork'>,
   instance: string,
   keep: (execId: number) => boolean,
+  options: { now?: number; signal?: AbortSignal } = {},
 ): Promise<number> {
+  const now = options.now ?? Date.now();
   let removed = 0;
-  for (const each of await docker.listNetworks(`${LABELS.instance}=${instance}`)) {
+  for (const each of await docker.listNetworks(`${LABELS.instance}=${instance}`, options.signal)) {
     if (each.labels[LABELS.sandbox] !== '1' || each.labels[LABELS.instance] !== instance) continue;
+    if (each.labels[LABELS.exec] === 'probe' && each.createdAt !== undefined && now - Date.parse(each.createdAt) < PROBE_AGE_MS) continue;
     const execId = Number(each.labels[LABELS.exec]);
     if (Number.isInteger(execId) && keep(execId)) continue;
-    await docker.removeNetwork(each.name);
+    await docker.removeNetwork(each.name, options.signal);
     removed += 1;
   }
   return removed;

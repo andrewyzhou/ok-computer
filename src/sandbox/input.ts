@@ -35,6 +35,8 @@ export const sandboxExecInput = z.strictObject({
     .string()
     .min(1)
     .refine((code) => Buffer.byteLength(code) <= CODE_BYTES, `use at most ${CODE_BYTES} bytes of code. put a long program in a file`)
+    // an argv entry cannot hold a nul byte, and the trace would cut the code at it.
+    .refine((code) => !code.includes('\u0000'), 'remove the nul character from the code. put binary data in a file')
     .describe('the code to run. the working directory is /work'),
   files: z.array(fileIn).max(FILE_LIMITS.count).optional().describe('files to put into /work before the code runs'),
   collect: z
@@ -44,6 +46,7 @@ export const sandboxExecInput = z.strictObject({
     .describe('files or folders under /work to return after the code ends. each file gets a blob hash'),
   timeoutMs: z.number().int().min(1_000).max(MAX_LIMITS.timeoutMs).optional().describe('the wall time limit in ms'),
   memoryMb: z.number().int().min(64).max(MAX_LIMITS.memoryMb).optional().describe('the memory limit in MB'),
+  cpus: z.number().min(0.5).max(MAX_LIMITS.cpus).optional().describe('the number of cpus, for example 2'),
   network: z
     .strictObject({
       allow: z.array(host).min(1).max(10),

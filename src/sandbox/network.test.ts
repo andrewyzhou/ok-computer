@@ -142,6 +142,25 @@ describe('check', () => {
     down = false;
     expect(await gate.check()).toEqual({ ok: true });
   });
+  it('asks again after docker could not make the probe network, and keeps a fixed reason', async () => {
+    const fake = fakeDocker();
+    let broken = true;
+    const create = fake.docker.createNetwork;
+    fake.docker.createNetwork = async (...args) => {
+      if (broken) throw new Error('the probe network was removed');
+      return create(...args);
+    };
+    const gate = gateWith(fake);
+    expect(await gate.check()).toMatchObject({ ok: false, reason: /cannot make an internal network/ });
+    broken = false;
+    expect(await gate.check()).toEqual({ ok: true });
+    const old = fakeDocker({ engine: 'docker 25.0.3 (linux/amd64)' });
+    const oldGate = gateWith(old);
+    await oldGate.check();
+    await oldGate.check();
+    expect(old.calls.filter((call) => call === 'info')).toHaveLength(1);
+  });
+
   it('makes open fail with the reason and leaves nothing behind', async () => {
     const fake = fakeDocker();
     await expect(gateWith(fake, { inContainer: true }).open(1, ['pypi.org'])).rejects.toThrow(/runs in a container/);
@@ -271,6 +290,18 @@ describe('the proxy of a call', () => {
       await plan.close();
     }
   });
+
+  it('lets through the host of an entry that starts with www', async () => {
+    const fake = fakeDocker();
+    const plan = await gateWith(fake).open(11, ['www.shop.test']);
+    const proxyPort = fake.containers.get(relayName('inst', 11))!.Cmd[3]!;
+    try {
+      expect(await through(proxyPort, `http://www.shop.test:${port}/`)).toBe(200);
+      expect(plan.refused()).toEqual([]);
+    } finally {
+      await plan.close();
+    }
+  });
 });
 
 describe('sweepNetworks', () => {
@@ -366,6 +397,7 @@ describe.skipIf(!dockerReady)('the network of a call on a real docker host', { t
       const memory = 256 * 1024 * 1024;
       const spec: ContainerSpec = {
         Image: SANDBOX_IMAGE,
+        Entrypoint: [''],
         Cmd: ['python3', '-c', PROBE],
         Env: plan.env,
         WorkingDir: '/tmp',
@@ -387,6 +419,7 @@ describe.skipIf(!dockerReady)('the network of a call on a real docker host', { t
           Memory: memory,
           MemorySwap: memory,
           PidsLimit: 64,
+          Ulimits: [],
           Tmpfs: { '/tmp': 'rw,nosuid,nodev,size=16m' },
           Mounts: [],
           ExtraHosts: plan.extraHosts,
@@ -417,5 +450,22 @@ describe.skipIf(!dockerReady)('the network of a call on a real docker host', { t
       await real.removeContainer(name);
       await plan.close();
     }
+  });
+});
+
+describe('sweepNetworks and the probes of another process', () => {
+  it('keeps a probe network younger than a minute and removes an old one', async () => {
+    const removed: string[] = [];
+    const now = Date.parse('2026-10-18T10:00:00Z');
+    const probe = { [LABELS.sandbox]: '1', [LABELS.instance]: 'inst', [LABELS.exec]: 'probe' };
+    const docker = {
+      listNetworks: async () => [
+        { name: 'young', labels: probe, createdAt: new Date(now - 5_000).toISOString() },
+        { name: 'old', labels: probe, createdAt: new Date(now - 120_000).toISOString() },
+      ],
+      removeNetwork: async (name: string) => void removed.push(name),
+    };
+    expect(await sweepNetworks(docker, 'inst', () => false, { now })).toBe(1);
+    expect(removed).toEqual(['old']);
   });
 });

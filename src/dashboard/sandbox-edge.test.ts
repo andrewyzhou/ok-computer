@@ -50,6 +50,8 @@ const DETAIL_KEYS: Array<keyof SandboxExecDetail> = [
   'stderrBlob',
   'error',
   'files',
+  'egress',
+  'notCollected',
   'policy',
   'endedAt',
 ];
@@ -121,6 +123,8 @@ describe('the sandbox routes against the contract', () => {
       error: null,
       policy: null,
       files: [],
+      egress: null,
+      notCollected: [],
       fileCount: 0,
       truncated: false,
       allowlist: [],

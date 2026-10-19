@@ -1,5 +1,5 @@
 import type { Readable } from 'node:stream';
-import type { SandboxExecStatus, SandboxLanguage, SandboxLimits } from '../dashboard/types.js';
+import type { SandboxEgress, SandboxExecStatus, SandboxLanguage, SandboxLimits } from '../dashboard/types.js';
 
 // the shapes that the parts of the sandbox share. each part has its own file (see docs/PHASE5-API.md, M9), and this
 // file has no code, so a test can fake any part.
@@ -10,6 +10,8 @@ import type { SandboxExecStatus, SandboxLanguage, SandboxLimits } from '../dashb
 // reads it to check each security setting.
 export interface ContainerSpec {
   Image: string;
+  // [""] resets the entrypoint of the base image, so Cmd runs as it is and no script of the base sits before it.
+  Entrypoint: [''];
   Cmd: string[];
   Env: string[];
   WorkingDir: string;
@@ -33,6 +35,8 @@ export interface ContainerSpec {
     // the same as Memory, so the container gets no swap.
     MemorySwap: number;
     PidsLimit: number;
+    // fsize keeps one file below the size limit of /work, so a single write cannot fill the disk of the host.
+    Ulimits: Array<{ Name: string; Soft: number; Hard: number }>;
     Tmpfs: Record<string, string>;
     Mounts: Array<{ Type: 'volume'; Source: string; Target: string; ReadOnly: false }>;
     ExtraHosts: string[];
@@ -64,6 +68,10 @@ export interface EngineInfo {
   arch: string;
 }
 
+// the promise of a wait. registered resolves when the engine has registered the waiter, that is when it sent the
+// headers of the answer, so a start after it cannot be missed. a fake client can leave it out.
+export type Waiting = Promise<number> & { registered?: Promise<void> };
+
 // a typed client for the parts of the engine api that the sandbox uses. each method throws a DockerError on an answer
 // that is not 2xx, and on a socket error. the signal ends the request.
 export interface DockerClient {
@@ -80,20 +88,21 @@ export interface DockerClient {
   attach(id: string, signal?: AbortSignal): Promise<Attached>;
   start(id: string, signal?: AbortSignal): Promise<void>;
   // wait ends when the container stops and gives its exit code.
-  wait(id: string, signal?: AbortSignal): Promise<number>;
+  wait(id: string, signal?: AbortSignal): Waiting;
   inspect(id: string, signal?: AbortSignal): Promise<ContainerState>;
-  kill(id: string): Promise<void>;
-  // remove also removes a running container. a missing container is not an error.
-  removeContainer(id: string): Promise<void>;
-  listContainers(label: string): Promise<Array<{ id: string; labels: Record<string, string>; createdAt: string }>>;
-  createVolume(name: string, labels: Record<string, string>): Promise<void>;
+  kill(id: string, signal?: AbortSignal): Promise<void>;
+  // remove also removes a running container. a missing container is not an error. id can also be the name.
+  removeContainer(id: string, signal?: AbortSignal): Promise<void>;
+  listContainers(label: string, signal?: AbortSignal): Promise<Array<{ id: string; labels: Record<string, string>; createdAt: string }>>;
+  createVolume(name: string, labels: Record<string, string>, signal?: AbortSignal): Promise<void>;
   // a missing volume is not an error.
-  removeVolume(name: string): Promise<void>;
-  listVolumes(label: string): Promise<Array<{ name: string; labels: Record<string, string> }>>;
-  createNetwork(name: string, options: { internal: boolean; labels: Record<string, string> }): Promise<string>;
+  removeVolume(name: string, signal?: AbortSignal): Promise<void>;
+  listVolumes(label: string, signal?: AbortSignal): Promise<Array<{ name: string; labels: Record<string, string> }>>;
+  createNetwork(name: string, options: { internal: boolean; labels: Record<string, string> }, signal?: AbortSignal): Promise<string>;
   // a missing network is not an error.
-  removeNetwork(name: string): Promise<void>;
-  listNetworks(label: string): Promise<Array<{ name: string; labels: Record<string, string> }>>;
+  removeNetwork(name: string, signal?: AbortSignal): Promise<void>;
+  // createdAt is the time that the engine made the network, when it says so.
+  listNetworks(label: string, signal?: AbortSignal): Promise<Array<{ name: string; labels: Record<string, string>; createdAt?: string }>>;
 }
 
 // --- one exec (runner.ts) ---
@@ -213,6 +222,10 @@ export interface ExecEnd {
   truncated: boolean;
   error: string | null;
   durationMs: number;
+  // the hosts that the proxy let through and the requests that it refused, for a call with network access.
+  egress?: SandboxEgress | null;
+  // the collect paths that did not come back, with the reason.
+  notCollected?: Array<{ path: string; reason: string }>;
 }
 
 export interface FileRow {

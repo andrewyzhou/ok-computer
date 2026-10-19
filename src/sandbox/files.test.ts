@@ -8,6 +8,7 @@ import { createByteStore } from '../observability/byte-blobs.js';
 import { registerSecret } from '../observability/redact.js';
 import { checkPath, type FileStores, mimeOf, resolveInputs, storeOutputs } from './files.js';
 import { FILE_LIMITS } from './limits.js';
+import { packTar } from './tar.js';
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
 
@@ -264,5 +265,18 @@ describe('mimeOf', () => {
     }
     // a dot file has no extension.
     expect(mimeOf('.bashrc', Buffer.from('alias x=y'))).toBe('text/plain; charset=utf-8');
+  });
+});
+
+describe('checkPath and the archive', () => {
+  it('refuses a name that packTar cannot write, or packTar writes it', () => {
+    for (const path of ['a'.repeat(150) + '.csv', 'é'.repeat(150)]) {
+      if (checkPath(path) === undefined) expect(() => packTar([{ path, bytes: Buffer.from('x') }], new Date(0))).not.toThrow();
+    }
+  });
+
+  it('refuses a name over 255 bytes, which linux cannot make', () => {
+    expect(checkPath('é'.repeat(150))).toMatch(/at most 255 bytes/);
+    expect(checkPath(`${'a'.repeat(190)}.csv`)).toBeUndefined();
   });
 });

@@ -51,7 +51,7 @@ function checksumOf(header: Buffer): number {
 
 // splitPath gives the name and the prefix field of a path. a path of at most 100 bytes needs no prefix. a longer
 // path splits at a slash, so that the prefix has at most 155 bytes and the name at most 100.
-function splitPath(path: string): { name: Buffer; prefix: Buffer } {
+function splitPath(path: string): { name: Buffer; prefix: Buffer } | undefined {
   const bytes = Buffer.from(path, 'utf8');
   if (bytes.length <= NAME_BYTES) return { name: bytes, prefix: Buffer.alloc(0) };
   // the slash at the end of a folder name is part of the name, so the split never uses it.
@@ -61,12 +61,22 @@ function splitPath(path: string): { name: Buffer; prefix: Buffer } {
     const name = bytes.subarray(i + 1);
     if (i <= PREFIX_BYTES && name.length <= NAME_BYTES && name.length > 0) return { name, prefix: bytes.subarray(0, i) };
   }
-  throw new Error(`the path ${path} is too long for the archive`);
+  return undefined;
 }
 
-function header(path: string, type: '0' | '5', size: number, mtime: number): Buffer {
+// paxRecord gives the record "<length> path=<path>\n". the length counts the whole record, also its own digits.
+function paxRecord(path: string): Buffer {
+  const body = ` path=${path}\n`;
+  const bodyBytes = Buffer.byteLength(body);
+  let length = bodyBytes + 1;
+  while (String(length).length + bodyBytes !== length) length = String(length).length + bodyBytes;
+  return Buffer.from(`${length}${body}`, 'utf8');
+}
+
+function header(path: string, type: '0' | '5' | 'x', size: number, mtime: number): Buffer {
   const block = Buffer.alloc(BLOCK);
-  const { name, prefix } = splitPath(path);
+  // a path that does not split gets a pax record before its header (see entry), and the header keeps the first bytes.
+  const { name, prefix } = splitPath(path) ?? { name: Buffer.from(path, 'utf8').subarray(0, NAME_BYTES), prefix: Buffer.alloc(0) };
   writeField(block, 'name', name);
   writeField(block, 'prefix', prefix);
   writeField(block, 'mode', type === '5' ? '0000755\0' : '0000644\0');
@@ -86,9 +96,17 @@ function header(path: string, type: '0' | '5', size: number, mtime: number): Buf
 
 const padding = (size: number) => Buffer.alloc((BLOCK - (size % BLOCK)) % BLOCK);
 
+// entry gives the header of a path. a path that does not fit the name and prefix fields, for example one name of more
+// than 100 bytes, gets a pax header with the whole path before it, as the engine and every tar reader understand.
+function entry(path: string, type: '0' | '5', size: number, mtime: number): Buffer[] {
+  if (splitPath(path)) return [header(path, type, size, mtime)];
+  const record = paxRecord(path);
+  return [header('PaxHeader', 'x', record.length, mtime), record, padding(record.length), header(path, type, size, mtime)];
+}
+
 // packTar writes each file with mode 0644, owner 1000:1000 (the sandbox user), and the folders that its path needs
 // with mode 0755. a path longer than the 100-byte name field uses the ustar prefix field, and a path that does not fit
-// throws.
+// there gets a pax record.
 export function packTar(files: FileIn[], mtime: Date): Buffer {
   const seconds = Math.max(0, Math.floor(mtime.getTime() / 1000));
   const parts: Buffer[] = [];
@@ -101,9 +119,9 @@ export function packTar(files: FileIn[], mtime: Date): Buffer {
       const folder = `${segments.slice(0, i).join('/')}/`;
       if (folders.has(folder)) continue;
       folders.add(folder);
-      parts.push(header(folder, '5', 0, seconds));
+      parts.push(...entry(folder, '5', 0, seconds));
     }
-    parts.push(header(file.path, '0', file.bytes.length, seconds), file.bytes, padding(file.bytes.length));
+    parts.push(...entry(file.path, '0', file.bytes.length, seconds), file.bytes, padding(file.bytes.length));
   }
   // two zero blocks end the archive.
   parts.push(Buffer.alloc(BLOCK * 2));

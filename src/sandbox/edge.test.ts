@@ -33,6 +33,17 @@ function stores() {
 describe('the input of sandbox_exec', () => {
   const parse = (input: unknown) => sandboxExecInput.safeParse(input);
 
+  it('refuses code with a nul byte, which no argv can carry and the trace would cut', () => {
+    expect(sandboxExecInput.safeParse({ language: 'bash', code: 'echo a\u0000b' }).success).toBe(false);
+  });
+
+  it('takes cpus up to the maximum, and limitsFor gives them to the container', () => {
+    expect(parse({ language: 'bash', code: 'ls', cpus: 2 }).success).toBe(true);
+    expect(parse({ language: 'bash', code: 'ls', cpus: 0.25 }).success).toBe(false);
+    expect(parse({ language: 'bash', code: 'ls', cpus: MAX_LIMITS.cpus + 1 }).success).toBe(false);
+    expect(limitsFor(sandboxExecInput.parse({ language: 'bash', code: 'ls', cpus: 1.5 })).cpus).toBe(1.5);
+  });
+
   it('refuses an unknown language, an empty code, an unknown key and a bad limit', () => {
     expect(parse({ language: 'ruby', code: 'puts 1' }).success).toBe(false);
     expect(parse({ language: 'bash', code: '' }).success).toBe(false);

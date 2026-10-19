@@ -12,11 +12,19 @@ export interface FileStores {
   bytes: ByteStore;
 }
 
-export type Inputs = { ok: true; files: FileIn[]; rows: FileRow[] } | { ok: false; reason: string };
+// untrusted is true when an input blob came out of a call with network access, so its text is from outside.
+export type Inputs = { ok: true; files: FileIn[]; rows: FileRow[]; untrusted: boolean } | { ok: false; reason: string };
+
+// where an input blob comes from. unknown is a hash that no sandbox file of this session or no sandbox output names,
+// for example a screenshot or a payload of another session, so the call cannot read it. outside is a file that a call
+// with network access collected.
+export type BlobOrigin = 'unknown' | 'sandbox' | 'outside';
 
 // the first folder of /work that the sandbox keeps for itself.
 const RESERVED = '.okc';
 const MB = 1024 * 1024;
+// the longest name of one file or folder on linux.
+const NAME_BYTES = 255;
 
 // checkPath gives the reason when a path under /work is not allowed: an absolute path, a "." or ".." segment, a back
 // slash, a control character, or the reserved folder .okc. it gives undefined for a good path.
@@ -31,6 +39,8 @@ export function checkPath(path: string): string | undefined {
   if (segments.some((segment) => segment === '.' || segment === '..')) return 'remove the . and .. segments from the path';
   if (segments.some((segment) => segment === '')) return 'remove the empty segment from the path (a double slash or a slash at the end)';
   if (segments[0] === RESERVED) return `the folder ${RESERVED} is reserved. use another folder`;
+  // linux refuses a file or folder name over 255 bytes, so the engine would fail the call late.
+  if (segments.some((segment) => Buffer.byteLength(segment) > NAME_BYTES)) return `use names of at most ${NAME_BYTES} bytes between the slashes`;
   return undefined;
 }
 
@@ -49,7 +59,9 @@ const name = (path: string) => JSON.stringify(path);
 
 // resolveInputs reads each file of the input: content as utf-8 text, or the bytes of a blob. it refuses a file that
 // has both or neither, a blob that the store does not have, two files with one path, and files over FILE_LIMITS.
-export function resolveInputs(files: NonNullable<SandboxExecInput['files']>, stores: FileStores): Inputs {
+// origin tells where a blob comes from. the tool gives it, so a call reads only the files of the sandbox. a test can
+// leave it out, and then every blob of the stores is a sandbox file.
+export function resolveInputs(files: NonNullable<SandboxExecInput['files']>, stores: FileStores, origin: (hash: string) => BlobOrigin = () => 'sandbox'): Inputs {
   if (files.length > FILE_LIMITS.count) return { ok: false, reason: `give at most ${FILE_LIMITS.count} files` };
   // the cheap checks come first, so a refused call stores nothing.
   const paths = new Set<string>();
@@ -74,6 +86,7 @@ export function resolveInputs(files: NonNullable<SandboxExecInput['files']>, sto
 
   const read: Array<{ path: string; bytes: Buffer; mime: string; content?: string; blob?: string }> = [];
   let total = 0;
+  let untrusted = false;
   for (const file of files) {
     let bytes: Buffer;
     let mime: string;
@@ -82,6 +95,9 @@ export function resolveInputs(files: NonNullable<SandboxExecInput['files']>, sto
       mime = mimeOf(file.path, bytes);
     } else {
       const hash = file.blob!;
+      const from = origin(hash);
+      if (from === 'unknown') return { ok: false, reason: `the file ${name(file.path)}: no file has the blob ${hash} in the sandbox. use a blob that a sandbox_exec result gave` };
+      if (from === 'outside') untrusted = true;
       try {
         // the byte store knows the mime of each blob. a text blob that only the text store can read is utf-8.
         const stored = stores.bytes.read(hash);
@@ -116,7 +132,7 @@ export function resolveInputs(files: NonNullable<SandboxExecInput['files']>, sto
     size: file.bytes.length,
     mime: file.mime,
   }));
-  return { ok: true, files: read.map((file) => ({ path: file.path, bytes: file.bytes })), rows };
+  return { ok: true, files: read.map((file) => ({ path: file.path, bytes: file.bytes })), rows, untrusted };
 }
 
 // storeOutputs puts each collected file into a store and gives its row. a file is text when it is valid utf-8 with no

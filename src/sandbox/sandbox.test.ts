@@ -214,3 +214,94 @@ describe('the code sandbox', () => {
     ]);
   });
 });
+
+describe('the code sandbox over its life', () => {
+  function withRunner(run: (signal: AbortSignal) => Promise<void>, info = { engine: 'docker 28.3.0 (linux/arm64)', os: 'linux', arch: 'arm64' }) {
+    const dir = mkdtempSync(join(tmpdir(), 'okc-sandbox-life-'));
+    const parsed = parseConfig({ paths: { workspace: dir, data: join(dir, 'data') } });
+    if (!parsed.ok) throw new Error(parsed.error);
+    const db = openDb(':memory:');
+    const docker = { info: async () => info, imageId: async () => 'sha256:img' } as unknown as DockerClient;
+    const sandbox = createSandbox({
+      db,
+      blobs: createBlobStore(db, join(dir, 'data', 'blobs'), clock),
+      logger: silentLogger,
+      clock,
+      config: parsed.value,
+      enabled: true,
+      docker,
+      runner: {
+        run: async (request) => {
+          await run(request.signal);
+          return {
+            status: 'killed',
+            exitCode: 137,
+            stdout: Buffer.alloc(0),
+            stderr: Buffer.alloc(0),
+            stdoutBytes: 0,
+            stderrBytes: 0,
+            truncated: false,
+            collected: [],
+            notCollected: [],
+            containerId: 'c',
+            imageId: 'sha256:img',
+            durationMs: 1,
+            error: 'the run stopped, so the command was ended',
+            scratchBytes: 0,
+          };
+        },
+      },
+      network: { check: async () => ({ ok: false, reason: 'off' }), open: async () => Promise.reject(new Error('off')) },
+      scratch: { volumeFor: async () => ({ taskId: 't', volume: 'v' }), afterExec: async () => ({ reset: false }), sweep: async () => 0 },
+    });
+    return { sandbox, db };
+  }
+
+  it('ends the execs that run when the app stops, and waits for them', async () => {
+    let removed = false;
+    const { sandbox } = withRunner(
+      (signal) =>
+        new Promise<void>((resolve) =>
+          signal.addEventListener('abort', () =>
+            setTimeout(() => {
+              removed = true;
+              resolve();
+            }, 20),
+          ),
+        ),
+    );
+    await sandbox.start();
+    const tool = sandbox.tools[0]!;
+    const ctx = { runId: 'r', sessionKey: 'main', timeZone: 'UTC', clock, signal: new AbortController().signal, toolCallId: 'c1' };
+    const pending = tool.run(tool.input.parse({ language: 'bash', code: 'sleep 100' }), ctx);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await sandbox.stop();
+    expect(removed).toBe(true);
+    expect((await pending).content).toMatch(/^Killed/);
+    // a call after the stop does not start a container.
+    const late = await tool.run(tool.input.parse({ language: 'bash', code: 'ls' }), ctx);
+    expect(late).toMatchObject({ isError: true, effect: 'none' });
+  });
+
+  it('sweeps once more after the longest call, for the execs that a stopped app left young', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const { sandbox } = withRunner(async () => undefined);
+      await sandbox.start();
+      expect(sweeps.containers).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(MAX_LIMITS.timeoutMs + STALE_MARGIN_MS);
+      expect(sweeps.containers).toHaveLength(2);
+      expect(sweeps.networks).toHaveLength(2);
+      await sandbox.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says why when the engine runs windows containers', async () => {
+    const { sandbox } = withRunner(async () => undefined, { engine: 'docker 28.3.0 (windows/amd64)', os: 'windows', arch: 'amd64' });
+    await sandbox.start();
+    expect((await sandbox.status()).reason).toMatch(/Switch Docker Desktop to Linux containers/);
+    expect(sandbox.toolsFor('main')).toEqual([]);
+  });
+});

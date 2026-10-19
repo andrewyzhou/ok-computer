@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import type { Db } from '../db/index.js';
 import type { Clock } from '../time.js';
 import { DockerError } from './docker.js';
-import { LABELS, SCRATCH_BYTES, SCRATCH_IDLE_MS } from './limits.js';
+import { errorText } from '../tools/registry.js';
+import { DOCKER_STEP_MS, LABELS, SCRATCH_BYTES, SCRATCH_IDLE_MS } from './limits.js';
 import type { DockerClient } from './types.js';
 
 // a task is one segment of a session, from a reset to the next reset. the calls of a task share one docker volume at
@@ -41,14 +42,16 @@ export function createScratch(deps: { db: Db; docker: DockerClient; clock: Clock
     async volumeFor(sessionKey) {
       const taskId = taskIdOf(db, sessionKey);
       const volume = `okc-work-${instance}-${taskId}`;
-      // the engine gives the same volume again for a name that exists, so the create runs at each call. a volume
-      // that someone removed by hand is then made again.
-      await docker.createVolume(volume, { [LABELS.sandbox]: '1', [LABELS.instance]: instance, [LABELS.task]: taskId });
+      // the row is written before the volume, so a sweep that runs at the same time never finds the new labelled
+      // volume without a row and removes it. a row whose volume could not be made is harmless: the idle sweep ends it.
       const now = clock().toISOString();
       db.prepare(
         `INSERT INTO sandbox_scratch (id, sessionKey, volume, createdAt, lastUsedAt) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET lastUsedAt = excluded.lastUsedAt, removedAt = NULL`,
       ).run(taskId, sessionKey, volume, now, now);
+      // the engine gives the same volume again for a name that exists, so the create runs at each call. a volume
+      // that someone removed by hand is then made again.
+      await docker.createVolume(volume, { [LABELS.sandbox]: '1', [LABELS.instance]: instance, [LABELS.task]: taskId }, AbortSignal.timeout(DOCKER_STEP_MS));
       return { taskId, volume };
     },
 
@@ -56,36 +59,47 @@ export function createScratch(deps: { db: Db; docker: DockerClient; clock: Clock
       if (size === undefined || size <= SCRATCH_BYTES) return { reset: false };
       const row = db.prepare('SELECT volume FROM sandbox_scratch WHERE id = ?').get(taskId) as { volume: string } | undefined;
       if (!row) return { reset: false };
-      await docker.removeVolume(row.volume);
+      await docker.removeVolume(row.volume, AbortSignal.timeout(DOCKER_STEP_MS));
       markRemoved(taskId);
       return { reset: true };
     },
 
     async sweep() {
       let removed = 0;
-      const cutoff = new Date(clock().getTime() - SCRATCH_IDLE_MS).toISOString();
-      const idle = db.prepare('SELECT id, volume FROM sandbox_scratch WHERE removedAt IS NULL AND lastUsedAt < ?').all(cutoff) as Array<{ id: string; volume: string }>;
-      for (const row of idle) {
+      const failures: unknown[] = [];
+      // one volume that cannot be removed must not keep the others on disk, so each removal fails on its own, and the
+      // sweep reports the failures after the loops.
+      const tryRemove = async (name: string): Promise<boolean> => {
         try {
-          await docker.removeVolume(row.volume);
+          await docker.removeVolume(name, AbortSignal.timeout(DOCKER_STEP_MS));
+          return true;
         } catch (err) {
-          if (inUse(err)) continue;
-          throw err;
+          if (!inUse(err)) failures.push(err);
+          return false;
         }
+      };
+      const cutoff = () => new Date(clock().getTime() - SCRATCH_IDLE_MS).toISOString();
+      const stillIdle = db.prepare('SELECT 1 AS x FROM sandbox_scratch WHERE id = ? AND removedAt IS NULL AND lastUsedAt < ?');
+      const idle = db.prepare('SELECT id, volume FROM sandbox_scratch WHERE removedAt IS NULL AND lastUsedAt < ?').all(cutoff()) as Array<{ id: string; volume: string }>;
+      for (const row of idle) {
+        // a task can resume while the sweep runs, so the row is read again just before the removal.
+        if (stillIdle.get(row.id, cutoff()) === undefined) continue;
+        if (!(await tryRemove(row.volume))) continue;
         markRemoved(row.id);
         removed += 1;
       }
 
+      // the rows are read after the list, and again before each removal, so a volume that a new task made while the
+      // list ran is never taken for one without a row.
+      const found = await docker.listVolumes(`${LABELS.instance}=${instance}`, AbortSignal.timeout(DOCKER_STEP_MS));
+      const hasRow = db.prepare('SELECT 1 AS x FROM sandbox_scratch WHERE volume = ? AND removedAt IS NULL');
       const live = new Set((db.prepare('SELECT volume FROM sandbox_scratch WHERE removedAt IS NULL').all() as Array<{ volume: string }>).map((row) => row.volume));
-      for (const volume of await docker.listVolumes(`${LABELS.instance}=${instance}`)) {
-        if (live.has(volume.name)) continue;
-        try {
-          await docker.removeVolume(volume.name);
-        } catch (err) {
-          if (inUse(err)) continue;
-          throw err;
-        }
-        removed += 1;
+      for (const volume of found) {
+        if (live.has(volume.name) || hasRow.get(volume.name) !== undefined) continue;
+        if (await tryRemove(volume.name)) removed += 1;
+      }
+      if (failures.length) {
+        throw new Error(`the sweep removed ${removed} volumes, and ${failures.length} could not be removed: ${failures.map(errorText).join('; ')}`);
       }
       return removed;
     },

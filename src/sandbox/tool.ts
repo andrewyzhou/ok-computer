@@ -3,7 +3,7 @@ import type { Db } from '../db/index.js';
 import type { Logger } from '../observability/logger.js';
 import type { Clock } from '../time.js';
 import { defineTool, errorText, type Tool, type ToolContext, type ToolOutput } from '../tools/registry.js';
-import { checkPath, resolveInputs, storeOutputs, type FileStores } from './files.js';
+import { checkPath, resolveInputs, storeOutputs, type BlobOrigin, type FileStores } from './files.js';
 import { sandboxExecInput, type SandboxExecInput } from './input.js';
 import { DEFAULT_LIMITS, LABELS, limitsFor, MAX_LIMITS, MAX_RUNNING, SCRATCH_BYTES, WORK_DIR } from './limits.js';
 import { checkAllowlist } from './network.js';
@@ -27,6 +27,9 @@ export interface SandboxToolDeps {
   probe: () => Probe;
   // the ids of the execs that run now in this process. the tool adds and removes its own id.
   live: Set<number>;
+  // the execs that run now, with a way to stop each one and the promise of its end. stop() of the sandbox uses it, so
+  // the containers are removed before the process exits.
+  running?: Map<number, { stop: AbortController; done: Promise<unknown> }>;
 }
 
 // the start of the app sweeps the idle scratch volumes. a process that runs for days also sweeps them after a call,
@@ -46,11 +49,12 @@ const DESCRIPTION =
   `The working directory is ${WORK_DIR}. It is kept for this task (until the owner starts a new chat with /new), so a later call can use the files of an earlier call. ` +
   `It is emptied when it grows over ${mb(SCRATCH_BYTES)} MB. ` +
   'The container has no network, unless network.allow names the hosts that the code may reach through a proxy. The owner then approves each such call. ' +
-  'Put files into /work with files: give content for a text file, or blob for the hash of a file from an earlier result. ' +
+  'Put files into /work with files: give content for a text file, or blob for the hash of a file from an earlier sandbox_exec result. ' +
   'collect names files or folders under /work to return after the code ends, and each returned file gets a blob hash. ' +
+  'A text file is stored with secrets (keys, tokens) masked, so a text blob passed back in holds the masked text. To keep exact bytes across calls, leave the file in /work. ' +
   `Default limits: ${DEFAULT_LIMITS.cpus} cpu, ${DEFAULT_LIMITS.memoryMb} MB of memory, ${DEFAULT_LIMITS.timeoutMs / 1000} s of wall time, ` +
   `${DEFAULT_LIMITS.pids} processes, and ${mb(DEFAULT_LIMITS.outputBytes)} MB each of stdout and stderr. ` +
-  `A call can ask for up to ${MAX_LIMITS.memoryMb} MB with memoryMb and up to ${MAX_LIMITS.timeoutMs / 1000} s with timeoutMs. ` +
+  `A call can ask for up to ${MAX_LIMITS.memoryMb} MB with memoryMb, up to ${MAX_LIMITS.cpus} cpus with cpus, and up to ${MAX_LIMITS.timeoutMs / 1000} s with timeoutMs. ` +
   `At most ${MAX_RUNNING} calls run at the same time.`;
 
 const BUSY = `${['No', 'One', 'Two', 'Three', 'Four'][MAX_RUNNING] ?? MAX_RUNNING} sandbox commands run now. Wait for a result, then try again.`;
@@ -61,6 +65,23 @@ const refuse = (content: string): ToolOutput => ({ content, isError: true, effec
 // with network access is external, so the owner approves it.
 export function createSandboxExecTool(deps: SandboxToolDeps): Tool {
   const { db, stores, runner, scratch, network, logger, clock, live } = deps;
+  const running = deps.running ?? new Map<number, { stop: AbortController; done: Promise<unknown> }>();
+
+  // a call reads only a blob that the sandbox knows: an output of any exec, or a file of an exec of the same session.
+  // a hash of a screenshot or a payload of another session is refused. an output of a call with network access holds
+  // text from outside.
+  const originOf =
+    (sessionKey: string) =>
+    (hash: string): BlobOrigin => {
+      const rows = db
+        .prepare(
+          `SELECT e.network AS network FROM sandbox_files f JOIN sandbox_execs e ON e.id = f.execId
+           WHERE f.blob = ? AND (f.direction = 'out' OR e.sessionKey = ?)`,
+        )
+        .all(hash, sessionKey);
+      if (!rows.length) return 'unknown';
+      return rows.some((row) => row.network === 'allowlist') ? 'outside' : 'sandbox';
+    };
   // a slot is taken before the first await, so two calls that start at the same time cannot both pass the limit.
   let starting = 0;
   let lastSweep = clock().getTime();
@@ -100,7 +121,7 @@ export function createSandboxExecTool(deps: SandboxToolDeps): Tool {
           const ready = await network.check();
           if (!ready.ok) return refuse(`sandbox_exec did not run, because the network mode does not work here: ${ready.reason}`);
         }
-        const inputs = resolveInputs(input.files ?? [], stores);
+        const inputs = resolveInputs(input.files ?? [], stores, originOf(ctx.sessionKey));
         if (!inputs.ok) return refuse(`sandbox_exec did not run: ${inputs.reason}`);
         const collect = input.collect ?? [];
         for (const path of collect) {
@@ -135,7 +156,24 @@ export function createSandboxExecTool(deps: SandboxToolDeps): Tool {
         );
         live.add(execId);
         release();
-        return await runExec(input, ctx, { execId, allow, limits, collect, files: inputs.files, rows: inputs.rows, ...task });
+        // the stop of the app ends the exec as the stop of its run does.
+        const stop = new AbortController();
+        const done = runExec(input, { ...ctx, signal: AbortSignal.any([ctx.signal, stop.signal]) }, {
+          execId,
+          allow,
+          limits,
+          collect,
+          files: inputs.files,
+          rows: inputs.rows,
+          untrusted: inputs.untrusted,
+          ...task,
+        });
+        running.set(execId, { stop, done });
+        try {
+          return await done;
+        } finally {
+          running.delete(execId);
+        }
       } finally {
         release();
       }
@@ -145,18 +183,34 @@ export function createSandboxExecTool(deps: SandboxToolDeps): Tool {
   async function runExec(
     input: SandboxExecInput,
     ctx: ToolContext,
-    exec: { execId: number; allow: string[]; limits: SandboxLimits; collect: string[]; files: FileIn[]; rows: FileRow[]; taskId: string; volume: string },
+    exec: {
+      execId: number;
+      allow: string[];
+      limits: SandboxLimits;
+      collect: string[];
+      files: FileIn[];
+      rows: FileRow[];
+      untrusted: boolean;
+      taskId: string;
+      volume: string;
+    },
   ): Promise<ToolOutput> {
     const { execId, allow, limits, collect, taskId, volume } = exec;
     const started = performance.now();
-    // the code and its output come from the model and the session. only what the network brings in is outside text.
-    const outside = input.network ? { untrustedSource: `sandbox:network (${allow.join(', ')})` } : {};
+    // the code and its output come from the model and the session. only what the network brings in is outside text,
+    // also when it comes in as a file that an earlier call with network access collected.
+    const outside = input.network
+      ? { untrustedSource: `sandbox:network (${allow.join(', ')})` }
+      : exec.untrusted
+        ? { untrustedSource: 'sandbox:file (an output of a call with network access)' }
+        : {};
     let stage: 'before' | 'running' | 'after' = 'before';
     let plan: NetworkPlan | undefined;
     try {
-      addFiles(db, execId, exec.rows, clock());
       let result: ExecResult;
       try {
+        // the rows of the files in are written inside the try, so a failed write still frees the slot of the exec.
+        addFiles(db, execId, exec.rows, clock());
         plan = input.network ? await network.open(execId, allow) : undefined;
         stage = 'running';
         result = await runner.run({
@@ -199,6 +253,8 @@ export function createSandboxExecTool(deps: SandboxToolDeps): Tool {
           truncated: result.truncated,
           error: result.error,
           durationMs: result.durationMs,
+          egress: plan ? { passed: plan.passed(), refused: plan.refused() } : null,
+          notCollected: result.notCollected,
         },
         clock(),
       );
@@ -247,6 +303,7 @@ export function createSandboxExecTool(deps: SandboxToolDeps): Tool {
             truncated: false,
             error: text,
             durationMs: performance.now() - started,
+            egress: plan ? { passed: plan.passed(), refused: plan.refused() } : null,
           },
           clock(),
         );

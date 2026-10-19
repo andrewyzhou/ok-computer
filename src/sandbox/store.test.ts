@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/index.js';
+import { registerSecret } from '../observability/redact.js';
 import { DEFAULT_LIMITS } from './limits.js';
 import { addFiles, closeStale, finishExec, STALE_ERROR, startExec } from './store.js';
 import type { ExecEnd, NewExec } from './types.js';
@@ -129,5 +130,27 @@ describe('sandbox store', () => {
       { execId: id, direction: 'in', path: 'data/in.csv', blob: 'b'.repeat(64), size: 10, mime: 'text/csv', createdAt: '2026-10-18T10:00:01.000Z' },
       { execId: id, direction: 'out', path: 'out.png', blob: 'c'.repeat(64), size: 99, mime: 'image/png', createdAt: '2026-10-18T10:00:01.000Z' },
     ]);
+  });
+});
+
+describe('the code in the trace', () => {
+  it('keeps the code redacted, so a key that the model pasted never reaches the row', () => {
+    const db = openDb(':memory:');
+    const key = 'store-test-key-0a1b2c3d4e5f';
+    registerSecret(key);
+    const id = startExec(db, exec({ command: `curl -H "authorization: ${key}" https://x.test` }), at('2026-10-18T10:00:00Z'));
+    const row = db.prepare('SELECT command FROM sandbox_execs WHERE id = ?').get(id) as { command: string };
+    expect(row.command).not.toContain(key);
+    expect(row.command).toBe('curl -H "authorization: [redacted]" https://x.test');
+  });
+
+  it('keeps the egress and the paths that were not collected', () => {
+    const db = openDb(':memory:');
+    const id = startExec(db, exec({ network: 'allowlist', allowlist: ['pypi.org'] }), at('2026-10-18T10:00:00Z'));
+    const egress = { passed: ['pypi.org'], refused: [{ target: 'evil.test:443', reason: 'evil.test is not in the allowlist of this call' }] };
+    finishExec(db, id, end({ egress, notCollected: [{ path: 'out.csv', reason: 'no such file in /work' }] }), at('2026-10-18T10:00:01Z'));
+    const row = db.prepare('SELECT egress, notCollected FROM sandbox_execs WHERE id = ?').get(id) as { egress: string; notCollected: string };
+    expect(JSON.parse(row.egress)).toEqual(egress);
+    expect(JSON.parse(row.notCollected)).toEqual([{ path: 'out.csv', reason: 'no such file in /work' }]);
   });
 });

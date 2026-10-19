@@ -12,8 +12,8 @@ import { MAIN_SESSION } from '../sessions/router.js';
 import type { Clock } from '../time.js';
 import { errorText, type Tool } from '../tools/registry.js';
 import { publicEgress, type Egress } from '../web/egress.js';
-import { createDockerClient, endpointOf } from './docker.js';
-import { DEFAULT_LIMITS, MAX_LIMITS, PROBE_TIMEOUT_MS, SANDBOX_IMAGE, STALE_MARGIN_MS, STATUS_TTL_MS } from './limits.js';
+import { createDockerClient, endpointOf, isLoopback } from './docker.js';
+import { DEFAULT_LIMITS, DOCKER_STEP_MS, MAX_LIMITS, PROBE_TIMEOUT_MS, SANDBOX_IMAGE, STALE_MARGIN_MS, STATUS_TTL_MS, SWEEP_MS } from './limits.js';
 import { createNetworkGate, sweepNetworks } from './network.js';
 import { createRunner, sweepContainers } from './runner.js';
 import { createScratch, type Scratch } from './scratch.js';
@@ -41,7 +41,9 @@ export interface Sandbox {
   // the status for the dashboard. it probes docker again after STATUS_TTL_MS.
   status(): Promise<SandboxStatus>;
   // start probes docker, closes the rows of a stopped process, and removes its containers, networks and idle volumes.
+  // it runs the same sweep once more after the longest call, for the execs that a stopped process left young.
   start(): Promise<void>;
+  // stop ends the execs that run now and waits until their containers are removed.
   stop(): Promise<void>;
 }
 
@@ -65,11 +67,27 @@ export const instanceOf = (dataDir: string) => createHash('sha256').update(resol
 
 const staleMs = MAX_LIMITS.timeoutMs + STALE_MARGIN_MS;
 
+// stop waits this long for the execs that it ends. the runner kills and removes each container within its step limits.
+const STOP_MS = 2 * DOCKER_STEP_MS;
+
+// within resolves when the promise settles, or after ms, so an engine that hangs never holds the start or the stop.
+const within = (promise: Promise<unknown>, ms: number) =>
+  new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref();
+    void promise.finally(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+
 export function createSandbox(deps: Deps): Sandbox {
   const { db, logger, clock, config } = deps;
   const image = deps.image ?? SANDBOX_IMAGE;
   const instance = instanceOf(config.paths.data);
   const live = new Set<number>();
+  const running = new Map<number, { stop: AbortController; done: Promise<unknown> }>();
+  let again: NodeJS.Timeout | undefined;
   let last: Probe = { available: false, reason: OFF, engine: null, imageId: null };
   let lastAt = -Infinity;
   let atStart = false;
@@ -81,12 +99,14 @@ export function createSandbox(deps: Deps): Sandbox {
     try {
       const found = deps.docker ? undefined : endpointOf(process.env, process.platform, homedir(), existsSync);
       if (found && 'error' in found) throw new Error(found.error);
+      // the code and the files of each call go to the engine in plain text over tcp.
+      if (found && !isLoopback(found)) logger.warn('DOCKER_HOST is a tcp address on another host, so the code and the files of each call go to it unencrypted', { host: 'host' in found ? found.host : undefined });
       const docker = deps.docker ?? createDockerClient(found!);
       const network = deps.network ?? createNetworkGate({ docker, egress: deps.egress ?? publicEgress, logger, instance, image });
       const scratch = deps.scratch ?? createScratch({ db, docker, clock, instance });
       const runner = deps.runner ?? createRunner({ docker, logger, instance });
       const stores = { blobs: deps.blobs, bytes: createByteStore(db, join(config.paths.data, 'blobs'), clock) };
-      const tool = createSandboxExecTool({ db, stores, runner, scratch, network, logger, clock, image, probe: () => last, live });
+      const tool = createSandboxExecTool({ db, stores, runner, scratch, network, logger, clock, image, probe: () => last, live, running });
       parts = { docker, network, scratch, tool };
     } catch (err) {
       last = { ...last, reason: `the code sandbox did not start: ${errorText(err)}` };
@@ -99,6 +119,11 @@ export function createSandbox(deps: Deps): Sandbox {
     const signal = AbortSignal.timeout(PROBE_TIMEOUT_MS);
     try {
       const info = await parts.docker.info(signal);
+      if (info.os !== 'linux') {
+        last = { available: false, reason: `docker runs ${info.os} containers. Switch Docker Desktop to Linux containers`, engine: info.engine, imageId: null };
+        lastAt = performance.now();
+        return last;
+      }
       const imageId = await parts.docker.imageId(image, signal);
       last = imageId
         ? { available: true, reason: null, engine: info.engine, imageId }
@@ -108,6 +133,34 @@ export function createSandbox(deps: Deps): Sandbox {
     }
     lastAt = performance.now();
     return last;
+  }
+
+  // the rows of a stopped process are closed also when docker is off now, so the trace never shows a command that runs
+  // forever. this needs only the database.
+  function closeRows() {
+    try {
+      const closed = closeStale(db, clock(), staleMs, live);
+      if (closed.length) logger.warn('closed the sandbox execs of a stopped app', { execs: closed });
+    } catch (err) {
+      logger.error('sandbox stale sweep failed', { err });
+    }
+  }
+
+  // sweep removes the containers, networks and volumes of the execs that do not run now. it has a time limit, so an
+  // engine that hangs never holds the start of the app.
+  async function sweep(found: NonNullable<typeof parts>) {
+    const signal = AbortSignal.timeout(SWEEP_MS);
+    const work = (async () => {
+      const keep = (execId: number) =>
+        db.prepare("SELECT 1 AS x FROM sandbox_execs WHERE id = ? AND status = 'running' AND createdAt > ?").get(execId, new Date(clock().getTime() - staleMs).toISOString()) !== undefined;
+      // the relay containers of a call with network access go with the other containers, so their networks are free
+      // to remove after them.
+      const containers = await sweepContainers(found.docker, instance, keep, signal);
+      const networks = await sweepNetworks(found.docker, instance, keep, { signal });
+      const volumes = await found.scratch.sweep();
+      if (containers || networks || volumes) logger.info('sandbox sweep', { containers, networks, volumes });
+    })().catch((err: unknown) => logger.error('sandbox sweep failed', { err }));
+    await within(work, SWEEP_MS);
   }
 
   return {
@@ -128,14 +181,7 @@ export function createSandbox(deps: Deps): Sandbox {
     },
     async start() {
       if (!deps.enabled) return;
-      // the rows of a stopped process are closed also when docker is off now, so the trace never shows a command that
-      // runs forever. this needs only the database.
-      try {
-        const closed = closeStale(db, clock(), staleMs, live);
-        if (closed.length) logger.warn('closed the sandbox execs of a stopped app', { execs: closed });
-      } catch (err) {
-        logger.error('sandbox stale sweep failed', { err });
-      }
+      closeRows();
       if (!parts) return;
       const found = await probe();
       atStart = found.available;
@@ -143,21 +189,25 @@ export function createSandbox(deps: Deps): Sandbox {
         logger.info('the code sandbox is off', { reason: found.reason });
         return;
       }
-      try {
-        const keep = (execId: number) =>
-          db.prepare("SELECT 1 AS x FROM sandbox_execs WHERE id = ? AND status = 'running' AND createdAt > ?").get(execId, new Date(clock().getTime() - staleMs).toISOString()) !== undefined;
-        // the relay containers of a call with network access go with the other containers, so their networks are
-        // free to remove after them.
-        const containers = await sweepContainers(parts.docker, instance, keep);
-        const networks = await sweepNetworks(parts.docker, instance, keep);
-        const volumes = await parts.scratch.sweep();
-        if (containers || networks || volumes) logger.info('sandbox sweep', { containers, networks, volumes });
-      } catch (err) {
-        logger.error('sandbox sweep failed', { err });
-      }
+      await sweep(parts);
+      // a stopped process can leave an exec younger than staleMs, which this sweep keeps. its container ends itself at
+      // its wall time, and this second sweep closes its row and removes what is left.
+      again = setTimeout(() => {
+        again = undefined;
+        closeRows();
+        if (parts) void sweep(parts);
+      }, staleMs);
+      again.unref();
     },
-    // a run that stops aborts the signal of its tool call, and the runner then kills its container. so stop has no
-    // container of its own to end.
-    async stop() {},
+    // a run that stops aborts the signal of its tool call, and the runner then kills its container. the stop of the
+    // app does the same for each exec that runs now, and waits until the runner has removed its container.
+    async stop() {
+      if (again) clearTimeout(again);
+      again = undefined;
+      last = { ...last, available: false, reason: 'the app is stopping' };
+      const ending = [...running.values()];
+      for (const exec of ending) exec.stop.abort();
+      await within(Promise.allSettled(ending.map((exec) => exec.done)), STOP_MS);
+    },
   };
 }

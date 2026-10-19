@@ -76,6 +76,20 @@ export const STATUS_TTL_MS = 30_000;
 // a running row older than the longest call and this margin belongs to a process that stopped.
 export const STALE_MARGIN_MS = 60_000;
 
+// the container also ends itself: the command runs under timeout -s KILL with the wall time and this margin, so a
+// container that the app left behind in a crash stops on its own. the app kills it first in the normal case.
+export const WALL_MARGIN_S = 5;
+
+// each docker call of an exec, apart from the wait, ends after this time, so an engine that hangs never holds a call.
+export const DOCKER_STEP_MS = 30_000;
+// the whole exec ends after its wall time and this margin, which covers the steps before and after the command.
+export const EXEC_MARGIN_MS = 120_000;
+// the start sweep ends after this time, so an engine that hangs never holds the start of the app.
+export const SWEEP_MS = 30_000;
+
+// while a command runs, the runner measures /work this often and kills a command that wrote more than SCRATCH_BYTES.
+export const DISK_POLL_MS = 5_000;
+
 // every container, volume and network of the sandbox has these labels, so a sweep never touches other docker objects
 // or the objects of another install. sandbox has the value "1", instance the value of instanceOf (sandbox.ts), exec the
 // id of the sandbox_execs row, and task the id of the scratch task.

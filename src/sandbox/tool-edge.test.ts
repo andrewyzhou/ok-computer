@@ -181,4 +181,103 @@ describe('sandbox_exec on its failure paths', () => {
     expect(out.content).toContain('boom');
     expect(t.db.prepare('SELECT status, exitCode FROM sandbox_execs').get()).toEqual({ status: 'failed', exitCode: 3 });
   });
+
+  it('frees the slot of the exec when the file rows cannot be written', async () => {
+    const db = openDb(':memory:');
+    const dir = mkdtempSync(join(tmpdir(), 'okc-sandbox-f4-'));
+    const stores = { blobs: createBlobStore(db, join(dir, 'blobs'), clock), bytes: createByteStore(db, join(dir, 'blobs'), clock) };
+    const live = new Set<number>();
+    const tool = createSandboxExecTool({
+      db, stores,
+      runner: { run: async () => ok() },
+      scratch: { volumeFor: async () => ({ taskId: 't', volume: 'v' }), afterExec: async () => ({ reset: false }), sweep: async () => 0 },
+      network: { check: async () => ({ ok: true }), open: async () => Promise.reject(new Error('no')) },
+      logger: silentLogger, clock, image: 'okc-sandbox:1',
+      probe: () => ({ available: true, reason: null, engine: 'docker 28', imageId: 'sha256:x' }),
+      live,
+    });
+    const ctx = { runId: 'r', sessionKey: 'main', timeZone: 'UTC', clock, signal: new AbortController().signal, toolCallId: 'c1' };
+    db.exec("CREATE TRIGGER fail_files BEFORE INSERT ON sandbox_files BEGIN SELECT RAISE(ABORT, 'the disk is full'); END");
+    for (let i = 0; i < 2; i++) {
+      const out = await tool.run(tool.input.parse({ language: 'bash', code: 'cat a.txt', files: [{ path: 'a.txt', content: 'x' }] }), ctx);
+      expect(out.isError).toBe(true);
+    }
+    db.exec('DROP TRIGGER fail_files');
+    expect(live.size).toBe(0);
+    const out = await tool.run(tool.input.parse({ language: 'bash', code: 'echo hi' }), ctx);
+    expect(out.isError).toBeUndefined();
+  });
+});
+
+describe('sandbox_exec and the blobs of other places', () => {
+  it('refuses a blob that no sandbox file names, such as a screenshot of another session', async () => {
+    const t = setup();
+    const hash = t.stores.bytes.put(Buffer.from([0x89, 0x50, 0x4e, 0x47]), 'image/png');
+    const out = await t.call({ language: 'bash', code: 'ls', files: [{ path: 'shot.png', blob: hash }] });
+    expect(out).toMatchObject({ isError: true, effect: 'none' });
+    expect(out.content).toContain('in the sandbox');
+    expect(t.run).not.toHaveBeenCalled();
+  });
+
+  it('takes an output of an earlier call, and marks the result untrusted when that call had network access', async () => {
+    const t = setup({ run: async () => ok({ collected: [{ path: 'page.html', bytes: Buffer.from('<p>from outside</p>') }] }) });
+    const first = await t.call({ language: 'bash', code: 'curl -o page.html https://pypi.org', network: { allow: ['pypi.org'] }, collect: ['page.html'] });
+    const hash = /blob ([0-9a-f]{64})/.exec(first.content)![1]!;
+    const second = await t.call({ language: 'bash', code: 'cat page.html', files: [{ path: 'page.html', blob: hash }] });
+    expect(second.isError).toBeUndefined();
+    expect(second.untrustedSource).toMatch(/network access/);
+    const clean = setup({ run: async () => ok({ collected: [{ path: 'a.txt', bytes: Buffer.from('mine') }] }) });
+    const made = await clean.call({ language: 'bash', code: 'echo mine > a.txt', collect: ['a.txt'] });
+    const own = /blob ([0-9a-f]{64})/.exec(made.content)![1]!;
+    const again = await clean.call({ language: 'bash', code: 'cat a.txt', files: [{ path: 'a.txt', blob: own }] });
+    expect(again.isError).toBeUndefined();
+    expect(again.untrustedSource).toBeUndefined();
+  });
+
+  it('keeps the egress and the missed collect paths in the row', async () => {
+    const plan: NetworkPlan = {
+      networkMode: 'n',
+      env: [],
+      extraHosts: [],
+      passed: () => ['pypi.org'],
+      refused: () => [{ target: 'evil.test:443', reason: 'evil.test is not in the allowlist of this call' }],
+      close: async () => {},
+    };
+    const t = setup({ network: { open: async () => plan }, run: async () => ok({ notCollected: [{ path: 'gone.csv', reason: 'no such file in /work' }] }) });
+    await t.call({ language: 'bash', code: 'curl https://pypi.org', network: { allow: ['pypi.org'] }, collect: ['gone.csv'] });
+    const row = t.db.prepare('SELECT egress, notCollected FROM sandbox_execs').get() as { egress: string; notCollected: string };
+    expect(JSON.parse(row.egress)).toEqual({ passed: ['pypi.org'], refused: [{ target: 'evil.test:443', reason: 'evil.test is not in the allowlist of this call' }] });
+    expect(JSON.parse(row.notCollected)).toEqual([{ path: 'gone.csv', reason: 'no such file in /work' }]);
+  });
+
+  it('ends a running exec when the app stops it, and frees its slot', async () => {
+    const db = openDb(':memory:');
+    const dir = mkdtempSync(join(tmpdir(), 'okc-sandbox-stop-'));
+    const stores = { blobs: createBlobStore(db, join(dir, 'blobs'), clock), bytes: createByteStore(db, join(dir, 'blobs'), clock) };
+    const live = new Set<number>();
+    const running = new Map<number, { stop: AbortController; done: Promise<unknown> }>();
+    const tool = createSandboxExecTool({
+      db,
+      stores,
+      runner: {
+        run: (request) => new Promise((resolve) => request.signal.addEventListener('abort', () => resolve(ok({ status: 'killed', exitCode: 137, error: 'the run stopped, so the command was ended' })))),
+      },
+      scratch: { volumeFor: async () => ({ taskId: 't', volume: 'v' }), afterExec: async () => ({ reset: false }), sweep: async () => 0 },
+      network: { check: async () => ({ ok: true }), open: async () => Promise.reject(new Error('no')) },
+      logger: silentLogger,
+      clock,
+      image: 'okc-sandbox:1',
+      probe: () => ({ available: true, reason: null, engine: 'docker 28', imageId: 'sha256:x' }),
+      live,
+      running,
+    });
+    const ctx = { runId: 'r', sessionKey: 'main', timeZone: 'UTC', clock, signal: new AbortController().signal, toolCallId: 'c1' };
+    const pending = tool.run(tool.input.parse({ language: 'bash', code: 'sleep 100' }), ctx);
+    await vi.waitFor(() => expect(running.size).toBe(1));
+    for (const exec of running.values()) exec.stop.abort();
+    const out = await pending;
+    expect(out.content).toMatch(/^Killed/);
+    expect(running.size).toBe(0);
+    expect(live.size).toBe(0);
+  });
 });

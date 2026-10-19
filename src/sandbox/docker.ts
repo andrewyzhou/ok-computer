@@ -1,7 +1,7 @@
 import { request as httpRequest, type ClientRequest, type IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
 import { PassThrough } from 'node:stream';
-import type { Attached, DockerClient } from './types.js';
+import type { Attached, DockerClient, Waiting } from './types.js';
 
 // the sandbox talks to the docker engine api over its socket with node:http, not through the docker cli. DESIGN-NEXT
 // (phase 5, m9) gives the reasons. this file is the only part that knows the http shapes of the api.
@@ -23,9 +23,11 @@ export class DockerError extends Error {
   }
 }
 
-// endpointOf finds the engine: DOCKER_HOST first (unix:// or tcp://; a tcp:// address with tls is refused with a
-// reason), then the socket of docker desktop in the home folder on macos, then /var/run/docker.sock, and on windows
-// the pipe //./pipe/docker_engine. exists is given, so a test can say which paths exist.
+// endpointOf finds the engine: DOCKER_HOST first (unix://, npipe:// or tcp://; a tcp:// address with tls is refused
+// with a reason), then the socket of docker desktop in the home folder on macos, then /var/run/docker.sock, then on
+// linux the socket of docker desktop in the home folder and the rootless socket in $XDG_RUNTIME_DIR, and on windows
+// the pipe //./pipe/docker_engine. it does not read docker contexts. exists is given, so a test can say which paths
+// exist.
 export function endpointOf(
   env: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
@@ -57,6 +59,12 @@ export function endpointOf(
     if (exists(desktop)) return { socketPath: desktop };
   }
   if (exists('/var/run/docker.sock')) return { socketPath: '/var/run/docker.sock' };
+  if (platform === 'linux') {
+    const desktop = `${home}/.docker/desktop/docker.sock`;
+    if (exists(desktop)) return { socketPath: desktop };
+    const runtime = env.XDG_RUNTIME_DIR?.trim();
+    if (runtime && exists(`${runtime}/docker.sock`)) return { socketPath: `${runtime}/docker.sock` };
+  }
   return { error: 'no docker socket was found. Install and start Docker, or set DOCKER_HOST' };
 }
 
@@ -90,6 +98,11 @@ const readBody = (res: IncomingMessage) =>
     res.on('end', () => resolve(Buffer.concat(chunks)));
     res.on('error', (err) => reject(new DockerError(err.message)));
   });
+
+// isLoopback tells if a tcp endpoint stays on this machine. the code and the files of a call go to the engine in
+// plain text, so the app warns about any other host.
+export const isLoopback = (endpoint: Endpoint) =>
+  'socketPath' in endpoint || endpoint.host === 'localhost' || endpoint.host === '::1' || /^127\./.test(endpoint.host);
 
 // the body of an error answer. a body that breaks off still gives the status.
 const errorBody = (res: IncomingMessage) => readBody(res).catch(() => Buffer.alloc(0));
@@ -241,9 +254,19 @@ export function createDockerClient(endpoint: Endpoint): DockerClient {
       // 304 is a container that runs already.
       await send('POST', `${container(id)}/start`, { signal }, [304]);
     },
-    async wait(id, signal) {
-      const { body } = await send('POST', `${container(id)}/wait?condition=next-exit`, { signal });
-      return json<{ StatusCode: number }>(body).StatusCode;
+    wait(id, signal) {
+      // the engine sends the headers of the answer only after it has registered the waiter. registered resolves
+      // then, so the runner starts the container after it, and a short command cannot exit before the wait.
+      const answer = open('POST', `${container(id)}/wait?condition=next-exit`, { signal }).answer;
+      const exit = answer.then(async (res) => {
+        const body = await readBody(res);
+        const status = res.statusCode ?? 0;
+        if (!ok(status)) throw errorOf(status, body);
+        return json<{ StatusCode: number }>(body).StatusCode;
+      });
+      const registered = answer.then(() => undefined);
+      registered.catch(() => {});
+      return Object.assign(exit, { registered }) as Waiting;
     },
     async inspect(id, signal) {
       const { body } = await send('GET', `${container(id)}/json`, { signal });
@@ -255,45 +278,50 @@ export function createDockerClient(endpoint: Endpoint): DockerClient {
         oomKilled: found.State?.OOMKilled === true,
       };
     },
-    async kill(id) {
+    async kill(id, signal) {
       // 404 is a container that is gone, and 409 one that does not run. both are the state that kill wants.
-      await send('POST', `${container(id)}/kill`, {}, [404, 409]);
+      await send('POST', `${container(id)}/kill`, { signal }, [404, 409]);
     },
-    async removeContainer(id) {
-      await send('DELETE', `${container(id)}?force=1&v=0`, {}, [404]);
+    async removeContainer(id, signal) {
+      await send('DELETE', `${container(id)}?force=1&v=0`, { signal }, [404]);
     },
-    async listContainers(label) {
-      const { body } = await send('GET', `/containers/json?all=1&filters=${filters(label)}`);
+    async listContainers(label, signal) {
+      const { body } = await send('GET', `/containers/json?all=1&filters=${filters(label)}`, { signal });
       return json<Array<{ Id: string; Labels?: Record<string, string> | null; Created?: number }>>(body).map((found) => ({
         id: found.Id,
         labels: found.Labels ?? {},
         createdAt: new Date((found.Created ?? 0) * 1000).toISOString(),
       }));
     },
-    async createVolume(name, labels) {
-      await send('POST', '/volumes/create', { body: { Name: name, Labels: labels } });
+    async createVolume(name, labels, signal) {
+      await send('POST', '/volumes/create', { body: { Name: name, Labels: labels }, signal });
     },
-    async removeVolume(name) {
+    async removeVolume(name, signal) {
       // a 409 is a volume that a container still uses, and the caller must know it, so only 404 is allowed.
-      await send('DELETE', `/volumes/${encodeURIComponent(name)}`, {}, [404]);
+      await send('DELETE', `/volumes/${encodeURIComponent(name)}`, { signal }, [404]);
     },
-    async listVolumes(label) {
-      const { body } = await send('GET', `/volumes?filters=${filters(label)}`);
+    async listVolumes(label, signal) {
+      const { body } = await send('GET', `/volumes?filters=${filters(label)}`, { signal });
       const found = json<{ Volumes?: Array<{ Name: string; Labels?: Record<string, string> | null }> | null }>(body);
       return (found.Volumes ?? []).map((volume) => ({ name: volume.Name, labels: volume.Labels ?? {} }));
     },
-    async createNetwork(name, options) {
+    async createNetwork(name, options, signal) {
       const { body } = await send('POST', '/networks/create', {
         body: { Name: name, Internal: options.internal, Labels: options.labels, CheckDuplicate: true },
+        signal,
       });
       return json<{ Id: string }>(body).Id;
     },
-    async removeNetwork(name) {
-      await send('DELETE', `/networks/${encodeURIComponent(name)}`, {}, [404]);
+    async removeNetwork(name, signal) {
+      await send('DELETE', `/networks/${encodeURIComponent(name)}`, { signal }, [404]);
     },
-    async listNetworks(label) {
-      const { body } = await send('GET', `/networks?filters=${filters(label)}`);
-      return json<Array<{ Name: string; Labels?: Record<string, string> | null }>>(body).map((network) => ({ name: network.Name, labels: network.Labels ?? {} }));
+    async listNetworks(label, signal) {
+      const { body } = await send('GET', `/networks?filters=${filters(label)}`, { signal });
+      return json<Array<{ Name: string; Labels?: Record<string, string> | null; Created?: string }>>(body).map((network) => ({
+        name: network.Name,
+        labels: network.Labels ?? {},
+        ...(network.Created ? { createdAt: network.Created } : {}),
+      }));
     },
   };
 }
