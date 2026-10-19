@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -23,6 +23,7 @@ const data = path.join(__dirname, '..', 'data');
 const token = require('node:crypto').randomBytes(16).toString('hex');
 fs.writeFileSync(path.join(data, 'okc.stop-token'), token + '\\n');
 fs.writeFileSync(path.join(data, 'agent.pid'), String(process.pid));
+fs.writeFileSync(path.join(data, 'agent.service'), String(process.env.OKC_SERVICE));
 setTimeout(() => process.exit(0), 60000);
 require('node:http').createServer((req, res) => {
   if (req.url === '/api/overview') return res.writeHead(200).end('{}');
@@ -42,12 +43,15 @@ const stubs: Record<string, string> = {
   launchctl: `echo "$*" >> "$STUB_DIR/launchctl.log"
 case "$1" in
   print)
-    [ -f "$STUB_DIR/loaded" ] || exit 113
+    # launchd removes a job a moment after bootout returns, so the job shows once more after a bootout.
+    if [ -f "$STUB_DIR/unloading" ]; then rm -f "$STUB_DIR/unloading"; elif [ ! -f "$STUB_DIR/loaded" ]; then exit 113; fi
     echo "$2 = {"
     if [ -f "$STUB_DIR/launchd.pid" ]; then printf '\\tpid = %s\\n' "$(cat "$STUB_DIR/launchd.pid")"; fi
     echo "}" ;;
-  bootstrap) touch "$STUB_DIR/loaded" ;;
-  bootout) rm -f "$STUB_DIR/loaded" ;;
+  bootstrap)
+    if [ -f "$STUB_DIR/unloading" ]; then echo 'Bootstrap failed: 5: Input/output error' >&2; exit 5; fi
+    touch "$STUB_DIR/loaded" ;;
+  bootout) if [ -f "$STUB_DIR/loaded" ]; then rm -f "$STUB_DIR/loaded"; touch "$STUB_DIR/unloading"; fi ;;
 esac`,
   open: `echo "$*" >> "$STUB_DIR/open.log"`,
   'xdg-open': `echo "$*" >> "$STUB_DIR/xdg-open.log"`,
@@ -72,7 +76,8 @@ async function freePort(): Promise<number> {
 }
 
 async function makeCase(uname: 'Darwin' | 'Linux', name = 'okc-edge-'): Promise<Case> {
-  const root = mkdtempSync(join(tmpdir(), name));
+  // the script resolves its root with pwd -P, and tmpdir() on macos is under the /var link.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), name)));
   const home = mkdtempSync(join(tmpdir(), 'okc-home-'));
   const stub = mkdtempSync(join(tmpdir(), 'okc-stub-'));
   for (const dir of ['scripts', 'dist', 'data']) mkdirSync(join(root, dir));
@@ -129,12 +134,15 @@ const answers = (c: Case) => async () => {
 };
 const agentPid = (c: Case) => Number(read(join(c.root, 'data', 'agent.pid')));
 
+const extra: string[] = [];
+
 afterEach(() => {
   for (const c of cases.splice(0)) {
     const pid = agentPid(c);
     if (pid && alive(pid)) process.kill(pid, 'SIGKILL');
     for (const dir of [c.root, c.home, c.stub]) rmSync(dir, { recursive: true, force: true });
   }
+  for (const dir of extra.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 describe.runIf(process.platform !== 'win32')('okc.sh at its edges', { timeout: 60_000 }, () => {
@@ -224,6 +232,10 @@ describe.runIf(process.platform !== 'win32')('okc.sh at its edges', { timeout: 6
     expect(parsed.WorkingDirectory).toBe(c.root);
     expect(parsed.RunAtLoad).toBe(true);
     expect(parsed.KeepAlive).toEqual({ SuccessfulExit: false });
+    // launchd gives /dev/null as stdin, and the variable keeps the agent from a cli that would end at once.
+    expect(parsed.EnvironmentVariables.OKC_SERVICE).toBe('1');
+    expect(parsed.ExitTimeOut).toBe(60);
+    expect(parsed.ThrottleInterval).toBe(60);
     const path: string[] = parsed.EnvironmentVariables.PATH.split(':');
     expect(path[0]).toBe(dirname(node));
     expect(path).toContain('/opt/homebrew/bin');
@@ -270,5 +282,114 @@ describe.runIf(process.platform !== 'win32')('okc.sh at its edges', { timeout: 6
     writeFileSync(join(c.root, 'data', 'logs', 'launcher.log'), 'x'.repeat(1_048_577));
     await okc(c, ['stop']);
     expect(read(join(c.root, 'data', 'logs', 'launcher.log'))).toBe('ok computer is not running.\n');
+  });
+
+  it('starts the agent as a service, so its stdin of /dev/null does not stop it', async () => {
+    const c = await makeCase('Linux');
+    await okc(c, ['start', '--no-open']);
+    await waitFor(answers(c));
+    expect(read(join(c.root, 'data', 'agent.service'))).toBe('1');
+    await okc(c, ['stop']);
+  });
+
+  it('keeps the pid of the agent that runs when two starts race', async () => {
+    for (let round = 0; round < 4; round++) {
+      const c = await makeCase('Linux');
+      await Promise.all([okc(c, ['start', '--no-open']), okc(c, ['start', '--no-open'])]);
+      await waitFor(answers(c));
+      await new Promise((r) => setTimeout(r, 1500));
+      const port = new URL(c.env.OKC_URL!).port;
+      const listener = Number(spawnSync('lsof', ['-t', `-iTCP:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8' }).stdout.trim());
+      const status = (await okc(c, ['status'])).out.split('\n')[0];
+      process.kill(listener, 'SIGKILL');
+      expect(status).toBe(`running (pid ${listener})`);
+    }
+  }, 120_000);
+
+  it('takes over a start lock whose shell ended', async () => {
+    const c = await makeCase('Linux');
+    mkdirSync(join(c.root, 'data', 'okc.start.lock'));
+    const ended = spawnSync(process.execPath, ['-e', '']).pid!;
+    writeFileSync(join(c.root, 'data', 'okc.start.lock', 'pid'), String(ended));
+    expect((await okc(c, ['start', '--no-open'])).out).toBe('ok computer started.');
+    expect(existsSync(join(c.root, 'data', 'okc.start.lock'))).toBe(false);
+    await waitFor(answers(c));
+    await okc(c, ['stop']);
+  });
+
+  // a forced stop skips the end of the agent, and the chrome of its profile would keep the profile lock.
+  it('ends a process of the agent profile after a forced stop, and leaves other processes alone', async () => {
+    const c = await makeCase('Linux');
+    const profile = join(c.root, 'data', 'browser', 'profile');
+    const chrome = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', '--', `--user-data-dir=${profile}`], { stdio: 'ignore' });
+    const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', '--', `--user-data-dir=${profile}-other`], { stdio: 'ignore' });
+    await waitFor(() => spawnSync('ps', ['-p', String(other.pid), '-o', 'command='], { encoding: 'utf8' }).stdout.includes('-other'));
+    try {
+      // the agent of the case is this test process. it counts as alive for the first check only, and its kill does
+      // nothing, so the forced stop runs and ends no test process.
+      const body = `agent_pid() { agent=${process.pid}; agent_source=file; }; calls=0; pid_matches() { ((++calls == 1)); }; kill() { if [[ "$2" == ${process.pid} ]]; then return 0; fi; command kill "$@"; }; stop_agent`;
+      const result = sourced(c, body);
+      expect(result.out).toContain('ok computer stopped.');
+      await waitFor(() => !alive(chrome.pid!), 5_000);
+      expect(alive(other.pid!)).toBe(true);
+    } finally {
+      chrome.kill('SIGKILL');
+      other.kill('SIGKILL');
+    }
+  });
+
+  it('shows the starts and the last exit code that launchd keeps', async () => {
+    const c = await makeCase('Darwin');
+    mkdirSync(join(c.home, 'Library', 'LaunchAgents'), { recursive: true });
+    writeFileSync(join(c.home, 'Library', 'LaunchAgents', `${label}.plist`), '');
+    writeFileSync(join(c.stub, 'loaded'), '');
+    const stub = join(c.stub, 'bin', 'launchctl');
+    writeFileSync(stub, `#!/bin/bash\nprintf '%s = {\\n\\truns = 7\\n\\tlast exit code = 1\\n}\\n' "$2"\n`);
+    const out = (await okc(c, ['status'])).out.split('\n');
+    expect(out.slice(0, 3)).toEqual(['not running', 'launchd runs: 7', 'launchd last exit code: 1']);
+  });
+
+  it('cuts the launchd logs in place to their last lines when they are over 1 mb', async () => {
+    const c = await makeCase('Linux');
+    mkdirSync(join(c.root, 'data', 'logs'));
+    const err = join(c.root, 'data', 'logs', 'launchd.err.log');
+    writeFileSync(err, `${'x'.repeat(600)}\n`.repeat(2000) + 'last line\n');
+    await okc(c, ['stop']);
+    const kept = read(err).split('\n');
+    expect(kept.length).toBe(1001);
+    expect(kept.at(-2)).toBe('last line');
+  });
+});
+
+describe.runIf(process.platform !== 'win32')('okc.sh through a linked folder', { timeout: 60_000 }, () => {
+  it('finds the agent that the real path started when it runs through a link to the root, and keeps its pid file', async () => {
+    const c = await makeCase('Linux');
+    const links = mkdtempSync(join(tmpdir(), 'okc-link-'));
+    extra.push(links);
+    const linked = join(links, 'repo');
+    symlinkSync(c.root, linked);
+    await okc(c, ['start', '--no-open']);
+    await waitFor(answers(c));
+    const pid = agentPid(c);
+    const status = await run(c, join(linked, 'scripts', 'okc.sh'), ['status']);
+    expect(status.out.split('\n')[0]).toBe(`running (pid ${pid})`);
+    expect(read(join(c.root, 'data', 'okc.node.pid')).trim()).toBe(String(pid));
+    expect((await run(c, join(linked, 'scripts', 'okc.sh'), ['stop'])).out).toBe('ok computer stopped.');
+    await waitFor(() => !alive(pid), 5_000);
+  });
+
+  // an agent that an older okc started through the link has the linked path in its command line.
+  it('finds an agent whose command line names the root through a link', async () => {
+    const c = await makeCase('Linux');
+    const links = mkdtempSync(join(tmpdir(), 'okc-link-'));
+    extra.push(links);
+    const linked = join(links, 'repo with space');
+    symlinkSync(c.root, linked);
+    const child = spawn(process.execPath, [join(linked, 'dist', 'main.js')], { cwd: c.root, env: c.env, stdio: 'ignore' });
+    await waitFor(answers(c));
+    writeFileSync(join(c.root, 'data', 'okc.node.pid'), String(child.pid));
+    expect((await okc(c, ['status'])).out.split('\n')[0]).toBe(`running (pid ${child.pid})`);
+    expect((await okc(c, ['stop'])).out).toBe('ok computer stopped.');
+    await waitFor(() => !alive(child.pid!), 5_000);
   });
 });

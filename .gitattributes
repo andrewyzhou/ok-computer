@@ -1,0 +1,3 @@
+# the shell script and the plist template run on macos and linux, where a carriage return breaks bash.
+*.sh text eol=lf
+scripts/macos/*.plist text eol=lf

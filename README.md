@@ -44,11 +44,13 @@ A small supervisor restarts the agent if it stops. The logon task means it runs 
 |---|---|
 | `okc` | Build if needed, start in the background, open the dashboard |
 | `okc stop` / `okc restart` | Stop or restart the agent |
-| `okc status` | Show whether it runs, the dashboard URL, and recent restarts |
+| `okc status` | Show whether it runs, the dashboard URL, how often launchd started it with its last exit code, and the last errors from launchd |
 | `okc logs` | Follow the agent log |
 | `okc open` | Open the dashboard at http://127.0.0.1:4317 |
+| `okc browser login [url]` | Open the agent's Chrome profile to sign in to sites |
+| `okc install` / `okc uninstall` | Add or remove the `okc` command and the LaunchAgent |
 
-launchd restarts the agent only after a crash, not after `okc stop`. Its own output goes to `data/logs/launchd.*.log`. `okc uninstall` removes the command and the LaunchAgent.
+launchd restarts the agent only after a crash, not after `okc stop`, and waits at least a minute between two starts. Its own output goes to `data/logs/launchd.*.log`, which `okc start` and `okc stop` cut to its last 1000 lines when it grows over 1 MB. `okc uninstall` removes the command and the LaunchAgent.
 
 ### On every system
 

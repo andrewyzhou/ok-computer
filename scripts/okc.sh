@@ -11,7 +11,9 @@ while [[ -L "$script" ]]; do
   link="$(readlink "$script")"
   if [[ "$link" == /* ]]; then script="$link"; else script="$(dirname "$script")/$link"; fi
 done
-root="$(cd "$(dirname "$script")/.." && pwd)"
+# pwd -P gives the physical path, so a start through a folder link and a start through the real path name the same
+# root, and the plist holds that same path.
+root="$(cd -P "$(dirname "$script")/.." && pwd -P)"
 data="$root/data"
 # the tests give their own address, because a real agent can listen on the default port of the same machine.
 url="${OKC_URL:-http://127.0.0.1:4317}"
@@ -59,12 +61,69 @@ launchd_loaded() {
   launchd_print >/dev/null
 }
 
+# bootout returns before launchd has removed the job, and a bootstrap before that fails with "5: Input/output error".
+# so this waits up to 5 seconds until launchctl print fails.
+launchd_bootout() {
+  launchctl bootout "$(domain)/$label" || true
+  local tries=25
+  while ((tries > 0)) && launchd_loaded; do
+    sleep 0.2
+    tries=$((tries - 1))
+  done
+}
+
+# two starts at the same moment both saw no agent and both started node, and the pid file could keep the one that
+# failed. mkdir is atomic, so only one start runs the check and the start at a time. macos has no flock. the lock
+# holds the pid of its shell, and a lock whose shell ended is stale.
+start_lock="$data/okc.start.lock"
+take_start_lock() {
+  mkdir -p "$data"
+  # a build can run under the lock, so a live holder gets up to 10 minutes.
+  local tries=3000 empty=0 holder
+  until mkdir "$start_lock" 2>/dev/null; do
+    holder="$(cat "$start_lock/pid" 2>/dev/null || true)"
+    if [[ "$holder" =~ ^[0-9]+$ ]]; then
+      empty=0
+      if ! kill -0 "$holder" 2>/dev/null; then rm -rf "$start_lock"; fi
+    else
+      # the holder writes its pid right after the mkdir. a lock that stays without a pid for 2 seconds belongs to a
+      # start that ended in between.
+      empty=$((empty + 1))
+      if ((empty >= 10)); then
+        rm -rf "$start_lock"
+        empty=0
+      fi
+    fi
+    tries=$((tries - 1))
+    ((tries > 0)) || fail "another okc start holds $start_lock. delete it when no okc runs."
+    sleep 0.2
+  done
+  echo "$$" >"$start_lock/pid"
+  trap 'rm -rf "$start_lock"' EXIT
+}
+
+drop_start_lock() {
+  rm -rf "$start_lock"
+  trap - EXIT
+}
+
 # a pid file stays after a crash, a logoff or a reboot, and the system then gives its id to other processes. so a
 # process counts only when its command line runs the agent of this root.
+# the agent may have started through another spelling of the same folder, such as a folder link, /var for
+# /private/var or other letter case on macos. so the path before dist/main.js also counts when it is the same file.
 pid_matches() {
-  local command
+  local command candidate
   command="$(LC_ALL=C ps -ww -p "$1" -o command= 2>/dev/null)" || return 1
-  [[ "$command" == *"$root/dist/main.js"* ]]
+  [[ "$command" == *"$root/dist/main.js"* ]] && return 0
+  [[ "$command" == */dist/main.js* ]] || return 1
+  # the command line is the node path, a space and the path of main.js, and both can hold spaces. so each space is
+  # tried as the start of the path.
+  candidate="${command%%/dist/main.js*}"
+  while :; do
+    if [[ "$candidate" == /* && "$candidate/dist/main.js" -ef "$root/dist/main.js" ]]; then return 0; fi
+    [[ "$candidate" == *' '* ]] || return 1
+    candidate="${candidate#* }"
+  done
 }
 
 # this sets agent and agent_source, or leaves both empty when no agent of this root runs. a pid file that does not
@@ -159,6 +218,7 @@ start_agent() {
   for arg in "$@"; do
     if [[ "$arg" == '--no-open' ]]; then open=0; fi
   done
+  take_start_lock
   if agent_pid; then
     echo 'ok computer is already running.'
     if code_is_newer "$agent"; then
@@ -176,11 +236,13 @@ start_agent() {
       local node
       node="$(find_node)"
       mkdir -p "$data/logs"
-      (cd "$root" && exec nohup "$node" "$root/dist/main.js" </dev/null >>"$launcher_log" 2>&1) &
+      # OKC_SERVICE tells the agent that its stdin is /dev/null, so it runs no cli that would end at once.
+      (cd "$root" && OKC_SERVICE=1 exec nohup "$node" "$root/dist/main.js" </dev/null >>"$launcher_log" 2>&1) &
       echo "$!" >"$pid_file"
     fi
     echo 'ok computer started.'
   fi
+  drop_start_lock
   if [[ $open -eq 1 ]]; then open_dashboard; fi
 }
 
@@ -224,14 +286,31 @@ stop_agent() {
     echo 'the agent did not stop by itself, so okc stops it.'
     if [[ "$source" == 'launchd' ]]; then
       # launchd starts the agent again after a kill, but not after a bootout.
-      launchctl bootout "$(domain)/$label" || true
+      launchd_bootout
     else
       kill -TERM "$pid" 2>/dev/null || true
       if ! wait_for_exit "$pid" 5; then kill -KILL "$pid" 2>/dev/null || true; fi
     fi
+    end_chrome
   fi
   rm -f "$pid_file"
   echo 'ok computer stopped.'
+}
+
+# playwright starts chrome in its own process group, and a forced stop skips the end of the agent, so the chrome of
+# the agent profile can outlive it. that chrome would keep the profile lock. the match is on the plain text of the
+# command line, so a path with special characters needs no escape.
+end_chrome() {
+  local profile="--user-data-dir=$agent_data/browser/profile" line pid command
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    pid="${line%% *}"
+    command="${line#* }"
+    # the profile path ends at a space or at the end, so the profile of another root with a longer name does not count.
+    if [[ "$pid" =~ ^[0-9]+$ && ("$command" == *"$profile "* || "$command" == *"$profile") ]]; then
+      kill -TERM "$pid" 2>/dev/null || true
+    fi
+  done < <(LC_ALL=C ps -A -ww -o pid= -o command= 2>/dev/null || true)
 }
 
 # this prints the http code of the overview, or 000 when nothing answers.
@@ -262,6 +341,13 @@ open_dashboard() {
 
 show_status() {
   if agent_pid; then echo "running (pid $agent)"; else echo 'not running'; fi
+  # launchd counts the starts of the job and keeps the code of its last exit.
+  local output line re='^[[:space:]]*(runs|last exit code) = (.*)$'
+  if output="$(launchd_print)"; then
+    while IFS= read -r line; do
+      if [[ "$line" =~ $re ]]; then echo "launchd ${BASH_REMATCH[1]}: ${BASH_REMATCH[2]}"; fi
+    done <<<"$output"
+  fi
   if has curl; then
     # a dashboard token makes the overview answer 401, and that still means the agent is up.
     local code
@@ -326,8 +412,9 @@ install_agent() {
     echo 'installed: okc command. linux has no login agent yet, so run okc start after you sign in.'
     return 0
   fi
-  # a second agent cannot hold the data folder next to the one that launchd starts.
-  if agent_pid && [[ "$agent_source" == 'file' ]]; then stop_agent; fi
+  # a second agent cannot hold the data folder next to the one that launchd starts. an agent of launchd also gets the
+  # graceful stop first, because the bootout below would stop it at once.
+  if agent_pid; then stop_agent; fi
   # launchd starts dist/main.js at once, because of RunAtLoad.
   if build_is_old; then run_build; fi
   link_command
@@ -339,17 +426,18 @@ install_agent() {
   sed -e "s|@@NODE@@|$(fill "$node")|g" -e "s|@@ROOT@@|$(fill "$root")|g" -e "s|@@PATH@@|$(fill "$path")|g" \
     -e "s|@@LOGS@@|$(fill "$logs")|g" "$template" >"$plist"
   if has plutil; then plutil -lint "$plist" >/dev/null || fail "the login agent at $plist is not a valid plist."; fi
-  if launchd_loaded; then launchctl bootout "$(domain)/$label" || true; fi
+  if launchd_loaded; then launchd_bootout; fi
   launchctl bootstrap "$(domain)" "$plist"
   echo "installed: okc command and the $label login agent."
 }
 
 uninstall_agent() {
   stop_agent
-  if launchd_loaded; then launchctl bootout "$(domain)/$label" || true; fi
+  if launchd_loaded; then launchd_bootout; fi
   rm -f "$plist"
   local command="$HOME/.local/bin/okc"
-  if [[ -L "$command" && "$(readlink "$command")" == "$root/scripts/okc.sh" ]]; then rm -f "$command"; fi
+  # -ef also matches a link that an install through another spelling of the root wrote.
+  if [[ -L "$command" && "$command" -ef "$root/scripts/okc.sh" ]]; then rm -f "$command"; fi
   echo 'uninstalled.'
 }
 
@@ -377,6 +465,15 @@ main() {
 logged_main() {
   mkdir -p "$data/logs"
   if [[ -f "$launcher_log" ]] && (($(wc -c <"$launcher_log") > 1048576)); then rm -f "$launcher_log"; fi
+  # launchd keeps its log files open and appends to them, so they are cut in place to their last 1000 lines and not
+  # deleted.
+  local file kept
+  for file in "$data/logs/launchd.out.log" "$data/logs/launchd.err.log"; do
+    if [[ -f "$file" ]] && (($(wc -c <"$file") > 1048576)); then
+      kept="$(tail -n 1000 "$file")"
+      printf '%s\n' "$kept" >"$file"
+    fi
+  done
   # bash ignores set -e in the whole of a command after || or &&, so the status comes from a plain pipeline, and the
   # subshell turns set -e on again.
   local status

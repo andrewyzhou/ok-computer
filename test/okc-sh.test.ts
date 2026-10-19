@@ -9,6 +9,7 @@ import {
   mkdtempSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   rmSync,
   utimesSync,
   writeFileSync,
@@ -60,12 +61,15 @@ const stubs: Record<string, string> = {
   launchctl: `echo "$*" >> "$STUB_DIR/launchctl.log"
 case "$1" in
   print)
-    [ -f "$STUB_DIR/loaded" ] || exit 113
+    # launchd removes a job a moment after bootout returns, so the job shows once more after a bootout.
+    if [ -f "$STUB_DIR/unloading" ]; then rm -f "$STUB_DIR/unloading"; elif [ ! -f "$STUB_DIR/loaded" ]; then exit 113; fi
     echo "$2 = {"
     if [ -f "$STUB_DIR/launchd.pid" ]; then printf '\\tpid = %s\\n' "$(cat "$STUB_DIR/launchd.pid")"; fi
     echo "}" ;;
-  bootstrap) touch "$STUB_DIR/loaded" ;;
-  bootout) rm -f "$STUB_DIR/loaded" ;;
+  bootstrap)
+    if [ -f "$STUB_DIR/unloading" ]; then echo 'Bootstrap failed: 5: Input/output error' >&2; exit 5; fi
+    touch "$STUB_DIR/loaded" ;;
+  bootout) if [ -f "$STUB_DIR/loaded" ]; then rm -f "$STUB_DIR/loaded"; touch "$STUB_DIR/unloading"; fi ;;
 esac`,
   open: `echo "$*" >> "$STUB_DIR/open.log"`,
   'xdg-open': `echo "$*" >> "$STUB_DIR/xdg-open.log"`,
@@ -94,7 +98,8 @@ async function freePort(): Promise<number> {
 // each case has its own root with a copy of okc.sh and the template, a fake HOME, a free port and a stub folder first
 // on the path. so no command reaches the launchd or the agent of the owner.
 async function makeCase(uname: 'Darwin' | 'Linux', name = 'okc-sh-'): Promise<Case> {
-  const root = mkdtempSync(join(tmpdir(), name));
+  // the script resolves its root with pwd -P, and tmpdir() on macos is under the /var link.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), name)));
   const home = mkdtempSync(join(tmpdir(), 'okc-home-'));
   const stub = mkdtempSync(join(tmpdir(), 'okc-stub-'));
   mkdirSync(join(root, 'scripts'));
