@@ -19,13 +19,14 @@ import { setChecklist } from '../scheduler/heartbeat.js';
 import { getAutomation, updateAutomation } from '../scheduler/store.js';
 import type { Clock } from '../time.js';
 import { errorText } from '../tools/registry.js';
-import { createLogTail, isLevel, readLogs } from './logs.js';
+import { createLogTail, isLevel, readLogsFor } from './logs.js';
 import {
   automationRuns,
   automations,
   costPage,
   getBlob,
   getModelCallBody,
+  getRun,
   getRunDetail,
   getToolCatalog,
   goalsPage,
@@ -49,6 +50,7 @@ import { mountInbox } from './inbox.js';
 import { mountSandbox } from './sandbox.js';
 import { mountSearch } from './search.js';
 import { mountSpans } from './spans.js';
+import { isDay } from './params.js';
 import { createFeed } from './stream.js';
 import type { ContextView, MemoryFile, Meta } from './types.js';
 
@@ -179,6 +181,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
   server.get('/api/runs', (c) => {
     const query = c.req.query();
     const limit = Number(query.limit);
+    if (query.before && !getRun(db, query.before)) return c.json({ error: 'give before as the id of a run' }, 400);
     return c.json(
       listRuns(
         db,
@@ -187,6 +190,8 @@ export function createDashboard(deps: DashboardDeps): Hono {
           ...(query.slot ? { slot: query.slot } : {}),
           ...(query.status ? { status: query.status } : {}),
           ...(query.day && /^\d{4}-\d{2}-\d{2}$/.test(query.day) ? { day: query.day } : {}),
+          ...(query.sessionKey ? { sessionKey: query.sessionKey } : {}),
+          ...(query.before ? { before: query.before } : {}),
           ...(limit > 0 ? { limit } : {}),
         },
         tz,
@@ -329,7 +334,17 @@ export function createDashboard(deps: DashboardDeps): Hono {
   server.get('/api/logs', (c) => {
     const level = c.req.query('level') ?? 'debug';
     const limit = Number(c.req.query('limit')) || 500;
-    return c.json(readLogs(logDir, clock(), isLevel(level) ? level : 'debug', Math.min(limit, 5000)));
+    const day = c.req.query('day');
+    const runId = c.req.query('runId');
+    if (day !== undefined && !isDay(day)) return c.json({ error: 'give day as yyyy-mm-dd' }, 400);
+    return c.json(
+      readLogsFor(logDir, clock(), tz, {
+        level: isLevel(level) ? level : 'debug',
+        limit: Math.min(limit, 5000),
+        ...(day ? { day } : {}),
+        ...(runId ? { runId } : {}),
+      }),
+    );
   });
 
   server.get('/api/stream', (c) =>

@@ -6,6 +6,7 @@ import type { Rule } from '../policy/policy.js';
 import { REPLY_CALL_ID, REPLY_NOTE, REPLY_TOOL } from '../policy/reply.js';
 import { REVIEW_TOOL } from '../policy/reviewer.js';
 import { outcomeOf } from './outcome.js';
+import { notBuilt } from './params.js';
 import { getChecklist, inActiveHours } from '../scheduler/heartbeat.js';
 import { describeSchedule } from '../scheduler/schedule.js';
 import { listAutomations, type Automation } from '../scheduler/store.js';
@@ -74,10 +75,15 @@ export interface RunFilter {
   slot?: string;
   status?: string;
   day?: string;
+  // phase 5 m1: the runs of one session, and the runs that started before the run with this id. the caller checks
+  // that the before run exists.
+  sessionKey?: string;
+  before?: string;
   limit?: number;
 }
 
 export function listRuns(db: Db, filter: RunFilter, timeZone: string): RunRow[] {
+  if (filter.sessionKey !== undefined || filter.before !== undefined) notBuilt('the sessionKey and before filters of the runs');
   const where: string[] = [];
   const params: string[] = [];
   for (const key of ['trigger', 'slot', 'status'] as const) {

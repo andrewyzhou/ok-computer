@@ -2,6 +2,7 @@ import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } fro
 import { join } from 'node:path';
 import { LEVELS, type Level } from '../observability/logger.js';
 import type { Clock } from '../time.js';
+import { notBuilt } from './params.js';
 import type { LogLine } from './types.js';
 
 // the logger starts a new file at each utc date.
@@ -34,6 +35,21 @@ export function readLogs(dir: string, now: Date, level: Level, limit: number): L
   return parse(readFileSync(file, 'utf8'))
     .filter((line) => atLeast(line, level))
     .slice(-limit);
+}
+
+export interface LogsInput {
+  level: Level;
+  // already clamped to 1 to 5000.
+  limit: number;
+  // phase 5 m1: a day in the time zone of the app, and a run id.
+  day?: string;
+  runId?: string;
+}
+
+// the lines of /api/logs. without a day it reads the file of today, as readLogs does.
+export function readLogsFor(dir: string, now: Date, timeZone: string, input: LogsInput): LogLine[] {
+  if (input.day !== undefined || input.runId !== undefined) return notBuilt(`the day and runId filters of the logs in ${timeZone}`);
+  return readLogs(dir, now, input.level, input.limit);
 }
 
 // the tail gives the complete lines that the logger wrote since the last call. it starts at the end of the file, and

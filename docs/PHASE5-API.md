@@ -125,7 +125,7 @@ Each team edits only its own files. A shared file gets only the change written h
 
 | Milestone | Owns (new files) | Shared files it may touch |
 |---|---|---|
-| M1 | `src/db/migrations/018_search.sql`, `src/dashboard/chats.ts`, `search.ts`, `spans.ts`, `src/search/` | `types.ts` (its section and the `StreamMessage` union), `stream.ts`, `queries.ts` (`listRuns` paging), the `/api/runs` and `/api/logs` handlers in `server.ts`, `browser.ts` (`/api/browser/live`) |
+| M1 | `src/db/migrations/018_search.sql`, `src/dashboard/chats.ts`, `search.ts`, `spans.ts`, `chat-keys.ts` (the chat key rules that chats, search and stream share), `params.ts` (the limit and id rules of section 1), `src/search/`, `test/seed-m1.ts` | `types.ts` (its section and the `StreamMessage` union), `stream.ts`, `queries.ts` (`listRuns` paging), the `/api/runs` and `/api/logs` handlers in `server.ts`, `browser.ts` (`/api/browser/live`) |
 | M2 | `src/channels/web.ts`, `src/dashboard/chat.ts` | `types.ts` (its section), the `isOwner` and `OwnerMessenger` lines, the wiring of the channel in `src/app.ts`, one key in the `app` pick of `DashboardDeps` |
 | M3 | `web/src/shell/`, `web/src/icons.tsx`, `web/src/fonts.ts`, `web/src/views/<area>/` for the restyled core pages | `App.tsx`, `styles.css`, `main.tsx`, `web/src/routes.ts`, `web/package.json` fonts, the web tests |
 | M4 | `web/src/views/chats/`, `web/src/views/activity/`, `web/src/views/search/`, `web/src/chat-stream.ts` | none |

@@ -1,4 +1,5 @@
 import type { Db } from '../db/index.js';
+import { notBuilt } from './params.js';
 import type { LogLine, StreamMessage } from './types.js';
 import { getRun, toEventRow } from './queries.js';
 
@@ -39,4 +40,13 @@ export function createFeed(db: Db, tail: () => LogLine[]): () => StreamMessage[]
     for (const line of tail()) messages.push({ kind: 'log', line });
     return messages;
   };
+}
+
+// phase 5 m1: the feed of the trace rows. it gives the new model calls, tool calls, browser steps, approvals and policy
+// decisions since the last call as the stream kinds model_call, tool_call, browser_step, approval and policy, with ids
+// and summaries only. each table has its own id cursor, which starts at the newest row when the feed is made. an
+// approval goes out when it is asked for and again when it is resolved. createFeed calls it on each poll once it is
+// built.
+export function createTraceFeed(_db: Db): () => StreamMessage[] {
+  return notBuilt('the trace feed');
 }
