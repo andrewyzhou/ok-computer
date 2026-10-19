@@ -56,6 +56,17 @@ export function unsubscribeBlock(sender: NewsletterSenderRow): string | null {
   if (sender.state === 'unsubscribed') return 'This sender is already unsubscribed.';
   if (sender.state === 'unsubscribe_pending') return 'The unsubscribe waits for your approval.';
   if (sender.unsubscribe.method === 'none') return 'The mail of this sender has no unsubscribe link.';
+  // ok computer never sends mail, so a mail unsubscribe is only shown. the owner does it by hand.
+  if (sender.unsubscribe.method === 'mailto') return 'This sender unsubscribes by mail, and ok computer never sends mail. Unsubscribe by hand with the address in the details.';
+  if (!sender.unsubscribe.url) return 'This sender gives no unsubscribe link. Unsubscribe by hand in its mail.';
+  return null;
+}
+
+// the reason that the keep button is off, or null when it is on. a keep would hide the record of an unsubscribe.
+export function keepBlock(sender: NewsletterSenderRow): string | null {
+  if (sender.state === 'kept') return 'This sender is already kept.';
+  if (sender.state === 'unsubscribe_pending') return 'The unsubscribe of this sender is under way, so it cannot be kept now.';
+  if (sender.state === 'unsubscribed') return 'This sender is unsubscribed, so it cannot be kept.';
   return null;
 }
 
@@ -142,6 +153,7 @@ function SenderActions({
   onKeep: () => void;
 }) {
   const block = unsubscribeBlock(sender);
+  const keepOff = keepBlock(sender);
   const name = senderName(sender);
   return (
     <div className="inbox-actions">
@@ -161,8 +173,8 @@ function SenderActions({
         <Button
           size="sm"
           variant="ghost"
-          disabled={sender.state === 'kept' || answer?.busy}
-          title={sender.state === 'kept' ? 'This sender is already kept.' : `Keep ${name} out of later sweeps`}
+          disabled={keepOff !== null || answer?.busy}
+          title={keepOff ?? `Keep ${name} out of later sweeps`}
           aria-label={`Keep ${name}`}
           onClick={onKeep}
         >
