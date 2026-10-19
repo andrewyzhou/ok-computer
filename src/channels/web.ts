@@ -78,8 +78,13 @@ export function createWebChannel(options: WebChannelOptions = {}): WebChannel {
   const generated = new WeakMap<InboundMessage, string>();
   let sentCount = 0;
 
+  // the turn id names the channel, as in 'telegram:<message id>'. a web message id already starts with 'web:', and
+  // the telegram channel keeps its message id a bare number, because its reactions read the number back.
   const turnIdOf = (message: InboundMessage): string => {
-    if (message.messageId !== undefined) return message.messageId;
+    if (message.messageId !== undefined) {
+      const prefix = `${message.channel}:`;
+      return message.messageId.startsWith(prefix) ? message.messageId : prefix + message.messageId;
+    }
     let id = generated.get(message);
     if (id === undefined) {
       id = `${message.channel}:${newId()}`;

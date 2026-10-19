@@ -444,9 +444,9 @@ describe('web channel with the router', () => {
       { kind: 'text', turnId, delta: 'Hello there', reset: false },
       { kind: 'done', turnId, ok: true },
     ]);
-    // the router sets replyTo only once it knows about turns, so the reply has no turn yet.
+    // the router sets replyTo to the message id, so the reply names the turn that it answers.
     const reply = events.find((event) => event.kind === 'reply');
-    expect(reply).toMatchObject({ kind: 'reply', turnId: null, runId: 'r1', text: 'Hello there', markdown: true });
+    expect(reply).toMatchObject({ kind: 'reply', turnId, runId: 'r1', text: 'Hello there', markdown: true });
     expect(events.indexOf(reply!)).toBe(events.length - 2);
   });
 });
