@@ -16,6 +16,21 @@ export function EmptyState({ icon, title, children, action }: { icon?: IconName;
   );
 }
 
+// the page of a row that is not there, such as an old link to a deleted item. it says so in one plain sentence and
+// links back to the list. a real failure to load keeps the red error box.
+export function NotFound({ icon, what, children }: { icon?: IconName; what: string; children?: ReactNode }) {
+  return (
+    <EmptyState {...(icon ? { icon } : {})} title={`This ${what} does not exist.`}>
+      {children}
+    </EmptyState>
+  );
+}
+
+// a 404 is a missing row, not a failure of the page. the server words it as "... not found".
+export function isNotFound(error: string): boolean {
+  return /not found/i.test(error) || /^404\b/.test(error);
+}
+
 export function isMac(): boolean {
   return /mac|iphone|ipad/i.test(globalThis.navigator?.platform ?? '');
 }

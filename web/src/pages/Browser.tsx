@@ -4,7 +4,7 @@ import type { BlobBody } from '../../../src/dashboard/types';
 import { apiUrl, useApi } from '../api';
 import { Expand, Load } from '../components';
 import { bytes, ms, time } from '../format';
-import { Badge, ButtonLink, DetailsPanel, EmptyState, Facts, Page, Section, Status, Table, type Column, type Fact } from '../ui';
+import { Badge, ButtonLink, DetailsPanel, EmptyState, Facts, NotFound, Page, Section, Status, Table, type Column, type Fact } from '../ui';
 import './connections.css';
 
 const taskHref = (id: string) => `#/browser/${encodeURIComponent(id)}`;
@@ -345,7 +345,16 @@ export function BrowserTask({ id, query }: { id: string; query?: URLSearchParams
       subtitle={task ? `${task.allowlist.length ? task.allowlist.join(', ') : 'no allowlist'} · ${task.steps} steps · ${time(task.startedAt)}` : undefined}
       crumbs={[{ label: 'Browser', href: '#/browser' }]}
     >
-      <Load loaded={loaded}>{(detail) => <TaskBody detail={detail} initial={Number.isFinite(initial) ? initial : 0} />}</Load>
+      <Load
+        loaded={loaded}
+        notFound={
+          <NotFound icon="browser" what="browser task">
+            <a href="#/browser">Go to the browser history</a>
+          </NotFound>
+        }
+      >
+        {(detail) => <TaskBody detail={detail} initial={Number.isFinite(initial) ? initial : 0} />}
+      </Load>
     </Page>
   );
 }

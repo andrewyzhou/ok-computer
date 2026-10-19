@@ -49,7 +49,7 @@ describe('the pure parts of the trace', () => {
   it('clamps a span that starts before the run or after its end', () => {
     const [run] = runOneSpans().spans;
     expect(barGeometry({ ...run!, startMs: -50, endMs: 100 }, 1000, 0)).toEqual({ left: 0, width: 10 });
-    expect(barGeometry({ ...run!, startMs: 2000, endMs: 3000 }, 1000, 0)).toEqual({ left: 100, width: 0 });
+    expect(barGeometry({ ...run!, startMs: 2000, endMs: 3000 }, 1000, 0)).toEqual({ left: 100, width: 0, cut: true });
     // an open span with a clock behind its start never gets a negative width.
     expect(barGeometry({ ...run!, startMs: 500, endMs: null }, 1000, 100)).toEqual({ left: 50, width: 0 });
   });

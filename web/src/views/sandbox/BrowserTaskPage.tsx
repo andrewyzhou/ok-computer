@@ -174,10 +174,17 @@ function TaskBody({ detail }: { detail: BrowserTaskDetail }) {
 
 export function BrowserTaskPage({ params }: RouteProps) {
   const taskId = params.taskId ?? '';
+  // the feed sends nothing when a task ends, so the page also reloads when the run of the task ends or makes a tool
+  // call. the run id is known only after the first load, so it is read from a ref.
+  const runId = useRef<string | null>(null);
   const loaded = useApi<BrowserTaskDetail>(
     `/api/browser/tasks/${encodeURIComponent(taskId)}`,
-    (message) => message.kind === 'browser_step' && message.step.taskId === taskId,
+    (message) =>
+      (message.kind === 'browser_step' && message.step.taskId === taskId) ||
+      (message.kind === 'run' && message.run.id === runId.current) ||
+      (message.kind === 'tool_call' && message.call.runId === runId.current),
   );
+  runId.current = loaded.data?.task.runId ?? null;
   return (
     <Page
       title="Browser task"
@@ -185,19 +192,14 @@ export function BrowserTaskPage({ params }: RouteProps) {
       width="full"
       crumbs={[{ label: 'Sandbox', href: '#/sandbox' }]}
       actions={
-        <ButtonLink size="sm" icon="browser" href={`#/browser/${encodeURIComponent(taskId)}`}>
-          In the browser history
-        </ButtonLink>
+        loaded.data ? (
+          <ButtonLink size="sm" icon="browser" href={`#/browser/${encodeURIComponent(taskId)}`}>
+            In the browser history
+          </ButtonLink>
+        ) : undefined
       }
     >
-      <LoadRow
-        loaded={loaded}
-        missing={
-          <ButtonLink size="sm" href="#/sandbox">
-            Open tasks
-          </ButtonLink>
-        }
-      >
+      <LoadRow loaded={loaded} what="browser task" missing={<a href="#/sandbox">Go to the open tasks</a>}>
         {(detail) => <TaskBody detail={detail} />}
       </LoadRow>
     </Page>

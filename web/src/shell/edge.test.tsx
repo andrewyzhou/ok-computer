@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seedDashboard } from '../../../test/seed';
-import { ROUTES } from '../routes';
+import { navSections, ROUTES } from '../routes';
 import { inMain, installEventSource, openApp, stubFetch } from '../testing';
 import { CommandMenu } from './CommandMenu';
 import type { CommandSource } from './extensions';
@@ -102,6 +102,14 @@ describe('the command menu', () => {
     for (const label of ['Runs', 'Sessions', 'Policy', 'Cost', 'Logs', 'Sandbox']) expect(pages().queryByRole('option', { name: label })).toBeNull();
     act(() => setPrefs({ devMode: true }));
     expect(dev().map((option) => option.querySelector('.cmdk-label')?.textContent)).toEqual(['Runs', 'Sessions', 'Policy', 'Cost', 'Logs', 'Sandbox']);
+  });
+
+  it('lists the pages in the order of the nav', () => {
+    act(() => setPrefs({ devMode: true }));
+    render(<CommandMenu open onClose={() => {}} routes={ROUTES} sources={[]} />);
+    const labels = navSections(true, ROUTES).flatMap((section) => section.items.map((item) => item.label));
+    const options = screen.getAllByRole('option').slice(0, labels.length);
+    expect(options.map((option, index) => option.textContent!.startsWith(labels[index]!))).toEqual(labels.map(() => true));
   });
 
   it('never lists a detail page, and wraps the arrow keys at both ends', () => {

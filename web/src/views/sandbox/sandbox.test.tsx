@@ -294,10 +294,12 @@ describe('the sandbox views', () => {
 
   it('says when a code run or a browser task is not found', async () => {
     openApp('#/sandbox/code/9');
-    expect(await inMain().findByText('Not found: sandbox exec not found')).toBeTruthy();
+    expect(await inMain().findByText('This code run does not exist.')).toBeTruthy();
     cleanup();
     openApp('#/sandbox/browser/task-gone');
-    expect(await inMain().findByText('Not found: browser task not found')).toBeTruthy();
+    expect(await inMain().findByText('This browser task does not exist.')).toBeTruthy();
+    // the header action needs the task, so it hides with it.
+    expect(inMain().queryByRole('link', { name: 'In the browser history' })).toBeNull();
   });
 
   it('shows the filmstrip of a browser task, moves with the arrow keys and links the trace zip', async () => {

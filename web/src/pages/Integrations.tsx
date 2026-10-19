@@ -3,7 +3,7 @@ import type { CatalogVersion, IntegrationDetail as Detail, IntegrationSummary, M
 import { send, useApi } from '../api';
 import { Expand, Json, Load } from '../components';
 import { ms, time } from '../format';
-import { Button, ButtonLink, DetailsPanel, EmptyState, Facts, Page, Section, Status, Table, type Column, type Fact } from '../ui';
+import { Button, ButtonLink, DetailsPanel, EmptyState, Facts, isNotFound, NotFound, Page, Section, Status, Table, type Column, type Fact } from '../ui';
 import { OAuthApp } from './OAuthApp';
 import './connections.css';
 
@@ -443,9 +443,10 @@ export function IntegrationDetail({ id }: { id: string; query?: URLSearchParams 
   const loaded = useApi<Detail>(path(id), isLogOf(id));
   const actions = useActions(loaded.reload);
   const integration = loaded.data;
+  const missing = loaded.error !== undefined && isNotFound(loaded.error);
   return (
     <Page
-      title={id}
+      title={missing ? 'Integration' : id}
       subtitle={integration ? `${integration.kind} integration` : undefined}
       crumbs={[{ label: 'Integrations', href: '#/integrations' }]}
       actions={
@@ -457,7 +458,14 @@ export function IntegrationDetail({ id }: { id: string; query?: URLSearchParams 
         ) : undefined
       }
     >
-      <Load loaded={loaded}>
+      <Load
+        loaded={loaded}
+        notFound={
+          <NotFound icon="integration" what="integration">
+            <a href="#/integrations">Go to all integrations</a>
+          </NotFound>
+        }
+      >
         {(integration) => (
           <>
             <DetailsPanel title={integration.id}>

@@ -272,7 +272,7 @@ describe('the developer pages load against the seeded database', () => {
     const view = await (await fetch('/api/sessions/main/context')).json();
     setPrefs({ devMode: true });
     open('#/sessions/main');
-    expect(await details().findByText('next request, estimated tokens')).toBeTruthy();
+    expect(await details().findByText('Next request, estimated tokens')).toBeTruthy();
     expect(await details().findByText(String(view.estimatedTokens))).toBeTruthy();
     expect(details().getByText('system prompt')).toBeTruthy();
   });

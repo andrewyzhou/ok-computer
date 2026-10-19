@@ -2,7 +2,7 @@ import type { DigestItem, DigestSection, DigestsPage, InboxDigest } from '../../
 import { useApi } from '../../api';
 import { longDay, time } from '../../format';
 import type { RouteProps } from '../../routes';
-import { Badge, ButtonLink, Count, DetailsPanel, EmptyState, Page, Section, Skeleton } from '../../ui';
+import { Badge, ButtonLink, Count, DetailsPanel, EmptyState, isNotFound, NotFound, Page, Section, Skeleton } from '../../ui';
 import { LoadMore, money, refreshInbox, RunJob, usePaged, withQuery } from './shared';
 import './inbox.css';
 
@@ -102,7 +102,7 @@ export function DigestPage({ params }: RouteProps) {
   const id = params.id;
   const loaded = useApi<InboxDigest>(id ? `/api/inbox/digests/${encodeURIComponent(id)}` : '/api/inbox/digests/latest', refreshInbox);
   const digest = loaded.data;
-  const missing = loaded.error !== undefined && /not found/i.test(loaded.error);
+  const missing = loaded.error !== undefined && isNotFound(loaded.error);
   const crumbs = id ? [{ label: 'Digest', href: '#/inbox' }] : undefined;
   return (
     <Page
@@ -121,14 +121,14 @@ export function DigestPage({ params }: RouteProps) {
         <EmptyState
           icon="inbox"
           title="No digest yet."
-          action={<RunJob job="digest" label="Make the digest now" variant="primary" note="Started. The digest shows here when it is ready." />}
+          action={<RunJob job="digest" label="Make the digest now" note="Started. The digest shows here when it is ready." />}
         >
           The digest job reads the mail of each account once a day.
         </EmptyState>
       ) : missing ? (
-        <EmptyState icon="inbox" title="This digest does not exist.">
+        <NotFound icon="inbox" what="digest">
           <a href="#/inbox">Go to the latest digest</a>
-        </EmptyState>
+        </NotFound>
       ) : loaded.error ? (
         <p className="error-box">Could not load: {loaded.error}</p>
       ) : digest ? (

@@ -1451,8 +1451,9 @@ kbd {
   overflow: auto;
   background: var(--bg-sunken);
   font-size: 12px;
+  /* a line breaks at a space first, and a word breaks only when it is longer than the line. */
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 .approval-card {
@@ -1642,7 +1643,7 @@ button:disabled {
 pre {
   margin: 4px 0;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
   font-size: 12px;
 }
 .json {

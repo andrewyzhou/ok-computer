@@ -49,6 +49,8 @@ function breadcrumb(match: RouteMatch | undefined, routes: RouteDef[], page: Pag
     const parent = parentRoute(match.route, routes);
     if (parent) crumbs.push({ label: parent.label, href: routeHref(parent) });
   }
+  // a page with the name of its group, such as Activity, would read Activity / Activity, so the group crumb goes.
+  if (crumbs.length === 1 && item?.group && crumbs[0]!.label === page?.title) crumbs.pop();
   return crumbs;
 }
 
