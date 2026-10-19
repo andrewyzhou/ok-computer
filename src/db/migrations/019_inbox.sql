@@ -12,7 +12,7 @@
 -- state: active, kept (the owner took the sender out of the sweeps), unsubscribe_pending (an approval waits),
 -- unsubscribed, or failed (the unsubscribe ran and failed; error says why).
 -- archived counts the messages that an approved archive took out of the inbox, and label is the last label that it
--- added.
+-- added. helpSessionKey is the session of the browser help run of an https unsubscribe, when one ran.
 CREATE TABLE inbox_senders (
   id INTEGER PRIMARY KEY,
   account TEXT NOT NULL,
@@ -33,6 +33,7 @@ CREATE TABLE inbox_senders (
   archived INTEGER NOT NULL DEFAULT 0,
   label TEXT,
   error TEXT,
+  helpSessionKey TEXT,
   runId TEXT,
   updatedAt TEXT NOT NULL,
   UNIQUE (account, senderKey)
@@ -53,7 +54,8 @@ CREATE TABLE inbox_sender_messages (
 CREATE INDEX inbox_sender_messages_sender ON inbox_sender_messages (senderId, receivedAt);
 
 -- one receipt that the subscription finder read. the finder reads each message one time, also when the model found no
--- charge in it (merchantKey null), so a later scan pays for the new mail only. modelCallId is the extraction call.
+-- charge in it (merchantKey null), so a later scan pays for the new mail only. recurring is 1 when the mail says that
+-- the charge renews. modelCallId is the extraction call.
 CREATE TABLE inbox_receipts (
   account TEXT NOT NULL,
   messageId TEXT NOT NULL,
@@ -62,6 +64,7 @@ CREATE TABLE inbox_receipts (
   amount REAL,
   currency TEXT,
   chargedAt TEXT,
+  recurring INTEGER NOT NULL DEFAULT 0,
   subject TEXT,
   cancelUrl TEXT,
   modelCallId INTEGER,
@@ -75,7 +78,8 @@ CREATE INDEX inbox_receipts_merchant ON inbox_receipts (account, merchantKey, ch
 -- without spaces and marks. sourceMessageIds is a json list of the receipt messages, newest first, and
 -- sourceMessageId is the first of them. confidence is 0 to 1: how sure the finder is that the charge repeats.
 -- state: active, cancel_pending (an approval waits), cancelled, or ignored (the owner hid it).
--- browserTaskId is the browser task that helped with the cancellation, when one ran.
+-- helpSessionKey is the session of the browser help run of a cancellation, and browserTaskId is the browser task
+-- that it opened, when it opened one.
 CREATE TABLE inbox_subscriptions (
   id INTEGER PRIMARY KEY,
   account TEXT NOT NULL,
@@ -94,6 +98,7 @@ CREATE TABLE inbox_subscriptions (
   state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'cancel_pending', 'cancelled', 'ignored')),
   approvalId INTEGER,
   browserTaskId TEXT,
+  helpSessionKey TEXT,
   error TEXT,
   runId TEXT,
   updatedAt TEXT NOT NULL,

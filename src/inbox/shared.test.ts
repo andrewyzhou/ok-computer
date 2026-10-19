@@ -11,11 +11,11 @@ import { createSlotRunner } from '../models/slots.js';
 import { silentLogger } from '../observability/logger.js';
 import { BUILTIN_RULES } from '../policy/policy.js';
 import { sessionTaint } from '../policy/store.js';
-import { createJobRunner } from '../scheduler/jobs.js';
+import { AUTOMATION_TOOLS, createJobRunner } from '../scheduler/jobs.js';
 import { listAutomations } from '../scheduler/store.js';
 import { createRunQueue } from '../sessions/queue.js';
 import { createToolRegistry, defineTool } from '../tools/registry.js';
-import { requestAction, settleApprovals } from './actions.js';
+import { requestAction, settleApprovals, startBrowserHelp } from './actions.js';
 import { monthlyTotals } from './cadence.js';
 import type { InboxContext } from './context.js';
 import { extractItems, itemsTool } from './extract.js';
@@ -232,5 +232,30 @@ describe('the inbox harness', () => {
     expect(h.inbox.tools).toEqual(expect.any(Array));
     expect(h.google.config.send).toBe(false);
     await h.close();
+  });
+});
+
+describe('startBrowserHelp', () => {
+  // the link comes from mail, so the help run starts tainted, and its session gets the web tools of an automation.
+  it('starts a tainted automation run with the approved link', async () => {
+    const db = openDb(':memory:');
+    const runs: Array<Parameters<InboxContext['agent']>[0]> = [];
+    const queue = createRunQueue();
+    const ctx = contextOf(db, {
+      queue,
+      owner: { chat: () => ({ channel: 'telegram', chatId: '1' }), send: async () => true },
+      agent: async (input) => (runs.push(input), { runId: input.runId!, status: 'completed', text: '' }),
+    });
+    const help = startBrowserHelp(ctx, { account: 'personal', url: 'https://shop.example/cancel', task: 'Cancel the plan of Shop.', toolName: 'inbox_cancel_subscription' });
+    await queue.drain();
+    expect(help.sessionKey).toBe(`auto:inbox:${help.runId}`);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ runId: help.runId, sessionKey: help.sessionKey, trigger: 'automation', channel: 'telegram', allowedTools: AUTOMATION_TOOLS });
+    const payload = runs[0]!.events[0]!.payload as { text: string; taint: Array<{ source: string }> };
+    expect(payload.text).toContain('The owner approved this link: https://shop.example/cancel');
+    expect(payload.taint.map((each) => each.source)).toEqual(['gmail:personal']);
+    startBrowserHelp(ctx, { account: 'personal', url: null, task: 'Cancel the plan of Shop.', toolName: 'inbox_cancel_subscription' });
+    await queue.drain();
+    expect((runs[1]!.events[0]!.payload as { text: string }).text).toContain('No link is known.');
   });
 });
