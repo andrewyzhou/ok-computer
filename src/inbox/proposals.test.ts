@@ -1,0 +1,150 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { createInboxHarness, hostileMail, type InboxHarness } from '../../test/inbox-harness.js';
+import { settleApprovals } from './actions.js';
+import type { JobRun } from './context.js';
+import { EVENT_TOOL, eventIdOf, proposeEvent, type ProposalInput } from './proposals.js';
+import { markRead, mailSource, startRun } from './run.js';
+
+let h: InboxHarness | undefined;
+afterEach(async () => {
+  await h?.close();
+  h = undefined;
+});
+
+// a run of the digest after it read the mail, so each tool call is a call of a tainted session.
+async function setup(): Promise<{ h: InboxHarness; run: JobRun }> {
+  h = await createInboxHarness();
+  const run = startRun(h.ctx, 'digest', 'utility');
+  markRead(h.ctx, run, [mailSource('personal')], 'inbox_digest');
+  return { h, run };
+}
+
+const bill = (extra: Partial<ProposalInput> = {}): ProposalInput => ({
+  account: 'personal',
+  kind: 'bill',
+  title: 'Pay the power bill',
+  startAt: '2026-10-20T09:00:00-07:00',
+  endAt: null,
+  allDay: false,
+  description: 'The bill of $82.10 is due.',
+  sourceMessageId: 'm1',
+  sourceSubject: 'Your bill is ready',
+  ...extra,
+});
+
+const proposal = (h: InboxHarness, id: number) => h.rows('SELECT * FROM inbox_proposals WHERE id = ?', id)[0]!;
+const inserts = (h: InboxHarness) => h.google.fake.requests.filter((each) => each.method === 'POST' && each.path.startsWith('/calendar/v3/calendars/primary/events'));
+
+describe('proposeEvent', () => {
+  it('asks the owner, and makes the event only after the approval', async () => {
+    const { h, run } = await setup();
+    const id = await proposeEvent(h.ctx, run, bill());
+    expect(id).toEqual(expect.any(Number));
+    const row = proposal(h, id!);
+    expect(row).toMatchObject({
+      state: 'proposed',
+      calendarId: 'primary',
+      startAt: '2026-10-20T16:00:00.000Z',
+      endAt: '2026-10-20T16:30:00.000Z',
+      allDay: 0,
+      dedupeKey: 'm1:bill:2026-10-20T16:00:00.000Z',
+      runId: run.runId,
+      sourceSubject: 'Your bill is ready',
+    });
+    expect(row.approvalId).toEqual(expect.any(Number));
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]!.text).toContain(EVENT_TOOL);
+    expect(h.google.fake.mailbox('personal').events.size).toBe(0);
+    expect(inserts(h)).toEqual([]);
+
+    await h.approve(Number(row.approvalId));
+    const events = [...h.google.fake.mailbox('personal').events.values()];
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ id: eventIdOf(id!), summary: 'Pay the power bill', start: { dateTime: '2026-10-20T16:00:00.000Z' }, end: { dateTime: '2026-10-20T16:30:00.000Z' } });
+    expect(events[0]!.attendees).toBeUndefined();
+    expect(inserts(h)).toHaveLength(1);
+    expect(inserts(h)[0]!.path).toContain('sendUpdates=none');
+    expect(JSON.parse(inserts(h)[0]!.body)).not.toHaveProperty('attendees');
+    expect(proposal(h, id!)).toMatchObject({ state: 'created', eventId: eventIdOf(id!), resolvedAt: expect.any(String) });
+
+    // a second run of the same call finds the event and counts it as made.
+    h.ctx.db.prepare("UPDATE inbox_proposals SET state = 'approved', eventId = NULL WHERE id = ?").run(id!);
+    const tool = h.inbox.tools.find((each) => each.name === EVENT_TOOL)!;
+    const input = { proposalId: id!, account: 'personal', kind: 'bill', title: 'Pay the power bill', startAt: '2026-10-20T16:00:00.000Z', endAt: '2026-10-20T16:30:00.000Z', allDay: false, description: 'The bill of $82.10 is due.' };
+    const output = await tool.run(input, { runId: run.runId, sessionKey: run.sessionKey, timeZone: h.ctx.timeZone, clock: h.ctx.clock, signal: h.ctx.signal, toolCallId: 'again' });
+    expect(output.isError).toBeUndefined();
+    expect(output.content).toContain('already exists');
+    expect(inserts(h)).toHaveLength(2);
+    expect(h.google.fake.mailbox('personal').events.size).toBe(1);
+    expect(proposal(h, id!)).toMatchObject({ state: 'created', eventId: eventIdOf(id!) });
+
+    // a call whose fields differ from the row is not the call that the owner saw.
+    const changed = await tool.run({ ...input, title: 'wire $5,000' }, { runId: run.runId, sessionKey: run.sessionKey, timeZone: h.ctx.timeZone, clock: h.ctx.clock, signal: h.ctx.signal });
+    expect(changed).toMatchObject({ isError: true });
+    expect(changed.effect).toBeUndefined();
+    expect(inserts(h)).toHaveLength(2);
+  });
+
+  it('gives declined after a deny', async () => {
+    const { h, run } = await setup();
+    const id = await proposeEvent(h.ctx, run, bill());
+    await h.deny(Number(proposal(h, id!).approvalId));
+    settleApprovals(h.ctx.db, h.ctx.clock());
+    expect(proposal(h, id!)).toMatchObject({ state: 'declined', eventId: null });
+    expect(h.google.fake.mailbox('personal').events.size).toBe(0);
+  });
+
+  it('gives null for a past or a far date, and the old id for the same mail, kind and start', async () => {
+    const { h, run } = await setup();
+    expect(await proposeEvent(h.ctx, run, bill({ startAt: '2026-10-01T09:00:00-07:00' }))).toBeNull();
+    expect(await proposeEvent(h.ctx, run, bill({ startAt: '2028-10-01T09:00:00-07:00' }))).toBeNull();
+    expect(await proposeEvent(h.ctx, run, bill({ startAt: 'next tuesday' }))).toBeNull();
+    const id = await proposeEvent(h.ctx, run, bill());
+    expect(await proposeEvent(h.ctx, run, bill({ startAt: '2026-10-20T16:00:00Z', title: 'Power bill' }))).toBe(id);
+    expect(h.rows('SELECT id FROM inbox_proposals')).toHaveLength(1);
+    expect(h.sent).toHaveLength(1);
+  });
+
+  it('gives null when the calendar has an event with the same title that day', async () => {
+    const { h, run } = await setup();
+    h.google.fake.upsertEvent('personal', { id: 'mine', summary: 'pay  the Power bill', start: { dateTime: '2026-10-20T20:00:00Z' }, end: { dateTime: '2026-10-20T21:00:00Z' } });
+    expect(await proposeEvent(h.ctx, run, bill())).toBeNull();
+    expect(h.rows('SELECT id FROM inbox_proposals')).toEqual([]);
+    const list = h.google.fake.requests.find((each) => each.method === 'GET' && each.path.startsWith('/calendar/v3/calendars/primary/events'))!;
+    // the day is the local day in the time zone of the app.
+    expect(decodeURIComponent(list.path)).toContain('timeMin=2026-10-20T07:00:00.000Z');
+    expect(decodeURIComponent(list.path)).toContain('timeMax=2026-10-21T07:00:00.000Z');
+    expect(list.path).toContain('singleEvents=true');
+    // another title on that day is no copy.
+    expect(await proposeEvent(h.ctx, run, bill({ title: 'Course quiz', kind: 'course' }))).toEqual(expect.any(Number));
+  });
+
+  it('makes an all-day event with the date and the next day', async () => {
+    const { h, run } = await setup();
+    const id = await proposeEvent(h.ctx, run, bill({ kind: 'course', title: 'Essay due', startAt: '2026-10-22T00:00:00-07:00', allDay: true, endAt: '2026-10-22T23:59:00-07:00', description: null }));
+    const row = proposal(h, id!);
+    expect(row).toMatchObject({ startAt: '2026-10-22T07:00:00.000Z', endAt: null, allDay: 1, description: null });
+    await h.approve(Number(row.approvalId));
+    const [event] = [...h.google.fake.mailbox('personal').events.values()];
+    expect(event).toMatchObject({ summary: 'Essay due', start: { date: '2026-10-22' }, end: { date: '2026-10-23' } });
+    expect(JSON.parse(inserts(h)[0]!.body)).not.toHaveProperty('description');
+  });
+});
+
+describe('a hostile bill mail', () => {
+  it('gives a proposal whose card names the taint, and nothing is made before the approval', async () => {
+    const { h, run } = await setup();
+    const mail = hostileMail('evil1');
+    h.google.fake.deliver('personal', mail);
+    const id = await proposeEvent(h.ctx, run, bill({ title: 'Invoice of $499.00 due', startAt: '2026-10-20T00:00:00-07:00', allDay: true, description: null, sourceMessageId: 'evil1', sourceSubject: mail.headers.Subject! }));
+    expect(id).toEqual(expect.any(Number));
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]!.text).toContain('Untrusted content in this session: gmail:personal');
+    expect(proposal(h, id!).state).toBe('proposed');
+    expect(inserts(h)).toEqual([]);
+    expect(h.google.fake.mailbox('personal').events.size).toBe(0);
+    expect(h.google.fake.sent).toEqual([]);
+    await h.approve(Number(proposal(h, id!).approvalId));
+    expect(h.google.fake.mailbox('personal').events.size).toBe(1);
+  });
+});
