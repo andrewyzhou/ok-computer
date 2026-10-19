@@ -10,9 +10,9 @@ export function commandFor(_language: SandboxLanguage, _code: string): string[] 
   throw new Error('not built: commandFor');
 }
 
-// containerSpec gives the body of the create request. it is a pure function, so a test checks each limit and each
-// security setting without docker.
-export function containerSpec(_request: ExecRequest): ContainerSpec {
+// containerSpec gives the body of the create request, with the labels of the instance and the exec. it is a pure
+// function, so a test checks each limit and each security setting without docker.
+export function containerSpec(_request: ExecRequest, _instance: string): ContainerSpec {
   throw new Error('not built: containerSpec');
 }
 

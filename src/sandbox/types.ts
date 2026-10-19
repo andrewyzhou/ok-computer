@@ -42,6 +42,8 @@ export interface ContainerSpec {
 }
 
 export interface ContainerState {
+  // the image id (sha256:...) that the container runs.
+  image: string;
   running: boolean;
   exitCode: number | null;
   oomKilled: boolean;
@@ -73,6 +75,8 @@ export interface DockerClient {
   putArchive(id: string, path: string, tar: Buffer, signal?: AbortSignal): Promise<void>;
   // the tar of path. the client stops and throws when the tar is longer than maxBytes.
   getArchive(id: string, path: string, maxBytes: number, signal?: AbortSignal): Promise<Buffer>;
+  // the length of the tar of path, counted while it streams and not kept. it stops at maxBytes and gives maxBytes + 1.
+  archiveSize(id: string, path: string, maxBytes: number, signal?: AbortSignal): Promise<number>;
   attach(id: string, signal?: AbortSignal): Promise<Attached>;
   start(id: string, signal?: AbortSignal): Promise<void>;
   // wait ends when the container stops and gives its exit code.

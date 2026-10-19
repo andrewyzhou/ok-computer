@@ -76,5 +76,12 @@ export const STATUS_TTL_MS = 30_000;
 // a running row older than the longest call and this margin belongs to a process that stopped.
 export const STALE_MARGIN_MS = 60_000;
 
-// every container, volume and network of the sandbox has this label, so a sweep never touches other docker objects.
-export const LABEL = 'okc.sandbox';
+// every container, volume and network of the sandbox has these labels, so a sweep never touches other docker objects
+// or the objects of another install. sandbox has the value "1", instance the value of instanceOf (sandbox.ts), exec the
+// id of the sandbox_execs row, and task the id of the scratch task.
+export const LABELS = {
+  sandbox: 'okc.sandbox',
+  instance: 'okc.instance',
+  exec: 'okc.exec',
+  task: 'okc.task',
+} as const;
