@@ -24,7 +24,7 @@ export function StatusBar({ onSearch }: { onSearch: () => void }) {
         <span className={`dot tone-${CONNECTION_TONE[connection]}`} aria-hidden="true" />
         {connection}
       </span>
-      <a className="sb-item" href="#/runs">
+      <a className="sb-item" href="#/runs?status=running">
         <Icon name="run" size={13} />
         {runs === undefined ? '-' : runs} running
       </a>

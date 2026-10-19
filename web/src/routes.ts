@@ -105,13 +105,17 @@ export function defineRoutes(routes: RouteDef[]): RouteDef[] {
   return routes;
 }
 
-// a core route wraps a page from web/src/pages. a detail page takes its param as the prop with the same name.
-function page(load: () => Promise<ComponentType>): RouteDef['load'] {
-  return () => load().then((Page) => () => createElement(Page));
+// a core route wraps a page from web/src/pages. a list page gets the RouteProps, so it can read its filters from the
+// query of the hash. a detail page takes its param as the prop with the same name, and the query as query.
+function page(load: () => Promise<ComponentType<Partial<RouteProps>>>): RouteDef['load'] {
+  return () => load().then((Page) => (props: RouteProps) => createElement(Page, props));
 }
 
-function detail<K extends string>(prop: K, load: () => Promise<ComponentType<Record<K, string>>>): RouteDef['load'] {
-  return () => load().then((Page) => ({ params }: RouteProps) => createElement(Page, { [prop]: params[prop] ?? '' } as Record<K, string>));
+type DetailProps<K extends string> = Record<K, string> & { query?: URLSearchParams };
+
+function detail<K extends string>(prop: K, load: () => Promise<ComponentType<DetailProps<K>>>): RouteDef['load'] {
+  return () =>
+    load().then((Page) => ({ params, query }: RouteProps) => createElement(Page, { [prop]: params[prop] ?? '', query } as DetailProps<K>));
 }
 
 export const CORE_ROUTES: RouteDef[] = [
