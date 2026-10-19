@@ -1,8 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import type { ChatSendResponse, ChatStreamEvent, ChatTurnSnapshot } from '../dashboard/types.js';
 import type { Logger } from '../observability/logger.js';
+import { NO_REPLY } from '../sessions/router.js';
 import type { TurnHooks } from '../sessions/turns.js';
 import type { Clock } from '../time.js';
-import type { ChannelAdapter } from './types.js';
+import type { ChannelAdapter, InboundMessage, OutboundMessage, ReplyProgress } from './types.js';
 
 export const WEB = 'web';
 // the web chat has one chat, the owner's. the dashboard signed in the request, so the sender is the owner.
@@ -51,8 +53,263 @@ export interface WebChannelOptions {
 
 export const TEXT_TICK_MS = 100;
 
-export function createWebChannel(_options: WebChannelOptions = {}): WebChannel {
-  throw new Error('not built: createWebChannel');
+// a turn that has not ended. the snapshot is what a new client gets. stop is the stop callback of the progress of the
+// turn while it runs, and cancel clears its text timer.
+interface LiveTurn {
+  snap: ChatTurnSnapshot;
+  stop?: () => void;
+  cancel?: () => void;
+}
+
+export function createWebChannel(options: WebChannelOptions = {}): WebChannel {
+  const clock = options.clock ?? (() => new Date());
+  const newId = options.newId ?? randomUUID;
+  const textTickMs = options.textTickMs ?? TEXT_TICK_MS;
+  const logger = options.logger;
+
+  let running = false;
+  let onMessage: ((message: InboundMessage) => void) | undefined;
+  const listeners = new Set<(event: ChatStreamEvent) => void>();
+  // the turns that have not ended, oldest first. a map keeps the order in which its keys came.
+  const turns = new Map<string, LiveTurn>();
+  // the timer cancels of all progress that has not ended, so the stop of the channel can clear each of them.
+  const timers = new Set<() => void>();
+  // a cli message has no messageId, so its turn id is made once and kept with the message object.
+  const generated = new WeakMap<InboundMessage, string>();
+  let sentCount = 0;
+
+  const turnIdOf = (message: InboundMessage): string => {
+    if (message.messageId !== undefined) return message.messageId;
+    let id = generated.get(message);
+    if (id === undefined) {
+      id = `${message.channel}:${newId()}`;
+      generated.set(message, id);
+    }
+    return id;
+  };
+
+  // each listener gets each event. a listener can remove itself in its callback, so the loop runs over a copy.
+  const emit = (event: ChatStreamEvent) => {
+    for (const listener of [...listeners]) {
+      try {
+        listener(event);
+      } catch (err) {
+        listeners.delete(listener);
+        logger?.warn('web chat listener failed and was removed', { err, kind: event.kind });
+      }
+    }
+  };
+
+  const liveTurn = (turnId: string, channel: string): LiveTurn => {
+    let live = turns.get(turnId);
+    if (!live) {
+      live = { snap: { turnId, channel, state: 'running', runId: null, text: '', activity: null } };
+      turns.set(turnId, live);
+    }
+    return live;
+  };
+
+  const replyEvent = (turnId: string | null, messageId: string, out: OutboundMessage): ChatStreamEvent => {
+    // the reply replaces the streamed text of its turn, so a later client does not see both.
+    const live = turnId === null ? undefined : turns.get(turnId);
+    if (live) {
+      live.snap.text = '';
+      live.snap.activity = null;
+    }
+    return {
+      kind: 'reply',
+      turnId,
+      messageId,
+      runId: out.runId ?? null,
+      text: out.text,
+      markdown: out.markdown ?? false,
+      details: out.details ?? null,
+      buttons: (out.buttons ?? []).map((row) => row.map((button) => ({ text: button.text, data: button.data }))),
+      at: clock().toISOString(),
+    };
+  };
+
+  // the progress of one turn on the stream. the web channel gives it for its own messages, and turns.started gives it
+  // for the messages of other channels.
+  const hubProgress = (turnId: string, channel: string, stop: () => void, guard: (text: string) => string): ReplyProgress => {
+    const live = liveTurn(turnId, channel);
+    live.stop = stop;
+    let latest = '';
+    let lastEmitted = '';
+    let timer: NodeJS.Timeout | undefined;
+    const cancel = () => {
+      clearTimeout(timer);
+      timer = undefined;
+    };
+    live.cancel = cancel;
+    timers.add(cancel);
+
+    // the router sends no message for a NO_REPLY answer, so no reply replaces its text. a text that can still become
+    // NO_REPLY therefore never shows. the guard runs once for each tick, not once for each token.
+    const visible = () => {
+      if (NO_REPLY.startsWith(latest.trim())) return '';
+      try {
+        return guard(latest);
+      } catch (err) {
+        logger?.warn('web chat draft guard failed', { err, turnId });
+        return '';
+      }
+    };
+    const flush = () => {
+      cancel();
+      const shown = visible();
+      if (shown === lastEmitted) return;
+      if (shown.startsWith(lastEmitted)) emit({ kind: 'text', turnId, delta: shown.slice(lastEmitted.length), reset: false });
+      // a new model call started, or the guard changed text that already went out.
+      else emit({ kind: 'text', turnId, delta: shown, reset: true });
+      lastEmitted = shown;
+      const current = turns.get(turnId);
+      if (current) current.snap.text = shown;
+    };
+
+    return {
+      text(full) {
+        latest = full;
+        timer ??= setTimeout(flush, textTickMs);
+      },
+      activity(tools) {
+        const value = tools ?? null;
+        const current = turns.get(turnId);
+        if (current) {
+          if (current.snap.activity === value) return;
+          current.snap.activity = value;
+        }
+        emit({ kind: 'activity', turnId, tools: value });
+      },
+      async end() {
+        try {
+          flush();
+        } catch (err) {
+          logger?.warn('web chat flush failed', { err, turnId });
+        }
+        cancel();
+        timers.delete(cancel);
+        // after the end, the stop of the turn gives false. a later progress of the same turn keeps its own stop.
+        const current = turns.get(turnId);
+        if (current?.stop === stop) delete current.stop;
+        if (current?.cancel === cancel) delete current.cancel;
+      },
+      done(ok) {
+        emit({ kind: 'done', turnId, ok });
+      },
+    };
+  };
+
+  const chat: WebChat = {
+    running: () => running,
+    submit(text) {
+      const handler = onMessage;
+      if (!running || !handler) return undefined;
+      const turnId = WEB_TURN_PREFIX + newId();
+      handler({ channel: WEB, senderId: WEB_SENDER_ID, chatId: WEB_CHAT_ID, text, messageId: turnId, receivedAt: clock().toISOString() });
+      // the router calls turns.queued before its first await, so the turn is in the map when the handler returns. a
+      // command such as /status makes no turn and answers at once, so it counts as running.
+      return { turnId, state: turns.get(turnId)?.snap.state === 'queued' ? 'queued' : 'running' };
+    },
+    press(data, turnId) {
+      const handler = onMessage;
+      if (!running || !handler) return false;
+      // the router handles a button message before the model path, so the data never goes to the model.
+      handler({
+        channel: WEB,
+        senderId: WEB_SENDER_ID,
+        chatId: WEB_CHAT_ID,
+        text: '',
+        button: data,
+        messageId: WEB_TURN_PREFIX + newId(),
+        receivedAt: clock().toISOString(),
+        ...(turnId ? { replyToMessageId: turnId } : {}),
+      });
+      return true;
+    },
+    stop(turnId) {
+      const stop = turns.get(turnId)?.stop;
+      if (!stop) return false;
+      try {
+        stop();
+      } catch (err) {
+        logger?.warn('web chat stop failed', { err, turnId });
+      }
+      return true;
+    },
+    snapshot: () => [...turns.values()].map((live) => ({ ...live.snap })),
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+
+  const hooks: TurnHooks = {
+    owner(message) {
+      emit({ kind: 'owner', turnId: turnIdOf(message), channel: message.channel, text: message.text, at: message.receivedAt });
+    },
+    queued(message, busy) {
+      const turnId = turnIdOf(message);
+      const state = busy ? 'queued' : 'running';
+      turns.set(turnId, { snap: { turnId, channel: message.channel, state, runId: null, text: '', activity: null } });
+      emit({ kind: 'state', turnId, state });
+    },
+    started(message, runId, stop, guard) {
+      const turnId = turnIdOf(message);
+      const before = turns.get(turnId)?.snap.state;
+      const live = liveTurn(turnId, message.channel);
+      live.snap.state = 'running';
+      if (before === undefined || before === 'queued') emit({ kind: 'state', turnId, state: 'running' });
+      live.snap.runId = runId;
+      emit({ kind: 'run', turnId, runId });
+      // the router tees this progress with the progress of the channel. the web channel's own progress already
+      // streams a web turn, so a second one here would send each event twice.
+      if (message.channel === WEB) return undefined;
+      return hubProgress(turnId, message.channel, stop, guard);
+    },
+    replied(message, out) {
+      // send() of the web channel already put this reply on the stream.
+      if (message.channel === WEB) return;
+      sentCount++;
+      emit(replyEvent(turnIdOf(message), `${message.channel}-out:${sentCount}`, out));
+    },
+    ended(message, end) {
+      const turnId = turnIdOf(message);
+      emit({ kind: 'state', turnId, state: end });
+      turns.get(turnId)?.cancel?.();
+      turns.delete(turnId);
+    },
+  };
+
+  return {
+    id: WEB,
+    chat,
+    turns: hooks,
+    async start(handler) {
+      onMessage = handler;
+      running = true;
+    },
+    async stop() {
+      running = false;
+      onMessage = undefined;
+      for (const cancel of timers) cancel();
+      timers.clear();
+      // the stop callbacks of the turns are not known after the stop. the listeners stay subscribed.
+      turns.clear();
+    },
+    // send works also while the channel does not run, so a reply that comes late still reaches the open clients.
+    async send(out) {
+      sentCount++;
+      const messageId = `web-out:${sentCount}`;
+      emit(replyEvent(out.replyTo ?? null, messageId, out));
+      return { messageId };
+    },
+    progress(message, stop, guard = (text: string) => text) {
+      return hubProgress(turnIdOf(message), message.channel, stop, guard);
+    },
+  };
 }
 
 export function isWebChannel(channel: ChannelAdapter): channel is WebChannel {
