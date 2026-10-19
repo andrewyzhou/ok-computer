@@ -8,6 +8,7 @@ import { createAlwaysAllow } from './approvals/always.js';
 import { approvalNote, createApprovalFlow, type ApprovalFlow } from './approvals/flow.js';
 import { expireApprovals, type Approval } from './approvals/store.js';
 import type { ChannelAdapter } from './channels/types.js';
+import { isWebChannel, WEB, type WebChat } from './channels/web.js';
 import type { LoginCodes } from './dashboard/login.js';
 import type { Config } from './config/schema.js';
 import { sinceLastReset } from './context/full-history.js';
@@ -117,6 +118,8 @@ export interface App {
   rules: readonly Rule[];
   integrations: Integrations;
   google?: Google;
+  // the web chat of the dashboard. it exists when the web channel is one of the channels.
+  chat?: WebChat;
 }
 
 // a run ends at its timeout. the margin covers the end of the run itself, so a live run is never closed as stale.
@@ -139,6 +142,7 @@ export function createApp(deps: AppDeps): App {
   const memoryDir = join(config.paths.data, 'memory');
   const memoryPath = join(memoryDir, 'MEMORY.md');
   const channels = new Map(deps.channels.map((channel) => [channel.id, channel]));
+  const webChannel = deps.channels.find(isWebChannel);
   const ownerIds = deps.ownerIds ?? {};
   // in a private telegram chat, the chat id is the same as the user id of the owner.
   const [preferred] = Object.entries(ownerIds).map(([channel, chatId]) => ({ channel, chatId }));
@@ -396,8 +400,9 @@ export function createApp(deps: AppDeps): App {
     queue,
     channels,
     agent,
-    // the cli runs on the owner's own terminal. other channels check the sender id against the owner id.
-    isOwner: (message) => message.channel === 'cli' || ownerIds[message.channel] === message.senderId,
+    // the cli runs on the owner's own terminal, and the dashboard signed in each web request. other channels check the
+    // sender id against the owner id.
+    isOwner: (message) => message.channel === 'cli' || message.channel === WEB || ownerIds[message.channel] === message.senderId,
     rememberOwnerChat: owner.remember,
     approvals: approvals.resolve,
     approvalCard: approvals.card,
@@ -419,6 +424,8 @@ export function createApp(deps: AppDeps): App {
       if (excerpt) appendToDailyNote(memoryDir, localDay(now, config.timeZone), 'notes', excerpt);
     },
     signal: shutdown.signal,
+    ...(webChannel ? { turns: webChannel.turns } : {}),
+    ...ids,
   });
 
   // the sweep closes the work of a stopped process and tells the sessions and the owner. it runs at the start and on
@@ -516,5 +523,6 @@ export function createApp(deps: AppDeps): App {
       }),
     resolveApproval: approvals.resolve,
     rules,
+    ...(webChannel ? { chat: webChannel.chat } : {}),
   };
 }

@@ -6,6 +6,7 @@ import { createApp } from './app.js';
 import { createCliChannel } from './channels/cli.js';
 import { createTelegramChannel, TELEGRAM } from './channels/telegram.js';
 import type { ChannelAdapter } from './channels/types.js';
+import { createWebChannel } from './channels/web.js';
 import { loadConfig, loadDotEnv, loadSecrets } from './config/load.js';
 import { openDb } from './db/index.js';
 import { createLoginCodes } from './dashboard/login.js';
@@ -86,12 +87,16 @@ async function main(): Promise<void> {
     logger.info('telegram is off, because TELEGRAM_BOT_TOKEN or TELEGRAM_OWNER_ID is not set');
   }
   const telegram = channels.length > 0;
-  // a service has no terminal. the cli then runs only when no other channel runs.
+  // the web chat lives in the dashboard, and npm run chat runs no dashboard.
+  const web = !chatMode;
+  // a service has no terminal. the cli then runs only when telegram does not run.
   if (chatMode || !telegram || process.stdin.isTTY) {
-    // when piped input ends, the runs that it started finish before the process stops. telegram keeps the process up.
-    const onClose = () => (telegram ? logger.info('cli input ended') : void app.idle().then(() => stop('cli input ended')));
+    // when piped input ends, the runs that it started finish before the process stops. telegram and the web chat keep
+    // the process up.
+    const onClose = () => (telegram || web ? logger.info('cli input ended') : void app.idle().then(() => stop('cli input ended')));
     channels.push(createCliChannel({ onClose }));
   }
+  if (web) channels.push(createWebChannel({ clock: systemClock, logger }));
   // the sign-in codes live in the process that runs the dashboard. npm run chat runs no dashboard.
   const loginCodes = !chatMode && secrets.dashboardToken && config.dashboard.publicUrl ? createLoginCodes(systemClock) : undefined;
   const app = createApp({

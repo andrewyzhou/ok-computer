@@ -12,6 +12,7 @@ import type { Clock } from '../time.js';
 import { wrapUntrusted } from '../tools/untrusted.js';
 import type { Card, RunState } from './commands.js';
 import type { RunQueue } from './queue.js';
+import type { TurnHooks } from './turns.js';
 
 // all owner messages from all channels share one continuous conversation.
 export const MAIN_SESSION = 'main';
@@ -69,6 +70,10 @@ export interface RouterDeps {
   // the router calls this on /new before the reset event goes into the log.
   onReset?: () => void;
   signal?: AbortSignal;
+  // the hooks of the turns, for the viewers of other channels (see turns.ts). the web channel gives them.
+  turns?: TurnHooks;
+  // the id of the run of a turn. the router makes it before the run starts when it has turns, so started() can name it.
+  newId?: () => string;
 }
 
 const APPROVAL_COMMAND = /^\/(approve|deny)\s+#?(\d+)$/i;
