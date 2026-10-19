@@ -1,0 +1,99 @@
+# ok computer on a server. docs/setup/aws.md is the runbook.
+#
+# no service publishes a port. the dashboard is reached only over the tailnet through tailscale serve, and telegram
+# polls out, so nothing on the host listens for the internet.
+#
+# OKC_RUN is the absolute path of the run directory on the host. it holds okc.config.json, okc.policy.json, data/,
+# workspace/ and skills/, and it belongs to 10001:10001, the user of the image and of litestream.
+# deploy/env.example lists the variables.
+#
+# the containers reach the instance role of the host for aws. that needs a hop limit of 2 for the instance metadata.
+# so every process in every container of the host holds the role: the app, its mcp servers, chrome and litestream.
+# the role may only read okc-host/env, the env of the host, and it may change only the okc/* secrets of the app.
+
+services:
+  tailscale:
+    image: tailscale/tailscale:v1.104.1
+    hostname: ${OKC_TS_HOSTNAME:-okc}
+    environment:
+      # the key is needed only for the first join. ts-state then keeps the node, so the key can leave deploy/.env.
+      - TS_AUTHKEY=${TS_AUTHKEY:-}
+      - TS_STATE_DIR=/var/lib/tailscale
+      # userspace networking needs no NET_ADMIN and no tun device. serve still reaches 127.0.0.1 of the shared network.
+      - TS_USERSPACE=true
+      - TS_SERVE_CONFIG=/config/serve.json
+    volumes:
+      - ts-state:/var/lib/tailscale
+      - ./tailscale-serve.json:/config/serve.json:ro
+    restart: unless-stopped
+
+  # a new host gets the database back from the replica before the app opens it. it does nothing when the database is
+  # there or when no replica exists yet.
+  restore:
+    image: litestream/litestream:0.5.17
+    user: "10001:10001"
+    command: restore -if-db-not-exists -if-replica-exists -config /etc/litestream.yml /okc/data/okc.sqlite
+    environment:
+      - OKC_BACKUP_BUCKET=${OKC_BACKUP_BUCKET:?set OKC_BACKUP_BUCKET to the backup bucket}
+      - AWS_REGION=${AWS_REGION:?set AWS_REGION to the region of the bucket}
+    volumes:
+      - ./litestream.yml:/etc/litestream.yml:ro
+      - ${OKC_RUN:?set OKC_RUN to the absolute path of the run directory}/data:/okc/data
+    restart: "no"
+
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: okc:local
+    # the app shares the network of the tailscale service, so 127.0.0.1:4317 there is the dashboard.
+    network_mode: "service:tailscale"
+    depends_on:
+      tailscale:
+        condition: service_started
+      restore:
+        condition: service_completed_successfully
+    init: true
+    # this is required. without telegram the app starts a cli channel, and it stops when stdin ends. an open stdin
+    # keeps it running.
+    stdin_open: true
+    # chrome needs more shared memory than the default of 64 mb.
+    shm_size: 1gb
+    stop_grace_period: 30s
+    restart: unless-stopped
+    volumes:
+      - ${OKC_RUN:?set OKC_RUN to the absolute path of the run directory}:/okc
+      # the data mount is explicit, because the VOLUME of the image would otherwise put an anonymous volume over it.
+      - ${OKC_RUN}/data:/okc/data
+    # an explicit list and no env_file, so TS_AUTHKEY is not in the environment of the app.
+    environment:
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_COMPAT_BASE_URL=${OPENAI_COMPAT_BASE_URL:-}
+      - OPENAI_COMPAT_API_KEY=${OPENAI_COMPAT_API_KEY:-}
+      - DASHBOARD_TOKEN=${DASHBOARD_TOKEN:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_OWNER_ID=${TELEGRAM_OWNER_ID:-}
+      - AWS_REGION=${AWS_REGION:-}
+
+  # litestream copies each change of the database to s3.
+  litestream:
+    image: litestream/litestream:0.5.17
+    user: "10001:10001"
+    command: replicate -config /etc/litestream.yml
+    depends_on:
+      app:
+        condition: service_started
+    environment:
+      - OKC_BACKUP_BUCKET=${OKC_BACKUP_BUCKET:?set OKC_BACKUP_BUCKET to the backup bucket}
+      - AWS_REGION=${AWS_REGION:?set AWS_REGION to the region of the bucket}
+    volumes:
+      - ./litestream.yml:/etc/litestream.yml:ro
+      - ${OKC_RUN:?set OKC_RUN to the absolute path of the run directory}/data:/okc/data
+    restart: unless-stopped
+
+  # the code sandbox of m9 is off on the server for now, because the image has no docker access. m9 adds a docker
+  # socket proxy service here, with only the container endpoints that the sandbox needs.
+
+volumes:
+  ts-state:

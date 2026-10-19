@@ -1,3 +1,6 @@
+# every text file is checked out with lf, also on windows. the image runs deploy/entrypoint.sh with /bin/sh, which
+# fails on a carriage return, and the deploy tests read compose.yaml and .dockerignore line by line.
+* text=auto eol=lf
 # the shell script and the plist template run on macos and linux, where a carriage return breaks bash.
 *.sh text eol=lf
 scripts/macos/*.plist text eol=lf

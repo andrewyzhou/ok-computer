@@ -38,8 +38,17 @@ export interface GoogleAccounts {
   saveClient(file: unknown): Promise<{ saved: true } | { error: string }>;
   beginSignIn(alias: string): Promise<{ url: string } | { error: string }>;
   finishSignIn(state: string, code: string): Promise<{ email: string } | { error: string }>;
+  // importToken takes a refresh token that a sign-in on a desktop made, for a server that has no browser. it makes the
+  // same checks as finishSignIn before it stores the token. see POST /api/google/accounts/:alias/token.
+  importToken(alias: string, input: { refreshToken: string; clientId: string }): Promise<TokenImport>;
   close(): Promise<void>;
 }
+
+// the status is the http status of the dashboard answer, so the route only copies it. docs/PHASE5-API.md (m7) gives
+// the meaning of each one.
+export type TokenImport =
+  | { ok: true; email: string | null; scopes: string[]; storedAt: string }
+  | { ok: false; status: 404 | 409 | 422 | 503; error: string };
 
 export interface AccountsDeps {
   db: Db;
@@ -60,12 +69,20 @@ export interface AccountsDeps {
 }
 
 const CLIENT_REF = 'google.client';
-const tokenRef = (alias: string) => `google.${alias}`;
+// the ref of the refresh token of an account. google:push reads it on the desktop.
+export const tokenRef = (alias: string) => `google.${alias}`;
 // a timeout on each request, so a hung connection to google cannot hold a poll or a session queue.
 const REQUEST_TIMEOUT_MS = 30_000;
 const FLOW_MS = 10 * 60_000;
 // a testing-mode consent screen ends each refresh token after 7 days.
 const DAY_MS = 24 * 60 * 60_000;
+
+// the result of the checks on a new refresh token. store means that the secret store did not take it.
+type Adopted =
+  | { ok: true; email: string; granted: string[] }
+  | { ok: false; why: 'scopes'; missing: string[] }
+  | { ok: false; why: 'email'; email: string; expected: string }
+  | { ok: false; why: 'store'; err: unknown };
 
 interface Flow {
   alias: string;
@@ -261,6 +278,98 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
     });
   };
 
+  // adopt makes the checks on a new refresh token and stores it. the loopback sign-in and the token import both use it,
+  // so a token from the desktop gets the same checks as one from the browser. auth must hold the token already. a
+  // token that fails a check is revoked. an error of google throws, and a store that fails is a result, because the
+  // import answers it with its own status.
+  async function adopt(alias: string, auth: OAuth2Client, refreshToken: string, scope: string | null | undefined): Promise<Adopted> {
+    const granted = new Set((scope ?? '').split(/\s+/));
+    const missing = requiredScopes(config).filter((each) => !granted.has(each));
+    const revoke = () => auth.revokeToken(refreshToken).catch((err: unknown) => logger.warn('google token revoke failed', { alias, err: toGoogleError(err) }));
+    if (missing.length) {
+      await revoke();
+      return { ok: false, why: 'scopes', missing };
+    }
+    const profile = await apisFor(auth).gmail.users.getProfile({ userId: 'me' });
+    const email = String(profile.data.emailAddress ?? '').toLowerCase();
+    const expected = config.accounts.find((each) => each.alias === alias)?.email?.toLowerCase();
+    if (expected && email !== expected) {
+      // the owner signed in with another account in the browser. the token must not stay valid at google either.
+      await revoke();
+      return { ok: false, why: 'email', email, expected };
+    }
+    const before = row(alias)?.email;
+    try {
+      await secrets.set(tokenRef(alias), refreshToken);
+    } catch (err) {
+      return { ok: false, why: 'store', err };
+    }
+    cached.delete(alias);
+    db.prepare(
+      `UPDATE google_accounts SET email = ?, scopes = ?, status = 'ok', authorizedAt = ?, alertedAt = NULL, lastError = NULL, lastErrorAt = NULL, failures = 0, updatedAt = ? WHERE alias = ?`,
+    ).run(email, [...granted].join(' '), now(), now(), alias);
+    if (before && before !== email) deps.onNewMailbox?.(alias);
+    // the gmail baseline is the moment of the sign-in, not the first poll that works. mail that comes between the
+    // two is news. a cursor that exists stays, so a sign-in after needs_auth still finds the mail of the outage.
+    db.prepare('UPDATE google_accounts SET historyId = COALESCE(historyId, ?) WHERE alias = ?').run(String(profile.data.historyId), alias);
+    return { ok: true, email, granted: [...granted] };
+  }
+
+  async function importToken(alias: string, input: { refreshToken: string; clientId: string }): Promise<TokenImport> {
+    // a made-up alias gets a 404 that never echoes the token. it is checked first, so it adds no source to the
+    // redactor, which keeps each source for good.
+    if (!aliases.includes(alias)) return { ok: false, status: 404, error: 'google account not found' };
+    // the token goes to the redactor before anything else, so no log line or trace row of a failure can hold it.
+    registerSecret(input.refreshToken, `google:${alias}:import`);
+    if (input.clientId !== config.clientId) {
+      return { ok: false, status: 409, error: `the token is for the client ${input.clientId}, but clientId in okc.config.json is ${config.clientId}.` };
+    }
+    let secret: string | undefined;
+    try {
+      secret = await secrets.get(CLIENT_REF);
+    } catch (err) {
+      logger.warn('the secret store failed during a google token import', { alias, err });
+      return { ok: false, status: 503, error: 'the secret store failed, so the token was not stored.' };
+    }
+    if (!secret) return { ok: false, status: 409, error: 'the server has no client secret yet. Upload the client file on the Google page of the server first.' };
+    return requestContext.run({ account: alias }, async (): Promise<TokenImport> => {
+      try {
+        const auth = await oauthClient();
+        auth.setCredentials({ refresh_token: input.refreshToken });
+        // one refresh proves that google takes the token, and its answer names the scopes that the token grants.
+        const { credentials } = await auth.refreshAccessToken();
+        registerSecret(credentials.access_token ?? undefined, `google:${alias}:access`);
+        const adopted = await adopt(alias, auth, input.refreshToken, credentials.scope);
+        if (adopted.ok) {
+          logger.info('google token imported', { alias });
+          return { ok: true, email: adopted.email, scopes: adopted.granted, storedAt: clock().toISOString() };
+        }
+        if (adopted.why === 'scopes') {
+          return { ok: false, status: 422, error: `the token does not grant: ${scopeWords(adopted.missing)}. It was revoked, so sign in again on the desktop and keep every box checked.` };
+        }
+        if (adopted.why === 'email') {
+          return {
+            ok: false,
+            status: 422,
+            error: `the token is for ${adopted.email}, but ${alias} is ${adopted.expected} in the config. The token was revoked, so sign in again on the desktop with ${adopted.expected}.`,
+          };
+        }
+        logger.error('the imported google token was not stored', { alias, err: adopted.err });
+        return { ok: false, status: 503, error: 'the secret store did not take the token.' };
+      } catch (err) {
+        // an error that is not from google is a bug or a database error. the route answers it with 500.
+        if (!fromSdk(err)) throw err;
+        const error = toGoogleError(err);
+        logger.warn('google token import failed', { alias, err: error });
+        // google refuses a dead token with invalid_grant, and a token of another client with unauthorized_client. any
+        // other 4xx is a refusal too. a 429, a 5xx, a timeout or a network error says nothing about the token.
+        const refused = error.kind === 'auth' || error.kind === 'client' || (error.status !== undefined && error.status >= 400 && error.status < 500 && error.status !== 429);
+        if (refused) return { ok: false, status: 422, error: `google refused the token: ${error.message}` };
+        return { ok: false, status: 503, error: 'google did not answer, so nothing was stored. Try again.' };
+      }
+    });
+  }
+
   // the requests of a sign-in belong to the account, without a run.
   async function finishSignIn(state: string, code: string): Promise<{ email: string } | { error: string }> {
     const alias = flows.get(state)?.alias;
@@ -281,32 +390,14 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
       registerSecret(tokens.access_token ?? undefined, `google:${flow.alias}:access`);
       registerSecret(tokens.refresh_token ?? undefined, `google:${flow.alias}:new`);
       if (!tokens.refresh_token) return { error: 'google gave no refresh token. Remove the app at myaccount.google.com/permissions, then connect again.' };
-      const granted = new Set((tokens.scope ?? '').split(/\s+/));
-      const missing = requiredScopes(config).filter((scope) => !granted.has(scope));
-      const revoke = () => auth.revokeToken(tokens.refresh_token!).catch((err: unknown) => logger.warn('google token revoke failed', { alias: flow.alias, err: toGoogleError(err) }));
-      if (missing.length) {
-        await revoke();
-        return { error: `Google did not grant: ${scopeWords(missing)}. Nothing was saved. Press Connect again and keep every box checked.` };
-      }
       auth.setCredentials(tokens);
-      const profile = await apisFor(auth).gmail.users.getProfile({ userId: 'me' });
-      const email = String(profile.data.emailAddress ?? '').toLowerCase();
-      const expected = config.accounts.find((each) => each.alias === flow.alias)?.email?.toLowerCase();
-      if (expected && email !== expected) {
-        // the owner signed in with another account in the browser. the token must not stay valid at google either.
-        await revoke();
-        return { error: `You signed in as ${email}, but ${flow.alias} is ${expected} in the config. Nothing was saved. Press Connect again and pick ${expected}.` };
+      const adopted = await adopt(flow.alias, auth, tokens.refresh_token, tokens.scope);
+      if (adopted.ok === false) {
+        if (adopted.why === 'scopes') return { error: `Google did not grant: ${scopeWords(adopted.missing)}. Nothing was saved. Press Connect again and keep every box checked.` };
+        if (adopted.why === 'email') return { error: `You signed in as ${adopted.email}, but ${flow.alias} is ${adopted.expected} in the config. Nothing was saved. Press Connect again and pick ${adopted.expected}.` };
+        throw adopted.err;
       }
-      const before = row(flow.alias)?.email;
-      await secrets.set(tokenRef(flow.alias), tokens.refresh_token);
-      cached.delete(flow.alias);
-      db.prepare(
-        `UPDATE google_accounts SET email = ?, scopes = ?, status = 'ok', authorizedAt = ?, alertedAt = NULL, lastError = NULL, lastErrorAt = NULL, failures = 0, updatedAt = ? WHERE alias = ?`,
-      ).run(email, [...granted].join(' '), now(), now(), flow.alias);
-      if (before && before !== email) deps.onNewMailbox?.(flow.alias);
-      // the gmail baseline is the moment of the sign-in, not the first poll that works. mail that comes between the
-      // two is news. a cursor that exists stays, so a sign-in after needs_auth still finds the mail of the outage.
-      db.prepare('UPDATE google_accounts SET historyId = COALESCE(historyId, ?) WHERE alias = ?').run(String(profile.data.historyId), flow.alias);
+      const { email } = adopted;
       logger.info('google account signed in', { alias: flow.alias });
       return { email };
     } catch (err) {
@@ -385,6 +476,7 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
       }
     },
     finishSignIn,
+    importToken,
     async close() {
       flows.clear();
       await closeIfIdle();

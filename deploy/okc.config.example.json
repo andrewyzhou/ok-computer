@@ -1,0 +1,17 @@
+{
+  "secrets": {
+    "backend": "aws",
+    "region": "us-east-1"
+  },
+  "dashboard": {
+    "publicUrl": "https://okc.your-tailnet.ts.net"
+  },
+  "google": {
+    "clientId": "000000000000-replace-me.apps.googleusercontent.com",
+    "accounts": [
+      { "alias": "personal", "email": "you@example.com" },
+      { "alias": "school" }
+    ],
+    "send": false
+  }
+}

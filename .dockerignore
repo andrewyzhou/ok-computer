@@ -1,0 +1,33 @@
+# the image is built from a clean copy of the code. nothing of a run and no secret goes into the build context.
+# a pattern here matches only from the root of the context, unlike in .gitignore, so each pattern that must match in
+# a subfolder starts with **/. deploy/.env holds every secret of a server, and docs/setup/docker.md makes a run
+# folder in the project folder.
+node_modules
+**/node_modules
+dist
+web/dist
+data
+**/data
+run
+deploy/.env
+.env
+.env.*
+**/.env
+**/.env.*
+okc.*.json
+**/okc.*.json
+*.sqlite
+*.sqlite-*
+**/*.sqlite
+**/*.sqlite-*
+.git
+.github
+explorations
+skills
+# the profile of the owner is personal. the image holds only the example.
+workspace/USER.md
+coverage
+test-results
+playwright-report
+*.log
+**/*.log

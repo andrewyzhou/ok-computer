@@ -1,0 +1,11 @@
+# litestream 0.5 copies the database of ok computer to s3. litestream reads the wal, and the app opens the database in
+# wal mode, so it needs no change for this.
+# the credentials come from the instance role of the host, so this file holds no keys. litestream expands the
+# ${...} variables from the environment that compose gives it.
+dbs:
+  - path: /okc/data/okc.sqlite
+    replica:
+      type: s3
+      bucket: ${OKC_BACKUP_BUCKET}
+      path: okc.sqlite
+      region: ${AWS_REGION}

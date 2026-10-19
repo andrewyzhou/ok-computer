@@ -58,7 +58,7 @@ launchd restarts the agent only after a crash, not after `okc stop`, and waits a
 
 ## What works now and how to turn each part on
 
-A part that needs setup stays off until the setup is done, and the rest of the app works without it. Settings go in `okc.config.json`, secrets in `.env` or the system credential store (the Credential Manager on Windows, the login Keychain on macOS). Run `okc restart` after a change. The background agent runs the build of its last start, so restart it once after an update.
+A part that needs setup stays off until the setup is done, and the rest of the app works without it. Settings go in `okc.config.json`, secrets in `.env` or the system credential store (the Credential Manager on Windows, the login Keychain on macOS). On a server, the `secrets` block of `okc.config.json` keeps them in a file with mode 0600 or in AWS Secrets Manager instead. Run `okc restart` after a change. The background agent runs the build of its last start, so restart it once after an update.
 
 | Part | State | How to turn it on |
 |---|---|---|
@@ -71,6 +71,7 @@ A part that needs setup stays off until the setup is done, and the rest of the a
 | Reviewer model, taint and sub-agents (`delegate`) | On | Nothing. `npm run smoke:reviewer` (about 30 calls of the `utility` slot) shows how well the reviewer holds injected actions |
 | Skill Workshop | On | Nothing. A review at 09:00 can propose a skill; only Approve writes it to `skills/` |
 | Dashboard on the phone and laptop | Optional | `DASHBOARD_TOKEN` and Tailscale Serve: [docs/setup/tailscale.md](docs/setup/tailscale.md) |
+| Running on a server (Docker, Tailscale, Litestream backups, AWS Secrets Manager) | Built, not yet checked on a real host | Try the image locally with [docs/setup/docker.md](docs/setup/docker.md), then follow the runbook in [docs/setup/aws.md](docs/setup/aws.md). Google accounts move with `npm run google:push` |
 | Subscription sweep | Owner test, not a separate feature | After Gmail works, ask the agent for it (see below) |
 | Code sandbox (`sandbox_exec`): bash, Python and Node in a fresh Docker container for each call | Optional (needs Docker) | Docker Desktop or the Docker engine, then `npm run sandbox:image` and `okc restart`: [docs/setup/sandbox.md](docs/setup/sandbox.md). Without Docker the tool is off and the rest of the app runs. The reviewer checks each call, and you approve each call with network access |
 | Claude history | On hold | Nothing to do |
