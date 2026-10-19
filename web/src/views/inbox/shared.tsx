@@ -1,7 +1,31 @@
 import { useState, type ReactNode } from 'react';
 import type { InboxActionResponse, InboxJob, StreamMessage } from '../../../../src/dashboard/types';
 import { api, send } from '../../api';
+import { Status } from '../../components';
 import { time } from '../../format';
+
+// the tones of the states of the inbox rows. they stay here, so the shared status words of other pages keep their
+// tones. a state that is not here, such as failed or expired, gets the shared tone.
+const INBOX_TONE: Record<string, string> = {
+  active: 'info',
+  kept: 'muted',
+  unsubscribe_pending: 'warning',
+  unsubscribed: 'good',
+  cancel_pending: 'warning',
+  cancelled: 'good',
+  ignored: 'muted',
+  drafted: 'good',
+  discarded: 'muted',
+  sent_by_owner: 'muted',
+  proposed: 'warning',
+  created: 'good',
+};
+
+// a status always shows its word, so the color is never the only signal.
+export function InboxStatus({ value }: { value: string }) {
+  const tone = INBOX_TONE[value];
+  return tone ? <span className={`badge tone-${tone}`}>{value}</span> : <Status value={value} />;
+}
 
 // the inbox lists change when a job run ends and when the owner decides on one of their approvals.
 export const refreshOnInbox = (message: StreamMessage) => message.kind === 'run' || message.kind === 'approval';

@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import type { NewsletterSenderRow, SenderState, SendersPage, SendersQuery } from '../../../../src/dashboard/types';
 import { api, useApi } from '../../api';
-import { Empty, Load, Page, Panel, Status } from '../../components';
+import { Empty, Load, Page, Panel } from '../../components';
 import { percent, time } from '../../format';
-import { ActionNotice, JobLine, LoadMore, query, refreshOnInbox, Select, useAction, usePages, type Chunk } from './shared';
+import { ActionNotice, InboxStatus, JobLine, LoadMore, query, refreshOnInbox, Select, useAction, usePages, type Chunk } from './shared';
 
 const STATES: readonly SenderState[] = ['active', 'kept', 'unsubscribe_pending', 'unsubscribed', 'failed'];
 const SORTS: ReadonlyArray<NonNullable<SendersQuery['sort']>> = ['messages', 'readRate', 'lastAt'];
@@ -133,7 +133,7 @@ export function Newsletters() {
                           <Unsubscribe sender={sender} />
                         </td>
                         <td className="wrap">
-                          <Status value={sender.state} />
+                          <InboxStatus value={sender.state} />
                           {sender.state === 'unsubscribe_pending' && sender.approvalId !== null ? (
                             <div>
                               <a href="#/approvals">approval #{sender.approvalId}</a>

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import type { SubscriptionRow, SubscriptionsPage, SubscriptionState } from '../../../../src/dashboard/types';
 import { useApi } from '../../api';
-import { Empty, Load, Page, Panel, Status, Tile } from '../../components';
+import { Empty, Load, Page, Panel, Tile } from '../../components';
 import { percent, time } from '../../format';
-import { ActionNotice, JobLine, money, query, refreshOnInbox, Select, useAction } from './shared';
+import { ActionNotice, InboxStatus, JobLine, money, query, refreshOnInbox, Select, useAction } from './shared';
 
 const STATES: readonly SubscriptionState[] = ['active', 'cancel_pending', 'cancelled', 'ignored'];
 
@@ -77,7 +77,7 @@ export function Subscriptions() {
                           </div>
                         </td>
                         <td className="wrap">
-                          <Status value={row.state} />
+                          <InboxStatus value={row.state} />
                           {row.state === 'cancel_pending' && row.approvalId !== null ? (
                             <div>
                               <a href="#/approvals">approval #{row.approvalId}</a>

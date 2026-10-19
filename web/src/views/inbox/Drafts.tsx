@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import type { DraftState, DraftView } from '../../../../src/dashboard/types';
 import { useApi } from '../../api';
-import { Empty, Load, Page, Panel, Status } from '../../components';
+import { Empty, Load, Page, Panel } from '../../components';
 import { time } from '../../format';
-import { accountsOf, BEFORE_LIMIT, beforeChunk, fetchBefore, LoadMore, query, refreshOnInbox, RunLink, Select, usePages } from './shared';
+import { accountsOf, BEFORE_LIMIT, beforeChunk, fetchBefore, InboxStatus, LoadMore, query, refreshOnInbox, RunLink, Select, usePages } from './shared';
 
 const STATES: readonly DraftState[] = ['drafted', 'discarded', 'sent_by_owner'];
 
@@ -37,7 +37,7 @@ export function Drafts() {
                   <li key={draft.id} className="card">
                     <div className="row">
                       <strong className="wrap">{draft.subject}</strong>
-                      <Status value={draft.state} />
+                      <InboxStatus value={draft.state} />
                     </div>
                     <div className="muted small wrap">
                       to {draft.to.length ? draft.to.join(', ') : 'nobody'} · {draft.account} · {time(draft.createdAt)}{' '}

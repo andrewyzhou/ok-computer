@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import type { CalendarProposalView, ProposalState } from '../../../../src/dashboard/types';
 import { useApi } from '../../api';
-import { Empty, Load, Page, Panel, Status } from '../../components';
+import { Empty, Load, Page, Panel } from '../../components';
 import { time } from '../../format';
-import { accountsOf, BEFORE_LIMIT, beforeChunk, fetchBefore, LoadMore, query, refreshOnInbox, RunLink, Select, usePages } from './shared';
+import { accountsOf, BEFORE_LIMIT, beforeChunk, fetchBefore, InboxStatus, LoadMore, query, refreshOnInbox, RunLink, Select, usePages } from './shared';
 
 const STATES: readonly ProposalState[] = ['proposed', 'approved', 'created', 'declined', 'expired', 'failed'];
 
@@ -67,7 +67,7 @@ export function Proposals() {
                         <td>{proposal.kind}</td>
                         <td>{when(proposal)}</td>
                         <td className="wrap">
-                          <Status value={proposal.state} />
+                          <InboxStatus value={proposal.state} />
                           {proposal.state === 'proposed' ? (
                             <div>
                               <a href="#/approvals">{proposal.approvalId !== null ? `approval #${proposal.approvalId}` : 'approvals'}</a>
