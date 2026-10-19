@@ -35,6 +35,7 @@ import { createOAuth } from './integrations/oauth.js';
 import { syncPolls } from './integrations/polls.js';
 import { createMemorySecretStore, type SecretStore } from './integrations/secrets.js';
 import { createSlackDmPoll } from './integrations/slack-dms.js';
+import type { SecretVault } from './secrets/index.js';
 import { createSlotRunner } from './models/slots.js';
 import type { ModelClient, ModelRequest } from './models/types.js';
 import { createBlobStore } from './observability/blobs.js';
@@ -85,6 +86,9 @@ export interface AppDeps {
   // the entries of okc.integrations.json, and the store of their secrets.
   integrations?: IntegrationEntry[];
   secrets?: SecretStore;
+  // the store that the secrets block of the config chose, for GET /api/secrets. main.ts makes it, and its store is
+  // the secrets above.
+  secretVault?: SecretVault;
   // tests connect in-memory servers. the app starts stdio processes and http connections.
   mcpTransport?: IntegrationsDeps['transport'];
   // false in npm run chat. see start(). the browser follows the same switch: one chrome can use its profile.
@@ -117,6 +121,7 @@ export interface App {
   rules: readonly Rule[];
   integrations: Integrations;
   google?: Google;
+  secretVault?: SecretVault;
 }
 
 // a run ends at its timeout. the margin covers the end of the run itself, so a live run is never closed as stale.
@@ -506,6 +511,7 @@ export function createApp(deps: AppDeps): App {
     },
     integrations,
     ...(google ? { google } : {}),
+    ...(deps.secretVault ? { secretVault: deps.secretVault } : {}),
     // without compaction hooks the strategy only renders. it does not call a model or append an event.
     contextView: (sessionKey) =>
       strategy.build({

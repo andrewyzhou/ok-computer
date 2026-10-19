@@ -38,8 +38,17 @@ export interface GoogleAccounts {
   saveClient(file: unknown): Promise<{ saved: true } | { error: string }>;
   beginSignIn(alias: string): Promise<{ url: string } | { error: string }>;
   finishSignIn(state: string, code: string): Promise<{ email: string } | { error: string }>;
+  // importToken takes a refresh token that a sign-in on a desktop made, for a server that has no browser. it makes the
+  // same checks as finishSignIn before it stores the token. see POST /api/google/accounts/:alias/token.
+  importToken(alias: string, input: { refreshToken: string; clientId: string }): Promise<TokenImport>;
   close(): Promise<void>;
 }
+
+// the status is the http status of the dashboard answer, so the route only copies it. docs/PHASE5-API.md (m7) gives
+// the meaning of each one.
+export type TokenImport =
+  | { ok: true; email: string | null; scopes: string[]; storedAt: string }
+  | { ok: false; status: 404 | 409 | 422 | 503; error: string };
 
 export interface AccountsDeps {
   db: Db;
@@ -385,6 +394,10 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
       }
     },
     finishSignIn,
+    // TODO(m7 token import): build it. the work package gives the checks and the status of each failure.
+    async importToken() {
+      throw new Error('not built: the google token import');
+    },
     async close() {
       flows.clear();
       await closeIfIdle();

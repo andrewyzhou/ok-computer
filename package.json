@@ -16,10 +16,12 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "test": "vitest run",
     "smoke": "tsx src/smoke.ts",
-    "smoke:reviewer": "tsx src/smoke-reviewer.ts"
+    "smoke:reviewer": "tsx src/smoke-reviewer.ts",
+    "google:push": "tsx src/deploy/push-token.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
+    "@aws-sdk/client-secrets-manager": "3.1144.0",
     "@googleapis/calendar": "20.1.0",
     "@googleapis/gmail": "22.0.1",
     "@hono/node-server": "^2.1.4",

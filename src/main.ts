@@ -11,13 +11,13 @@ import { openDb } from './db/index.js';
 import { createLoginCodes } from './dashboard/login.js';
 import { startDashboard, type RunningDashboard } from './dashboard/server.js';
 import { loadIntegrations } from './integrations/config.js';
-import { createKeyringStore } from './integrations/secrets.js';
 import { createClients } from './models/clients.js';
 import { exitOnFatal, exitOnUncaught, exitWhenIdle } from './exit.js';
 import { holdInstanceLock } from './instance.js';
 import { createLogger, pruneLogs, type Logger } from './observability/logger.js';
 import { registerSecret } from './observability/redact.js';
 import { loadPolicy } from './policy/policy.js';
+import { createSecretVault } from './secrets/index.js';
 import { systemClock } from './time.js';
 
 // the handlers of a fatal error use the logger once it exists.
@@ -93,6 +93,8 @@ async function main(): Promise<void> {
     channels.push(createCliChannel({ onClose }));
   }
   // the sign-in codes live in the process that runs the dashboard. npm run chat runs no dashboard.
+  // the secrets block of the config chooses the store: the keyring on a desktop, a file or aws on a server.
+  const vault = createSecretVault(config.secrets);
   const loginCodes = !chatMode && secrets.dashboardToken && config.dashboard.publicUrl ? createLoginCodes(systemClock) : undefined;
   const app = createApp({
     config,
@@ -105,7 +107,8 @@ async function main(): Promise<void> {
     rules: rules.value,
     policyPath: 'okc.policy.json',
     integrations: integrations.value,
-    ...(integrations.value.length || config.google ? { secrets: createKeyringStore() } : {}),
+    ...(integrations.value.length || config.google || vault.backend !== 'keyring' ? { secrets: vault.store } : {}),
+    secretVault: vault,
     connectIntegrations: !chatMode,
     background: !chatMode,
     ...(loginCodes ? { loginCodes } : {}),

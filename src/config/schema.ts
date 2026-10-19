@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { googleConfigSchema } from '../google/config.js';
+import { DEFAULT_SECRET_STORE, secretStoreConfigSchema } from '../secrets/config.js';
 
 export const SLOTS = ['main', 'heartbeat', 'utility', 'batch', 'consolidation', 'compaction'] as const;
 export type Slot = (typeof SLOTS)[number];
@@ -147,6 +148,9 @@ export const configSchema = z.strictObject({
     .prefault({}),
   // the google integration is off without this block. see docs/setup/google.md.
   google: googleConfigSchema.optional(),
+  // the place that keeps the secrets. a desktop uses the keyring, and a server uses a file or aws secrets manager.
+  // see docs/setup/aws.md.
+  secrets: secretStoreConfigSchema.prefault(DEFAULT_SECRET_STORE),
 });
 
 // the result is in milliseconds. "0" gives 0.
