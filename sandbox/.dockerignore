@@ -1,0 +1,3 @@
+# the build needs only the files that the Dockerfile copies.
+*
+!relay.mjs

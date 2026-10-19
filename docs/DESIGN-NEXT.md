@@ -46,7 +46,7 @@ These add to DESIGN.md section 2.
 - `mcp_messages`: every JSON-RPC message per server: `serverId, direction (out | in), method, rpcId, payloadBlob, latencyMs, createdAt`. This includes `tools/list` results and notifications. The run id is set when the message belongs to a tool call.
 - The tables below are the plan for later milestones. Each one is created by the migration of the milestone that writes it (2.5).
 - `browser_steps`: `taskId, runId, toolCallId, action, target, urlBefore, urlAfter, snapshotBlob, screenshotBlob, consoleErrors, blockedRequests, createdAt`. Plus one Playwright trace zip per browser task.
-- `sandbox_execs` (on hold with the sandbox, 5.4): `runId, toolCallId, command, cwd, network (none | allowlist), exitCode, stdoutBlob, stderrBlob, filesChanged, durationMs`.
+- `sandbox_execs` (on hold with the sandbox, 5.4): `runId, toolCallId, command, cwd, network (none | allowlist), exitCode, stdoutBlob, stderrBlob, filesChanged, durationMs`. Phase 5 M9 built it in migration 020 with more columns, and `sandbox_files` in place of `filesChanged` (5.8).
 - `integration_events`: polled changes (new mail, calendar changes, Slack DMs) with `source, account, externalId, kind, summary, payloadBlob, seenAt`.
 - `subagent_runs`: `parentRunId, childRunId, profile, task, resultSummary`.
 
@@ -679,7 +679,7 @@ It returns `allow` or `hold` with a reason. A hold does not run the tool. The ag
 
 - **Default mode.** Risk levels and static rules decide. A reviewer model checks `write` calls, and the owner approves `external` calls.
 - **What the reviewer catches.** Prompt injection and malicious actions; the action is held. The taint rule adds to it: an outbound action after untrusted input always needs the owner.
-- **OS isolation.** Code runs in a Docker sandbox, and there is no host shell by default (on hold, see 5.4).
+- **OS isolation.** Code runs in a Docker sandbox, and there is no host shell by default (on hold, see 5.4). Phase 5 M9 built it as a fresh container for each call (5.8).
 - **MCP.** Lazy schemas through `tool_search` and `tool_call`, with a stable tool list for caching.
 - **Large outputs.** Stored out of context, with a preview, a handle and `result_read`.
 - **Sub-agents.** They inherit the permissions of the parent and cannot start sub-agents of their own. They also have explicit tool profiles and their own trace.
@@ -687,7 +687,7 @@ It returns `allow` or `hold` with a reason. A hold does not run the tool. The ag
 
 ### 5.4 Sandbox for code and shell
 
-On hold (section 10).
+On hold (section 10) until phase 5. Phase 5 M9 built the sandbox, and 5.8 records its decisions. The text below is the old plan; where it differs, 5.8 wins. In particular, M9 uses a fresh container for each call, not one long-lived container, and it does not offer the server-side code tool of a model provider.
 
 **Decision:** one long-lived Docker container, `okc-sandbox`, through Docker Desktop (on Windows it runs through WSL2).
 
@@ -741,7 +741,7 @@ This section covers the reviewer, the exfiltration guard, taint across sub-agent
 - **Taint across sub-agents** uses the paths of 2.6, with no new mechanism. Down: the first event of the child is `system_event {text: "Your task from the parent agent: …", taint: sessionTaint(parent)}`, so the child starts as tainted as its parent and the provenance names the parent call that read the source. A delegate call that the owner approved (`approval-N`) uses the taint snapshot of its decision instead, as the approval note does, because the owner can send /new before the approval (verification round 4 of the fixer pass: the child started clean and its data link passed with no review). The task is not wrapped: it is the instruction of the child, and the policy guards each call of the child. Up: when the child session is tainted, the output of `delegate` has `untrustedSource = "sub:<profile>:<childRunId> (<sources>)"`, so the caller wraps it and the parent session is tainted with a source that names the child run. The list names only the sources that the child read itself; with none, the source is the child key alone. Verification round 4 found that a list with the inherited sources doubled the newest source with each delegate call (1 MB after 16 calls). A reason, an approval card and `<untrusted_sources>` name at most 5 sources, each cut to 200 characters, with "and N more"; the decision keeps the full list. A taint array on `ToolOutput` was rejected: it changes shared payload shapes for provenance that the child run already holds.
 - **Taint names.** `sessionTaint` takes the name of a `tool_call` result from its trace row, so a card says "read by mail__read_inbox", not "read by tool_call". The event alone decides the taint. The lookup runs one time for each source after deduplication, so a session with 50,000 events still checks in well under 1 ms.
 - **`delegate`** (`src/agent/delegate.ts`): `{profile: browser | research | inbox, task ≤ 8,000}`, risk `read`, in the main and automation tool lists, with the built-in allow rule "delegate starts a sub-agent; each call of the sub-agent gets its own policy decision".
-  - **Profiles are code**: browser (slot `main`, 30 model calls), research (`main`, 20), inbox (`batch`, 40). There is no `code` profile while the sandbox is on hold. A planned tool name that the app does not have is left out; the description lists the live tools of each profile, computed at start, so the `tools` parameter is stable. An integration reaches a child only through `"sessions": ["sub:<profile>"]` in `okc.integrations.json`. A test lists the planned names that this build does not have (the browser, web and gmail tools); the merge must make that list empty.
+  - **Profiles are code**: browser (slot `main`, 30 model calls), research (`main`, 20), inbox (`batch`, 40). There is no `code` profile while the sandbox is on hold (phase 5 M9 adds none either, see 5.8). A planned tool name that the app does not have is left out; the description lists the live tools of each profile, computed at start, so the `tools` parameter is stable. An integration reaches a child only through `"sessions": ["sub:<profile>"]` in `okc.integrations.json`. A test lists the planned names that this build does not have (the browser, web and gmail tools); the merge must make that list empty.
   - **Depth 1.** No profile lists `delegate`, and the tool refuses in a `sub:` session.
   - **At most 3 children per parent run**, counted in memory. A fourth call gets an error at once ("wait for a result, then try again"); a wait would hold the parent turn with no result.
   - **No budget input and no timeout per child.** The iteration limit of the profile bounds a child, and it runs under the tool signal of its parent and its own background run timeout.
@@ -771,6 +771,46 @@ This section covers the reviewer, the exfiltration guard, taint across sub-agent
 
 - **The Policy page (2.3) is built, read only.** The reviewer now decides each write call without the owner, and a held call goes back to the model, which may not tell the owner. `GET /api/policy` lists the newest 200 `policy_decisions` with their tool, session, rule, reasons (redacted), reviewer verdict and approval state, filtered by decision and verdict, each with a link to its run. It also lists the rules that the caller uses now (`App.rules`, the same list that "always allow" changes), so the page never reads `okc.policy.json` again. There is no rule filter: the rule is a column, and 200 rows fit one page.
 
+### 5.8 Decisions from phase 5 M9
+
+M9 builds the code sandbox that 5.4 planned and section 10 put on hold. The tool is `sandbox_exec {language: bash | python | node, code, files?, collect?, timeoutMs?, memoryMb?, network?}` (`src/sandbox/input.ts`). The contract is in `docs/PHASE5-API.md` (M9), and the owner's guide is `docs/setup/sandbox.md`. This section wins where 5.4 differs.
+
+- **(a) A fresh container for each call.** 5.4 planned one long-lived container. M9 creates a container for each call and removes it after the call. The reasons:
+  - no state leaks from one call to the next, except the files in the `/work` volume of the task;
+  - a process that a call starts in the background ends with its container;
+  - a crash of the app leaves no container that runs: the start sweep removes each labelled container of this instance that has no running row.
+
+  The cost is the start time of a container for each call, which is small next to a model turn.
+- **(b) The engine API over its socket, not the `docker` command.** `src/sandbox/docker.ts` is a small client over `node:http` (API v1.44, Docker 25 and later). The reasons:
+  - the app needs no `docker` program, only a socket. When the app runs in its own container (M7), it gets a socket or a socket proxy, and no CLI in its image;
+  - each error has an HTTP status and a message, not text that the app must parse;
+  - the attach stream is split into stdout and stderr in the app, so the output limit and the drain of the stream are exact;
+  - the kill at the wall time is exact: the app kills the container by its id when the timer ends;
+  - there is no shell quoting: the code goes to the interpreter as one argv entry (`bash -c`, `python3 -c`, `node -e`);
+  - files go in and out as tar archives through the API, with no bind mount of a host folder. This also works when the app runs in a container and the engine runs on its host;
+  - it adds no dependency.
+
+  The cost: the app keeps the client, and it does not read Docker contexts. It reads `DOCKER_HOST` (`unix://` or `tcp://` without TLS) and the default sockets only (`~/.docker/run/docker.sock` on macOS, `/var/run/docker.sock`, and the pipe `//./pipe/docker_engine` on Windows).
+- **(c) The security settings of each container** (`ContainerSpec` in `src/sandbox/types.ts`, values in `src/sandbox/limits.ts`):
+  - the user `1000:1000`, never root;
+  - `CapDrop: ['ALL']` and `no-new-privileges`, not privileged;
+  - a read-only root filesystem, and a tmpfs at `/tmp` (`rw,noexec,nosuid,nodev,size=64m`);
+  - 128 processes, 512 MB of memory with no swap (`MemorySwap` equals `Memory`), and 1 CPU. A call can ask for up to 2,048 MB and 2 CPUs;
+  - `Init: true`, so a child process that the code leaves behind is reaped;
+  - a wall time of 60 s, up to 300 s on request; at the end the container is killed;
+  - at most 1 MB is kept for each of stdout and stderr. The bytes after the cut are counted (`stdoutBytes`, `stderrBytes`) and the result says that it is cut;
+  - no network (`NetworkDisabled`, network mode `none`), unless the call has `network.allow` (g).
+
+  The image (`sandbox/Dockerfile`) is pinned by the digest of its base, has no setuid or setgid file, and has no entrypoint. A new image definition gets a new tag (`okc-sandbox:2`), so an app never runs an old image under a new name.
+- **(d) A scratch volume for each task.** A task is one segment of a session, from a `session_reset` to the next one. Its id is a hash of the session key and the id of the last `session_reset` (0 before the first), so `/new` gives a fresh `/work`. The calls of a task share one Docker volume at `/work`, so a call can use the files of an earlier call. `sandbox_scratch` keeps each volume. The start sweep and each call remove a volume that no call used for 24 hours, and a labelled volume of this instance without a row. After each call the runner measures `/work`; a volume over 256 MB is removed, and the result tells the model that `/work` is empty again. Known gap: during one call only the time limit bounds the disk writes, so a call can fill the disk of the Docker host for up to 5 minutes before the size check removes the volume.
+- **(e) Files through the blob store.** A file in is the text of the call or the blob of an earlier result. A text file (valid UTF-8 with no NUL byte) goes to the text store, which redacts it like every other text of the trace; any other file goes to the byte store as it is. After the end, only the paths in `collect` come back, each as a blob with its size and type. Each file in and out has a `sandbox_files` row. The limits are 20 files, 10 MB for each file and 20 MB for each call, in each direction.
+- **(f) Policy.** The new risk `exec` goes to the reviewer (rule `risk:exec`), as `write` does, because the code runs in an isolated container with no network. A call with `network.allow` is `external` through `riskFor`, so the owner approves each one, and the taint rule of 5.1 applies to it. The result has an `untrustedSource` only for a call with network access: without network, the output comes from the code and the files of the call, and the session holds both already. With network access, the output can hold text from outside, so it is wrapped and taints the session.
+- **(g) Network through the egress proxy.** A call with `network.allow` (at most 10 host names; an entry also allows its subdomains) runs on a Docker network that reaches only the egress proxy of the app (`src/browser/proxy.ts`), with the proxy variables set. The proxy lets through only the hosts of the list, and the egress check refuses private addresses, as for the browser. `checkAllowlist` refuses a public suffix (`tooBroad` of `src/browser/gate.ts`) or a name that is not a host. The plan of each call (`NetworkPlan`) gives the hosts that the proxy let through and the requests that it refused, for the result and the trace, and the gate removes the network after the call. When the Docker host cannot give this route, `NetworkGate.check()` gives the reason in `SandboxStatus.networkReason`, a call with `network.allow` fails with that reason, and a call without it still runs. The network package (`src/sandbox/network.ts`) records the exact route and its limits on each platform.
+- **(h) Model-neutral (D16).** The sandbox runs on the owner's Docker for every model provider. The 5.4 bullet that offers the server-side code tool of a model provider per slot is rejected under D16: a core ability must not depend on one provider, and that tool would also put the code and its data outside the trace of 2.2.
+- **(i) The tool is off without Docker or the image.** At the start, the app probes the engine (`/info`, 3 s limit) and looks for the image. With no socket, no answer or no image, the tool is not in any tool list, the status gives the reason, and the rest of the app runs. `toolsFor` is fixed at the start, so the `tools` parameter of a session stays stable for caching; a restart is needed after Docker comes up or the image is built. When the last probe says that Docker does not answer (Docker stopped while the app ran), a call returns an error with effect none. The dashboard status probes again when its last answer is older than 30 s. The tool is in the main session and in automation runs. There is no `code` sub-agent profile (section 6).
+- **(j) The constants live in `src/sandbox/limits.ts`, not in config**, as for the reviewer (5.5). A wrong value only makes the sandbox weaker or less useful, and the tests check these values.
+- **(k) The trace.** Migration 020 makes `sandbox_execs` again (004 made it and 006 dropped it), and adds `sandbox_files` and `sandbox_scratch`. A row links to its tool call by `runId` and `toolCallId`; the dashboard joins it to the `tool_calls` row and to its `policy_decisions` row (the decision, the reviewer verdict and the approval). Each row keeps the language, the code, the image and the image id that ran, the container id, the network mode and the allowlist, the limits, the status, the exit code, the stdout and stderr blobs with their full byte counts, the error and the duration. The tool writes the row with status `running` before the container is created, so a crash leaves a row; the start sweep closes a running row older than the longest call and a margin (6 minutes) that this process does not run. A call that fails before Docker runs it also gets a row, with status `error`. The waterfall (M1) shows each exec as a `sandbox` span.
+
 ## 6. Sub-agents
 
 Built as recorded in 5.5; that section wins where they differ.
@@ -780,7 +820,7 @@ Built as recorded in 5.5; that section wins where they differ.
   - `browser`: browser tools, `web_fetch`, `result_read`.
   - `research`: `web_search`, `web_fetch`, `memory_search`, `memory_get` (`history_search` waits for the history milestone).
   - `inbox`: Gmail read tools, labeling with review, and the `batch` slot for bulk triage.
-  - `code`: sandbox tools. Not built, because the sandbox is on hold (section 10).
+  - `code`: sandbox tools. Not built, because the sandbox is on hold (section 10). Phase 5 M9 built the sandbox but not this profile: `sandbox_exec` is in the main session and in automation runs only (5.8).
 - Children cannot delegate (depth 1). They inherit the parent's taint and are stricter where their profile says so.
 - The child's final text is the tool result, through a handle when long. The full child trace links to the parent in `subagent_runs` and in the dashboard timeline.
 - At most 3 children run at once per parent. A child that hits its budget stops and reports what it has.
@@ -860,7 +900,7 @@ Each milestone is one implementer agent, named `phase<N>_milestone<M>_<word>` in
 **Plan change (2026-10-13, owner decision).** Three milestones leave the build plan for now:
 
 - **Phase 3 M4 history is on hold.** The owner never asked for it in this form, and it is not designed well enough. A later design should also cover ChatGPT logs, not only Claude.
-- **Phase 4 M1 sandbox is on hold.** There is no use case for it yet. Without it, the `code` sub-agent profile is not built.
+- **Phase 4 M1 sandbox is on hold.** There is no use case for it yet. Without it, the `code` sub-agent profile is not built. Phase 5 M9 built the sandbox (5.8); the `code` profile is still not built.
 - **Phase 4 M2 sweep is not a development milestone.** The owner tests it by asking the agent to do it with the Gmail integration. If that test shows a gap, the gap becomes a normal fix.
 
 After M2, the other six milestones (google, telegram, slack, web, review, workshop) are built at the same time on separate branches, then merged one at a time. Review merges last, so that it can check its rules against the real tools.
@@ -887,7 +927,7 @@ After M2, the other six milestones (google, telegram, slack, web, review, worksh
 
 | Milestone | Scope | Done when |
 |---|---|---|
-| **M1 sandbox** (on hold) | Docker sandbox container, `sandbox_*` tools, network proxy with allowlist, optional Claude code execution per slot | With Docker available: commands run as non-root with no network, network needs review, and output goes through handles |
+| **M1 sandbox** (on hold; built in phase 5 M9, see 5.8) | Docker sandbox container, `sandbox_*` tools, network proxy with allowlist, optional Claude code execution per slot | With Docker available: commands run as non-root with no network, network needs review, and output goes through handles |
 | **M2 sweep** (owner test, not built) | Subscription sweep: the `inbox` sub-agent triages mail across accounts on the `batch` slot, proposes an unsubscribe list, and runs it after one approval of the whole list | With a mocked Gmail: the list is grouped by sender, one approval runs all unsubscribes, and each run is traced |
 | **M3 workshop** | Skill Workshop: after long or corrected tasks, a review proposes a new or changed skill, and the owner approves it in Telegram | A fixture task produces a skill draft, and only approval writes it to `skills/` |
 
