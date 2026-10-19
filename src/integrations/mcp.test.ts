@@ -45,9 +45,11 @@ export function memoryTransport(servers: McpServer[] = []): () => Promise<Transp
 }
 
 const open: McpConnection[] = [];
+// on windows the stop of a stdio server lists the processes of the system before and after the close, so it can end
+// what the server started. one such list took more than 10 s on a busy ci machine, though it takes about 0.3 s.
 afterEach(async () => {
   for (const connection of open.splice(0)) await connection.stop();
-});
+}, 30_000);
 
 function setup(
   transport: () => Promise<Transport>,
