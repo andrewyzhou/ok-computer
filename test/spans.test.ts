@@ -274,19 +274,12 @@ describe('the spans of a run', () => {
     expect(result.spans.filter((span) => span.kind === 'subagent').map((span) => span.id)).toEqual(['subagent:loop-b', 'subagent:loop-a']);
   });
 
-  it('reads sandbox spans only when the table of m9 is there', async () => {
+  it('reads the sandbox spans from the table of m9, and none when the table is gone', async () => {
     const { t } = await seedM1();
     const db = t.db;
     expect(runSpans(db, TRACE_RUN)!.spans.some((span) => span.kind === 'sandbox')).toBe(false);
-    // the shape of 020_sandbox.sql. the row is written with status running before the container starts, and the end
+    // 020_sandbox.sql makes the table. the row is written with status running before the container starts, and the end
     // sets endedAt and the status.
-    db.exec(`CREATE TABLE sandbox_execs (
-      id INTEGER PRIMARY KEY, runId TEXT, toolCallId TEXT, sessionKey TEXT, taskId TEXT, language TEXT NOT NULL, command TEXT NOT NULL,
-      image TEXT NOT NULL, imageId TEXT, cwd TEXT NOT NULL, network TEXT NOT NULL, allowlist TEXT NOT NULL, limits TEXT NOT NULL,
-      status TEXT NOT NULL, exitCode INTEGER, containerId TEXT, stdoutBlob TEXT, stderrBlob TEXT, stdoutBytes INTEGER NOT NULL DEFAULT 0,
-      stderrBytes INTEGER NOT NULL DEFAULT 0, truncated INTEGER NOT NULL DEFAULT 0, error TEXT, durationMs INTEGER NOT NULL DEFAULT 0,
-      createdAt TEXT NOT NULL, endedAt TEXT
-    )`);
     const insert = db.prepare(
       `INSERT INTO sandbox_execs (runId, toolCallId, language, command, image, cwd, network, allowlist, limits, status, exitCode, error, durationMs, createdAt, endedAt)
        VALUES (?, 'tc-mcp', ?, ?, 'img', '/work', 'none', '[]', '{}', ?, ?, ?, ?, ?, ?) RETURNING id`,
@@ -310,6 +303,9 @@ describe('the spans of a run', () => {
     expect(spans.get(`sandbox:${running}`)).toMatchObject({ label: 'bash ls -la', startMs: 4_200, endMs: null, endAt: null, status: 'running', error: null });
     expectSorted(result.spans);
     expectParents(result.spans);
+    // a database from before 020 has no table, and the spans then leave the sandbox out.
+    db.exec('DROP TABLE sandbox_files; DROP TABLE sandbox_execs');
+    expect(runSpans(db, TRACE_RUN)!.spans.some((span) => span.kind === 'sandbox')).toBe(false);
   });
 
   it('puts each parent before the spans inside it', async () => {
