@@ -199,7 +199,8 @@ run_build() {
 }
 
 # the agent keeps the code of its start, also when a later build replaced the files. ps gives the start in whole
-# seconds, so the stamp counts as newer only from the next second on.
+# seconds, and linux computes it from the boot time and the clock ticks, so it can be up to a second early. the stamp
+# counts as newer only when it is more than a second after the start that ps gives.
 code_is_newer() {
   build_is_old && return 0
   local started node
@@ -208,7 +209,7 @@ code_is_newer() {
   "$node" -e '
     const [started, stamp] = process.argv.slice(1);
     const built = Math.floor(require("node:fs").statSync(stamp).mtimeMs / 1000) * 1000;
-    process.exit(built > Date.parse(started) ? 0 : 1);' "$started" "$stamp"
+    process.exit(built > Date.parse(started) + 1000 ? 0 : 1);' "$started" "$stamp"
 }
 
 # OKC_NODE names the node of the agent, so a machine with several versions can pick one that is not first on the path.
