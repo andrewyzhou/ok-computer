@@ -4,7 +4,7 @@ import { hostname, tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { chromePaths } from './login.js';
-import { profileBusy } from './worker.js';
+import { profileBusy, staleLockHint } from './worker.js';
 
 // these cases try the edges of the profile lock on macos and linux, and of the places of chrome.
 
@@ -46,6 +46,19 @@ describe.skipIf(process.platform === 'win32')('the profile lock of chrome on mac
     expect(profileBusy(linked)).toBe(true);
   });
 
+  it('is busy for a pid too large for the system, like other junk', () => {
+    for (const pid of ['2147483648', '99999999999']) {
+      const dir = profile();
+      lock(dir, `${hostname()}-${pid}`);
+      expect(profileBusy(dir), pid).toBe(true);
+    }
+  });
+
+  it('names the lock that the owner can delete in the busy hint', () => {
+    const dir = profile();
+    expect(staleLockHint(dir)).toContain(join(dir, 'SingletonLock'));
+  });
+
   it('gives the same answer on each call, so the check has no side effect on the link', () => {
     const dir = profile();
     lock(dir, `${hostname()}-${process.pid}`);
@@ -60,6 +73,14 @@ describe('the places of chrome, at their edges', () => {
   it('gives only absolute places on macos and linux', () => {
     for (const each of chromePaths('darwin', { HOME: '/Users/owner' })) expect(isAbsolute(each), each).toBe(true);
     for (const each of chromePaths('linux', {})) expect(isAbsolute(each), each).toBe(true);
+  });
+
+  it('gives only absolute places on macos when HOME is not set', () => {
+    for (const each of chromePaths('darwin', {})) expect(isAbsolute(each), each).toBe(true);
+  });
+
+  it('gives only absolute places on windows when LOCALAPPDATA is not set', () => {
+    for (const each of chromePaths('win32', {})) expect(each.startsWith('C:/'), each).toBe(true);
   });
 
   it('looks in the system folder first on macos, then in the folder of the owner', () => {

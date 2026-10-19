@@ -268,15 +268,24 @@ function singletonBusy(path: string): boolean {
   const at = target.lastIndexOf('-');
   const digits = target.slice(at + 1);
   const pid = /^\d+$/.test(digits) ? Number(digits) : 0;
-  if (at < 0 || !Number.isSafeInteger(pid) || pid <= 0) return true;
+  // a pid above the largest one of the system makes process.kill throw a type error, so it counts as junk too.
+  if (at < 0 || !Number.isSafeInteger(pid) || pid <= 0 || pid > 0x7fffffff) return true;
   if (target.slice(0, at) !== hostname()) return true;
   try {
     process.kill(pid, 0);
     return true;
   } catch (err) {
-    // EPERM means that the process is alive and belongs to another user.
-    return (err as NodeJS.ErrnoException).code === 'EPERM';
+    // only ESRCH says that the process ended. EPERM means that it is alive and belongs to another user, and any other
+    // error leaves the lock unread, so it counts as busy.
+    return (err as NodeJS.ErrnoException).code !== 'ESRCH';
   }
+}
+
+// a link from another host stays after a crash, for example when the host name of a mac changed with the network. the
+// check cannot tell that from a live chrome, so a busy message names the link that the owner can delete.
+export function staleLockHint(profile: string): string {
+  if (process.platform === 'win32') return '';
+  return ` If no Chrome window uses the profile, a crash left its lock: delete ${join(profile, 'SingletonLock')} and try again.`;
 }
 
 type Json = Record<string, unknown>;
@@ -498,7 +507,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       // a second chrome on the profile fails with "target page, context or browser has been closed" (probe p3), so
       // the lock file tells the real reason.
       if (profileBusy(profile)) {
-        return { refused: 'The agent browser profile is in use by another Chrome window, for example okc browser login. Try again after it closes.' };
+        return { refused: `The agent browser profile is in use by another Chrome window, for example okc browser login. Try again after it closes.${staleLockHint(profile)}` };
       }
       return { refused: `The browser did not start: ${errorText(err).split('\n')[0]}` };
     }

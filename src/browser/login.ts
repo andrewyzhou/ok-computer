@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/load.js';
 import { openDb } from '../db/index.js';
 import { resumeEngines } from '../web/search.js';
-import { hardenProfile, profileBusy } from './worker.js';
+import { hardenProfile, profileBusy, staleLockHint } from './worker.js';
 
 // the usual places of chrome on each platform. a browser login and the browser tests use the first one that exists.
 export function chromePaths(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): string[] {
@@ -13,12 +13,13 @@ export function chromePaths(platform: NodeJS.Platform = process.platform, env: N
     return [
       join(env.PROGRAMFILES ?? 'C:/Program Files', 'Google/Chrome/Application/chrome.exe'),
       join(env['PROGRAMFILES(X86)'] ?? 'C:/Program Files (x86)', 'Google/Chrome/Application/chrome.exe'),
-      join(env.LOCALAPPDATA ?? '', 'Google/Chrome/Application/chrome.exe'),
+      // a missing folder of the owner would give a relative path, which the check would read against the working folder.
+      ...(env.LOCALAPPDATA ? [join(env.LOCALAPPDATA, 'Google/Chrome/Application/chrome.exe')] : []),
     ];
   }
   if (platform === 'darwin') {
     const app = 'Google Chrome.app/Contents/MacOS/Google Chrome';
-    return [join('/Applications', app), join(env.HOME ?? '', 'Applications', app)];
+    return [join('/Applications', app), ...(env.HOME ? [join(env.HOME, 'Applications', app)] : [])];
   }
   return ['/opt/google/chrome/chrome', '/usr/bin/google-chrome-stable', '/usr/bin/google-chrome'];
 }
@@ -48,7 +49,7 @@ export async function browserLogin(deps: LoginDeps): Promise<string> {
   const chrome = deps.chrome ?? findChrome();
   if (!chrome) return 'Chrome is not installed in a usual place, so the agent browser cannot open.';
   if (profileBusy(profile)) {
-    return 'The agent browser profile is open now, in the agent or in another login window. The agent closes it 10 minutes after its last browser action. Try again then, or run okc stop first.';
+    return `The agent browser profile is open now, in the agent or in another login window. The agent closes it 10 minutes after its last browser action. Try again then, or run okc stop first.${staleLockHint(profile)}`;
   }
   hardenProfile(profile, resolve(deps.dataDir, 'browser', 'downloads'));
   const args = [`--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', ...(deps.url ? [deps.url] : [])];
