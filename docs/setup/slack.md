@@ -119,6 +119,8 @@ Use this when the official server does not work for a workspace, for example whe
    security add-generic-password -U -s ok-computer -a slack-work-xoxp -w
    ```
 
+   When the agent first reads the entry, macOS asks whether `node` may use it. Choose **Always Allow**, because the agent waits until you answer. macOS asks again after a node update.
+
    To remove it later: `cmdkey /delete:slack-work-xoxp.ok-computer` on Windows, `security delete-generic-password -s ok-computer -a slack-work-xoxp` on macOS.
 
 3. Use this entry in place of the one in step 2:

@@ -58,6 +58,8 @@ security add-generic-password -U -s ok-computer -a notes-token -w
 
 `security` then asks for the secret twice. Keep `-w` last and give it no value, so the secret does not go into the shell history. `-U` replaces an entry that is already there.
 
+An entry that `security` made lets only `security` read it at first. When the agent reads it, macOS asks once whether `node` may use it. Choose **Always Allow**: under the LaunchAgent the read waits until you answer. macOS asks again after a node update, because the program changed.
+
 On Windows the target is `<secretRef>.ok-computer`. On macOS the entry is a generic password with the service `ok-computer` and the account `<secretRef>`. The app never writes these values to its database, log or trace. OAuth tokens are stored there by the app itself.
 
 To remove an entry:
