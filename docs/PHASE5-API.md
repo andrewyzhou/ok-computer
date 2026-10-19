@@ -1,6 +1,6 @@
 # Phase 5 API contracts
 
-Status: the shared contract for the parallel work of phase 5 (see `docs/PHASE5-PLAN.md`). The types are in `src/dashboard/types.ts`, one section for each milestone. The web route registry is `web/src/routes.ts`. When a team must change a shape, it changes the type, this file and its own code in the same commit, and it tells the teams that read the shape. When phase 5 is done, this file moves into DESIGN-NEXT with the plan.
+Status: the API contract of dashboard v2, written for the parallel work of phase 5. The decisions of phase 5 are in DESIGN-NEXT §12, and this file stays the contract that §12 points to. The types are in `src/dashboard/types.ts`, one section for each milestone. The web route registry is `web/src/routes.ts`. When a team must change a shape, it changes the type, this file and its own code in the same commit, and it tells the teams that read the shape. A later change of a shape changes the type and this file in the same commit.
 
 ## 1. Rules for every endpoint
 
@@ -64,12 +64,12 @@ The backend is chosen by `SecretStoreConfig` (`keyring`, `file` with mode 0600, 
 | Method | Path | Query / body | Response | Notes |
 |---|---|---|---|---|
 | GET | `/api/inbox/senders` | `SendersQuery`: `account`, `state`, `sort`, `cursor`, `limit` 1–200 (default 50) | `SendersPage` | Cursor paging. |
-| POST | `/api/inbox/senders/:id/unsubscribe` | `{}` | `InboxActionResponse` | Asks for approval. One-click (RFC 8058), or the https link. `409` when already unsubscribed or pending, when the method is `none` or the sender gives no link, and when the method is `mailto`, because ok computer never sends mail. The page turns the button off for each of these and says to unsubscribe by hand. |
-| POST | `/api/inbox/senders/:id/archive` | `InboxArchiveRequest` | `InboxActionResponse` | Asks for approval. |
-| POST | `/api/inbox/senders/:id/keep` | `{}` | `InboxActionResponse` (`done`) | Takes the sender out of later sweeps. `409` while an unsubscribe is pending and after it is done, because a keep would hide the record of the unsubscribe. |
-| GET | `/api/inbox/subscriptions` | `account`, `state` (`SubscriptionState`) | `SubscriptionsPage` | No paging, because the table is small. |
+| POST | `/api/inbox/senders/:id/unsubscribe` | `{}` | `InboxActionResponse` | Asks for approval. One-click (RFC 8058), or the https link. `409` when the sender is already unsubscribed, when its unsubscribe is pending (it waits for an approval, or a browser task works on it) or already started, when the sender offers no link (the method is `none`), and when the sender unsubscribes only by mail (`mailto`), because ok computer never sends mail. The page turns the button off for each of these and says to unsubscribe by hand. |
+| POST | `/api/inbox/senders/:id/archive` | `InboxArchiveRequest` | `InboxActionResponse` | Asks for approval. `409` when an archive of the sender already started or waits for approval. The label is trimmed first, and a gmail system label (`INBOX`, `SPAM`, `TRASH`, `UNREAD`, `STARRED`, `IMPORTANT`, `SENT`, `DRAFT`, `CHAT` or a `CATEGORY_` label, in any case) gives `400` from the body check. The inbox code refuses it again with `409`. |
+| POST | `/api/inbox/senders/:id/keep` | `{}` | `InboxActionResponse` (`done`) | Takes the sender out of later sweeps. `409` when the unsubscribe of the sender is pending, and when the sender is unsubscribed, because a keep would hide the record of the unsubscribe. |
+| GET | `/api/inbox/subscriptions` | `account`, `state` (`SubscriptionState`) | `SubscriptionsPage` | No paging, because the table is small. `monthlyTotals` counts only the rows of the answer that are `active` or `cancel_pending`: a cancelled or ignored subscription costs nothing more, so a filter on `cancelled` gives no totals. |
 | POST | `/api/inbox/subscriptions/:id/cancel` | `{}` | `InboxActionResponse` | Asks for approval, then opens the cancel link or a browser task. Each step is approved. `409` unless the state is `active`. |
-| POST | `/api/inbox/subscriptions/:id/ignore` | `{}` | `InboxActionResponse` (`done`) | `409` while the state is `cancel_pending`. The page shows ignore only on an `active` row. |
+| POST | `/api/inbox/subscriptions/:id/ignore` | `{}` | `InboxActionResponse` (`done`) | `409` while the cancellation is pending (`cancel_pending`). The page shows ignore only on an `active` row. |
 | GET | `/api/inbox/digests` | `cursor`, `limit` 1–100 (default 30) | `DigestsPage` | Cursor paging. |
 | GET | `/api/inbox/digests/latest` | none | `InboxDigest` | `404 digest not found` when none exists yet. |
 | GET | `/api/inbox/digests/:id` | none | `InboxDigest` | `404`. |
@@ -79,7 +79,7 @@ The backend is chosen by `SecretStoreConfig` (`keyring`, `file` with mode 0600, 
 | GET | `/api/inbox/proposals/:id` | none | `CalendarProposalView` | One proposal in any state, for the proposal link of a digest. `404 proposal not found`. |
 | POST | `/api/inbox/run` | `InboxRunRequest` `{ job }` | `202 { started: true }` | Runs the automation of the job now, like `POST /api/automations/:id/run`. `404` when the job's automation is missing, `409` while a run of the job is still going. |
 
-An approval that an inbox action asks for shows on the Approvals page, in the stream (`approval`), and in Telegram, the same way as any approval.
+An action that asks for approval (unsubscribe, archive, cancel) also gives `409` with the text of the policy when the policy refuses the call without asking the owner, for example when the owner turned the tool off. An approval that an inbox action asks for shows on the Approvals page, in the stream (`approval`), and in Telegram, the same way as any approval.
 
 - Each job runs in code in the session `inbox:<job>:<runId>`, and each dashboard action in `inbox:action:<runId>`. The first event of each run is a `system_event` with the task of the run, so the reviewer reads what the run may do. One run of a job goes at a time: a second start is skipped.
 - The tools of the inbox code are in the registry, but no session lists them, so only the inbox code calls them through the tool caller. Nothing in them sends mail, and a `mailto` unsubscribe is only shown, never used.
@@ -96,7 +96,7 @@ An approval that an inbox action asks for shows on the Approvals page, in the st
 - Every unsubscribe, one-click or https, needs a DKIM signature of the From domain that covers `List-Unsubscribe`. The sweep takes the link of a sender from its newest signed message.
 - Without a `google` block in the config, the lists answer from the tables (empty), and the `POST` routes give `503`, also `POST /api/inbox/run`.
 - `SubscriptionRow` also has `sourceMessageIds` (every receipt, newest first) and `confidence` (0 to 1), which the subscription finder needs to show why a row is there.
-- For M6 to move into DESIGN-NEXT §12: the automation payload is `{ type: 'inbox', job }`. The app installs three system automations one time: `inbox: daily digest` at 07:30 every day, `inbox: newsletter sweep` at 09:00 on Saturday and `inbox: subscription finder` at 10:00 on Sunday, in the time zone of the app. The owner changes the time or turns a job off on the Automations page, and the app never puts a deleted one back. The tables are in `019_inbox.sql`. A job that could read no account fails, so the scheduler backs off.
+- The automation payload is `{ type: 'inbox', job }`. The app installs three system automations one time: `inbox: daily digest` at 07:30 every day, `inbox: newsletter sweep` at 09:00 on Saturday and `inbox: subscription finder` at 10:00 on Sunday, in the time zone of the app. The owner changes the time or turns a job off on the Automations page, and the app never puts a deleted one back. The tables are in `019_inbox.sql`. A job that could read no account fails, so the scheduler backs off.
 
 ### M9: code sandbox (`src/dashboard/sandbox.ts`, `src/sandbox/`)
 
