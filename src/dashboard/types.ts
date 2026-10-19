@@ -392,7 +392,7 @@ export type StreamMessage =
   | { kind: 'policy'; decision: StreamPolicy };
 
 // phase 5 contracts. each section belongs to one milestone. a team adds fields only in its own section, and
-// docs/PHASE5-API.md gives the endpoint of each shape. a time is an iso string in utc, and a cost is in us dollars.
+// docs/API.md gives the endpoint of each shape. a time is an iso string in utc, and a cost is in us dollars.
 
 // phase 5 m1: chats, search, spans
 

@@ -3,7 +3,7 @@ import { createElement, type ComponentType } from 'react';
 // the route registry of the web app. each view folder web/src/views/<area>/ has a routes.ts with a default export of
 // RouteDef[], and this file collects them, so a team adds a page with no edit to a shared file. the pages from before
 // phase 5 are the core routes below. a view route with the same path as a core route takes its place, so a restyled
-// page replaces the old one. docs/PHASE5-API.md lists the routes of each milestone.
+// page replaces the old one. docs/API.md lists the routes of each milestone.
 
 // the groups of the left nav, in the order of the nav. a group shows only when it has a route.
 export type NavGroup = 'today' | 'desk' | 'inbox' | 'calendar' | 'docs' | 'people' | 'chats' | 'activity' | 'agent' | 'connections' | 'dev';

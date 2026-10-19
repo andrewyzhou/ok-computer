@@ -9,7 +9,7 @@ import { idOf, limitOf } from './params.js';
 import type { DashboardDeps } from './server.js';
 import type { ChatKind, ChatKindFilter, ChatMessage, ChatMessagesPage, ChatRow, ChatsPage } from './types.js';
 
-// phase 5 m1 owns this module. it mounts GET /api/chats and GET /api/chats/:key/messages. docs/PHASE5-API.md gives the
+// phase 5 m1 owns this module. it mounts GET /api/chats and GET /api/chats/:key/messages. docs/API.md gives the
 // shapes and the errors. server.ts calls it after the sign-in check, so each route is behind the dashboard auth.
 
 export const CHAT_KINDS: readonly ChatKindFilter[] = ['main', 'auto', 'heartbeat', 'sub', 'consolidate', 'workshop', 'poll', 'other', 'activity'];

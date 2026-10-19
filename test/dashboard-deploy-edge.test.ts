@@ -13,7 +13,7 @@ import { createSecretVault, type SecretVault } from '../src/secrets/index.js';
 import { CLIENT_ID, CLIENT_SECRET, createGoogleHarness, type GoogleHarness } from './google-harness.js';
 
 // these tests try to break the m7 routes through the dashboard: bad bodies, aliases that are not in the config, a
-// token of the wrong account, and secret stores whose errors could carry a ref. docs/PHASE5-API.md (m7) is the
+// token of the wrong account, and secret stores whose errors could carry a ref. docs/API.md (m7) is the
 // contract.
 
 const TOKEN = 'dashboard-token-edge';

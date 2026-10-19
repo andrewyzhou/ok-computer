@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { CalendarProposalView, DigestsPage, DraftView, InboxDigest, SendersPage, SubscriptionsPage } from '../src/dashboard/types.js';
 import { seedInbox } from './seed-inbox.js';
 
-// edge cases of the /api/inbox routes against docs/PHASE5-API.md: odd ids, odd cursors, bodies of the wrong type, and
+// edge cases of the /api/inbox routes against docs/API.md: odd ids, odd cursors, bodies of the wrong type, and
 // the shapes of the answers.
 
 type Dashboard = ReturnType<typeof seedInbox>['dashboard'];

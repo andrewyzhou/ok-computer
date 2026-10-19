@@ -44,7 +44,7 @@ export interface GoogleAccounts {
   close(): Promise<void>;
 }
 
-// the status is the http status of the dashboard answer, so the route only copies it. docs/PHASE5-API.md (m7) gives
+// the status is the http status of the dashboard answer, so the route only copies it. docs/API.md (m7) gives
 // the meaning of each one.
 export type TokenImport =
   | { ok: true; email: string | null; scopes: string[]; storedAt: string }

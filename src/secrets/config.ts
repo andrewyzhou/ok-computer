@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { SecretStoreConfig } from '../dashboard/types.js';
 
 // the secrets block of okc.config.json chooses the place that keeps the secrets. a desktop uses the keyring, and a
-// server uses a file with mode 0600 or aws secrets manager. see docs/PHASE5-API.md (m7).
+// server uses a file with mode 0600 or aws secrets manager. see docs/API.md (m7).
 const filePath = z
   .string()
   .min(1, 'give the path of the secret file, for example data/secrets.json')

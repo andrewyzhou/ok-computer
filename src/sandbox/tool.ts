@@ -61,7 +61,7 @@ const BUSY = `${['No', 'One', 'Two', 'Three', 'Four'][MAX_RUNNING] ?? MAX_RUNNIN
 
 const refuse = (content: string): ToolOutput => ({ content, isError: true, effect: 'none' });
 
-// sandbox_exec runs code in a fresh container (see docs/PHASE5-API.md, M9). risk exec goes to the reviewer. a call
+// sandbox_exec runs code in a fresh container (see docs/API.md, M9). risk exec goes to the reviewer. a call
 // with network access is external, so the owner approves it.
 export function createSandboxExecTool(deps: SandboxToolDeps): Tool {
   const { db, stores, runner, scratch, network, logger, clock, live } = deps;

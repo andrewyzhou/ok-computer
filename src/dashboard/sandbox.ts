@@ -43,7 +43,7 @@ const offStatus = (reason: string): SandboxStatus => ({
 });
 
 // phase 5 m9 owns this module. it mounts GET /api/sandbox, GET /api/sandbox/execs/:id and GET /api/sandbox/files/:hash.
-// docs/PHASE5-API.md gives the shapes and the errors. server.ts calls it after the sign-in check, so each route is behind the dashboard auth.
+// docs/API.md gives the shapes and the errors. server.ts calls it after the sign-in check, so each route is behind the dashboard auth.
 export function mountSandbox(server: Hono, deps: DashboardDeps): void {
   const { db, config, clock, app } = deps;
   const blobs = createBlobStore(db, join(config.paths.data, 'blobs'), clock);
@@ -140,7 +140,7 @@ export function parseSandboxQuery(query: Record<string, string | undefined>): { 
     if (!/^[1-9]\d*$/.test(query.before) || !Number.isSafeInteger(before)) return { ok: false, error: 'before must be an exec id' };
     value.before = before;
   }
-  // a limit that is not a number gives the default, as for every list (PHASE5-API section 1).
+  // a limit that is not a number gives the default, as for every list (API.md section 1).
   const limit = Number(query.limit);
   value.limit = query.limit === undefined || query.limit === '' || !Number.isFinite(limit) ? DEFAULT_PAGE : Math.min(Math.max(Math.trunc(limit), 1), MAX_PAGE);
   return { ok: true, value };

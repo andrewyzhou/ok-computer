@@ -773,7 +773,7 @@ This section covers the reviewer, the exfiltration guard, taint across sub-agent
 
 ### 5.8 Decisions from phase 5 M9
 
-M9 builds the code sandbox that 5.4 planned and section 10 put on hold. The tool is `sandbox_exec {language: bash | python | node, code, files?, collect?, timeoutMs?, memoryMb?, cpus?, network?}` (`src/sandbox/input.ts`). The contract is in `docs/PHASE5-API.md` (M9), and the owner's guide is `docs/setup/sandbox.md`. This section wins where 5.4 differs.
+M9 builds the code sandbox that 5.4 planned and section 10 put on hold. The tool is `sandbox_exec {language: bash | python | node, code, files?, collect?, timeoutMs?, memoryMb?, cpus?, network?}` (`src/sandbox/input.ts`). The contract is in `docs/API.md` (M9), and the owner's guide is `docs/setup/sandbox.md`. This section wins where 5.4 differs.
 
 - **(a) A fresh container for each call.** 5.4 planned one long-lived container. M9 creates a container for each call and removes it after the call. The reasons:
   - no state leaks from one call to the next, except the files in the `/work` volume of the task;
@@ -998,7 +998,7 @@ These steps need the owner's own accounts. The implementer writes a guide in `do
 
 ## 12. Phase 5
 
-Phase 5 runs the agent on macOS and Linux, and adds dashboard v2 with the web chat and full-text search, the server deploy, the inbox jobs and the code sandbox. The plan of the phase was approved on 2026-10-18. Its decisions are recorded here, and the plan file is deleted, by the "fix one so they match" rule of DESIGN.md. The API contract of dashboard v2 (endpoints, errors, paging, streams, the web route registry and the file ownership of each track) stays in [PHASE5-API.md](PHASE5-API.md), and the types are in `src/dashboard/types.ts`. Where this section and the contract differ on a shape, the contract wins. Where this section differs from older text in this document or in DESIGN.md, this section wins.
+Phase 5 runs the agent on macOS and Linux, and adds dashboard v2 with the web chat and full-text search, the server deploy, the inbox jobs and the code sandbox. The plan of the phase was approved on 2026-10-18. Its decisions are recorded here, and the plan file is deleted, by the "fix one so they match" rule of DESIGN.md. The API contract of dashboard v2 (endpoints, errors, paging, streams, the web route registry and the file ownership of each track) stays in [API.md](API.md), and the types are in `src/dashboard/types.ts`. Where this section and the contract differ on a shape, the contract wins. Where this section differs from older text in this document or in DESIGN.md, this section wins.
 
 Each track was built on its own branch (`phase5_m<n>_<word>`), passed `npm run typecheck && npm test`, got a review and was merged one at a time with a full test run after each merge. M4 and M5 were built on the merged base. Out of scope for phase 5: iMessage, the multi-user product version, voice, the import of Claude and ChatGPT history, and the agent's own mailbox and calendar (phase 6).
 
@@ -1038,7 +1038,7 @@ Each track was built on its own branch (`phase5_m<n>_<word>`), passed `npm run t
 
 ### 12.3 M1: chats, search and spans
 
-The endpoints, their errors and their paging are in PHASE5-API.md (M1). The design of the chat list, the search index and the stream is in DESIGN.md §16.2 ("Chats and search", "Stream").
+The endpoints, their errors and their paging are in API.md (M1). The design of the chat list, the search index and the stream is in DESIGN.md §16.2 ("Chats and search", "Stream").
 
 - **Chat keys.** Each segment of `main` between two `session_reset` events is one chat, with the key `main@<id of its reset>` (`main@0` before the first reset). A background session is one chat. The key rules live in `src/dashboard/chat-keys.ts`, which chats, search and the stream share. The sort and the cursor of `/api/chats` are in SQL, and the numbers of a chat are read only for the chats of the page. With `q`, a page reads at most 500 background chats.
 - **Delivered text only.** A chat shows the owner messages, the guarded final reply of each run (its last `assistant_message` with no tool calls, or a turn whose call made an approval), the notes and the system events that the chat shows. The text of other tool turns was a draft, and the chat never got it. Search uses the same rule, so a `NO_REPLY` answer, a draft and a held reply give no hit.
@@ -1049,7 +1049,7 @@ The endpoints, their errors and their paging are in PHASE5-API.md (M1). The desi
 
 ### 12.4 M2: web chat
 
-The design is in DESIGN.md §10 (**web**), and the endpoints are in PHASE5-API.md (M2).
+The design is in DESIGN.md §10 (**web**), and the endpoints are in API.md (M2).
 
 - The web channel starts only when `DASHBOARD_TOKEN` is set, because it runs the main session as the owner with all its tools. Without the token every chat route answers `503`.
 - **Limits.** A message is 1 to 16,000 characters, and a text of only spaces gives `400`. Button `data` is at most 256 characters, and a `turnId` at most 200. The bodies are strict, so an unknown key gives `400`.
@@ -1061,7 +1061,7 @@ The design is in DESIGN.md §10 (**web**), and the endpoints are in PHASE5-API.m
 ### 12.5 M3: the shell and the design system
 
 - The shell (`web/src/shell/`) has an icon rail, a left nav with groups, a ⌘K command menu, a header with a breadcrumb, a filter bar, the main area, a details panel and a status bar (live state, running runs, pending approvals, cost today, the DEV badge). A nav group shows only when a view registers in it. The Dev group (Runs, Sessions, Policy, Cost, Logs, Sandbox) shows in the nav and the ⌘K menu only in developer mode, but the hash of a dev page opens it in each mode.
-- Routes stay in the hash. `web/src/routes.ts` is the registry, and each view folder registers its routes and its shell parts itself (PHASE5-API.md §4), so no shared file changes when a view is added.
+- Routes stay in the hash. `web/src/routes.ts` is the registry, and each view folder registers its routes and its shell parts itself (API.md §4), so no shared file changes when a view is added.
 - The look is a warm off-white base with near-black ink, hairline rules, Instrument Serif for titles and Inter for UI text (`@fontsource`, D10), black pill primary buttons, and a matching warm dark theme. The theme, developer mode and the details panel are preferences of the browser, kept in localStorage (`web/src/shell/prefs.ts`).
 - Below 1100px the details panel is a drawer, and below 760px the rail and nav fold into a sheet. The pages work at 390px.
 - `api.ts`, `format.ts`, the event renderers, the status words and the SVG charts stayed. The pages from before phase 5 were restyled into the shell in place.
@@ -1074,7 +1074,7 @@ The design is in DESIGN.md §10 (**web**), and the endpoints are in PHASE5-API.m
 
 ### 12.7 M7: deploy
 
-The runbook is [setup/aws.md](setup/aws.md), and a local trial is [setup/docker.md](setup/docker.md). The endpoints and the backends are in PHASE5-API.md (M7).
+The runbook is [setup/aws.md](setup/aws.md), and a local trial is [setup/docker.md](setup/docker.md). The endpoints and the backends are in API.md (M7).
 
 - A multi-arch `Dockerfile` (Node 24 and Chrome), `deploy/compose.yaml` with a Tailscale sidecar, Litestream to S3 (`deploy/litestream.yml`), and a CI workflow (`.github/workflows/ci.yml`) that runs the ubuntu, macos and windows matrix and then builds the image for amd64 and arm64 (D12, D13).
 - **Secret stores** (D14): `secrets` in `okc.config.json` picks `keyring` (the default), `file` (mode 0600, not inside `paths.workspace` or `paths.skills`) or `aws` (one secret for each ref, named with the prefix `okc/` and an `@` escape for each character that AWS does not allow). The prefix `okc-host/` holds the env of the host and is refused as a secret name.
@@ -1084,7 +1084,7 @@ The runbook is [setup/aws.md](setup/aws.md), and a local trial is [setup/docker.
 
 ### 12.8 M8: inbox jobs
 
-The endpoints, their `409` answers and the tools are in PHASE5-API.md (M8). The owner's guide is [setup/google.md](setup/google.md), section 4.
+The endpoints, their `409` answers and the tools are in API.md (M8). The owner's guide is [setup/google.md](setup/google.md), section 4.
 
 - **The jobs are code.** Each job runs in the session `inbox:<job>:<runId>`, and each dashboard action in `inbox:action:<runId>`. The first event of each run is a `system_event` with its task, so the reviewer reads what the run may do. One run of a job goes at a time.
 - **Automations.** The payload is `{ type: 'inbox', job }`. The app installs three system automations one time: `inbox: daily digest` at 07:30 every day, `inbox: newsletter sweep` at 09:00 on Saturday and `inbox: subscription finder` at 10:00 on Sunday, in the time zone of the app. The owner changes them or turns them off on the Automations page, and the app never puts a deleted one back. A job that could read no account fails, so the scheduler backs off.
@@ -1098,7 +1098,7 @@ The endpoints, their `409` answers and the tools are in PHASE5-API.md (M8). The 
 
 ### 12.9 M9: code sandbox
 
-The decisions are in 5.8, the contract is in PHASE5-API.md (M9), and the owner's guide is [setup/sandbox.md](setup/sandbox.md).
+The decisions are in 5.8, the contract is in API.md (M9), and the owner's guide is [setup/sandbox.md](setup/sandbox.md).
 
 ### 12.10 Owner setup for phase 5
 

@@ -361,7 +361,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
     }),
   );
 
-  // the route modules of phase 5. each milestone owns its module, and docs/PHASE5-API.md lists its routes.
+  // the route modules of phase 5. each milestone owns its module, and docs/API.md lists its routes.
   mountChats(server, deps);
   mountSearch(server, deps);
   mountSpans(server, deps);

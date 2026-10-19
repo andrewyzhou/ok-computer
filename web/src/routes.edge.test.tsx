@@ -3,7 +3,7 @@ import { buildRoutes, CORE_ROUTES, matchRoute, navSections, NAV_GROUPS, ROUTES, 
 import { hashPath, navRoute, parentRoute } from './shell/model';
 
 // the edge cases of the route registry: the hashes that a person types or edits, the contract table of
-// docs/PHASE5-API.md section 4, and the parent of each detail page.
+// docs/API.md section 4, and the parent of each detail page.
 
 const stub = (path: string, extra: Partial<RouteDef> = {}): RouteDef => ({
   path,

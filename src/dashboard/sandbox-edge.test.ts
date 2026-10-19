@@ -12,7 +12,7 @@ import { parseSandboxQuery } from './sandbox.js';
 import { createDashboard, type DashboardDeps } from './server.js';
 import type { SandboxExecDetail, SandboxExecRow, SandboxPage, SandboxStatus } from './types.js';
 
-// the routes of the code sandbox against docs/PHASE5-API.md (M9): the exact keys of each shape, the query rules of
+// the routes of the code sandbox against docs/API.md (M9): the exact keys of each shape, the query rules of
 // section 1, and the rows that the sandbox itself writes, also a row that still runs.
 
 const NOW = new Date('2026-10-18T12:00:00.000Z');

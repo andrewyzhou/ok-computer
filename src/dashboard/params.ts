@@ -1,4 +1,4 @@
-// the query rules of the phase 5 endpoints (docs/PHASE5-API.md section 1). a limit is clamped to the range of its
+// the query rules of the phase 5 endpoints (docs/API.md section 1). a limit is clamped to the range of its
 // endpoint, and a value that is not a number gives the default.
 
 export function limitOf(value: string | undefined, max: number, fallback: number): number {

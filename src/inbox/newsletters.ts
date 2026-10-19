@@ -16,7 +16,7 @@ import { getMessages, inInbox, isUnread, listMessages, receivedAt } from './gmai
 import { mailSource, markRead } from './run.js';
 
 // the newsletter sweep: it groups the mail of each account by List-Id or From, counts what the owner read, and finds
-// the unsubscribe method. the owner unsubscribes or archives a sender with an approval. see docs/PHASE5-API.md (m8)
+// the unsubscribe method. the owner unsubscribes or archives a sender with an approval. see docs/API.md (m8)
 // for the routes that call it. nothing here sends mail: a mailto unsubscribe is shown, but never used.
 
 export const UNSUBSCRIBE_TOOL = 'inbox_unsubscribe';

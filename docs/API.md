@@ -1,4 +1,4 @@
-# Phase 5 API contracts
+# API contracts
 
 Status: the API contract of dashboard v2, written for the parallel work of phase 5. The decisions of phase 5 are in DESIGN-NEXT §12, and this file stays the contract that §12 points to. The types are in `src/dashboard/types.ts`, one section for each milestone. The web route registry is `web/src/routes.ts`. When a team must change a shape, it changes the type, this file and its own code in the same commit, and it tells the teams that read the shape. A later change of a shape changes the type and this file in the same commit.
 

@@ -1,7 +1,7 @@
 import type { Readable } from 'node:stream';
 import type { SandboxEgress, SandboxExecStatus, SandboxLanguage, SandboxLimits } from '../dashboard/types.js';
 
-// the shapes that the parts of the sandbox share. each part has its own file (see docs/PHASE5-API.md, M9), and this
+// the shapes that the parts of the sandbox share. each part has its own file (see docs/API.md, M9), and this
 // file has no code, so a test can fake any part.
 
 // --- the docker engine api (docker.ts) ---

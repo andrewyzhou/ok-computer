@@ -14,7 +14,7 @@ export const WEB_SENDER_ID = 'owner';
 // the prefix of the messageId of a web message. the rest is a random uuid.
 export const WEB_TURN_PREFIX = 'web:';
 
-// the part of the web channel that the dashboard uses. docs/PHASE5-API.md (m2) gives the routes on top of it.
+// the part of the web channel that the dashboard uses. docs/API.md (m2) gives the routes on top of it.
 export interface WebChat {
   // running is true after start() and before stop() of the channel. the routes answer 503 when it is false.
   running(): boolean;

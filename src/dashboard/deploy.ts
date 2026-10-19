@@ -5,7 +5,7 @@ import type { DashboardDeps } from './server.js';
 import type { GoogleTokenImportRequest, GoogleTokenImportResponse, SecretStoreView } from './types.js';
 
 // phase 5 m7 owns this module. it mounts POST /api/google/accounts/:alias/token and GET /api/secrets.
-// docs/PHASE5-API.md gives the shapes and the errors. server.ts calls it after the sign-in check, so each route is
+// docs/API.md gives the shapes and the errors. server.ts calls it after the sign-in check, so each route is
 // behind the dashboard auth.
 
 // a refresh token and a client id are one word each. the limits only keep a wrong paste out.
