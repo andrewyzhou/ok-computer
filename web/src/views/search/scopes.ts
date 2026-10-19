@@ -21,6 +21,13 @@ export const SCOPES: readonly ScopeDef[] = [
 // the server takes at most 200 characters, so a longer text is cut here and never gets a 400.
 export const MAX_QUERY = 200;
 
+// the cut counts utf-16 code units, as the server does. a cut in the middle of an emoji would leave a lone high
+// surrogate, and encodeURIComponent throws on it, so that half is dropped as well.
+export function cutQuery(text: string): string {
+  const cut = text.slice(0, MAX_QUERY);
+  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
+}
+
 // a value that is not a scope gives undefined, so an old or edited link shows every scope.
 export function scopeOf(value: string | null | undefined): ScopeDef | undefined {
   return SCOPES.find((scope) => scope.id === value);

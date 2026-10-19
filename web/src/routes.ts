@@ -219,20 +219,36 @@ export interface RouteMatch {
   query: URLSearchParams;
 }
 
+// a typed or cut link can hold a bad percent escape, and decodeURIComponent throws on it. such a value gives no
+// match, so the shell shows its missing page and does not crash while it renders.
+function decode(value: string): string | undefined {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+}
+
+// a param never matches an empty value, so runs/ is not a run with the id ''.
 function matchPath(pattern: string, segments: string[]): Record<string, string> | undefined {
   const parts = pattern === '' ? [] : pattern.split('/');
   const params: Record<string, string> = {};
   for (const [index, part] of parts.entries()) {
     if (part.startsWith(':') && part.endsWith('*') && index === parts.length - 1) {
-      const rest = segments.slice(index);
-      if (rest.length === 0) return undefined;
-      params[part.slice(1, -1)] = decodeURIComponent(rest.join('/'));
+      const rest = segments.slice(index).join('/');
+      if (rest === '') return undefined;
+      const value = decode(rest);
+      if (value === undefined) return undefined;
+      params[part.slice(1, -1)] = value;
       return params;
     }
     const segment = segments[index];
     if (segment === undefined) return undefined;
-    if (part.startsWith(':')) params[part.slice(1)] = decodeURIComponent(segment);
-    else if (part !== segment) return undefined;
+    if (part.startsWith(':')) {
+      const value = segment === '' ? undefined : decode(segment);
+      if (value === undefined) return undefined;
+      params[part.slice(1)] = value;
+    } else if (part !== segment) return undefined;
   }
   return parts.length === segments.length ? params : undefined;
 }
@@ -243,9 +259,13 @@ function rank(pattern: string): number {
   return pattern.split('/').reduce((sum, part) => sum + (part.endsWith('*') ? 1 : part.startsWith(':') ? 10 : 100), 0);
 }
 
-// the hash is the part after #/, for example runs/run-1 or search?q=essay.
+// the hash is the part after #/, for example runs/run-1 or search?q=essay. the query starts at the first ?, so a
+// later ? stays in the query. one trailing slash is dropped, so runs/ is the runs page.
 export function matchRoute(hash: string, routes: RouteDef[] = ROUTES): RouteMatch | undefined {
-  const [path = '', search = ''] = hash.replace(/^#?\/?/, '').split('?', 2);
+  const raw = hash.replace(/^#?\/?/, '');
+  const at = raw.indexOf('?');
+  const path = (at < 0 ? raw : raw.slice(0, at)).replace(/\/$/, '');
+  const search = at < 0 ? '' : raw.slice(at + 1);
   const segments = path === '' ? [] : path.split('/');
   const sorted = [...routes].sort((a, b) => rank(b.path) - rank(a.path));
   for (const route of sorted) {

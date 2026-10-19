@@ -133,6 +133,19 @@ describe('the command menu', () => {
     expect(screen.getByRole('option', { name: /hit second/ })).toBeTruthy();
     expect(screen.queryByRole('option', { name: /hit first/ })).toBeNull();
   });
+
+  it('shows the error of a source that throws at once', async () => {
+    const source: CommandSource = {
+      id: 'sync',
+      label: 'Search',
+      search: () => {
+        throw new Error('bad text');
+      },
+    };
+    render(<CommandMenu open onClose={() => {}} routes={ROUTES} sources={[source]} />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Search or run a command' }), { target: { value: 'goals' } });
+    expect(await screen.findByText('Search: bad text')).toBeTruthy();
+  });
 });
 
 describe('the stored preferences', () => {

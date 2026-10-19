@@ -25,7 +25,10 @@ export function runHref(runId: string): string {
 // undoes a filter. an empty value leaves its key out. the change starts from the hash itself and not from the props,
 // because the props follow the hash only after its change event, and two quick changes must both stay.
 export function setHashQuery(path: string, change: Record<string, string>): void {
-  const [current = '', search = ''] = location.hash.replace(/^#?\/?/, '').split('?', 2);
+  const raw = location.hash.replace(/^#?\/?/, '');
+  const at = raw.indexOf('?');
+  const current = at < 0 ? raw : raw.slice(0, at);
+  const search = at < 0 ? '' : raw.slice(at + 1);
   const next = new URLSearchParams(current === path ? search : '');
   for (const [key, value] of Object.entries(change)) {
     if (value) next.set(key, value);

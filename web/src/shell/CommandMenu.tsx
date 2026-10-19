@@ -32,8 +32,9 @@ function useSources(query: string, sources: CommandSource[]): Record<string, Rem
     if (!active.length) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
+      // a source that throws at once is turned into a failed promise, so its error shows like a failed request.
       for (const source of active) {
-        source.search(text, controller.signal).then(
+        Promise.resolve().then(() => source.search(text, controller.signal)).then(
           (groups) => !controller.signal.aborted && setState((old) => ({ ...old, [source.id]: { groups, loading: false } })),
           (err: Error) =>
             !controller.signal.aborted && setState((old) => ({ ...old, [source.id]: { groups: [], loading: false, error: err.message } })),

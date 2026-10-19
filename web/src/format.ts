@@ -42,8 +42,10 @@ export function duration(from: string, to: string | null): string {
 
 export function ms(value: number): string {
   if (value < 1000) return `${value} ms`;
-  if (value < 60_000) return `${(value / 1000).toFixed(1)} s`;
-  return `${Math.floor(value / 60_000)} min ${Math.round((value % 60_000) / 1000)} s`;
+  // the value is rounded once before it is split, so a value just under a minute never shows 60 s.
+  if (value < 59_950) return `${(value / 1000).toFixed(1)} s`;
+  const total = Math.round(value / 1000);
+  return `${Math.floor(total / 60)} min ${total % 60} s`;
 }
 
 export function bytes(value: number): string {

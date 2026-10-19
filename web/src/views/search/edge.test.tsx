@@ -5,7 +5,8 @@ import type { SearchHit, SearchResults, SearchScope } from '../../../../src/dash
 import { seedDashboard } from '../../../../test/seed';
 import { setPrefs } from '../../shell/prefs';
 import { inMain, installEventSource, json, openApp, stubFetch } from '../../testing';
-import { scopeOf, searchHref, toCommandGroups } from './scopes';
+import { cutQuery, scopeOf, searchHref, toCommandGroups } from './scopes';
+import searchShell from './shell';
 
 // the edge cases of the search: text with the characters of a url, snippets with markup and bad offsets, a scope
 // from a newer server, and the errors of the contract.
@@ -125,5 +126,26 @@ describe('the search page', () => {
     expect(link.getAttribute('href')).toBe('#/chats/main%400');
     fireEvent.click(inMain().getByRole('button', { name: 'Details of essay plan' }));
     await waitFor(() => expect(document.querySelector('a[href="#/chats/main%400"]')).toBeTruthy());
+  });
+
+  it('never cuts an emoji in half at the 200 character limit', () => {
+    const cut = cutQuery(`${'a'.repeat(199)}😀`);
+    expect(cut.length).toBeLessThanOrEqual(200);
+    expect(() => encodeURIComponent(cut)).not.toThrow();
+  });
+
+  it('searches a long text that ends in an emoji from the hash', async () => {
+    stubFetch(seeded.dashboard, { 'GET /api/search': ({ query }) => ({ q: query.get('q'), mode: 'fts', groups: [] }) });
+    openApp(`#/search?q=${'a'.repeat(199)}${encodeURIComponent('😀')}`);
+    expect(await inMain().findByText(/Nothing matches/)).toBeTruthy();
+  });
+
+  it('gives the command menu a promise, not a throw, for an emoji at the cut', async () => {
+    stubFetch(seeded.dashboard, { 'GET /api/search': () => ({ q: 'x', mode: 'fts', groups: [] }) });
+    let result: Promise<unknown> | undefined;
+    expect(() => {
+      result = searchShell.commandSources![0]!.search(`${'a'.repeat(199)}😀`, new AbortController().signal);
+    }).not.toThrow();
+    await expect(result).resolves.toBeDefined();
   });
 });

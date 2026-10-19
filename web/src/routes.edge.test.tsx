@@ -139,6 +139,24 @@ describe('matchRoute with typed and edited hashes', () => {
     expect(matchRoute('a/c', routes)?.route.path).toBe('a/:x');
     expect(matchRoute('a/c/d', routes)?.route.path).toBe('a/:x*');
   });
+
+  it('gives no match, and does not throw, for a hash with bad percent-encoding', () => {
+    expect(() => matchRoute('runs/%E0%A4%A')).not.toThrow();
+    expect(matchRoute('runs/%E0%A4%A')).toBeUndefined();
+    expect(matchRoute('chats/%')).toBeUndefined();
+  });
+
+  it('never gives a param an empty value for a hash with a trailing slash', () => {
+    expect(matchRoute('runs/')?.params.id).not.toBe('');
+    expect(matchRoute('chats/')?.params.key).not.toBe('');
+    expect(matchRoute('trace/')?.route.path).not.toBe('trace/:runId');
+  });
+
+  it('keeps a question mark inside the query', () => {
+    const match = matchRoute('search?q=what?&scope=runs');
+    expect(match?.query.get('q')).toBe('what?');
+    expect(match?.query.get('scope')).toBe('runs');
+  });
 });
 
 describe('the nav order and the parents of detail pages', () => {

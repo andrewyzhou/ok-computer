@@ -5,7 +5,7 @@ import { time } from '../../format';
 import { Icon } from '../../icons';
 import type { RouteProps } from '../../routes';
 import { Button, ButtonLink, DetailsPanel, EmptyState, Facts, FilterBar, Highlight, IconButton, KeyHint, Page, SearchField, Section, Skeleton, Tabs, type TabItem } from '../../ui';
-import { MAX_QUERY, SCOPES, scopeOf, searchHref, type ScopeDef } from './scopes';
+import { cutQuery, SCOPES, scopeOf, searchHref, type ScopeDef } from './scopes';
 import './search.css';
 
 // the page waits this long after the last key before it changes the hash, so a word gives one request.
@@ -107,7 +107,7 @@ function HitFacts({ hit }: { hit: SearchHit }) {
 }
 
 export function SearchPage({ query }: RouteProps) {
-  const urlText = (query.get('q') ?? '').slice(0, MAX_QUERY);
+  const urlText = cutQuery(query.get('q') ?? '');
   const q = urlText.trim();
   const scope = scopeOf(query.get('scope'));
   const tab: TabId = scope?.id ?? 'all';
@@ -124,7 +124,7 @@ export function SearchPage({ query }: RouteProps) {
 
   // a new hash from outside, for example the command menu, gives the field its text.
   useEffect(() => {
-    setText((old) => (old.slice(0, MAX_QUERY) === urlText ? old : urlText));
+    setText((old) => (cutQuery(old) === urlText ? old : urlText));
   }, [urlText]);
   useEffect(() => () => clearTimeout(timer.current), []);
 
@@ -146,7 +146,7 @@ export function SearchPage({ query }: RouteProps) {
 
   const commit = (value: string) => {
     clearTimeout(timer.current);
-    replaceHash(searchHref(value.slice(0, MAX_QUERY), scope?.id));
+    replaceHash(searchHref(cutQuery(value), scope?.id));
   };
   const onType = (value: string) => {
     setText(value);
@@ -155,7 +155,7 @@ export function SearchPage({ query }: RouteProps) {
   };
   const showScope = (id: TabId) => {
     clearTimeout(timer.current);
-    location.hash = `#/${searchHref(text.slice(0, MAX_QUERY), id === 'all' ? undefined : id)}`;
+    location.hash = `#/${searchHref(cutQuery(text), id === 'all' ? undefined : id)}`;
   };
 
   const links = () => [...(results.current?.querySelectorAll<HTMLAnchorElement>('a.search-hit-title') ?? [])];
