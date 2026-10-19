@@ -1,5 +1,6 @@
 import type { MouseEvent } from 'react';
 import type { CalendarProposalView, ProposalState } from '../../../../src/dashboard/types';
+import { useApi } from '../../api';
 import { clock, longDay, time } from '../../format';
 import type { RouteProps } from '../../routes';
 import { Badge, DetailsPanel, EmptyState, Facts, FilterBar, Page, Skeleton, Tabs, type Tone } from '../../ui';
@@ -115,7 +116,12 @@ export function ProposalsPage({ query }: RouteProps) {
     approvals.reload();
   };
   const proposals = paged.pages.flat();
-  const proposal = selectedId ? proposals.find((each) => String(each.id) === selectedId) : undefined;
+  const listed = selectedId ? proposals.find((each) => String(each.id) === selectedId) : undefined;
+  // a link from the digest names a proposal that may be in another tab or older than the loaded rows, so the page asks
+  // for that one proposal by its id when the list does not have it.
+  const lookup = selectedId && /^[1-9]\d{0,15}$/.test(selectedId) && paged.data !== undefined && !listed ? `/api/inbox/proposals/${selectedId}` : null;
+  const single = useApi<CalendarProposalView>(lookup);
+  const proposal = listed ?? single.data;
   const select = (id: string | null) => setHashQuery(PATH, query, { id });
 
   return (
@@ -159,8 +165,12 @@ export function ProposalsPage({ query }: RouteProps) {
         </DetailsPanel>
       ) : (
         <DetailsPanel title="Proposals" {...(selectedId ? { onClose: () => select(null) } : {})}>
-          {selectedId && paged.data !== undefined ? (
-            <p className="muted">Proposal #{selectedId} is not in this list. It may be in another tab, or older than the rows that are loaded.</p>
+          {selectedId && paged.data !== undefined && (lookup === null || /not found/i.test(single.error ?? '')) ? (
+            <p className="muted">Proposal #{selectedId} was not found.</p>
+          ) : selectedId && single.error !== undefined ? (
+            <p className="error-text">Could not load proposal #{selectedId}: {single.error}</p>
+          ) : selectedId && paged.data !== undefined ? (
+            <Skeleton lines={3} />
           ) : (
             <p className="muted">Select a proposal to see its calendar, its source and its approval.</p>
           )}
