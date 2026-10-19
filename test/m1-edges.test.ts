@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -7,9 +7,11 @@ import { migrate } from '../src/db/index.js';
 import { createDashboard } from '../src/dashboard/server.js';
 import { runSpans } from '../src/dashboard/spans.js';
 import { createTraceFeed } from '../src/dashboard/stream.js';
-import type { ChatMessagesPage, ChatsPage, RunRow, RunSpans, SearchResults } from '../src/dashboard/types.js';
+import type { ChatMessagesPage, ChatsPage, LogLine, RunRow, RunSpans, SearchResults } from '../src/dashboard/types.js';
 import { appendEvent } from '../src/events/log.js';
 import { silentLogger } from '../src/observability/logger.js';
+import { REPLY_CALL_ID, REPLY_NOTE, REPLY_TOOL } from '../src/policy/reply.js';
+import { NO_REPLY } from '../src/sessions/router.js';
 import { at, NOW, seedM1, TRACE_RUN } from './seed-m1.js';
 import { seedDashboard } from './seed.js';
 
@@ -219,5 +221,101 @@ describe('migration 018 on payloads of other shapes', () => {
     migrate(db, real);
     expect(db.prepare('SELECT rowid FROM events_fts WHERE events_fts MATCH ? ORDER BY rowid').all('"blocky"')).toHaveLength(1);
     expect(db.prepare('SELECT COUNT(*) AS n FROM events_fts').get()).toEqual({ n: 2 });
+  });
+});
+
+const turn = (text: string, toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> = []) => ({
+  provider: 'fake',
+  model: 'm',
+  content: [{ type: 'text' as const, text }, ...toolCalls.map((call) => ({ type: 'tool_use' as const, ...call }))],
+  text,
+  toolCalls,
+  stopReason: toolCalls.length ? ('tool_use' as const) : ('end_turn' as const),
+});
+
+describe('the search edges after the review', () => {
+  it('finds no message hit in a link that the guard held, or in NO_REPLY', async () => {
+    const { dashboard } = await seedM1();
+    const held = await json<SearchResults>(dashboard.request('/api/search?q=owner-notes&scope=messages'));
+    expect(held.groups[0]!.hits.filter((hit) => hit.snippet.includes('owner-notes'))).toEqual([]);
+    const silent = await json<SearchResults>(dashboard.request(`/api/search?q=${NO_REPLY}&scope=messages`));
+    expect(silent.groups[0]!.hits).toEqual([]);
+  });
+
+  it('shows the delivered text of a reply that got only a short notice, and finds no draft of a tool turn', async () => {
+    const { t, dashboard } = await seedM1();
+    t.db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('held-run', 'main', 'message', 'main', 'completed', ?)").run(at(30_000));
+    appendEvent(t.db, { sessionKey: 'main', runId: 'held-run', type: 'assistant_message', payload: turn('draft https://d.example/?d=zzqqdraft', [{ id: 'tc-x', name: 'now', input: {} }]) });
+    appendEvent(t.db, { sessionKey: 'main', runId: 'held-run', type: 'assistant_message', payload: turn('secret https://evil.example/?d=zzqqxx') });
+    t.db
+      .prepare(
+        `INSERT INTO policy_decisions (runId, toolCallId, toolName, decision, rule, reason, reviewerVerdict, createdAt)
+         VALUES ('held-run', ?, ?, 'review', 'exfiltration', 'seeded', 'hold', ?)`,
+      )
+      .run(REPLY_CALL_ID, REPLY_TOOL, at(31_000));
+    appendEvent(t.db, { sessionKey: 'main', runId: 'held-run', type: 'note', payload: { text: `${REPLY_NOTE}: the review failed, so the chat got only a short notice in its place.` } });
+    for (const q of ['zzqqxx', 'zzqqdraft']) {
+      const results = await json<SearchResults>(dashboard.request(`/api/search?q=${q}&scope=messages`));
+      expect(results.groups[0]!.hits, q).toEqual([]);
+    }
+  });
+
+  it('answers 400 for a q of nul characters and counts the mode without them', async () => {
+    const { dashboard } = await seedM1();
+    for (const q of ['\u0000', '\u0000\u0000\u0000', ' \u0000 ']) {
+      expect((await dashboard.request(`/api/search?q=${encodeURIComponent(q)}`)).status, JSON.stringify(q)).toBe(400);
+    }
+    const short = await json<SearchResults>(dashboard.request(`/api/search?q=${encodeURIComponent('co\u0000')}&scope=messages`));
+    const plain = await json<SearchResults>(dashboard.request('/api/search?q=co&scope=messages'));
+    expect(short.mode).toBe('like');
+    expect(plain.groups[0]!.hits.length).toBeGreaterThan(0);
+    expect(short.groups[0]!.hits.map((hit) => hit.id)).toEqual(plain.groups[0]!.hits.map((hit) => hit.id));
+  });
+
+  it('fills the limit with paths and sets more when another path matches', async () => {
+    const { t, dashboard } = await seedM1();
+    const dir = join(t.dataDir, 'memory');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'aaa.md'), '# one\n\nzephyr zephyr zephyr zephyr\n\n# two\n\nzephyr zephyr zephyr zephyr\n\n# three\n\nzephyr zephyr zephyr\n');
+    writeFileSync(join(dir, 'bbb.md'), '# b\n\nthe long note about many things and also zephyr once among the other words of it\n');
+    const one = await json<SearchResults>(dashboard.request('/api/search?q=zephyr&scope=memory&limit=1'));
+    expect(one.groups[0]!.hits).toHaveLength(1);
+    expect(one.groups[0]!.more).toBe(true);
+    const two = await json<SearchResults>(dashboard.request('/api/search?q=zephyr&scope=memory&limit=2'));
+    expect(two.groups[0]!.hits.map((hit) => hit.id).sort()).toEqual(['aaa.md', 'bbb.md']);
+    expect(two.groups[0]!.more).toBe(false);
+  });
+});
+
+describe('the logs and runs edges after the review', () => {
+  it('answers 400 for a day that is not a date of the calendar', async () => {
+    const { dashboard } = await seedDashboard();
+    for (const day of ['2026-13-01', '9999-99-99', '2026-00-10', '2026-02-30', '2026-13-45']) {
+      for (const path of [`/api/logs?day=${day}`, `/api/runs?day=${day}`]) {
+        const response = await dashboard.request(path);
+        expect(response.status, path).toBe(400);
+        expect(((await response.json()) as { error: string }).error).toBeTruthy();
+      }
+    }
+    expect((await dashboard.request('/api/logs?day=2028-02-29')).status).toBe(200);
+  });
+
+  it('clamps a negative limit to 1', async () => {
+    const { dashboard } = await seedDashboard();
+    const all = await json<LogLine[]>(dashboard.request('/api/logs'));
+    expect(all.length).toBeGreaterThan(2);
+    const one = await json<LogLine[]>(dashboard.request('/api/logs?limit=-1'));
+    expect(one).toEqual(all.slice(-1));
+  });
+});
+
+describe('the dashboard errors', () => {
+  it('answers a route that throws with 500 and a json error', async () => {
+    const { t, dashboard } = await seedM1();
+    t.db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('broken-run', 'main', 'message', 'main', 'running', ?)").run(at(0));
+    t.db.prepare("INSERT INTO mcp_messages (runId, serverId, direction, rpcId, method, payload, createdAt) VALUES ('broken-run', 's', 'out', 1, 'tools/call', 'not json', ?)").run(at(1));
+    const response = await dashboard.request('/api/runs/broken-run/spans');
+    expect(response.status).toBe(500);
+    expect(((await response.json()) as { error: string }).error).toBeTruthy();
   });
 });
