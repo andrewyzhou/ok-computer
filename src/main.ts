@@ -6,6 +6,7 @@ import { createApp } from './app.js';
 import { cliWanted, createCliChannel } from './channels/cli.js';
 import { createTelegramChannel, TELEGRAM } from './channels/telegram.js';
 import type { ChannelAdapter } from './channels/types.js';
+import { createWebChannel } from './channels/web.js';
 import { loadConfig, loadDotEnv, loadSecrets } from './config/load.js';
 import { openDb } from './db/index.js';
 import { createLoginCodes } from './dashboard/login.js';
@@ -86,13 +87,27 @@ async function main(): Promise<void> {
     logger.info('telegram is off, because TELEGRAM_BOT_TOKEN or TELEGRAM_OWNER_ID is not set');
   }
   const telegram = channels.length > 0;
+  let inputEnded = false;
+  const stopAfterInput = () => void app.idle().then(() => stop('cli input ended'));
+  // the web chat lives in the dashboard, and npm run chat runs no dashboard. the web chat runs the main session as the
+  // owner, and a dashboard without a token lets each local request in, so the web chat needs the token.
+  const web = !chatMode && Boolean(secrets.dashboardToken);
+  if (!chatMode && !web) logger.info('the web chat is off, because DASHBOARD_TOKEN is not set');
+  // the web chat can be reached only while its dashboard runs. it is false after the dashboard did not start.
+  let webReachable = web;
   // a service has no terminal, so its stdin ends at once. see cliWanted.
   const service = process.env.OKC_SERVICE === '1';
   if (cliWanted({ chatMode, telegram, service, tty: Boolean(process.stdin.isTTY) })) {
-    // when piped input ends, the runs that it started finish before the process stops. telegram keeps the process up.
-    const onClose = () => (telegram ? logger.info('cli input ended') : void app.idle().then(() => stop('cli input ended')));
+    // when piped input ends, the runs that it started finish before the process stops. telegram keeps the process up,
+    // and so does the web chat, unless its dashboard did not start (see below).
+    const onClose = () => {
+      inputEnded = true;
+      if (telegram || webReachable) logger.info('cli input ended');
+      else stopAfterInput();
+    };
     channels.push(createCliChannel({ onClose }));
   }
+  if (web) channels.push(createWebChannel({ clock: systemClock, logger }));
   // the sign-in codes live in the process that runs the dashboard. npm run chat runs no dashboard.
   const loginCodes = !chatMode && secrets.dashboardToken && config.dashboard.publicUrl ? createLoginCodes(systemClock) : undefined;
   const app = createApp({
@@ -126,6 +141,9 @@ async function main(): Promise<void> {
       logger.info('dashboard started', { url: `http://127.0.0.1:${dashboard.port}` });
     } catch (err) {
       logger.error('dashboard did not start', { port: config.dashboard.port, err });
+      // without a dashboard nobody can reach the web chat, so it does not keep the process up.
+      webReachable = false;
+      if (!telegram && inputEnded) stopAfterInput();
     }
   }
   if (chatMode) process.stdout.write('ok computer is ready. type a message, /new for a fresh session, ctrl+c to quit.\n');

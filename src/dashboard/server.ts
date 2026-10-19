@@ -46,6 +46,7 @@ import { mountBrowser } from './browser.js';
 import { mountChat } from './chat.js';
 import { mountChats } from './chats.js';
 import { mountDeploy } from './deploy.js';
+import { readBody } from './http.js';
 import { mountInbox } from './inbox.js';
 import { mountSandbox } from './sandbox.js';
 import { mountSearch } from './search.js';
@@ -59,7 +60,7 @@ export interface DashboardDeps {
   config: Config;
   clock: Clock;
   logger: Logger;
-  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google' | 'rules'>;
+  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google' | 'rules' | 'chat'>;
   // with a token, every api request must give it. the browser gives it in the query, because EventSource has no
   // headers.
   token?: string;
@@ -137,10 +138,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
     await next();
   });
 
-  const body = async <T>(c: Context, schema: z.ZodType<T>): Promise<T | undefined> => {
-    const parsed = schema.safeParse(await c.req.json().catch(() => undefined));
-    return parsed.success ? parsed.data : undefined;
-  };
+  const body = readBody;
   const notFound = (c: Context, what: string) => c.json({ error: `${what} not found` }, 404);
 
   // the owner signs in one time with a code or the token. the token then never goes into a url, a bookmark or the

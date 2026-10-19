@@ -28,6 +28,9 @@ export interface OutboundMessage {
   details?: string;
   // the run that wrote the text. the log of the channel names it.
   runId?: string;
+  // the messageId of the owner message that this text answers. the router sets it on each reply to a message. a
+  // proactive message has none. the web channel uses it as the turn id of the reply.
+  replyTo?: string;
 }
 
 // progress shows the owner that a run works on a message, and lets the owner stop it.
