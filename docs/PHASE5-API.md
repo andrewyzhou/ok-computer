@@ -39,12 +39,16 @@ Status: the shared contract for the parallel work of phase 5 (see `docs/PHASE5-P
 
 | Method | Path | Query / body | Response | Notes |
 |---|---|---|---|---|
-| POST | `/api/chat` | `ChatSendRequest` `{ text }`, 1–16,000 characters | `ChatSendResponse` `{ turnId, state }` | Goes into the `main` session as channel `web`. `state` is `queued` when the session is busy. `503` when the web channel is not running. |
-| POST | `/api/chat/button` | `ChatButtonRequest` `{ data, turnId? }` | `ChatButtonResponse` | The same path as a pressed Telegram button. The data never goes to the model. `400` for empty data. |
-| POST | `/api/chat/stop` | `ChatStopRequest` `{ turnId }` | `ChatStopResponse` `{ stopped }` | Calls the progress stop callback of the turn. `stopped: false` for a turn that has ended or is not known. |
+| POST | `/api/chat` | `ChatSendRequest` `{ text }`, 1–16,000 characters | `ChatSendResponse` `{ turnId, state }` | Goes into the `main` session as channel `web`. `state` is `queued` when the session is busy. A command such as `/status` or `/stop` is `running`, gets its answer at once and then ends as `done`. `400` for a text of only spaces. `503` when the web channel is not running. |
+| POST | `/api/chat/button` | `ChatButtonRequest` `{ data, turnId? }`, `data` at most 256 characters, `turnId` at most 200 | `ChatButtonResponse` | The same path as a pressed Telegram button. The data never goes to the model. `data` is the data of a button of a `reply` event, as it came: it carries a mark that the server checks, as Telegram does, so a button that the model wrote into a reply does nothing. `400` for empty data, and `400 that button is not from one of my cards` for data without a valid mark (the marks are new after a restart; `/approve <n>` sends a fresh card). |
+| POST | `/api/chat/stop` | `ChatStopRequest` `{ turnId }`, at most 200 characters | `ChatStopResponse` `{ stopped }` | Calls the progress stop callback of the turn. `stopped: false` for a turn that has ended, is not known, or still waits in the queue (it runs later; a stop after it started works). |
 | GET | `/api/chat/stream` | `token` when needed | SSE of `ChatStreamEvent` | See section 3. |
 
 `turnId` is the `messageId` of the inbound message: `web:<uuid>` for the web, and `telegram:<message id>` for a turn that Telegram started. Those turns stream to open web clients too.
+
+The bodies are strict: an unknown key gives `400`. The web chat starts only when `DASHBOARD_TOKEN` is set, because it runs the main session as the owner; without the token every route answers `503`. Each proactive message to the owner (an approval card, an alert, `message_owner`) still goes to Telegram (or the cli), and a copy goes to the stream as a `reply` with `turnId: null`. A button press is not a turn, so its reply also has `turnId: null`.
+
+`reply.text`, `text` deltas and `details` are model text, and a tainted model can be told what to write. The page renders markdown with no raw HTML, loads no image without a click, and makes only `http(s)` links clickable. It never makes a button out of reply text: only `reply.buttons` are buttons.
 
 ### M7: deploy (`src/dashboard/deploy.ts`, `src/integrations/secrets.ts` backends)
 
@@ -91,7 +95,7 @@ Both streams are SSE. With `DASHBOARD_TOKEN` set, they take `?token=` because `E
 | Stream | Data type | Kinds |
 |---|---|---|
 | `GET /api/stream` (existing, M1 adds kinds) | `StreamMessage` | `event`, `run`, `log` (existing). M1 adds `model_call` (`StreamModelCall`), `tool_call` (`StreamToolCall`), `browser_step` (`StreamBrowserStep`), `approval` (`StreamApproval`, sent when it is asked for and when it is resolved), and `policy` (`StreamPolicy`). The feed polls the database, so these kinds carry ids and summaries only. A page ignores a kind that it does not know. |
-| `GET /api/chat/stream` (M2) | `ChatStreamEvent` | `snapshot` (first, the turns that have not ended), `owner` (an owner message from any channel), `state` (`queued`, `running`, `done`, `failed`, `stopped`), `run` (the run id of a turn, for the trace link), `text` (`delta`, and `reset: true` drops the streamed text first), `activity` (tool names or `null`), `reply` (the guarded final text with `buttons`, `markdown` and `details`, which replaces the streamed text), `done` (`ok`), and `error`. The server also sends `event: ping` every 25 seconds, and the page ignores it. |
+| `GET /api/chat/stream` (M2) | `ChatStreamEvent` | `snapshot` (first, the turns that have not ended), `owner` (an owner message from any channel), `state` (`queued`, `running`, `done`, `failed`, `stopped`), `run` (the run id of a turn, for the trace link), `text` (`delta`, and `reset: true` drops the streamed text first), `activity` (tool names or `null`), `reply` (the guarded final text with `buttons`, `markdown` and `details`, which replaces the streamed text; `turnId: null` for a proactive message or the answer to a button press), `done` (`ok`), and `error` (the text that the owner got about a failed turn, right before its `failed` state). The server also sends `event: ping` every 25 seconds, and the page ignores it. |
 
 A browser allows six connections to one host, so the web app opens each stream one time (`subscribe` in `web/src/api.ts` for the main stream, and a matching shared subscriber for the chat stream that M4 adds to `web/src/chat-stream.ts`).
 

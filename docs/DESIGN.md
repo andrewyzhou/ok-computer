@@ -66,7 +66,7 @@ ok-computer/
     agent/                agent loop, run lifecycle, system prompt builder
     context/              context strategies (trim, compaction), token estimation
     sessions/             session keys and routing
-    channels/             channel interface, cli adapter, telegram adapter
+    channels/             channel interface, cli adapter, telegram adapter, web adapter (the dashboard chat)
     scheduler/            automations, heartbeat, run history
     goals/                goals domain
     memory/               daily notes, MEMORY.md, search index, consolidation
@@ -87,10 +87,10 @@ ok-computer/
 ## 5. Architecture
 
 ```
- owner (phone / terminal)
+ owner (phone / terminal / dashboard)
         |
         v
- channel adapters (telegram, cli)  --->  router: sender check, session key
+ channel adapters (telegram, cli, web)  --->  router: sender check, session key, turn hooks
         |                                        |
         |                                        v
         |                               run queue (one run at a time per session)
@@ -283,7 +283,7 @@ Current Claude prices per million tokens (verify against the Anthropic pricing p
 
 ```ts
 interface ChannelAdapter {
-  id: string;                                   // 'telegram' | 'cli'
+  id: string;                                   // 'telegram' | 'cli' | 'web'
   start(onMessage: (m: InboundMessage) => void): Promise<void>;
   stop(): Promise<void>;
   send(out: OutboundMessage): Promise<{ messageId: string }>;
@@ -294,6 +294,7 @@ interface OutboundMessage {
   markdown?: boolean;   // the text is model markdown (phase 2 M4)
   details?: string;     // a block that the owner opens, e.g. the exact input of an approval (phase 2 M4)
   runId?: string;       // the run that wrote the text, for the log
+  replyTo?: string;     // the messageId of the owner message that this text answers; a proactive message has none (phase 5 M2)
 }
 ```
 
@@ -304,8 +305,12 @@ interface OutboundMessage {
   - M3 sends plain text with no parse mode. A split falls back from paragraphs to lines, then words, then a hard cut that never breaks a surrogate pair. Buttons go on the last part.
   - Polling runs in the background, so a network failure is logged and the cli keeps working. A button press is answered (`answerCallbackQuery`) and becomes an inbound message with `button`. Messages without text are logged and ignored. Messages and button presses from a chat that is not private (a group or a channel) are also logged and ignored, so an owner message in a group never gets an answer there and never becomes the main chat.
   - Telegram starts only when both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID` are set, and never in `npm run chat`. The owner id is not registered as a secret.
-  - The cli runs in chat mode, when Telegram does not run, or when stdin is a terminal. When Telegram runs, the end of cli input does not stop the process.
-- The owner's main chat for proactive messages is the most recent chat the owner used, stored in the database (`settings.owner_chat`), with Telegram preferred when configured. Before the first owner message it is the cli, when the cli runs. In M3 the order is: the saved chat when it is not the cli, then the owner's private Telegram chat (its chat id is `TELEGRAM_OWNER_ID`), then a saved cli chat, then the cli.
+  - The cli runs in chat mode, when Telegram does not run, or when stdin is a terminal. When Telegram runs, or the web chat runs and its dashboard started, the end of cli input does not stop the process. When the dashboard did not start, nothing can reach the web chat, so the end of cli input stops the process as before.
+- **web** (phase 5 M2, `src/channels/web.ts`): the chat of the dashboard. It starts outside chat mode, and only when `DASHBOARD_TOKEN` is set, because a dashboard without a token lets every local request in, and the web chat runs the main session with all its tools. The router trusts each web message as the owner, because the dashboard signed in the request. `POST /api/chat`, `POST /api/chat/button` and `POST /api/chat/stop` give it messages, presses and stops, and `GET /api/chat/stream` streams the turns (docs/PHASE5-API.md, M2).
+  - A turn is one owner message and the work on it. The router calls the turn hooks (`src/sessions/turns.ts`) for each turn of every channel: `owner`, `queued`, `started`, `replied` and `ended`. The web channel is the hub of the stream, so a run that Telegram started streams to the open web clients too. `started` gives a progress that the router tees with the progress of the channel of the message (`teeProgress`), so Telegram keeps its own draft. A command such as `/status` or `/stop` gets its answer and then ends as done. A failed turn gives the text that the owner got, and the stream sends it as an `error` event.
+  - Each button of a reply on the stream carries a mark from a key that each process makes, as Telegram buttons do. A press without a valid mark does nothing, so a button that the model wrote into a markdown reply cannot resolve an approval.
+  - The web chat is never the target of a proactive message and never the saved `owner_chat`: it shows only while a tab of the dashboard is open. Each proactive message still goes to the target below, and a copy goes to the web stream as a reply with no turn, so an open tab shows an approval card with its buttons.
+- The owner's main chat for proactive messages is the most recent chat the owner used, stored in the database (`settings.owner_chat`), with Telegram preferred when configured. Before the first owner message it is the cli, when the cli runs. In M3 the order is: the saved chat when it is not the cli, then the owner's private Telegram chat (its chat id is `TELEGRAM_OWNER_ID`), then a saved cli chat, then the cli. A web message is never saved as the owner chat, and a saved web chat from an older setting is skipped. When only the web channel runs, no chat is known, and the web copy is the only place the message shows.
 - An inbound message can carry `button` (the data of a pressed button). Such a message never goes to the model.
 
 ## 11. Scheduler
@@ -459,7 +464,7 @@ Everything below is queryable from SQLite:
 ### 16.2 Dashboard
 
 - Hono server on `127.0.0.1` (port from config, default 4317). Loopback only. Optional `DASHBOARD_TOKEN` for future remote access.
-- JSON API under `/api/*`. Live updates through server-sent events at `/api/stream` (new events, run status, log lines).
+- JSON API under `/api/*`. Live updates through server-sent events at `/api/stream` (new events, run status, log lines). The web chat (phase 5 M2) has `POST /api/chat`, `POST /api/chat/button`, `POST /api/chat/stop` and its own stream `GET /api/chat/stream`, which carries the live text of each turn.
 - Pages:
   - **Overview**: today's cost, runs, errors, open goals, next 5 automations, heartbeat status.
   - **Runs**: list with filters (trigger, slot, status, date). Run detail is a timeline: each model call (model, tokens, cache hits, cost, latency, full request and response on expand) and each tool call (input, output, duration, errors).
