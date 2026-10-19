@@ -21,8 +21,8 @@ afterEach(async () => {
   site.google = 'ok';
 }, 60_000);
 
-function setup() {
-  h = createBrowserHarness();
+function setup(extra: Parameters<typeof createBrowserHarness>[0] = {}) {
+  h = createBrowserHarness(extra);
   let now = new Date('2026-10-13T17:00:00Z');
   // the gap reads this clock and not the time that chrome takes, so a slow start of chrome leaves the wait the same.
   let mono = 0;
@@ -50,9 +50,11 @@ function setup() {
 
 describe.skipIf(!hasChrome())('web_search through the browser', { timeout: 60_000 }, () => {
   it('reads the results of google, and records the search as a step with a screenshot', async () => {
-    const s = setup();
+    // this test waits for no timeout, so its tabs get the timeouts of the app. the short ones of the harness made this
+    // first search fail while chrome started on a busy machine.
+    const s = setup({ timeouts: { action: 10_000, navigation: 30_000, capture: 15_000 } });
     const out = await s.search('autumn shirts');
-    expect(out.untrustedSource).toBe('web_search:google');
+    expect(out.untrustedSource, out.content).toBe('web_search:google');
     expect(out.content).toContain('1. Autumn shirts for autumn shirts\n   https://shirts.example/autumn');
     expect(out.content).toContain('https://wiki.example/Shirt');
     expect(s.h.tasks()).toMatchObject([{ kind: 'search', status: 'closed' }]);
