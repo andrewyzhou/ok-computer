@@ -1,0 +1,292 @@
+/* the classes of the inbox views. each name starts with inbox-, and each color and size comes from the tokens of
+   styles.css, so the dark theme reaches these pages too. */
+
+.inbox-items,
+.inbox-past,
+.inbox-proposals {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.inbox-item {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--rule);
+  min-width: 0;
+}
+.inbox-item:first-child {
+  padding-top: 2px;
+}
+.inbox-item:last-child {
+  border-bottom: 0;
+}
+.inbox-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+}
+.inbox-item-from {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.inbox-item-subject {
+  margin: 2px 0 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.inbox-item-summary {
+  margin: 4px 0 0;
+  color: var(--ink-2);
+  max-width: 68ch;
+}
+.inbox-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 6px;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.inbox-amount {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.inbox-short {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--bg-sunken);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.inbox-past li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.inbox-past a[aria-current='page'] {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.inbox-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: var(--space-4);
+}
+
+.inbox-run {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.inbox-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 9rem;
+  overflow-wrap: break-word;
+}
+.inbox-amount-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  white-space: nowrap;
+}
+.inbox-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.inbox-state .badge {
+  white-space: nowrap;
+}
+
+.inbox-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.inbox-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: 200px;
+}
+.inbox-action-buttons .btn {
+  white-space: nowrap;
+}
+.inbox-detail-actions .inbox-actions {
+  align-items: flex-start;
+}
+.inbox-detail-actions .inbox-action-buttons {
+  justify-content: flex-start;
+  max-width: none;
+}
+.inbox-detail-actions .inbox-row-note {
+  text-align: left;
+  max-width: none;
+}
+.inbox-row-note {
+  font-size: var(--text-sm);
+  max-width: 28ch;
+  text-align: right;
+  white-space: normal;
+}
+
+.inbox-pending {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+.inbox-pending-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.inbox-pending-text {
+  margin: 0;
+}
+
+.inbox-external {
+  overflow-wrap: anywhere;
+}
+
+.inbox-subhead {
+  margin: var(--space-5) 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.inbox-detail-approval .approval-card {
+  margin-top: 4px;
+}
+
+.inbox-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+.inbox-note {
+  margin: var(--space-4) 0 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--rule);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.inbox-proposal {
+  padding: 14px 12px;
+  margin: 0 -12px;
+  border-bottom: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.inbox-proposal:hover {
+  background: var(--bg-hover);
+}
+.inbox-proposal.is-selected {
+  background: var(--bg-active);
+}
+.inbox-proposal p {
+  margin: 4px 0 0;
+}
+.inbox-proposal-title {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.inbox-proposal-when {
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.inbox-proposal-approval {
+  margin-top: 10px;
+  max-width: 560px;
+  cursor: default;
+}
+
+.inbox-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+.inbox-form-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.inbox-form p {
+  margin: 0;
+}
+.inbox-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.inbox-field > span:first-child {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.inbox-field input {
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+.inbox-field input[aria-invalid='true'] {
+  border-color: var(--critical);
+}
+.inbox-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 759.98px) {
+  .inbox-actions {
+    align-items: flex-start;
+  }
+  .inbox-action-buttons {
+    justify-content: flex-start;
+  }
+  .inbox-row-note {
+    text-align: left;
+  }
+  .inbox-proposal {
+    margin: 0;
+    padding: 14px 4px;
+  }
+}
+
+.inbox-nowrap {
+  white-space: nowrap;
+}
