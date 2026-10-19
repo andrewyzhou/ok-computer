@@ -51,7 +51,6 @@ describe('migration 018', () => {
       ['main:5', 'the ferry leaves at 11', 'r', 'assistant_message', 't5'],
       ['main:6', 'a check-in', null, 'system_event', 't6'],
       ['main:7', 'a note', null, 'note', 't7'],
-      ['main:8', 'the old part', null, 'compaction', 't8'],
       ['heartbeat:1:1', 'a heartbeat note', null, 'note', 't10'],
     ] as const;
     expect(indexed).toEqual(
@@ -76,7 +75,7 @@ describe('migration 018', () => {
       { rowid: added.id, eventId: added.id, type: 'user_message' },
     ]);
     expect(Number(db.prepare('SELECT COUNT(*) AS n FROM events_fts').get()!.n)).toBe(expected.length + 1);
-    expect(db.prepare("SELECT COUNT(*) AS n FROM events_fts WHERE type IN ('context', 'session_reset')").get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM events_fts WHERE type IN ('context', 'session_reset', 'compaction')").get()).toEqual({ n: 0 });
 
     // the event log stays append-only.
     expect(() => db.prepare("UPDATE events SET payload = '{}' WHERE id = ?").run(added.id)).toThrow(/append-only/);
@@ -89,5 +88,18 @@ describe('migration 018', () => {
     ]);
     // a second migrate has nothing to do.
     expect(migrate(db, real)).toEqual([]);
+  });
+
+  it('migrates a database at 017 that has an event with a damaged payload', () => {
+    const db = databaseAt017();
+    db.exec(`INSERT INTO events (sessionKey, runId, seq, type, payload, createdAt) VALUES
+      ('main', NULL, 1, 'note', 'not json', 't1'),
+      ('main', NULL, 2, 'note', '{"text":"a fine note"}', 't2')`);
+    expect(() => migrate(db, real)).not.toThrow();
+    expect(db.prepare('SELECT text FROM events_fts').all()).toEqual([{ text: 'a fine note' }]);
+    // the trigger keeps the same rule, so a damaged payload never stops the insert of an event.
+    db.exec(`INSERT INTO events (sessionKey, runId, seq, type, payload, createdAt) VALUES ('main', NULL, 3, 'note', '{"text":', 't3')`);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM events').get()).toEqual({ n: 3 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM events_fts').get()).toEqual({ n: 1 });
   });
 });

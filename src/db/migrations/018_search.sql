@@ -12,18 +12,19 @@ CREATE VIRTUAL TABLE events_fts USING fts5(
   tokenize = 'trigram'
 );
 
--- the text of each event type that a person can read. a context event repeats the system prompt in each run, and a
--- session_reset has no text, so the index leaves both out.
+-- the text of each event type that a person can read and that a search scope reads. a context event repeats the system
+-- prompt in each run, a session_reset has no text, and no scope shows a compaction summary, so the index leaves them
+-- out. a payload that is not valid json gives no text, so it never stops the migration or the insert of an event.
 CREATE TRIGGER events_fts_insert AFTER INSERT ON events
-WHEN NEW.type IN ('user_message', 'assistant_message', 'tool_result', 'system_event', 'note', 'compaction')
+WHEN NEW.type IN ('user_message', 'assistant_message', 'tool_result', 'system_event', 'note')
 BEGIN
   INSERT INTO events_fts (rowid, text, sessionKey, runId, type, eventId, createdAt)
   SELECT NEW.id, value, NEW.sessionKey, NEW.runId, NEW.type, NEW.id, NEW.createdAt
   FROM (
-    SELECT json_extract(
+    SELECT CASE WHEN json_valid(NEW.payload) THEN json_extract(
       NEW.payload,
-      CASE NEW.type WHEN 'tool_result' THEN '$.content' WHEN 'compaction' THEN '$.summary' ELSE '$.text' END
-    ) AS value
+      CASE NEW.type WHEN 'tool_result' THEN '$.content' ELSE '$.text' END
+    ) END AS value
   )
   WHERE value IS NOT NULL AND value != '';
 END;
@@ -32,12 +33,12 @@ END;
 INSERT INTO events_fts (rowid, text, sessionKey, runId, type, eventId, createdAt)
 SELECT id, value, sessionKey, runId, type, id, createdAt
 FROM (
-  SELECT id, sessionKey, runId, type, createdAt, json_extract(
+  SELECT id, sessionKey, runId, type, createdAt, CASE WHEN json_valid(payload) THEN json_extract(
     payload,
-    CASE type WHEN 'tool_result' THEN '$.content' WHEN 'compaction' THEN '$.summary' ELSE '$.text' END
-  ) AS value
+    CASE type WHEN 'tool_result' THEN '$.content' ELSE '$.text' END
+  ) END AS value
   FROM events
-  WHERE type IN ('user_message', 'assistant_message', 'tool_result', 'system_event', 'note', 'compaction')
+  WHERE type IN ('user_message', 'assistant_message', 'tool_result', 'system_event', 'note')
 )
 WHERE value IS NOT NULL AND value != ''
 ORDER BY id;
