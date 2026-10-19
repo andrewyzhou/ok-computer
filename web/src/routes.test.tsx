@@ -3,7 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { seedDashboard } from '../../test/seed';
 import './testing';
-import { buildRoutes, CORE_ROUTES, defineRoutes, matchRoute, navSections, ROUTES, type RouteDef } from './routes';
+import { buildRoutes, CORE_ROUTES, matchRoute, navSections, ROUTES, type RouteDef } from './routes';
 
 vi.stubGlobal('EventSource', class {});
 afterEach(() => cleanup());
@@ -52,11 +52,11 @@ describe('the route registry', () => {
   });
 
   it('groups the nav and hides dev pages outside developer mode', () => {
-    const routes = defineRoutes([...ROUTES, stub('sandbox', { group: 'dev', label: 'Sandbox', devOnly: true, order: 60 })]);
+    const routes = ROUTES;
     const dev = (on: boolean) => navSections(on, routes).find((s) => s.group === 'dev')?.items.map((r) => r.label);
     expect(dev(true)).toEqual(['Runs', 'Sessions', 'Policy', 'Cost', 'Logs', 'Sandbox']);
     expect(dev(false)).toEqual(['Runs', 'Sessions', 'Policy', 'Cost', 'Logs']);
-    expect(navSections(false).map((s) => s.group)).toEqual(['today', 'agent', 'connections', 'dev']);
+    expect(navSections(false).map((s) => s.group)).toEqual(['today', 'inbox', 'chats', 'activity', 'agent', 'connections', 'dev']);
   });
 
   it('renders a core detail page with its param', async () => {

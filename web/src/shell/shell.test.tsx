@@ -37,7 +37,7 @@ describe('the shell', () => {
     const groups = nav()
       .getAllByRole('heading', { level: 2 })
       .map((heading) => heading.textContent);
-    expect(groups).toEqual(['Today', 'Agent', 'Connections', 'Dev']);
+    expect(groups).toEqual(['Today', 'Inbox', 'Chats', 'Activity', 'Agent', 'Connections', 'Dev']);
     expect(nav().getByRole('link', { name: 'Cost' }).getAttribute('aria-current')).toBe('page');
     const rail = within(screen.getByRole('navigation', { name: 'sections' }));
     expect(rail.getByRole('link', { name: 'Dev' }).getAttribute('aria-current')).toBe('true');

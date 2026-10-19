@@ -170,7 +170,7 @@ describe('the developer pages load against the seeded database', () => {
   it('shows the logs and adds live lines from the stream', async () => {
     open('#/logs');
     expect(await screen.findByText('model request failed')).toBeTruthy();
-    FakeEventSource.last!.emit({ kind: 'log', line: { ts: '2026-10-13T01:31:00.000Z', level: 'warn', msg: 'a live line' } });
+    FakeEventSource.find('/api/stream')!.emit({ kind: 'log', line: { ts: '2026-10-13T01:31:00.000Z', level: 'warn', msg: 'a live line' } });
     expect(await screen.findByText('a live line')).toBeTruthy();
   });
 
@@ -298,8 +298,8 @@ describe('the developer pages load against the seeded database', () => {
     expect(await inMain().findByText('model request failed')).toBeTruthy();
     expect(inMain().queryByText('run started')).toBeNull();
     expect(calls.map((call) => call.url)).toContain('/api/logs?level=info&limit=500&runId=run-3');
-    FakeEventSource.last!.emit({ kind: 'log', line: { ts: '2026-10-13T01:31:00.000Z', level: 'warn', msg: 'a line of another run', runId: 'run-1' } });
-    FakeEventSource.last!.emit({ kind: 'log', line: { ts: '2026-10-13T01:31:01.000Z', level: 'warn', msg: 'a line of this run', runId: 'run-3' } });
+    FakeEventSource.find('/api/stream')!.emit({ kind: 'log', line: { ts: '2026-10-13T01:31:00.000Z', level: 'warn', msg: 'a line of another run', runId: 'run-1' } });
+    FakeEventSource.find('/api/stream')!.emit({ kind: 'log', line: { ts: '2026-10-13T01:31:01.000Z', level: 'warn', msg: 'a line of this run', runId: 'run-3' } });
     expect(await inMain().findByText('a line of this run')).toBeTruthy();
     expect(inMain().queryByText('a line of another run')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Clear the run filter' }));
@@ -314,7 +314,7 @@ describe('the developer pages load against the seeded database', () => {
     // the lines of that day come from the server. the server of this test may not know the day yet, so the test waits
     // for the list or the empty state, whichever it gets.
     await expect.poll(() => document.querySelector('main .skeleton')).toBeNull();
-    FakeEventSource.last!.emit({ kind: 'log', line: { ts: '2026-10-13T01:31:00.000Z', level: 'warn', msg: 'a line of today' } });
+    FakeEventSource.find('/api/stream')!.emit({ kind: 'log', line: { ts: '2026-10-13T01:31:00.000Z', level: 'warn', msg: 'a line of today' } });
     await new Promise((done) => setTimeout(done, 50));
     expect(inMain().queryByText('a line of today')).toBeNull();
   });
