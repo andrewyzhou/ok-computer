@@ -47,10 +47,15 @@ describe('the instance lock', () => {
 
   it('names a socket file that fits the socket path limit on macos', () => {
     const data = mkdtempSync(join(tmpdir(), 'okc-lock-'));
-    const name = lockName(data, 'darwin');
-    expect(name).toMatch(/^\/.*\/okc-(\d+-)?[0-9a-f]{32}\.sock$/);
-    expect(Buffer.byteLength(name)).toBeLessThanOrEqual(103);
-    expect(lockName(join(data, '.'), 'darwin')).toBe(name);
+    // only macos makes a name for macos, as the agent always asks for the name of the platform it runs on. a unix
+    // host can still check that name, as it has a user id and paths with the separator of macos. windows has
+    // neither, and its data folder is not a path of macos, so there a name for macos means nothing.
+    if (process.platform !== 'win32') {
+      const name = lockName(data, 'darwin');
+      expect(name).toMatch(/^\/.*\/okc-(\d+-)?[0-9a-f]{32}\.sock$/);
+      expect(Buffer.byteLength(name)).toBeLessThanOrEqual(103);
+      expect(lockName(join(data, '.'), 'darwin')).toBe(name);
+    }
     expect(lockName(data, 'linux')).toMatch(/^\0okc-[0-9a-f]{32}$/);
     expect(lockName(data, 'win32')).toMatch(/^\\\\\.\\pipe\\okc-[0-9a-f]{32}$/);
   });
