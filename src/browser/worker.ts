@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { chromium, type BrowserContext, type Page } from 'playwright-core';
 import type { Db } from '../db/index.js';
@@ -238,8 +239,12 @@ export function maskPasswords(snapshot: string, secrets: string[]): string {
 export const renumber = (snapshot: string, n: number) => snapshot.replace(/\[ref=((?:f\d+)?e\d+)\]/g, `[ref=s${n}$1]`);
 
 // chrome keeps a file named lockfile open while it uses a profile, and windows refuses a second open (probe p4). this
-// is exact, also after a crash of the app, so the app needs no lock file of its own.
+// is exact, also after a crash of the app, so the app needs no lock file of its own. on macos and linux chrome makes
+// a link named SingletonLock that points to "<host>-<pid>" and removes it when it closes. a crash leaves the link, so
+// the profile is busy only while that process is alive. a link from another host is busy, because chrome on that host
+// can use the profile through a shared folder.
 export function profileBusy(profile: string): boolean {
+  if (process.platform !== 'win32') return singletonBusy(join(profile, 'SingletonLock'));
   const path = join(profile, 'lockfile');
   if (!existsSync(path)) return false;
   try {
@@ -247,6 +252,27 @@ export function profileBusy(profile: string): boolean {
     return false;
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === 'EBUSY' || (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+function singletonBusy(path: string): boolean {
+  let target: string;
+  try {
+    target = readlinkSync(path);
+  } catch (err) {
+    // no link, or a file that is not a link. chrome makes only a link, so a plain file does not hold the profile.
+    return (err as NodeJS.ErrnoException).code !== 'ENOENT' && (err as NodeJS.ErrnoException).code !== 'EINVAL';
+  }
+  const at = target.lastIndexOf('-');
+  const pid = Number(target.slice(at + 1));
+  if (at < 0 || !Number.isInteger(pid) || pid <= 0) return true;
+  if (target.slice(0, at) !== hostname()) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM means that the process is alive and belongs to another user.
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
   }
 }
 

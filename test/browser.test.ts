@@ -10,7 +10,7 @@ import { browserLogin } from '../src/browser/login.js';
 import { maskPasswords, profileBusy } from '../src/browser/worker.js';
 import { openDb } from '../src/db/index.js';
 import { registerSecret } from '../src/observability/redact.js';
-import { createBrowserHarness, FIXTURE_ARGS, hasChrome, killChrome, traceEntries } from './browser-harness.js';
+import { createBrowserHarness, FIXTURE_ARGS, hasChrome, hasLanAddress, killChrome, traceEntries } from './browser-harness.js';
 import { FIXTURE_COOKIE, FIXTURE_PASSWORD, startFixture, type Fixture } from './web-fixture.js';
 
 // not real secrets: a value with the shape of an api key, and a value that the test registers.
@@ -661,7 +661,7 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(posts()).toEqual([]);
   });
 
-  it('sends no webrtc packet over udp, also to an address of this pc', async () => {
+  it.skipIf(!hasLanAddress)('sends no webrtc packet over udp, also to an address of this pc', async () => {
     const udp = createSocket('udp4');
     const packets: Buffer[] = [];
     udp.on('message', (bytes) => packets.push(bytes));
@@ -743,7 +743,7 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
 
   // a shared worker belongs to no tab, so no page layer saw it, and a web socket of a dedicated worker skips the
   // socket route of the tab. both reached the owner's network.
-  it('starts no shared worker, and keeps the requests and sockets of a worker off the owner network', async () => {
+  it.skipIf(!hasLanAddress)('starts no shared worker, and keeps the requests and sockets of a worker off the owner network', async () => {
     const lan = await startLan();
     try {
       const h = harness();
@@ -787,7 +787,7 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
 
   // chrome preloads the pages of speculation rules outside the tab, and the activation of a prerender sends no request,
   // so a click could show an off-list page.
-  it('preloads no page of the speculation rules', async () => {
+  it.skipIf(!hasLanAddress)('preloads no page of the speculation rules', async () => {
     const lan = await startLan();
     try {
       const h = harness();
@@ -807,7 +807,7 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
 
   // the gate resolved a name in node, and chrome resolved it again, so a name that pointed elsewhere the second time
   // (dns rebinding) reached the owner's network. chrome now connects through the proxy, to the address it checked.
-  it('connects to the address that the gate checked, also when the name would resolve elsewhere for chrome', async () => {
+  it.skipIf(!hasLanAddress)('connects to the address that the gate checked, also when the name would resolve elsewhere for chrome', async () => {
     const lan = await startLan();
     try {
       const h = harness({ args: ['--host-resolver-rules=MAP rebind.test 127.0.0.5, MAP *.test 127.0.0.1'] });

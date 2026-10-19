@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createServer as createSecureServer } from 'node:https';
@@ -19,9 +19,13 @@ let port = 0;
 let securePort = 0;
 let turnPort = 0;
 
-// the reporting api works only in a secure context, so its test needs https. git for windows has openssl, and the
-// test skips without it. the key and the cert are made for each run and are not kept.
-const OPENSSL = ['C:/Program Files/Git/usr/bin/openssl.exe', 'C:/Program Files/Git/mingw64/bin/openssl.exe'].find((path) => existsSync(path));
+// the reporting api works only in a secure context, so its test needs https. macos and linux have openssl on the
+// path, git for windows has its own, and the test skips without it. the key and the cert are made for each run and
+// are not kept.
+const OPENSSL = [
+  ...(spawnSync('openssl', ['version'], { stdio: 'ignore' }).status === 0 ? ['openssl'] : []),
+  ...['C:/Program Files/Git/usr/bin/openssl.exe', 'C:/Program Files/Git/mingw64/bin/openssl.exe'].filter((path) => existsSync(path)),
+][0];
 
 const page = (title: string, body: string) => `<!doctype html><html><head><title>${title}</title></head><body>${body}</body></html>`;
 const note = '<label>Note <input id="n" value=""></label><button id="go" type="button">Go</button><p id="out">-</p>';
