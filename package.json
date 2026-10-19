@@ -5,7 +5,7 @@
   "description": "a personal agent that lives on the owner's pc and talks to them over chat",
   "type": "module",
   "engines": {
-    "node": ">=24"
+    "node": ">=24 <27"
   },
   "scripts": {
     "dev": "tsx watch src/main.ts",

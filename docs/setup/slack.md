@@ -8,7 +8,7 @@ No test of the app may call the real Slack, so some Slack details in this guide 
 
 ## 1. Make a Slack app for each workspace
 
-Do this once for each workspace, on the PC.
+Do this once for each workspace, on this computer.
 
 1. Open https://api.slack.com/apps, choose **Create New App**, then **From scratch**. Name it, for example "OK Computer", and pick the workspace. The app stays internal to that workspace.
 2. Open **OAuth & Permissions**.
@@ -69,13 +69,13 @@ Run `okc restart`.
 ## 3. Store the app and sign in
 
 1. Run `okc open`, go to **Integrations**, and open your Slack integration.
-2. In the **OAuth app** panel, enter the Client ID and the Client Secret and press **Store**. The app writes them to the Windows Credential Manager as `slack-work-app.ok-computer`, and no page shows them again. To change them, store new values. A Client ID with an empty secret keeps the stored secret of the same Client ID.
+2. In the **OAuth app** panel, enter the Client ID and the Client Secret and press **Store**. The app writes them to the system credential store, and no page shows them again: as `slack-work-app.ok-computer` in the Credential Manager on Windows, and as the account `slack-work-app` of the service `ok-computer` in the login Keychain on macOS. To change them, store new values. A Client ID with an empty secret keeps the stored secret of the same Client ID.
 
-   Do not use `cmdkey` for this value: a terminal removes the quotes of the JSON on the way to `cmdkey`, and the app then says that the secret "is not valid json".
+   Do not store this value with `cmdkey` or `security`: a terminal removes the quotes of the JSON on the way to `cmdkey`, and the app then says that the secret "is not valid json". The panel writes the JSON in the form that the app reads.
 3. Press **Connect**. Slack's consent page opens in a new tab. Allow the access.
 4. The browser then goes to `https://127.0.0.1:4318/oauth/callback?code=...` and shows an error page, because nothing answers there with https. That is expected. Copy the whole address of that page, paste it into the box in the **OAuth app** panel, and press **Finish sign-in** within 10 minutes. The address works once.
 
-Do the sign-in on this PC, or over a remote desktop.
+Do the sign-in on this computer, or over a remote desktop.
 
 ## 4. Read the first poll
 
@@ -91,7 +91,7 @@ The first poll runs 15 minutes after the start, and it reads the direct messages
 | The page, the poll or Telegram says | Do this |
 |---|---|
 | "the OAuth client of slack-work is not stored yet" | Store the Client ID and the Client Secret (step 3). |
-| "... is not valid json" | The client was stored with `cmdkey`. Store it again on the page (step 3). |
+| "... is not valid json" | The client was stored by hand with `cmdkey` or `security`. Store it again on the page (step 3). |
 | "The server said: invalid_client: the server said bad_client_secret" (or `invalid_client_id`) | Copy both values again from **Basic Information** and store them. |
 | "The server said: invalid_grant: the server said invalid_code" | The address was pasted too late or twice. Press Connect again. |
 | Slack's consent page says `bad_redirect_uri` | The redirect URL of the app must be exactly the one that the **OAuth app** panel shows. |
@@ -104,14 +104,22 @@ The first poll runs 15 minutes after the start, and it reads the direct messages
 
 ## Fallback: a local server with a token that you copy
 
-Use this when the official server does not work for a workspace, for example when Slack refuses both redirect addresses. It runs `slack-mcp-server` on the PC (version 1.3.0, published 2026-05-14, checked on 2026-10-13) with a user token of the same Slack app. **This path has no poll**: the agent reads your direct messages when you ask, or from an automation that you make ("check my Slack DMs every hour").
+Use this when the official server does not work for a workspace, for example when Slack refuses both redirect addresses. It runs `slack-mcp-server` on this computer (version 1.3.0, published 2026-05-14, checked on 2026-10-13) with a user token of the same Slack app. **This path has no poll**: the agent reads your direct messages when you ask, or from an automation that you make ("check my Slack DMs every hour").
 
 1. In the app, open **OAuth & Permissions**, press **Install to Workspace**, and copy the **User OAuth Token** (`xoxp-...`). No redirect URL is needed for this.
-2. Store it in a terminal. The token has no quotes, so `cmdkey` works:
+2. Store it in a terminal. The token has no quotes and is short, so a terminal works. On Windows:
 
    ```
    cmdkey /generic:slack-work-xoxp.ok-computer /user:slack-work-xoxp /pass:xoxp-...
    ```
+
+   On macOS (`security` asks for the token, so it stays out of the shell history):
+
+   ```
+   security add-generic-password -U -s ok-computer -a slack-work-xoxp -w
+   ```
+
+   To remove it later: `cmdkey /delete:slack-work-xoxp.ok-computer` on Windows, `security delete-generic-password -s ok-computer -a slack-work-xoxp` on macOS.
 
 3. Use this entry in place of the one in step 2:
 

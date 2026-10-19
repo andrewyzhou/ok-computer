@@ -10,7 +10,7 @@ Optional. Without a `google` block in `okc.config.json` the app has no Google to
    - User type **External**. App name `OK Computer`. Use your own address as the support and developer contact.
    - **Audience → Publish app**, so the status is **In production**. Do not submit it for verification. In **Testing** mode Google ends each sign-in after 7 days.
    - You do not need to add scopes here. The app asks for them at sign-in.
-4. **Clients → Create client**, type **Desktop app**. Download the JSON file (`client_secret_….json`). Keep it on this PC. A **Web application** client does not work.
+4. **Clients → Create client**, type **Desktop app**. Download the JSON file (`client_secret_….json`). Keep it on this computer. A **Web application** client does not work.
 
 ## 2. Configure the accounts
 
@@ -42,14 +42,14 @@ Run `okc restart`. If the block is invalid, the app stops at start and the messa
 
 ## 3. Store the client secret and connect each account
 
-Open the dashboard on this PC (`okc open`), then go to **Google**.
+Open the dashboard on this computer (`okc open`), then go to **Google**.
 
-1. Under **Accounts**, use **Upload the client file** and pick the downloaded `client_secret_….json`. The app checks that the client ID matches `clientId`. Only the secret is kept, in the Windows Credential Manager (`google.client.ok-computer`). It never goes into the database.
+1. Under **Accounts**, use **Upload the client file** and pick the downloaded `client_secret_….json`. The app checks that the client ID matches `clientId`. Only the secret is kept, in the system credential store: the Credential Manager on Windows (`google.client.ok-computer`), and the login Keychain on macOS (service `ok-computer`, account `google.client`). It never goes into the database.
 2. Press **Connect** next to an account. A new tab opens the Google sign-in.
    - Pick the account that matches the alias. If your browser is signed in to several accounts, check the address.
    - Google says that the app is not verified. Click **Advanced → Go to OK Computer (unsafe)**. This is your own app.
    - **Keep every box checked.** If a permission is missing, the app saves nothing and the page names the permission.
-3. The tab shows "Signed in as …". The link works once, for 10 minutes, and only on this PC (the answer goes to a port on `127.0.0.1`).
+3. The tab shows "Signed in as …". The link works once, for 10 minutes, and only on this computer (the answer goes to a port on `127.0.0.1`).
 4. Repeat for each alias.
 
 ## 4. What happens next
@@ -81,7 +81,19 @@ The Google page says what to do for each account.
 - The message says **Testing mode**: the consent screen is not In production. Publish it (step 1.3) and connect again.
 - **"Google refused the OAuth client"** (one message for all accounts): `clientId` or the secret is wrong, or the client was deleted. Fix `clientId`, restart, and upload the client file again. The accounts work again without a new sign-in.
 - **"has failed 12 times in a row"**: Google or the network failed for about three hours. The app keeps polling and sends this once for each run of failures (again at the next poll when the send failed).
-- To remove the access: https://myaccount.google.com/permissions, then delete the `google.<alias>.ok-computer` and `google.client.ok-computer` entries in the Windows Credential Manager.
+- To remove the access: https://myaccount.google.com/permissions, then delete the `google.<alias>` and `google.client` entries of the service `ok-computer` from the system credential store. On Windows:
+
+  ```
+  cmdkey /delete:google.<alias>.ok-computer
+  cmdkey /delete:google.client.ok-computer
+  ```
+
+  On macOS:
+
+  ```
+  security delete-generic-password -s ok-computer -a google.<alias>
+  security delete-generic-password -s ok-computer -a google.client
+  ```
 
 ## 6. Manual checks against real Google
 

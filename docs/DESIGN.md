@@ -31,7 +31,7 @@ There is one user. There is no multi-tenancy. Design for clarity and reliability
 | Concern | Choice | Notes |
 |---|---|---|
 | Language | TypeScript, `strict: true` | ES modules |
-| Runtime | Node.js 24+ | Must run on Windows (dev) and Linux/WSL (service) |
+| Runtime | Node.js 24 to 26 | Must run on macOS, Windows and Linux. `engines` is `>=24 <27`, and `.nvmrc` names 24 |
 | Database | SQLite through the built-in `node:sqlite` module | No native build step. Enable WAL mode. |
 | Claude access | `@anthropic-ai/sdk` | Prompt caching, adaptive thinking, refusal handling |
 | Other models | `openai` package with a custom `baseURL` | Ollama, vLLM, llama.cpp, any OpenAI-compatible server |
@@ -496,9 +496,12 @@ Decisions from M4:
 - `npm run dev`: start everything with reload. `npm start`: run the build. `npm run chat`: cli channel only. `npm run dev:web`: the dashboard UI with hot reload. `npm test`, `npm run typecheck`, `npm run build` (server and web).
 - Graceful shutdown on SIGINT and SIGTERM: stop channels, finish or abort active runs with a recorded status, close the database.
 - Database migrations are numbered SQL files applied at start inside a transaction, tracked in a `migrations` table.
-- The agent runs on Windows, not in WSL. `scripts/okc.ps1` is the `okc` command: start (build if needed, then start the supervisor in a hidden window), stop, restart, status, logs, open, browser login, install, uninstall. `okc install` adds the command, a desktop shortcut, and an "OK Computer" task that runs `okc start` at logon. Start, stop and restart write to `data/logs/launcher.log`.
+- On Windows the agent runs natively, not in WSL. `scripts/okc.ps1` is the `okc` command: start (build if needed, then start the supervisor in a hidden window), stop, restart, status, logs, open, browser login, install, uninstall. `okc install` adds the command, a desktop shortcut, and an "OK Computer" task that runs `okc start` at logon. Start, stop and restart write to `data/logs/launcher.log`.
 - `scripts/run.ps1` is the supervisor. It holds a mutex for its folder, so only one supervisor runs, and it starts `node dist/main.js` again after each exit, with each restart in `data/logs/service.restarts.log`. An error in its loop is logged, and the loop continues.
 - `okc stop` asks the agent to stop by itself (`POST /api/shutdown` with the token in `okc.stop-token`, in the data folder of the config), so runs end with a recorded status. Windows ends the process (TerminateProcess) only when it does not stop in time. Windows also ends the child processes of the agent (stdio MCP servers, Chrome) with it.
+- On macOS and Linux, `scripts/okc.sh` is the `okc` command, with the same commands: start, stop, restart, status, logs, open, browser login, install, uninstall. It keeps the same checks: a stale build against `dist/.build-ok`, the graceful stop, and the warning that the running agent is older than the code. `okc install` adds `~/.local/bin/okc` and the LaunchAgent `~/Library/LaunchAgents/com.okcomputer.agent.plist`, and loads it with `launchctl bootstrap gui/$UID`. The plist has the absolute path of node, a `WorkingDirectory`, a `PATH` that includes `/opt/homebrew/bin`, `RunAtLoad`, and `KeepAlive` with `SuccessfulExit` false, so launchd restarts the agent only after a crash and not after a clean stop. launchd writes the output of the agent to `data/logs/launchd.*.log`. launchd takes the place of `scripts/run.ps1`.
+- On macOS and Linux, `okc stop` also goes through `POST /api/shutdown` with `okc.stop-token`. `launchctl bootout` runs only when the agent does not stop in 10 s. A stdio MCP server runs in its own process group, and a stop of the server kills the whole group, so no child of the server stays after it.
+- Only one agent runs for each data folder. On Windows the lock is a named pipe, on Linux an abstract unix socket, and on macOS a unix socket file in `os.tmpdir()` (`src/instance.ts`, see DESIGN-NEXT §10.3).
 - The live agent runs from its own folder, a `git archive` of a tested commit, and its config points at the data, workspace and skills folders of the repository. A build in the repository therefore never changes the running agent.
 
 ## 19. Testing
