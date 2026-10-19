@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seedBrowser } from '../../test/seed-browser';
 import { App } from './App';
+import './testing';
 
 vi.stubGlobal(
   'EventSource',

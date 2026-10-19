@@ -22,7 +22,8 @@ export const NAV_GROUPS: ReadonlyArray<{ id: NavGroup; label: string }> = [
   { id: 'dev', label: 'Dev' },
 ];
 
-// the names of the inline svg icons. the m3 shell draws one icon for each name, and a new name goes here first.
+// the names of the inline svg icons. web/src/icons.tsx draws one icon for each name, and a new name goes here first.
+// the names after draft are for the shell and the shared parts of web/src/ui.
 export type IconName =
   | 'today'
   | 'desk'
@@ -50,7 +51,31 @@ export type IconName =
   | 'search'
   | 'mail'
   | 'subscription'
-  | 'draft';
+  | 'draft'
+  | 'agent'
+  | 'connection'
+  | 'dev'
+  | 'menu'
+  | 'close'
+  | 'chevron-left'
+  | 'chevron-right'
+  | 'chevron-down'
+  | 'sun'
+  | 'moon'
+  | 'monitor'
+  | 'panel'
+  | 'filter'
+  | 'sort'
+  | 'display'
+  | 'plus'
+  | 'send'
+  | 'stop'
+  | 'external'
+  | 'check'
+  | 'copy'
+  | 'more'
+  | 'refresh'
+  | 'command';
 
 // params holds the decoded values of the :name segments of the path. query is the part of the hash after a ?.
 export interface RouteProps {
@@ -101,7 +126,7 @@ export const CORE_ROUTES: RouteDef[] = [
     order: 30,
     load: page(() => import('./pages/Automations').then((m) => m.Automations)),
   },
-  { path: 'signals', group: 'agent', label: 'Signals', icon: 'signal', order: 40, load: page(() => import('./pages/Google').then((m) => m.Signals)) },
+  { path: 'signals', group: 'agent', label: 'Signals', icon: 'signal', order: 40, load: page(() => import('./pages/Signals').then((m) => m.Signals)) },
   {
     path: 'approvals',
     group: 'agent',

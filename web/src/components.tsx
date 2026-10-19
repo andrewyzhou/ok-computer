@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import type { Loaded } from './api';
+import { Page as UiPage, Section, Skeleton } from './ui';
 
 const STATUS_TONE: Record<string, string> = {
   completed: 'good',
@@ -55,27 +56,21 @@ export function Status({ value }: { value: string }) {
   return <span className={`badge tone-${STATUS_TONE[value] ?? 'muted'}`}>{value}</span>;
 }
 
+// Page and Panel are the parts of the pages from before phase 5. they now use the shared parts in web/src/ui, so each
+// old page sits in the shell until its restyle.
 export function Page({ title, actions, children }: { title: string; actions?: ReactNode; children: ReactNode }) {
   return (
-    <section className="page">
-      <header className="page-head">
-        <h1>{title}</h1>
-        {actions}
-      </header>
+    <UiPage title={title} actions={actions}>
       {children}
-    </section>
+    </UiPage>
   );
 }
 
 export function Panel({ title, children, actions }: { title: string; children: ReactNode; actions?: ReactNode }) {
   return (
-    <section className="panel">
-      <header className="panel-head">
-        <h2>{title}</h2>
-        {actions}
-      </header>
+    <Section title={title} actions={actions}>
       {children}
-    </section>
+    </Section>
   );
 }
 
@@ -92,7 +87,7 @@ export function Tile({ label, value, note }: { label: string; value: ReactNode; 
 // the pages render only after their data loaded. an error shows in the place of the page.
 export function Load<T>({ loaded, children }: { loaded: Loaded<T>; children: (data: T) => ReactNode }) {
   if (loaded.error) return <p className="error-box">Could not load: {loaded.error}</p>;
-  if (loaded.data === undefined) return <p className="muted">Loading…</p>;
+  if (loaded.data === undefined) return <Skeleton lines={4} />;
   return <>{children(loaded.data)}</>;
 }
 

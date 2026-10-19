@@ -7,6 +7,7 @@ import { silentLogger } from '../../src/observability/logger';
 import { createTestApp } from '../../test/app-harness';
 import { notesIntegration, seedIntegrations } from '../../test/seed-integrations';
 import { App } from './App';
+import './testing';
 
 // the browser stream is a fake, so a test can send a log line of an integration to the pages.
 class FakeEventSource {

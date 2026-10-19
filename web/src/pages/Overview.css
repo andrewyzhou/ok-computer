@@ -1,0 +1,27 @@
+/* the classes of the overview only. a page keeps its own classes in a file next to it, with a prefix of its name, and
+   uses the tokens of styles.css for each color and size. */
+
+.overview-goals {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.overview-goals li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.overview-goals li:first-child {
+  padding-top: 0;
+}
+.overview-goal-id {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+}
+.overview-goal-title {
+  flex: 1;
+  min-width: 0;
+}

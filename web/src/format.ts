@@ -59,3 +59,8 @@ export function percent(value: number | null): string {
 export function shortDay(day: string): string {
   return day.slice(5);
 }
+
+// a day is yyyy-mm-dd in the time zone of the app, so it is shown as it is, with no change of time zone.
+export function longDay(day: string): string {
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric' }).format(new Date(`${day}T00:00:00Z`));
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { StreamMessage } from '../../src/dashboard/types';
 
 // the server asks for the token only when DASHBOARD_TOKEN is set. the page then gets it once in its own url.
@@ -26,6 +26,18 @@ type Listener = (message: StreamMessage) => void;
 const listeners = new Set<Listener>();
 let source: EventSource | undefined;
 
+// the state of the shared stream, for the status bar. the browser connects again by itself, so an error first means
+// connecting, and offline means that the browser gave up.
+export type Connection = 'connecting' | 'live' | 'offline';
+let connection: Connection = 'connecting';
+const connectionListeners = new Set<() => void>();
+
+function setConnection(next: Connection): void {
+  if (next === connection) return;
+  connection = next;
+  for (const each of connectionListeners) each();
+}
+
 // all pages share one event stream. the browser connects again by itself after an error.
 export function subscribe(listener: Listener): () => void {
   if (!source && typeof EventSource !== 'undefined') {
@@ -33,6 +45,9 @@ export function subscribe(listener: Listener): () => void {
     // a browser allows only six connections to one host. a stream that stays open after a reload can block the
     // requests of the new page.
     addEventListener('pagehide', () => source?.close());
+    const opened = source;
+    opened.onopen = () => setConnection('live');
+    opened.onerror = () => setConnection(opened.readyState === 2 ? 'offline' : 'connecting');
     source.onmessage = (event) => {
       const message = JSON.parse(String(event.data)) as StreamMessage;
       for (const each of listeners) each(message);
@@ -40,6 +55,18 @@ export function subscribe(listener: Listener): () => void {
   }
   listeners.add(listener);
   return () => void listeners.delete(listener);
+}
+
+export function useConnection(): Connection {
+  useEffect(() => subscribe(() => {}), []);
+  return useSyncExternalStore(
+    (listener) => {
+      connectionListeners.add(listener);
+      return () => void connectionListeners.delete(listener);
+    },
+    () => connection,
+    () => connection,
+  );
 }
 
 export function useStream(listener: Listener): void {

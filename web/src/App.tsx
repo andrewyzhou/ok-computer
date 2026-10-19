@@ -1,39 +1,11 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ComponentType } from 'react';
 import type { Meta } from '../../src/dashboard/types';
 import { useApi } from './api';
-import { Load } from './components';
 import { setTimeZone } from './format';
-import { Approvals } from './pages/Approvals';
-import { Automations } from './pages/Automations';
-import { Cost } from './pages/Cost';
-import { Goals } from './pages/Goals';
-import { Google, Signals } from './pages/Google';
-import { BrowserTask, BrowserTasks } from './pages/Browser';
-import { IntegrationDetail, Integrations } from './pages/Integrations';
-import { Logs } from './pages/Logs';
-import { Memory } from './pages/Memory';
-import { Overview } from './pages/Overview';
-import { Policy } from './pages/Policy';
-import { RunDetail } from './pages/RunDetail';
-import { Runs } from './pages/Runs';
-import { SessionDetail, Sessions } from './pages/Sessions';
-
-const NAV = [
-  ['', 'Overview'],
-  ['runs', 'Runs'],
-  ['sessions', 'Sessions'],
-  ['automations', 'Automations'],
-  ['goals', 'Goals'],
-  ['memory', 'Memory'],
-  ['approvals', 'Approvals'],
-  ['policy', 'Policy'],
-  ['integrations', 'Integrations'],
-  ['google', 'Google'],
-  ['signals', 'Signals'],
-  ['browser', 'Browser'],
-  ['cost', 'Cost'],
-  ['logs', 'Logs'],
-] as const;
+import { matchRoute, ROUTES, type RouteDef, type RouteMatch, type RouteProps } from './routes';
+import { Shell } from './shell/Shell';
+import { hashPath } from './shell/model';
+import { EmptyState, Skeleton } from './ui';
 
 // the routes live in the hash, so the server needs to serve only index.html and the assets.
 function useHash(): string {
@@ -43,68 +15,53 @@ function useHash(): string {
     addEventListener('hashchange', onChange);
     return () => removeEventListener('hashchange', onChange);
   }, []);
-  return hash.replace(/^#\/?/, '');
+  return hash;
 }
 
-export function route(path: string): ReactNode {
-  const [section = '', ...rest] = path.split('/');
-  const param = rest.length ? decodeURIComponent(rest.join('/')) : undefined;
-  switch (section) {
-    case '':
-      return <Overview />;
-    case 'runs':
-      return param ? <RunDetail key={param} id={param} /> : <Runs />;
-    case 'sessions':
-      return param ? <SessionDetail key={param} sessionKey={param} /> : <Sessions />;
-    case 'automations':
-      return <Automations />;
-    case 'goals':
-      return <Goals />;
-    case 'memory':
-      return <Memory />;
-    case 'approvals':
-      return <Approvals />;
-    case 'policy':
-      return <Policy />;
-    case 'integrations':
-      return param ? <IntegrationDetail key={param} id={param} /> : <Integrations />;
-    case 'google':
-      return <Google />;
-    case 'signals':
-      return <Signals />;
-    case 'browser':
-      return param ? <BrowserTask key={param} id={param} /> : <BrowserTasks />;
-    case 'cost':
-      return <Cost />;
-    case 'logs':
-      return <Logs />;
-    default:
-      return <p className="error-box">This page does not exist.</p>;
-  }
+// a route loads its component one time. the next visit renders it at once.
+const loaded = new Map<RouteDef, ComponentType<RouteProps>>();
+
+function RouteView({ match }: { match: RouteMatch }) {
+  const [View, setView] = useState<ComponentType<RouteProps> | undefined>(() => loaded.get(match.route));
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (View) return;
+    let current = true;
+    match.route.load().then(
+      (component) => {
+        loaded.set(match.route, component);
+        if (current) setView(() => component);
+      },
+      (err: Error) => current && setError(err.message),
+    );
+    return () => {
+      current = false;
+    };
+  }, [match.route, View]);
+  if (error) return <p className="error-box">Could not load the page: {error}</p>;
+  if (!View) return <Skeleton lines={5} />;
+  return <View params={match.params} query={match.query} />;
 }
 
 export function App() {
-  const path = useHash();
+  const hash = useHash();
+  const match = matchRoute(hash);
   const meta = useApi<Meta>('/api/meta');
-  const section = path.split('/')[0] ?? '';
+  if (meta.data) setTimeZone(meta.data.timeZone);
   return (
-    <div className="shell">
-      <nav className="nav" aria-label="pages">
-        <div className="brand">OK Computer</div>
-        {NAV.map(([href, label]) => (
-          <a key={href} href={`#/${href}`} className={section === href ? 'active' : ''}>
-            {label}
-          </a>
-        ))}
-      </nav>
-      <main className="main">
-        <Load loaded={meta}>
-          {(data) => {
-            setTimeZone(data.timeZone);
-            return route(path);
-          }}
-        </Load>
-      </main>
-    </div>
+    <Shell match={match} routes={ROUTES}>
+      {meta.error ? (
+        <p className="error-box">Could not load: {meta.error}</p>
+      ) : !meta.data ? (
+        <Skeleton lines={5} />
+      ) : match ? (
+        // the key is the path without the query, so a new param gives a new page and a new filter keeps the page.
+        <RouteView key={hashPath(hash)} match={match} />
+      ) : (
+        <EmptyState icon="search" title="This page does not exist.">
+          <a href="#/">Go to the overview</a>
+        </EmptyState>
+      )}
+    </Shell>
   );
 }

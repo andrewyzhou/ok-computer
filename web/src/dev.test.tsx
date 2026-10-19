@@ -1,46 +1,20 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StreamMessage } from '../../src/dashboard/types';
+import { cleanup, fireEvent, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedDashboard } from '../../test/seed';
-import { App } from './App';
+import { FakeEventSource, installEventSource, openApp as open, stubFetch } from './testing';
 
-// the browser stream is a fake, so a test can send a message to the pages.
-class FakeEventSource {
-  static last: FakeEventSource | undefined;
-  onmessage: ((event: { data: string }) => void) | null = null;
-  constructor(readonly url: string) {
-    FakeEventSource.last = this;
-  }
-  emit(message: StreamMessage) {
-    this.onmessage?.({ data: JSON.stringify(message) });
-  }
-}
-vi.stubGlobal('EventSource', FakeEventSource);
+installEventSource();
 
 let seeded: Awaited<ReturnType<typeof seedDashboard>>;
 
 beforeEach(async () => {
   seeded = await seedDashboard();
-  const dashboard = seeded.dashboard;
-  vi.stubGlobal('fetch', (input: string, init?: RequestInit) => dashboard.request(String(input), init));
+  stubFetch(seeded.dashboard);
 });
 afterEach(() => cleanup());
 
-function open(hash: string) {
-  location.hash = hash;
-  return render(<App />);
-}
-
-describe('every dashboard page loads against the seeded database', () => {
-  it('shows the overview', async () => {
-    open('#/');
-    expect(await screen.findByText('Cost today')).toBeTruthy();
-    expect(screen.getByText('check-in: finish essay')).toBeTruthy();
-    expect(screen.getByText('Blob store')).toBeTruthy();
-    expect(screen.getByText('remind me when a goal eta is less than one hour away')).toBeTruthy();
-  });
-
+describe('the developer pages load against the seeded database', () => {
   it('lists runs and filters them by status', async () => {
     open('#/runs');
     expect(await screen.findByText('run-5')).toBeTruthy();
@@ -85,8 +59,6 @@ describe('every dashboard page loads against the seeded database', () => {
     expect(await screen.findByText(/Catalog [0-9a-f]{12}, first offered/)).toBeTruthy();
   });
 
-  // a failed blob write keeps the row without its raw text. the page once said that the model saw the raw result
-  // unchanged, and showed the preview, or the note of an abandoned call, as the raw result.
   it('says that the raw result was not stored when the blob write failed, and never calls a note the raw result', async () => {
     const { db } = seeded.t;
     db.prepare("UPDATE tool_calls SET rawResultBlob = NULL WHERE toolCallId = 'call-week'").run();
@@ -144,38 +116,6 @@ describe('every dashboard page loads against the seeded database', () => {
     const panel = screen.getByText('What the model saw').closest('section')!;
     expect(panel.querySelectorAll('.event')).toHaveLength(view.messages.length);
     expect(within(panel as HTMLElement).getByText(/<summary>/)).toBeTruthy();
-  });
-
-  it('lists automations and turns one off', async () => {
-    open('#/automations');
-    const name = await screen.findByText('goals: ask');
-    const row = name.closest('tr')!;
-    fireEvent.click(within(row).getByText('Turn off'));
-    expect(await screen.findByText('goals: ask is off.')).toBeTruthy();
-    expect(seeded.t.rows("SELECT enabled FROM automations WHERE name = 'goals: ask'")).toEqual([{ enabled: 0 }]);
-    expect(screen.getByLabelText('heartbeat checklist')).toBeTruthy();
-  });
-
-  it('shows goals with stats and charts', async () => {
-    open('#/goals');
-    expect(await screen.findByText('Hit rate, 7 days')).toBeTruthy();
-    expect(screen.getAllByText('63%')).toHaveLength(2);
-    expect(document.querySelectorAll('svg.chart')).toHaveLength(2);
-    expect(screen.getByText('2026-10-11')).toBeTruthy();
-  });
-
-  it('browses memory files', async () => {
-    open('#/memory');
-    expect(await screen.findByText(/the owner writes essays in the evening/)).toBeTruthy();
-    fireEvent.click(screen.getByText('consolidation-log.md'));
-    expect(await screen.findByText(/weekly trends saved/)).toBeTruthy();
-  });
-
-  it('approves a pending approval', async () => {
-    open('#/approvals');
-    fireEvent.click(await screen.findByText('Approve'));
-    expect(await screen.findByText(/^Approved #1\./)).toBeTruthy();
-    expect(await screen.findByText('Nothing waits for your approval.')).toBeTruthy();
   });
 
   it('lists the policy decisions newest first, filters the held calls, and shows the rules', async () => {

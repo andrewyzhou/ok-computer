@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seedGoogle } from '../../test/seed-google';
 import { App } from './App';
+import './testing';
 
 vi.stubGlobal(
   'EventSource',
@@ -47,36 +48,5 @@ describe('the google page', () => {
     expect(screen.getByText(/Last poll/)).toBeTruthy();
     expect(screen.getByText('its requests and labels')).toBeTruthy();
     expect(screen.getByText('write, external with attendees')).toBeTruthy();
-  });
-});
-
-describe('the signals page', () => {
-  it('says what happened to each signal, with the detector, the label and the message the owner got', async () => {
-    open('#/signals');
-    const essay = (await screen.findByText(/^from Prof\. Lee/)).closest('tr')!;
-    expect(within(essay).getByText('deadline')).toBeTruthy();
-    expect(within(essay).getByText(/model call \d+/)).toBeTruthy();
-    expect(within(essay).getByText('date_not_on_calendar')).toBeTruthy();
-    expect(within(essay).getByText('notified')).toBeTruthy();
-    expect(within(essay).getByText('“The essay is due Oct 20, and it is not on your calendar.”')).toBeTruthy();
-    const deals = screen.getByText(/^from News/).closest('tr')!;
-    expect(within(deals).getByText('filtered')).toBeTruthy();
-    expect(within(deals).getByText(/a quiet label and no detector hit/)).toBeTruthy();
-  });
-});
-
-describe('the run timeline', () => {
-  it('opens the http requests of a google tool call', async () => {
-    const row = seeded.t.db.prepare("SELECT runId FROM tool_calls WHERE name = 'google__gmail_search'").get()!;
-    open(`#/runs/${String(row.runId)}`);
-    fireEvent.click(await screen.findByText(/http requests to google/));
-    expect(await screen.findAllByText(/\/gmail\/v1\/users\/me\/messages/)).not.toHaveLength(0);
-  });
-
-  it('shows the requests of a poll run', async () => {
-    const row = seeded.t.db.prepare("SELECT id FROM runs WHERE trigger = 'poll' ORDER BY startedAt LIMIT 1").get()!;
-    open(`#/runs/${String(row.id)}`);
-    expect(await screen.findByText('Requests of this poll')).toBeTruthy();
-    expect(await screen.findAllByText(/\/gmail\/v1\/users\/me\/profile/)).not.toHaveLength(0);
   });
 });
