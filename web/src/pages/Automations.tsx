@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import type { AutomationRow, AutomationRunRow, HeartbeatStatus } from '../../../src/dashboard/types';
 import { send, useApi } from '../api';
-import { Empty, Expand, Load, Page, Panel, Status } from '../components';
+import { Load } from '../components';
 import { duration, time } from '../format';
+import { Button, DetailsPanel, EmptyState, Facts, Page, Section, Status, Table, type Column } from '../ui';
+import './agent.css';
 
 function History({ id }: { id: string }) {
   const loaded = useApi<AutomationRunRow[]>(`/api/automations/${encodeURIComponent(id)}/runs`, (message) => message.kind === 'run');
@@ -10,22 +12,25 @@ function History({ id }: { id: string }) {
     <Load loaded={loaded}>
       {(runs) =>
         runs.length ? (
-          <ul className="list">
+          <ul className="automations-history" aria-label="history">
             {runs.map((run) => (
               <li key={run.id}>
-                <Status value={run.status} /> {time(run.startedAt)}, {duration(run.startedAt, run.endedAt)}
-                {run.runId ? (
-                  <>
-                    {' '}
-                    · <a href={`#/runs/${encodeURIComponent(run.runId)}`}>run {run.runId.slice(0, 8)}</a>
-                  </>
-                ) : null}
-                {run.error ? <span className="muted"> · {run.error}</span> : null}
+                <div className="automations-history-head">
+                  <Status value={run.status} />
+                  <span>{time(run.startedAt)}</span>
+                  <span className="muted">{duration(run.startedAt, run.endedAt)}</span>
+                  {run.runId ? (
+                    <a className="automations-history-run" href={`#/runs/${encodeURIComponent(run.runId)}`}>
+                      run {run.runId.slice(0, 8)}
+                    </a>
+                  ) : null}
+                </div>
+                {run.error ? <div className="error-text small">{run.error}</div> : null}
               </li>
             ))}
           </ul>
         ) : (
-          <Empty>This automation did not run yet.</Empty>
+          <EmptyState icon="automation" title="This automation did not run yet." />
         )
       }
     </Load>
@@ -36,121 +41,239 @@ function Checklist() {
   const loaded = useApi<HeartbeatStatus>('/api/heartbeat');
   const [draft, setDraft] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
   return (
-    <Panel title="Heartbeat checklist">
+    <Section
+      title="Heartbeat checklist"
+      description="The heartbeat checks these items during active hours. An empty list stops the checks."
+    >
       <Load loaded={loaded}>
         {(status) => (
           <form
-            className="stack"
+            className="automations-checklist"
             onSubmit={(event) => {
               event.preventDefault();
-              send('/api/heartbeat/checklist', 'PUT', { checklist: draft ?? status.checklist }).then(
+              setBusy(true);
+              send('/api/heartbeat/checklist', 'PUT', {
+                checklist: draft ?? status.checklist,
+              }).then(
                 () => {
+                  setBusy(false);
                   setNotice('Saved.');
                   setDraft(undefined);
                   loaded.reload();
                 },
-                (err: Error) => setNotice(err.message),
+                (err: Error) => {
+                  setBusy(false);
+                  setNotice(err.message);
+                },
               );
             }}
           >
-            <p className="muted small">The heartbeat checks these items every {status.every} during active hours. An empty list stops the checks.</p>
+            <p className="muted small">It runs every {status.every}.</p>
             <textarea
               aria-label="heartbeat checklist"
-              rows={5}
+              rows={6}
               value={draft ?? status.checklist}
               onChange={(event) => setDraft(event.target.value)}
             />
-            <div className="row">
-              <button type="submit" disabled={draft === undefined}>
+            <div className="automations-checklist-foot">
+              <Button type="submit" variant="primary" size="sm" busy={busy} disabled={draft === undefined}>
                 Save checklist
-              </button>
-              <span className="muted">{notice}</span>
+              </Button>
+              {notice ? (
+                <span className="muted" role="status">
+                  {notice}
+                </span>
+              ) : null}
             </div>
           </form>
         )}
       </Load>
-    </Panel>
+    </Section>
+  );
+}
+
+function AutomationDetails({ automation, onClose }: { automation: AutomationRow; onClose: () => void }) {
+  return (
+    <DetailsPanel title={automation.name} openKey={automation.id} onClose={onClose}>
+      <Facts
+        layout="stacked"
+        items={[
+          {
+            label: 'State',
+            value: <Status value={automation.enabled ? 'on' : 'off'} />,
+          },
+          { label: 'Schedule', value: automation.schedule },
+          { label: 'Next run', value: time(automation.nextRunAt) },
+          { label: 'Last run', value: time(automation.lastRunAt) },
+          { label: 'Id', value: <code>{automation.id}</code> },
+          { label: 'Payload', value: automation.payloadType },
+          { label: 'Session', value: `${automation.sessionMode} session` },
+          { label: 'Slot', value: automation.slot },
+          { label: 'Made by', value: automation.createdBy },
+          automation.consecutiveFailures > 0 && {
+            label: 'Failures in a row',
+            value: automation.consecutiveFailures,
+          },
+        ]}
+      />
+      <Section title="History">
+        <History id={automation.id} />
+      </Section>
+    </DetailsPanel>
   );
 }
 
 export function Automations() {
   const loaded = useApi<AutomationRow[]>('/api/automations', (message) => message.kind === 'run');
   const [notice, setNotice] = useState('');
-  const act = (promise: Promise<unknown>, done: string) =>
-    promise.then(
+  const [selected, setSelected] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const act = (key: string, promise: Promise<unknown>, done: string) => {
+    setBusy(key);
+    void promise.then(
       () => {
+        setBusy(null);
         setNotice(done);
         loaded.reload();
       },
-      (err: Error) => setNotice(err.message),
+      (err: Error) => {
+        setBusy(null);
+        setNotice(err.message);
+      },
     );
+  };
+  const columns: Array<Column<AutomationRow>> = [
+    {
+      key: 'name',
+      header: 'Name',
+      wrap: true,
+      width: '20%',
+      cell: (automation) => <span className="automations-name">{automation.name}</span>,
+    },
+    {
+      key: 'schedule',
+      header: 'Schedule',
+      cell: (automation) => automation.schedule,
+      wrap: true,
+      width: '28%',
+      hideBelow: 'sm',
+    },
+    {
+      key: 'next',
+      header: 'Next run',
+      cell: (automation) => time(automation.nextRunAt),
+      hideBelow: 'md',
+    },
+    {
+      key: 'last',
+      header: 'Last run',
+      cell: (automation) => time(automation.lastRunAt),
+      hideBelow: 'md',
+    },
+    {
+      key: 'state',
+      header: 'State',
+      cell: (automation) => (
+        <>
+          <Status value={automation.enabled ? 'on' : 'off'} />
+          {automation.consecutiveFailures ? (
+            <span className="automations-failures error-text small">{automation.consecutiveFailures} failures in a row</span>
+          ) : null}
+        </>
+      ),
+    },
+    {
+      key: 'actions',
+      header: <span className="sr-only">Actions</span>,
+      align: 'end',
+      cell: (automation) => {
+        const id = encodeURIComponent(automation.id);
+        return (
+          <span className="automations-actions">
+            <Button
+              size="sm"
+              variant="ghost"
+              busy={busy === `toggle:${automation.id}`}
+              aria-label={`${automation.enabled ? 'Turn off' : 'Turn on'} ${automation.name}`}
+              onClick={() =>
+                act(
+                  `toggle:${automation.id}`,
+                  send(`/api/automations/${id}`, 'POST', {
+                    enabled: !automation.enabled,
+                  }),
+                  `${automation.name} is ${automation.enabled ? 'off' : 'on'}.`,
+                )
+              }
+            >
+              {automation.enabled ? 'Turn off' : 'Turn on'}
+            </Button>
+            <Button
+              size="sm"
+              icon="play"
+              busy={busy === `run:${automation.id}`}
+              aria-label={`Run ${automation.name} now`}
+              onClick={() => act(`run:${automation.id}`, send(`/api/automations/${id}/run`, 'POST', {}), `${automation.name} started.`)}
+            >
+              Run now
+            </Button>
+          </span>
+        );
+      },
+    },
+  ];
+  const automation = loaded.data?.find((each) => each.id === selected);
   return (
-    <Page title="Automations" actions={<span className="muted">{notice}</span>}>
+    <Page
+      title="Automations"
+      subtitle="The scheduled work of the agent. Select one to see its history."
+      actions={
+        notice ? (
+          <span className="muted" role="status">
+            {notice}
+          </span>
+        ) : undefined
+      }
+    >
       <Load loaded={loaded}>
-        {(automations) =>
-          automations.length ? (
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Schedule</th>
-                  <th>Next run</th>
-                  <th>Last run</th>
-                  <th>State</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {automations.map((automation) => (
-                  <tr key={automation.id}>
-                    <td>
-                      <strong>{automation.name}</strong>
-                      <div className="muted small">
-                        {automation.id} · {automation.payloadType} · {automation.sessionMode} session · by {automation.createdBy}
-                      </div>
-                      <Expand label="history">{() => <History id={automation.id} />}</Expand>
-                    </td>
-                    <td>{automation.schedule}</td>
-                    <td>{time(automation.nextRunAt)}</td>
-                    <td>{time(automation.lastRunAt)}</td>
-                    <td>
-                      <Status value={automation.enabled ? 'on' : 'off'} />
-                      {automation.consecutiveFailures ? (
-                        <div className="error-text small">{automation.consecutiveFailures} failures in a row</div>
-                      ) : null}
-                    </td>
-                    <td className="actions">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          act(
-                            send(`/api/automations/${encodeURIComponent(automation.id)}`, 'POST', { enabled: !automation.enabled }),
-                            `${automation.name} is ${automation.enabled ? 'off' : 'on'}.`,
-                          )
-                        }
-                      >
-                        {automation.enabled ? 'Turn off' : 'Turn on'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          act(send(`/api/automations/${encodeURIComponent(automation.id)}/run`, 'POST', {}), `${automation.name} started.`)
-                        }
-                      >
-                        Run now
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <Empty>No automations yet.</Empty>
-          )
-        }
+        {(automations) => (
+          <Table
+            label="automations"
+            columns={columns}
+            rows={automations}
+            rowKey={(each) => each.id}
+            selected={selected}
+            onSelect={(each) => setSelected(each.id === selected ? null : each.id)}
+            empty={<EmptyState icon="automation" title="No automations yet." />}
+          />
+        )}
       </Load>
       <Checklist />
+      {automation ? (
+        <AutomationDetails automation={automation} onClose={() => setSelected(null)} />
+      ) : loaded.data ? (
+        <DetailsPanel title="Automations">
+          <Facts
+            layout="stacked"
+            items={[
+              {
+                label: 'On',
+                value: loaded.data.filter((each) => each.enabled).length,
+              },
+              {
+                label: 'Off',
+                value: loaded.data.filter((each) => !each.enabled).length,
+              },
+              {
+                label: 'Failing',
+                value: loaded.data.filter((each) => each.consecutiveFailures > 0).length,
+              },
+            ]}
+          />
+          <p className="muted small">Select an automation to see its runs.</p>
+        </DetailsPanel>
+      ) : null}
     </Page>
   );
 }

@@ -1,196 +1,328 @@
-import { useMemo, useState } from 'react';
-import type { NewsletterSenderRow, SenderState, SendersPage, SendersQuery } from '../../../../src/dashboard/types';
-import { api, useApi } from '../../api';
-import { Empty, Load, Page, Panel } from '../../components';
+import { useState, type FormEvent } from 'react';
+import type { NewsletterSenderRow, SenderState, SendersPage, UnsubscribeMethod } from '../../../../src/dashboard/types';
 import { percent, time } from '../../format';
-import { ActionNotice, InboxStatus, JobLine, LoadMore, query, refreshOnInbox, Select, useAction, usePages, type Chunk } from './shared';
+import type { RouteProps } from '../../routes';
+import { Button, DetailsPanel, Drawer, EmptyState, Facts, FilterBar, IconButton, Page, Select, Skeleton, Table, type Column, type Tone } from '../../ui';
+import {
+  day,
+  LastRun,
+  LoadMore,
+  PendingAnswers,
+  RowNote,
+  RunJob,
+  StateBadge,
+  setHashQuery,
+  useApprovals,
+  usePaged,
+  useRowActions,
+  withQuery,
+  type RowAnswer,
+} from './shared';
+import './inbox.css';
 
-const STATES: readonly SenderState[] = ['active', 'kept', 'unsubscribe_pending', 'unsubscribed', 'failed'];
-const SORTS: ReadonlyArray<NonNullable<SendersQuery['sort']>> = ['messages', 'readRate', 'lastAt'];
+// the senders of the newsletter sweep, with the actions on each: unsubscribe, archive the old mail, or keep the
+// sender out of later sweeps. unsubscribe and archive change mail, so they wait for the owner's approval.
 
-// ok computer can unsubscribe only through a one-click post or an https link. a mailto link needs a sent mail, and
-// sending is off, so the owner does it by hand.
-const canUnsubscribe = (sender: NewsletterSenderRow) =>
-  (sender.unsubscribe.method === 'one_click' || sender.unsubscribe.method === 'https') &&
-  sender.state !== 'unsubscribe_pending' &&
-  sender.state !== 'unsubscribed';
+const PATH = 'inbox/newsletters';
 
-function ArchiveForm({ busy, onSend, onCancel }: { busy: boolean; onSend: (days: number, label: string) => void; onCancel: () => void }) {
+const STATES: Array<{ value: SenderState; label: string }> = [
+  { value: 'active', label: 'active' },
+  { value: 'kept', label: 'kept' },
+  { value: 'unsubscribe_pending', label: 'unsubscribe pending' },
+  { value: 'unsubscribed', label: 'unsubscribed' },
+  { value: 'failed', label: 'failed' },
+];
+
+const STATE_TONE: Record<SenderState, Tone> = {
+  active: 'muted',
+  kept: 'info',
+  unsubscribe_pending: 'warning',
+  unsubscribed: 'good',
+  failed: 'critical',
+};
+
+const SORTS = [
+  { value: 'messages', label: 'most mail' },
+  { value: 'readRate', label: 'read rate' },
+  { value: 'lastAt', label: 'last mail' },
+];
+
+const METHOD: Record<UnsubscribeMethod, string> = { one_click: 'one click', https: 'link', mailto: 'mail', none: 'none' };
+
+const senderName = (sender: NewsletterSenderRow) => sender.displayName ?? sender.fromAddress;
+
+// the reason that the unsubscribe button is off, or null when it is on. the button says it in its title.
+export function unsubscribeBlock(sender: NewsletterSenderRow): string | null {
+  if (sender.state === 'unsubscribed') return 'This sender is already unsubscribed.';
+  if (sender.state === 'unsubscribe_pending') return 'The unsubscribe waits for your approval.';
+  if (sender.unsubscribe.method === 'none') return 'The mail of this sender has no unsubscribe link.';
+  return null;
+}
+
+function ArchiveForm({
+  sender,
+  error,
+  onClose,
+  onArchive,
+}: {
+  sender: NewsletterSenderRow;
+  error: string | undefined;
+  onClose: () => void;
+  onArchive: (body: { olderThanDays: number; label?: string }) => Promise<boolean> }) {
   const [days, setDays] = useState('30');
   const [label, setLabel] = useState('');
+  const [busy, setBusy] = useState(false);
+  const value = Number(days);
+  const valid = days.trim() !== '' && Number.isInteger(value) && value >= 0 && value <= 3650;
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!valid) return;
+    setBusy(true);
+    void onArchive({ olderThanDays: value, ...(label.trim() ? { label: label.trim() } : {}) }).then((ok) => {
+      setBusy(false);
+      if (ok) onClose();
+    });
+  };
   return (
-    <form
-      className="filters"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSend(Number(days), label.trim());
-      }}
-    >
-      <label>
-        older than days
-        <input type="number" min={0} max={3650} value={days} onChange={(event) => setDays(event.target.value)} />
+    <form className="inbox-form" onSubmit={submit} aria-label={`archive the mail of ${senderName(sender)}`}>
+      <header className="inbox-form-head">
+        <h2 className="details-title">Archive the mail of {senderName(sender)}</h2>
+        <IconButton icon="close" label="Close" size="sm" onClick={onClose} />
+      </header>
+      <p className="muted">The mail leaves the inbox after you approve it. Nothing is deleted.</p>
+      <label className="inbox-field">
+        <span>Older than (days)</span>
+        <input
+          type="number"
+          min={0}
+          max={3650}
+          step={1}
+          value={days}
+          onChange={(event) => setDays(event.target.value)}
+          aria-invalid={!valid}
+          aria-describedby="inbox-days-help"
+          data-autofocus
+        />
+        <span id="inbox-days-help" className={valid ? 'muted small' : 'error-text small'}>
+          A whole number from 0 to 3650. 0 archives all of the mail.
+        </span>
       </label>
-      <label>
-        label
-        <input value={label} placeholder="none" onChange={(event) => setLabel(event.target.value)} />
+      <label className="inbox-field">
+        <span>Label (optional)</span>
+        <input type="text" value={label} maxLength={100} onChange={(event) => setLabel(event.target.value)} placeholder="for example newsletters" />
       </label>
-      <button type="submit" disabled={busy}>
-        Archive mail
-      </button>
-      <button type="button" className="secondary" onClick={onCancel}>
-        Cancel
-      </button>
+      {error ? (
+        <p role="alert" className="error-text">
+          {error}
+        </p>
+      ) : null}
+      <div className="inbox-form-actions">
+        <Button type="submit" variant="primary" busy={busy} disabled={!valid}>
+          Archive
+        </Button>
+        <Button variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+      </div>
     </form>
   );
 }
 
-function Unsubscribe({ sender }: { sender: NewsletterSenderRow }) {
-  const { method, url } = sender.unsubscribe;
+function SenderActions({
+  sender,
+  answer,
+  onUnsubscribe,
+  onArchive,
+  onKeep,
+}: {
+  sender: NewsletterSenderRow;
+  answer: RowAnswer | undefined;
+  onUnsubscribe: () => void;
+  onArchive: () => void;
+  onKeep: () => void;
+}) {
+  const block = unsubscribeBlock(sender);
+  const name = senderName(sender);
   return (
-    <>
-      <div>{method.replace('_', ' ')}</div>
-      {/* the link comes from mail, so it shows as text and is never an anchor. */}
-      {url ? <code className="wrap small">{url}</code> : null}
-      {method === 'mailto' ? (
-        <div className="muted small">Unsubscribe by hand with this address, because ok computer does not send mail.</div>
-      ) : null}
-    </>
+    <div className="inbox-actions">
+      <div className="inbox-action-buttons">
+        <Button
+          size="sm"
+          disabled={block !== null || answer?.busy}
+          title={block ?? `Unsubscribe from ${name}`}
+          aria-label={`Unsubscribe from ${name}`}
+          onClick={onUnsubscribe}
+        >
+          Unsubscribe
+        </Button>
+        <Button size="sm" variant="ghost" disabled={answer?.busy} aria-label={`Archive the mail of ${name}`} onClick={onArchive}>
+          Archive
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={sender.state === 'kept' || answer?.busy}
+          title={sender.state === 'kept' ? 'This sender is already kept.' : `Keep ${name} out of later sweeps`}
+          aria-label={`Keep ${name}`}
+          onClick={onKeep}
+        >
+          Keep
+        </Button>
+      </div>
+      <RowNote answer={answer} />
+    </div>
   );
 }
 
-export function Newsletters() {
-  const [filter, setFilter] = useState({ account: '', state: '', sort: '' });
-  const [archiving, setArchiving] = useState<number | null>(null);
-  const base = `/api/inbox/senders${query(filter)}`;
-  const loaded = useApi<SendersPage>(base, refreshOnInbox);
-  const first = useMemo<Chunk<NewsletterSenderRow> | undefined>(
-    () => (loaded.data ? { rows: loaded.data.senders, next: loaded.data.nextCursor } : undefined),
-    [loaded.data],
-  );
-  const pages = usePages(first, (cursor) =>
-    api<SendersPage>(`/api/inbox/senders${query({ ...filter, cursor })}`).then((page) => ({ rows: page.senders, next: page.nextCursor })),
-  );
-  const action = useAction(loaded.reload);
-  const path = (sender: NewsletterSenderRow, verb: string) => `/api/inbox/senders/${sender.id}/${verb}`;
-  const accounts = loaded.data?.accounts ?? (filter.account ? [filter.account] : []);
+function SenderFacts({ sender }: { sender: NewsletterSenderRow }) {
   return (
-    <Page title="Newsletters">
-      <JobLine
-        label="Last sweep"
-        last={loaded.data?.lastSweep ?? null}
-        button="Sweep now"
-        busy={action.busy}
-        onRun={() => void action.runJob('newsletters', 'The sweep runs now. The list updates when it ends.')}
-      />
-      <ActionNotice notice={action.notice} />
-      <div className="filters">
-        <Select label="account" value={filter.account} options={accounts} onChange={(account) => setFilter({ ...filter, account })} />
-        <Select label="state" value={filter.state} options={STATES} onChange={(state) => setFilter({ ...filter, state })} />
-        <label>
-          sort
-          <select value={filter.sort} onChange={(event) => setFilter({ ...filter, sort: event.target.value })}>
-            <option value="">messages</option>
-            {SORTS.slice(1).map((sort) => (
-              <option key={sort}>{sort}</option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <Panel title="Senders">
-        <Load loaded={loaded}>
-          {() =>
-            pages.rows.length ? (
-              <>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Sender</th>
-                      <th>Key</th>
-                      <th className="num">Messages</th>
-                      <th className="num">Read</th>
-                      <th>Last mail</th>
-                      <th>Unsubscribe</th>
-                      <th>State</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pages.rows.map((sender) => (
-                      <tr key={sender.id}>
-                        <td className="wrap">
-                          <strong>{sender.displayName ?? sender.fromAddress}</strong>
-                          <div className="muted small">
-                            {sender.fromAddress} · {sender.account}
-                          </div>
-                        </td>
-                        <td className="wrap">
-                          <code>{sender.senderKey}</code>
-                        </td>
-                        <td className="num">{sender.messages}</td>
-                        <td className="num">{percent(sender.readRate)}</td>
-                        <td>{time(sender.lastAt)}</td>
-                        <td className="wrap">
-                          <Unsubscribe sender={sender} />
-                        </td>
-                        <td className="wrap">
-                          <InboxStatus value={sender.state} />
-                          {sender.state === 'unsubscribe_pending' && sender.approvalId !== null ? (
-                            <div>
-                              <a href="#/approvals">approval #{sender.approvalId}</a>
-                            </div>
-                          ) : null}
-                          {sender.archived ? (
-                            <div className="muted small">
-                              {sender.archived} archived{sender.label ? ` with label ${sender.label}` : ''}
-                            </div>
-                          ) : null}
-                          {sender.error ? <div className="error-text small">{sender.error}</div> : null}
-                        </td>
-                        <td>
-                          <div className="row">
-                            <button
-                              type="button"
-                              disabled={action.busy || !canUnsubscribe(sender)}
-                              onClick={() => void action.act(path(sender, 'unsubscribe'), {})}
-                            >
-                              Unsubscribe
-                            </button>
-                            <button type="button" className="secondary" disabled={action.busy} onClick={() => setArchiving(sender.id)}>
-                              Archive
-                            </button>
-                            <button
-                              type="button"
-                              className="secondary"
-                              disabled={action.busy || sender.state === 'kept'}
-                              onClick={() => void action.act(path(sender, 'keep'), {})}
-                            >
-                              Keep
-                            </button>
-                          </div>
-                          {archiving === sender.id ? (
-                            <ArchiveForm
-                              busy={action.busy}
-                              onCancel={() => setArchiving(null)}
-                              onSend={(olderThanDays, label) =>
-                                void action
-                                  .act(path(sender, 'archive'), label ? { olderThanDays, label } : { olderThanDays })
-                                  .then(() => setArchiving(null))
-                              }
-                            />
-                          ) : null}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <LoadMore pages={pages} />
-              </>
-            ) : (
-              <Empty>No senders match the filters. A sweep finds them in the mail.</Empty>
-            )
-          }
-        </Load>
-      </Panel>
+    <Facts
+      layout="stacked"
+      items={[
+        { label: 'State', value: <StateBadge value={sender.state} tones={STATE_TONE} /> },
+        { label: 'Account', value: sender.account },
+        { label: 'List-Id', value: sender.listId ?? <span className="muted">none</span> },
+        { label: 'From', value: sender.fromAddress },
+        { label: 'Mail', value: `${sender.messages} messages, ${sender.read} read (${percent(sender.readRate)})` },
+        { label: 'First and last', value: `${time(sender.firstAt)} to ${time(sender.lastAt)}` },
+        { label: 'Unsubscribe', value: METHOD[sender.unsubscribe.method] },
+        // the unsubscribe goes only through the approved action, so its link shows as text and is never an anchor that
+        // could unsubscribe with one press.
+        sender.unsubscribe.url ? { label: 'Unsubscribe link', value: <code className="inbox-external">{sender.unsubscribe.url}</code> } : null,
+        { label: 'Archived', value: sender.archived },
+        { label: 'Label', value: sender.label ?? <span className="muted">none</span> },
+        sender.approvalId !== null ? { label: 'Approval', value: <a href="#/approvals">#{sender.approvalId}</a> } : null,
+        { label: 'Unsubscribed', value: time(sender.unsubscribedAt) },
+        sender.error ? { label: 'Error', value: <span className="error-text">{sender.error}</span> } : null,
+      ]}
+    />
+  );
+}
+
+export function NewslettersPage({ query }: RouteProps) {
+  const account = query.get('account') ?? '';
+  const state = query.get('state') ?? '';
+  const sort = query.get('sort') ?? 'messages';
+  const filters = { account, state, sort: sort === 'messages' ? '' : sort };
+  const paged = usePaged<SendersPage>(withQuery('/api/inbox/senders', filters), (last) =>
+    last.nextCursor ? withQuery('/api/inbox/senders', { ...filters, cursor: last.nextCursor }) : null,
+  );
+  const approvals = useApprovals();
+  const reload = () => {
+    paged.reload();
+    approvals.reload();
+  };
+  const { answers, act, clear } = useRowActions(reload);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [archiving, setArchiving] = useState<number | null>(null);
+  const first = paged.pages[0];
+  // the accounts stay in the select while a new filter loads, so a second choice does not find an empty list.
+  const [accounts, setAccounts] = useState<string[]>([]);
+  const known = first ? [...new Set([...first.accounts, ...(account ? [account] : [])])] : accounts;
+  if (known.join() !== accounts.join()) setAccounts(known);
+  const senders = paged.pages.flatMap((page) => page.senders);
+  const sender = senders.find((each) => each.id === selected);
+  const archiveSender = senders.find((each) => each.id === archiving);
+  const filter = (key: string) => (value: string) => setHashQuery(PATH, query, { [key]: value });
+  const base = (id: number) => `/api/inbox/senders/${id}`;
+
+  // the actions show in the row on a wide screen. on a phone the row has no room for them, so they show in the details
+  // panel of the selected sender, which is there on each screen.
+  const actionsFor = (row: NewsletterSenderRow) => (
+    <SenderActions
+      sender={row}
+      answer={answers[row.id]}
+      onUnsubscribe={() => void act(row.id, `${base(row.id)}/unsubscribe`)}
+      onArchive={() => {
+        clear(row.id);
+        setArchiving(row.id);
+      }}
+      onKeep={() => void act(row.id, `${base(row.id)}/keep`)}
+    />
+  );
+
+  const columns: Array<Column<NewsletterSenderRow>> = [
+    {
+      key: 'sender',
+      header: 'Sender',
+      wrap: true,
+      cell: (row) => (
+        <div className="inbox-name">
+          <span>{senderName(row)}</span>
+          {row.listId ? <span className="muted small">{row.listId}</span> : null}
+        </div>
+      ),
+    },
+    { key: 'messages', header: 'Messages', align: 'end', cell: (row) => row.messages },
+    { key: 'read', header: 'Read', align: 'end', hideBelow: 'sm', cell: (row) => percent(row.readRate) },
+    { key: 'last', header: 'Last', hideBelow: 'md', cell: (row) => <span className="inbox-nowrap">{day(row.lastAt)}</span> },
+    {
+      key: 'state',
+      header: 'State',
+      cell: (row) => (
+        <div className="inbox-state">
+          <StateBadge value={row.state} tones={STATE_TONE} />
+          <span className="muted small">unsubscribe: {METHOD[row.unsubscribe.method]}</span>
+        </div>
+      ),
+    },
+    { key: 'actions', header: <span className="sr-only">Actions</span>, hideBelow: 'sm', cell: (row) => actionsFor(row) },
+  ];
+
+  return (
+    <Page
+      title="Newsletters"
+      subtitle={first ? <LastRun label="sweep" last={first.lastSweep} /> : undefined}
+      actions={<RunJob job="newsletters" label="Sweep now" note="Started. The list loads again when the sweep is done." />}
+      toolbar={
+        <FilterBar label="newsletter filters">
+          <Select label="account" value={account} options={known.length ? known : account ? [account] : []} allLabel="all" onChange={filter('account')} />
+          <Select label="state" value={state} options={STATES} allLabel="all" onChange={filter('state')} />
+          <Select label="sort" value={sort} options={SORTS} onChange={(value) => setHashQuery(PATH, query, { sort: value === 'messages' ? null : value })} />
+        </FilterBar>
+      }
+    >
+      {paged.error ? (
+        <p className="error-box">Could not load: {paged.error}</p>
+      ) : !first ? (
+        <Skeleton lines={5} />
+      ) : (
+        <>
+          <PendingAnswers answers={answers} rows={senders} name={senderName} approvals={approvals} onDecided={reload} clear={clear} />
+          <Table
+            label="newsletter senders"
+            columns={columns}
+            rows={senders}
+            rowKey={(row) => String(row.id)}
+            selected={selected === null ? null : String(selected)}
+            onSelect={(row) => setSelected(row.id === selected ? null : row.id)}
+            empty={
+              <EmptyState icon="mail" title="No newsletters found yet.">
+                {account || state ? 'No sender matches these filters.' : 'The sweep runs each week and lists the senders of bulk mail here. Sweep now to start it.'}
+              </EmptyState>
+            }
+          />
+          <LoadMore paged={paged} />
+        </>
+      )}
+      {sender ? (
+        <DetailsPanel title={senderName(sender)} openKey={sender.id} onClose={() => setSelected(null)}>
+          <div className="inbox-detail-actions">{actionsFor(sender)}</div>
+          <SenderFacts sender={sender} />
+        </DetailsPanel>
+      ) : (
+        <DetailsPanel title="Newsletters">
+          <p className="muted">Select a sender to see its List-Id, its unsubscribe link and what the sweep did.</p>
+        </DetailsPanel>
+      )}
+      <Drawer open={archiveSender !== undefined} onClose={() => setArchiving(null)} label="Archive mail">
+        {archiveSender ? (
+          <ArchiveForm
+            sender={archiveSender}
+            error={answers[archiveSender.id]?.error}
+            onClose={() => setArchiving(null)} onArchive={(body) => act(archiveSender.id, `${base(archiveSender.id)}/archive`, body)} />
+        ) : null}
+      </Drawer>
     </Page>
   );
 }

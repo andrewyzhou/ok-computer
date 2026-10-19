@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import type { GooglePage, GoogleRequestRow, SignalRow } from '../../../src/dashboard/google-types';
+import type { GoogleAccountView, GooglePage, GoogleRequestRow } from '../../../src/dashboard/google-types';
 import { send, useApi } from '../api';
-import { Empty, Expand, Json, Load, Page, Panel, Status } from '../components';
+import { Expand, Json, Load } from '../components';
 import { ms, time } from '../format';
+import { Badge, Button, DetailsPanel, EmptyState, Facts, Page, Section, Status, Table, toneOf, type Column } from '../ui';
+import './connections.css';
 
 const pretty = (text: string) => {
   try {
@@ -19,30 +21,38 @@ export function GoogleRequests({ query }: { query: string }) {
     <Load loaded={loaded}>
       {(rows) =>
         rows.length ? (
-          <ol className="log-lines">
+          <ol className="google-requests" aria-label="requests to google">
             {rows.map((row) => (
-              <li key={row.id}>
-                <span className="muted">{time(row.createdAt)}</span> <strong>{row.method}</strong> <code>{row.url}</code>{' '}
-                {row.status !== null ? <span className={row.status < 400 ? 'muted' : 'error-text'}>{row.status}</span> : null}
-                {row.latencyMs !== null ? <span className="muted"> {ms(row.latencyMs)}</span> : null}
-                {row.account ? <span className="muted"> {row.account}</span> : null}
-                {row.error ? <span className="error-text"> {row.error}</span> : null}
-                {row.request ? <Expand label="request body">{() => <Json value={pretty(row.request!)} />}</Expand> : null}
-                {row.response ? (
-                  <Expand label={row.responseBlob ? 'answer (the start; the full answer is a blob)' : 'answer'}>
-                    {() => (
-                      <>
-                        <Json value={pretty(row.response!)} />
-                        {row.responseBlob ? <code>blob {row.responseBlob}</code> : null}
-                      </>
-                    )}
-                  </Expand>
+              <li key={row.id} className="google-request">
+                <div className="google-request-line">
+                  <span className="muted google-time">{time(row.createdAt)}</span>
+                  <strong className="google-method">{row.method}</strong>
+                  <code className="google-url">{row.url}</code>
+                  {row.status !== null ? <span className={row.status < 400 ? 'muted google-status' : 'error-text google-status'}>{row.status}</span> : null}
+                  {row.latencyMs !== null ? <span className="muted google-latency">{ms(row.latencyMs)}</span> : null}
+                  {row.account ? <span className="muted">{row.account}</span> : null}
+                </div>
+                {row.error ? <div className="error-text">{row.error}</div> : null}
+                {row.request || row.response ? (
+                  <div className="google-bodies">
+                    {row.request ? <Expand label="request body">{() => <Json value={pretty(row.request!)} />}</Expand> : null}
+                    {row.response ? (
+                      <Expand label={row.responseBlob ? 'answer (the start; the full answer is a blob)' : 'answer'}>
+                        {() => (
+                          <>
+                            <Json value={pretty(row.response!)} />
+                            {row.responseBlob ? <code>blob {row.responseBlob}</code> : null}
+                          </>
+                        )}
+                      </Expand>
+                    ) : null}
+                  </div>
                 ) : null}
               </li>
             ))}
           </ol>
         ) : (
-          <Empty>No requests to Google.</Empty>
+          <EmptyState title="No requests to Google." />
         )
       }
     </Load>
@@ -61,180 +71,192 @@ function ClientUpload({ onDone }: { onDone: (text: string) => void }) {
     }
   };
   return (
-    <label>
-      Upload the client file (client_secret_….json):{' '}
-      <input type="file" accept="application/json,.json" onChange={(event) => event.target.files?.[0] && void upload(event.target.files[0])} />
+    <label className="btn btn-secondary btn-sm google-upload">
+      Upload the client file
+      <input
+        type="file"
+        className="sr-only"
+        aria-label="Upload the client file (client_secret_….json)"
+        accept="application/json,.json"
+        onChange={(event) => event.target.files?.[0] && void upload(event.target.files[0])}
+      />
     </label>
+  );
+}
+
+function AccountFacts({ account }: { account: GoogleAccountView }) {
+  return (
+    <Facts
+      layout="stacked"
+      items={[
+        { label: 'Status', value: <Status value={account.status} /> },
+        { label: 'What to do', value: account.nextStep ?? <span className="muted">nothing</span> },
+        { label: 'Address', value: account.email ?? <span className="muted">no sign-in yet</span> },
+        account.expected !== null && account.expected !== account.email && { label: 'Expected address', value: account.expected },
+        { label: 'Signed in', value: account.authorizedAt ? time(account.authorizedAt) : <span className="muted">never</span> },
+        Boolean(account.lastError) && {
+          label: 'Last error',
+          value: (
+            <span className="error-text">
+              {account.lastError} <span className="muted">{time(account.lastErrorAt)}</span>
+            </span>
+          ),
+        },
+        account.failures > 0 && { label: 'Failures in a row', value: account.failures },
+        Boolean(account.alertedAt) && { label: 'Told you', value: time(account.alertedAt) },
+        { label: 'In 24 h', value: `${account.calls24h} calls, ${account.errors24h} errors` },
+      ]}
+    />
+  );
+}
+
+function accountColumns(connect: (alias: string) => void, busy: string | null): Array<Column<GoogleAccountView>> {
+  return [
+    {
+      key: 'alias',
+      header: 'Account',
+      cell: (account) => (
+        <div className="google-account">
+          <strong>{account.alias}</strong>
+          <span className="muted google-email">{account.email ?? account.expected ?? 'no address yet'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status and 24 h',
+      cell: (account) => (
+        <div className="google-account">
+          <Status value={account.status} />
+          {account.alertedAt ? <span className="muted small">told you at {time(account.alertedAt)}</span> : null}
+          <span className="muted small">{`${account.calls24h} calls, ${account.errors24h} errors`}</span>
+        </div>
+      ),
+    },
+    { key: 'next', header: 'What to do', cell: (account) => account.nextStep ?? <span className="muted">nothing</span>, wrap: true, hideBelow: 'sm', width: '34%' },
+    {
+      key: 'action',
+      header: <span className="sr-only">Actions</span>,
+      align: 'end',
+      cell: (account) => (
+        <Button size="sm" variant={account.status === 'ok' ? 'secondary' : 'primary'} busy={busy === account.alias} onClick={() => connect(account.alias)}>
+          {account.status === 'ok' ? 'Reconnect' : 'Connect'}
+        </Button>
+      ),
+    },
+  ];
+}
+
+// the risk of a tool is a list, for example "write, external with attendees". its first word gives the tone.
+function Risk({ value }: { value: string }) {
+  return <Badge tone={toneOf(value.split(/[ ,]/)[0] ?? '')}>{value}</Badge>;
+}
+
+const TOOL_COLUMNS: Array<Column<GooglePage['tools'][number]>> = [
+  { key: 'name', header: 'Name', cell: (tool) => <code className="google-code">{tool.name}</code> },
+  { key: 'risk', header: 'Risk', cell: (tool) => <Risk value={tool.risk} /> },
+  { key: 'description', header: 'Description', cell: (tool) => <span className="muted">{tool.description}</span>, wrap: true, hideBelow: 'sm' },
+];
+
+function GoogleBody({ page, connect, busy, onUpload }: { page: GooglePage; connect: (alias: string) => void; busy: string | null; onUpload: (text: string) => void }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const account = page.accounts.find((each) => each.alias === selected);
+  return (
+    <>
+      <Section title="Accounts" description="Select an account to see its sign-in and its last error.">
+        <Table
+          label="google accounts"
+          columns={accountColumns(connect, busy)}
+          rows={page.accounts}
+          rowKey={(each) => each.alias}
+          selected={selected}
+          onSelect={(each) => setSelected(each.alias === selected ? null : each.alias)}
+          empty={<EmptyState icon="google" title="No accounts.">Add an account to the google part of okc.config.json.</EmptyState>}
+        />
+        <div className="google-client">
+          <span className="muted">{page.clientId ? <>Client <span className="google-client-id">{page.clientId}</span></> : 'No client is stored yet.'}</span>
+          <ClientUpload onDone={onUpload} />
+        </div>
+      </Section>
+      <Section title="Polls" description={`Every ${page.pollMinutes} minutes.`}>
+        {page.lastPoll ? (
+          <p className="google-poll">
+            Last poll {time(page.lastPoll.startedAt)} <Status value={page.lastPoll.status} />{' '}
+            {page.lastPoll.runId ? <a href={`#/runs/${encodeURIComponent(page.lastPoll.runId)}`}>its requests and labels</a> : null}
+            {page.lastPoll.note ? <span className="muted"> {page.lastPoll.note}</span> : null}
+          </p>
+        ) : (
+          <EmptyState title="No poll yet." />
+        )}
+      </Section>
+      <Section title="Tools" description={`Sending is ${page.send ? 'on' : 'off'}. Sessions: ${page.sessions.join(', ')}.`}>
+        <Table label="google tools" columns={TOOL_COLUMNS} rows={page.tools} rowKey={(tool) => tool.name} empty={<EmptyState title="No tools." />} />
+      </Section>
+      {account ? (
+        <DetailsPanel title={account.alias} openKey={account.alias} onClose={() => setSelected(null)}>
+          <AccountFacts account={account} />
+          <div>
+            <Button size="sm" variant="primary" busy={busy === account.alias} onClick={() => connect(account.alias)}>
+              {account.status === 'ok' ? 'Reconnect' : 'Connect'} {account.alias}
+            </Button>
+          </div>
+        </DetailsPanel>
+      ) : (
+        <DetailsPanel title="Google">
+          <Facts
+            layout="stacked"
+            items={[
+              { label: 'Accounts', value: page.accounts.length },
+              { label: 'Need a step from you', value: page.accounts.filter((each) => each.nextStep !== null).length },
+              { label: 'Sending', value: <Status value={page.send ? 'on' : 'off'} /> },
+              { label: 'Poll', value: `every ${page.pollMinutes} minutes` },
+            ]}
+          />
+          <p className="muted small">Select an account to see its sign-in and its last error.</p>
+        </DetailsPanel>
+      )}
+    </>
   );
 }
 
 export function Google() {
   const loaded = useApi<GooglePage>('/api/google', (message) => message.kind === 'run');
   const [notice, setNotice] = useState('');
-  const connect = (alias: string) =>
-    send<{ url: string } | { error: string }>(`/api/google/accounts/${encodeURIComponent(alias)}/connect`, 'POST', {}).then(
-      (result) => {
-        if ('error' in result) return setNotice(result.error);
-        // the consent page opens in a new tab. its last page says whether the sign-in worked.
-        window.open(result.url, '_blank', 'noopener');
-        setNotice(`Sign in to ${alias} in the new tab, then come back and reload.`);
-      },
-      (err: Error) => setNotice(err.message),
-    );
+  const [busy, setBusy] = useState<string | null>(null);
+  const connect = (alias: string) => {
+    setBusy(alias);
+    void send<{ url: string } | { error: string }>(`/api/google/accounts/${encodeURIComponent(alias)}/connect`, 'POST', {})
+      .then(
+        (result) => {
+          if ('error' in result) return setNotice(result.error);
+          // the consent page opens in a new tab. its last page says whether the sign-in worked.
+          window.open(result.url, '_blank', 'noopener');
+          setNotice(`Sign in to ${alias} in the new tab, then come back and reload.`);
+        },
+        (err: Error) => setNotice(err.message),
+      )
+      .finally(() => setBusy(null));
+  };
   return (
-    <Page title="Google" actions={<span className="muted">{notice}</span>}>
+    <Page
+      title="Google"
+      subtitle="Mail and calendar accounts"
+      actions={
+        notice ? (
+          <span className="google-notice" role="status">
+            {notice}
+          </span>
+        ) : undefined
+      }
+    >
       <Load loaded={loaded}>
         {(page) =>
           !page.configured ? (
-            <Empty>Google is not configured. See docs/setup/google.md.</Empty>
+            <EmptyState icon="google" title="Google is not configured.">
+              See docs/setup/google.md.
+            </EmptyState>
           ) : (
-            <>
-              <Panel title="Accounts">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Account</th>
-                      <th>Status</th>
-                      <th>What to do</th>
-                      <th>24 h</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {page.accounts.map((account) => (
-                      <tr key={account.alias}>
-                        <td>
-                          <strong>{account.alias}</strong>
-                          <div className="muted">{account.email ?? account.expected ?? 'no address yet'}</div>
-                        </td>
-                        <td>
-                          <Status value={account.status} />
-                          {account.alertedAt ? <div className="muted">told you at {time(account.alertedAt)}</div> : null}
-                        </td>
-                        <td className="wrap">{account.nextStep ?? <span className="muted">nothing</span>}</td>
-                        <td>
-                          {account.calls24h} calls, {account.errors24h} errors
-                        </td>
-                        <td>
-                          <button type="button" onClick={() => void connect(account.alias)}>
-                            {account.status === 'ok' ? 'Reconnect' : 'Connect'}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <p className="muted">
-                  Client {page.clientId}. <ClientUpload onDone={(text) => (setNotice(text), loaded.reload())} />
-                </p>
-              </Panel>
-              <Panel title={`Polls (every ${page.pollMinutes} minutes)`}>
-                {page.lastPoll ? (
-                  <p>
-                    Last poll {time(page.lastPoll.startedAt)} <Status value={page.lastPoll.status} />{' '}
-                    {page.lastPoll.runId ? <a href={`#/runs/${encodeURIComponent(page.lastPoll.runId)}`}>its requests and labels</a> : null}
-                    {page.lastPoll.note ? <span className="muted"> {page.lastPoll.note}</span> : null}
-                  </p>
-                ) : (
-                  <Empty>No poll yet.</Empty>
-                )}
-              </Panel>
-              <Panel title={`Tools (sending is ${page.send ? 'on' : 'off'}; sessions: ${page.sessions.join(', ')})`}>
-                <table>
-                  <tbody>
-                    {page.tools.map((tool) => (
-                      <tr key={tool.name}>
-                        <td>
-                          <code>{tool.name}</code>
-                        </td>
-                        <td>{tool.risk}</td>
-                        <td className="wrap muted">{tool.description}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </Panel>
-            </>
-          )
-        }
-      </Load>
-    </Page>
-  );
-}
-
-const HANDLED: Record<string, string> = {
-  notified: 'the heartbeat told the owner',
-  seen: 'the heartbeat read it and stayed silent',
-  filtered: 'left out: a quiet label and no detector hit',
-  stale: 'no heartbeat handled it in 3 days',
-};
-
-export function Signals() {
-  const loaded = useApi<SignalRow[]>('/api/signals', (message) => message.kind === 'run');
-  return (
-    <Page title="Signals">
-      <Load loaded={loaded}>
-        {(signals) =>
-          signals.length ? (
-            <table>
-              <thead>
-                <tr>
-                  <th>Seen</th>
-                  <th>From</th>
-                  <th>Signal</th>
-                  <th>Label and detectors</th>
-                  <th>What happened</th>
-                </tr>
-              </thead>
-              <tbody>
-                {signals.map((signal) => (
-                  <tr key={signal.id}>
-                    <td>
-                      #{signal.id} {time(signal.seenAt)}
-                    </td>
-                    <td>
-                      {signal.source}:{signal.account}
-                      <div className="muted">{signal.kind.replace('_', ' ')}</div>
-                    </td>
-                    <td className="wrap">{signal.summary}</td>
-                    <td className="wrap">
-                      {signal.label ? <Status value={signal.label} /> : signal.source === 'gmail' ? <span className="muted">no label yet</span> : null}
-                      {signal.labelModelCallId !== null && signal.runId ? (
-                        <a href={`#/runs/${encodeURIComponent(signal.runId)}`} className="muted">
-                          {' '}
-                          (model call {signal.labelModelCallId})
-                        </a>
-                      ) : null}
-                      {signal.detectors?.map((hit, index) => (
-                        <div key={index}>
-                          <strong>{hit.name}</strong>: {hit.detail}
-                        </div>
-                      ))}
-                    </td>
-                    <td className="wrap">
-                      {signal.handledAs ? (
-                        <>
-                          <Status value={signal.handledAs} /> {HANDLED[signal.handledAs]}
-                          {signal.handledBy && signal.handledBy !== 'reset' ? (
-                            <>
-                              {' '}
-                              in <a href={`#/runs/${encodeURIComponent(signal.handledBy)}`}>run {signal.handledBy.slice(0, 8)}</a>
-                            </>
-                          ) : null}
-                          {signal.notification ? <div className="muted">“{signal.notification}”</div> : null}
-                        </>
-                      ) : (
-                        <>
-                          <Status value="waiting" /> waits for the next heartbeat
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <Empty>No signals yet. A poll makes them from new mail and calendar changes.</Empty>
+            <GoogleBody page={page} connect={connect} busy={busy} onUpload={(text) => (setNotice(text), loaded.reload())} />
           )
         }
       </Load>

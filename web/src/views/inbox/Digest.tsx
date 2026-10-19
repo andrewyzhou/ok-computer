@@ -1,140 +1,142 @@
-import { useMemo } from 'react';
-import type { DigestItem, DigestSection, DigestsPage, DigestSummary, InboxDigest } from '../../../../src/dashboard/types';
-import { api, useApi } from '../../api';
-import { Empty, Load, Page, Panel } from '../../components';
-import { time } from '../../format';
-import { ActionNotice, LoadMore, money, query, refreshOnInbox, RunLink, useAction, usePages, type Chunk } from './shared';
+import type { DigestItem, DigestSection, DigestsPage, InboxDigest } from '../../../../src/dashboard/types';
+import { useApi } from '../../api';
+import { longDay, time } from '../../format';
+import type { RouteProps } from '../../routes';
+import { Badge, ButtonLink, Count, DetailsPanel, EmptyState, Page, Section, Skeleton } from '../../ui';
+import { LoadMore, money, refreshInbox, RunJob, usePaged, withQuery } from './shared';
+import './inbox.css';
 
-const SECTIONS: ReadonlyArray<{ id: DigestSection; label: string; empty: string }> = [
+// the daily digest of the inbox: the mail that needs a reply, the deadlines, the bills and the packages, with links
+// to the draft replies and the calendar proposals that the job made. the same page shows a past digest by its id.
+
+const SECTIONS: Array<{ id: DigestSection; label: string; empty: string }> = [
   { id: 'needs_reply', label: 'Needs a reply', empty: 'No mail waits for a reply.' },
-  { id: 'deadlines', label: 'Deadlines', empty: 'No deadlines.' },
-  { id: 'bills', label: 'Bills', empty: 'No bills.' },
-  { id: 'packages', label: 'Packages', empty: 'No packages.' },
+  { id: 'deadlines', label: 'Deadlines', empty: 'No deadlines in the mail.' },
+  { id: 'bills', label: 'Bills', empty: 'No bills in the mail.' },
+  { id: 'packages', label: 'Packages', empty: 'No packages on the way.' },
 ];
 
-// the text of an item comes from mail, so each field renders as a text node. the links go to pages of ok computer,
-// never to an address from the mail.
 function Item({ item }: { item: DigestItem }) {
   return (
-    <li className="card">
-      <div className="wrap">
-        <strong>{item.subject}</strong>
+    <li className="inbox-item">
+      <div className="inbox-item-head">
+        <strong className="inbox-item-from">{item.from}</strong>
+        <Badge tone="muted">{item.account}</Badge>
       </div>
-      <div className="muted wrap">
-        {item.from} · {item.account}
-      </div>
-      <p className="wrap">{item.summary}</p>
-      <div className="row small">
+      <p className="inbox-item-subject">{item.subject}</p>
+      <p className="inbox-item-summary">{item.summary}</p>
+      <div className="inbox-item-meta">
         {item.dueAt ? <span>due {time(item.dueAt)}</span> : null}
-        {item.amount !== null ? <span>{money(item.amount, item.currency)}</span> : null}
-        {item.draftId !== null ? <a href="#/inbox/drafts">draft #{item.draftId}</a> : null}
-        {item.proposalId !== null ? <a href="#/inbox/proposals">calendar proposal #{item.proposalId}</a> : null}
+        {item.amount !== null ? <span className="inbox-amount">{money(item.amount, item.currency)}</span> : null}
+        {item.draftId !== null ? <a href={`#/inbox/drafts?id=${item.draftId}`}>draft</a> : null}
+        {item.proposalId !== null ? <a href={`#/inbox/proposals?id=${item.proposalId}`}>calendar proposal</a> : null}
       </div>
     </li>
   );
 }
 
-function DigestView({ digest }: { digest: InboxDigest }) {
+function DigestBody({ digest }: { digest: InboxDigest }) {
   return (
     <>
-      <Panel title={`Digest of ${digest.day}`}>
-        <p className="muted">
-          {digest.accounts.length ? digest.accounts.join(', ') : 'no account'} · made {time(digest.createdAt)}{' '}
-          <RunLink runId={digest.runId} />
-        </p>
-        <pre className="block">{digest.shortText}</pre>
-      </Panel>
       {SECTIONS.map((section) => {
         const items = digest.items.filter((item) => item.section === section.id);
         return (
-          <Panel key={section.id} title={`${section.label} (${items.length})`}>
+          <Section
+            key={section.id}
+            id={`digest-${section.id}`}
+            title={
+              <>
+                {section.label} <Count value={items.length} label="items" />
+              </>
+            }
+          >
             {items.length ? (
-              <ul className="cards">
+              <ul className="inbox-items" aria-label={section.label}>
                 {items.map((item) => (
                   <Item key={`${item.account}:${item.messageId}`} item={item} />
                 ))}
               </ul>
             ) : (
-              <Empty>{section.empty}</Empty>
+              <p className="muted">{section.empty}</p>
             )}
-          </Panel>
+          </Section>
         );
       })}
+      <Section title="Message sent to the phone" description="The short text that the job sent with the digest.">
+        <pre className="inbox-short">{digest.shortText}</pre>
+      </Section>
     </>
   );
 }
 
-function OlderDigests() {
-  const loaded = useApi<DigestsPage>('/api/inbox/digests', refreshOnInbox);
-  const first = useMemo<Chunk<DigestSummary> | undefined>(
-    () => (loaded.data ? { rows: loaded.data.digests, next: loaded.data.nextCursor } : undefined),
-    [loaded.data],
-  );
-  const pages = usePages(first, (cursor) =>
-    api<DigestsPage>(`/api/inbox/digests${query({ cursor })}`).then((page) => ({ rows: page.digests, next: page.nextCursor })),
-  );
+// the past digests, newest first, in the details panel. the one on the page is marked.
+function PastDigests({ currentId }: { currentId: number | undefined }) {
+  const paged = usePaged<DigestsPage>('/api/inbox/digests', (last) => (last.nextCursor ? withQuery('/api/inbox/digests', { cursor: last.nextCursor }) : null));
+  const digests = paged.pages.flatMap((page) => page.digests);
   return (
-    <Panel title="All digests">
-      <Load loaded={loaded}>
-        {() =>
-          pages.rows.length ? (
-            <>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Day</th>
-                    <th className="num">Items</th>
-                    <th>Made</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pages.rows.map((row) => (
-                    <tr key={row.id}>
-                      <td>
-                        <a href={`#/inbox/digests/${row.id}`}>{row.day}</a>
-                      </td>
-                      <td className="num">{row.items}</td>
-                      <td>{time(row.createdAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <LoadMore pages={pages} />
-            </>
-          ) : (
-            <Empty>No digests yet.</Empty>
-          )
-        }
-      </Load>
-    </Panel>
+    <DetailsPanel title="Past digests">
+      {paged.error ? (
+        <p className="error-text">Could not load: {paged.error}</p>
+      ) : paged.data === undefined ? (
+        <Skeleton lines={3} />
+      ) : digests.length ? (
+        <ul className="inbox-past">
+          {digests.map((digest) => (
+            <li key={digest.id}>
+              <a href={`#/inbox/digests/${digest.id}`} aria-current={digest.id === currentId ? 'page' : undefined}>
+                {longDay(digest.day)}
+              </a>
+              <span className="muted">{digest.items === 1 ? '1 item' : `${digest.items} items`}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted">No past digests yet.</p>
+      )}
+      <LoadMore paged={paged} />
+    </DetailsPanel>
   );
 }
 
-// the latest digest at #/inbox, or one digest at #/inbox/digests/:id.
-export function Digest({ params }: { params?: Record<string, string> }) {
-  const id = params?.id;
-  const loaded = useApi<InboxDigest>(id ? `/api/inbox/digests/${encodeURIComponent(id)}` : '/api/inbox/digests/latest', refreshOnInbox);
-  const action = useAction(loaded.reload);
-  const run = () => void action.runJob('digest', 'The digest runs now. This page shows it when the run ends.');
-  // the server answers 404 digest not found before the first digest. the latest page then offers the first run.
-  const none = !id && loaded.error === 'digest not found';
+export function DigestPage({ params }: RouteProps) {
+  const id = params.id;
+  const loaded = useApi<InboxDigest>(id ? `/api/inbox/digests/${encodeURIComponent(id)}` : '/api/inbox/digests/latest', refreshInbox);
+  const digest = loaded.data;
+  const missing = loaded.error !== undefined && /not found/i.test(loaded.error);
+  const crumbs = id ? [{ label: 'Digest', href: '#/inbox' }] : undefined;
   return (
     <Page
-      title={id ? 'Digest' : 'Inbox digest'}
+      title="Digest"
+      {...(crumbs ? { crumbs } : {})}
+      subtitle={digest ? `${longDay(digest.day)} · ${digest.accounts.join(', ') || 'no accounts'}` : undefined}
       actions={
-        <button type="button" disabled={action.busy} onClick={run}>
-          Run the digest now
-        </button>
+        digest?.runId ? (
+          <ButtonLink href={`#/runs/${encodeURIComponent(digest.runId)}`} size="sm" variant="ghost" icon="run">
+            Open the run
+          </ButtonLink>
+        ) : undefined
       }
     >
-      <ActionNotice notice={action.notice} />
-      {none ? <Empty>no digest yet</Empty> : <Load loaded={loaded}>{(digest) => <DigestView digest={digest} />}</Load>}
-      {id ? (
-        <p>
-          <a href="#/inbox">The latest digest</a>
-        </p>
-      ) : null}
-      <OlderDigests />
+      {missing && !id ? (
+        <EmptyState
+          icon="inbox"
+          title="No digest yet."
+          action={<RunJob job="digest" label="Make the digest now" variant="primary" note="Started. The digest shows here when it is ready." />}
+        >
+          The digest job reads the mail of each account once a day.
+        </EmptyState>
+      ) : missing ? (
+        <EmptyState icon="inbox" title="This digest does not exist.">
+          <a href="#/inbox">Go to the latest digest</a>
+        </EmptyState>
+      ) : loaded.error ? (
+        <p className="error-box">Could not load: {loaded.error}</p>
+      ) : digest ? (
+        <DigestBody digest={digest} />
+      ) : (
+        <Skeleton lines={5} />
+      )}
+      <PastDigests currentId={digest?.id} />
     </Page>
   );
 }

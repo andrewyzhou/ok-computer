@@ -1,0 +1,178 @@
+/* the classes of the trace view only. each color comes from the tokens of styles.css. */
+
+.trace-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding: 10px 0;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.trace-hint {
+  margin: 0 0 8px;
+  font-size: var(--text-sm);
+}
+.trace-waterfall {
+  margin-top: 12px;
+  container-type: inline-size;
+}
+@container (max-width: 820px) {
+  .trace-waterfall th:has(> .trace-usage),
+  .trace-waterfall td:has(> .trace-usage) {
+    display: none;
+  }
+}
+.trace-waterfall .table {
+  table-layout: auto;
+}
+.trace-waterfall td {
+  vertical-align: middle;
+}
+
+.trace-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 40ch;
+  padding-left: calc(var(--trace-depth, 0) * 16px);
+  white-space: nowrap;
+}
+.trace-toggle,
+.trace-toggle-space {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+.trace-toggle {
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.trace-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+.trace-kind {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  text-transform: lowercase;
+}
+.trace-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trace-row-error .trace-label {
+  color: var(--critical-ink);
+}
+
+/* the axis and the bars. the grid lines sit at the same thirds as the ticks. */
+
+.trace-axis {
+  position: relative;
+  height: 14px;
+  min-width: 160px;
+}
+.trace-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  color: var(--muted);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.trace-tick:first-of-type {
+  transform: none;
+}
+.trace-tick:last-of-type {
+  transform: translateX(-100%);
+}
+.trace-track {
+  position: relative;
+  height: 12px;
+  min-width: 160px;
+  background-image: linear-gradient(to right, var(--grid) 1px, transparent 1px);
+  background-size: calc(100% / 3) 100%;
+  box-shadow: inset -1px 0 0 var(--grid);
+}
+.trace-bar {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--series-1);
+}
+.trace-bar.is-error {
+  background: var(--critical);
+}
+/* an open span has a striped end, so its state shows without the color too. */
+.trace-bar.is-open {
+  background-image: repeating-linear-gradient(-45deg, transparent 0 3px, var(--bg) 3px 5px);
+}
+
+/* the inspectors of the details panel. */
+
+.trace-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.trace-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.trace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.trace-list {
+  margin: 0;
+  padding-left: 18px;
+}
+.trace-list li + li {
+  margin-top: 4px;
+}
+.trace-break {
+  overflow-wrap: anywhere;
+}
+.trace-shot {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+}
+
+/* a phone shows the name, the status and the duration. the indent is smaller, so a deep span keeps its label. */
+@media (max-width: 759.98px) {
+  .trace-name {
+    max-width: 44vw;
+    padding-left: calc(var(--trace-depth, 0) * 10px);
+    gap: 4px;
+  }
+  .trace-toggle,
+  .trace-toggle-space {
+    width: 16px;
+  }
+}
+
+.trace-body > .segmented {
+  align-self: flex-start;
+}

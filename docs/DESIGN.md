@@ -489,7 +489,7 @@ Decisions from M4:
 - **Approvals.** The dashboard shows the redacted summary of an approval, never the stored input, because the input is not redacted.
 - **Plain words.** A daily cron (`M H * * *`) is described as "every day at HH:MM" before the cron text, also in the tool output.
 - **Charts** are single-series SVG bars (daily hit rate, the streak of days with goals, cost by day) with a native tooltip on each day. Tables carry the same numbers.
-- **Tests.** `test/seed.ts` fills a database through the real app and a fake model: runs with tool calls, a failed tool, a failed model call, a heartbeat, a compaction, approvals, goals over several days, memory files and log lines. The API tests and the jsdom page tests (`web/src/pages.test.tsx`) run against it.
+- **Tests.** `test/seed.ts` fills a database through the real app and a fake model: runs with tool calls, a failed tool, a failed model call, a heartbeat, a compaction, approvals, goals over several days, memory files and log lines. The API tests and the jsdom page tests run against it. The page tests are the `*.test.tsx` files in `web/src/`, `web/src/shell/`, `web/src/ui/` and each view folder in `web/src/views/`, and they share the helpers in `web/src/testing.tsx`.
 
 ## 17. Configuration
 

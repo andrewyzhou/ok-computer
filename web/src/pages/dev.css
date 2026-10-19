@@ -1,0 +1,274 @@
+/* the classes of the developer pages: runs, a run, sessions, policy, cost and logs. each class has the prefix of its
+   page, and dev- is for the parts that several of these pages share. the colors and sizes come from styles.css. */
+
+/* ids, hashes and rule names are mono, so equal characters line up and an id reads as one word. */
+.dev-id {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+.dev-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+/* a date filter in the shape of the select pills of the filter bar. */
+.dev-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 6px 0 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.dev-date.is-set {
+  border-color: var(--ink-2);
+}
+.dev-date input {
+  border: 0;
+  background: none;
+  padding: 0;
+  height: 26px;
+  font: inherit;
+  font-weight: 500;
+  color: var(--ink);
+  outline: none;
+  min-width: 0;
+}
+.dev-date:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* a header action that a phone shows in the details panel instead. */
+@media (max-width: 759.98px) {
+  .dev-wide-only {
+    display: none;
+  }
+}
+@media (min-width: 760px) {
+  .dev-narrow-only {
+    display: none;
+  }
+}
+
+/* an active filter from the link that opened the page, with its own button to clear it. */
+.dev-filter-pill {
+  height: 30px;
+  padding-right: 3px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* in a table an id keeps one line, and a long one scrolls the table instead of breaking inside a word. */
+.table .dev-id {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+/* the main area is narrow next to the details panel, so a list hides the columns that the panel shows for the
+   selected row. the list measures its own width, because the panel and the nav change it at the same screen width.
+   the numbers count the columns of the list in their order in the tsx file. */
+.runs-table,
+.policy-decisions {
+  container-type: inline-size;
+}
+.runs-table td:first-child,
+.policy-decisions td:first-child {
+  white-space: nowrap;
+}
+@container (max-width: 900px) {
+  /* trigger, slot, model calls and tool calls. */
+  .runs-table :is(th, td):is(:nth-child(4), :nth-child(5), :nth-child(7), :nth-child(8)) {
+    display: none;
+  }
+  /* rule and session. */
+  .policy-decisions :is(th, td):is(:nth-child(4), :nth-child(6)) {
+    display: none;
+  }
+}
+
+/* runs */
+.runs-id {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.runs-more {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+}
+
+/* a run. the model name is mono, the metrics stay small, and each body shows next to the other where it fits. */
+.run-model {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+.run-split {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: var(--space-4) var(--space-5);
+  align-items: start;
+  min-width: 0;
+}
+.run-split > div {
+  min-width: 0;
+}
+.run-logs-link {
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.run-policy {
+  font-size: var(--text-sm);
+  margin: var(--space-2) 0;
+}
+.timeline .metrics {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  gap: 4px 12px;
+}
+.timeline .step-head {
+  font-size: var(--text-sm);
+}
+.timeline .expand {
+  font-size: var(--text-sm);
+  min-width: 0;
+}
+.timeline .step,
+.timeline .subagent {
+  min-width: 0;
+}
+.timeline .code-block {
+  margin: var(--space-1) 0 var(--space-2);
+}
+
+/* sessions */
+.sessions-split {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 0 var(--space-5);
+  align-items: start;
+}
+.sessions-split > section,
+.sessions-model {
+  min-width: 0;
+}
+.sessions-tools {
+  list-style: none;
+  margin: var(--space-2) 0;
+  padding: 0;
+  font-size: var(--text-sm);
+}
+.sessions-tools li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+@media (max-width: 759.98px) {
+  .policy-rules .dev-id {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+.policy-rules td:last-child {
+  min-width: 180px;
+}
+.policy-words {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.policy-taint {
+  margin: 0;
+  padding-left: 16px;
+}
+.policy-taint li {
+  margin: 2px 0;
+}
+
+/* cost */
+.cost-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+  gap: 0 var(--space-6);
+  align-items: start;
+}
+.cost-columns > section {
+  min-width: 0;
+}
+.cost-day {
+  white-space: nowrap;
+}
+.cost-key {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+/* logs. one line for each entry, the newest at the top, in the mono face. */
+.logs-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.logs-line {
+  display: grid;
+  grid-template-columns: max-content max-content minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.logs-time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.logs-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.logs-msg {
+  font-weight: 600;
+  color: var(--ink);
+  margin-right: var(--space-2);
+}
+.logs-run {
+  margin-right: var(--space-2);
+  white-space: nowrap;
+}
+.logs-line .badge {
+  font-family: var(--font-ui);
+}
+.logs-fields {
+  color: var(--ink-2);
+  font-family: inherit;
+}
+.logs-error .logs-msg {
+  color: var(--critical-ink);
+}
+@media (max-width: 759.98px) {
+  /* a phone shows the level and the time on one row, and the message gets the whole width under them. */
+  .logs-line {
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 4px var(--space-3);
+  }
+  .logs-line .badge {
+    order: -1;
+  }
+  .logs-text {
+    grid-column: 1 / -1;
+  }
+}

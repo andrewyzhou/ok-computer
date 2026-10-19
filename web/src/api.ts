@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { StreamMessage } from '../../src/dashboard/types';
 
 // the server asks for the token only when DASHBOARD_TOKEN is set. the page then gets it once in its own url.
@@ -24,22 +24,87 @@ export function send<T>(path: string, method: 'POST' | 'PUT', body: unknown): Pr
 
 type Listener = (message: StreamMessage) => void;
 const listeners = new Set<Listener>();
-let source: EventSource | undefined;
 
-// all pages share one event stream. the browser connects again by itself after an error.
+// the state of the shared stream, for the status bar. the browser connects again by itself, so an error first means
+// connecting, and offline means that the browser gave up.
+export type Connection = 'connecting' | 'live' | 'offline';
+let connection: Connection = 'connecting';
+const connectionListeners = new Set<() => void>();
+
+function setConnection(next: Connection): void {
+  if (next === connection) return;
+  connection = next;
+  for (const each of connectionListeners) each();
+}
+
+export interface SharedStream {
+  // it opens the stream when it is not open, and does nothing when it is.
+  ensure(): void;
+}
+
+// one event stream that the whole page shares. a browser allows only six connections to one host, and a stream that
+// stays open after a reload can block the requests of the new page, so the stream closes on pagehide. the browser can
+// then keep the page in its back and forward cache, and when the page comes back from it, the stream opens again for
+// the parts that still listen.
+export function sharedStream(options: {
+  path: string;
+  setConnection: (next: Connection) => void;
+  hasListeners: () => boolean;
+  onMessage: (event: MessageEvent) => void;
+}): SharedStream {
+  let source: EventSource | undefined;
+  let hooked = false;
+  const ensure = (): void => {
+    if (source || typeof EventSource === 'undefined') return;
+    if (!hooked && typeof addEventListener === 'function') {
+      hooked = true;
+      addEventListener('pagehide', () => {
+        source?.close();
+        source = undefined;
+        options.setConnection('connecting');
+      });
+      addEventListener('pageshow', (event) => {
+        if ((event as PageTransitionEvent).persisted && options.hasListeners()) ensure();
+      });
+    }
+    const opened = new EventSource(apiUrl(options.path));
+    source = opened;
+    opened.onopen = () => options.setConnection('live');
+    // the browser connects again by itself after an error, so an error first means connecting. a closed stream does
+    // not come back.
+    opened.onerror = () => options.setConnection(opened.readyState === 2 ? 'offline' : 'connecting');
+    opened.onmessage = options.onMessage;
+  };
+  return { ensure };
+}
+
+const stream = sharedStream({
+  path: '/api/stream',
+  setConnection,
+  hasListeners: () => listeners.size > 0,
+  onMessage: (event) => {
+    const message = JSON.parse(String(event.data)) as StreamMessage;
+    for (const each of listeners) each(message);
+  },
+});
+
+// all pages share one event stream.
 export function subscribe(listener: Listener): () => void {
-  if (!source && typeof EventSource !== 'undefined') {
-    source = new EventSource(apiUrl('/api/stream'));
-    // a browser allows only six connections to one host. a stream that stays open after a reload can block the
-    // requests of the new page.
-    addEventListener('pagehide', () => source?.close());
-    source.onmessage = (event) => {
-      const message = JSON.parse(String(event.data)) as StreamMessage;
-      for (const each of listeners) each(message);
-    };
-  }
+  stream.ensure();
   listeners.add(listener);
   return () => void listeners.delete(listener);
+}
+
+export function useConnection(): Connection {
+  useEffect(() => subscribe(() => {}), []);
+  return useSyncExternalStore(
+    (listener) => {
+      connectionListeners.add(listener);
+      return () => void connectionListeners.delete(listener);
+    },
+    () => connection,
+    () => connection,
+  );
 }
 
 export function useStream(listener: Listener): void {

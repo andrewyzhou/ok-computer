@@ -22,7 +22,8 @@ export const NAV_GROUPS: ReadonlyArray<{ id: NavGroup; label: string }> = [
   { id: 'dev', label: 'Dev' },
 ];
 
-// the names of the inline svg icons. the m3 shell draws one icon for each name, and a new name goes here first.
+// the names of the inline svg icons. web/src/icons.tsx draws one icon for each name, and a new name goes here first.
+// the names after draft are for the shell and the shared parts of web/src/ui.
 export type IconName =
   | 'today'
   | 'desk'
@@ -50,7 +51,32 @@ export type IconName =
   | 'search'
   | 'mail'
   | 'subscription'
-  | 'draft';
+  | 'draft'
+  | 'agent'
+  | 'connection'
+  | 'dev'
+  | 'menu'
+  | 'close'
+  | 'chevron-left'
+  | 'chevron-right'
+  | 'chevron-down'
+  | 'sun'
+  | 'moon'
+  | 'monitor'
+  | 'panel'
+  | 'filter'
+  | 'sort'
+  | 'display'
+  | 'plus'
+  | 'send'
+  | 'stop'
+  | 'play'
+  | 'external'
+  | 'check'
+  | 'copy'
+  | 'more'
+  | 'refresh'
+  | 'command';
 
 // params holds the decoded values of the :name segments of the path. query is the part of the hash after a ?.
 export interface RouteProps {
@@ -73,6 +99,10 @@ export interface RouteDef {
   devOnly?: boolean;
   // the place in its group. a lower number comes first, and the default is 100.
   order?: number;
+  // the key of the page for its params. two hashes with the same key show one page that stays mounted, and the shell
+  // keeps its scroll, so a param that only selects a row, for example the span of a trace, changes the page in place.
+  // the default is the route path with every param, so each new param gives a new page.
+  pageKey?: (params: Record<string, string>) => string;
 }
 
 // a helper that gives a view's list its type.
@@ -80,13 +110,17 @@ export function defineRoutes(routes: RouteDef[]): RouteDef[] {
   return routes;
 }
 
-// a core route wraps a page from web/src/pages. a detail page takes its param as the prop with the same name.
-function page(load: () => Promise<ComponentType>): RouteDef['load'] {
-  return () => load().then((Page) => () => createElement(Page));
+// a core route wraps a page from web/src/pages. a list page gets the RouteProps, so it can read its filters from the
+// query of the hash. a detail page takes its param as the prop with the same name, and the query as query.
+function page(load: () => Promise<ComponentType<Partial<RouteProps>>>): RouteDef['load'] {
+  return () => load().then((Page) => (props: RouteProps) => createElement(Page, props));
 }
 
-function detail<K extends string>(prop: K, load: () => Promise<ComponentType<Record<K, string>>>): RouteDef['load'] {
-  return () => load().then((Page) => ({ params }: RouteProps) => createElement(Page, { [prop]: params[prop] ?? '' } as Record<K, string>));
+type DetailProps<K extends string> = Record<K, string> & { query?: URLSearchParams };
+
+function detail<K extends string>(prop: K, load: () => Promise<ComponentType<DetailProps<K>>>): RouteDef['load'] {
+  return () =>
+    load().then((Page) => ({ params, query }: RouteProps) => createElement(Page, { [prop]: params[prop] ?? '', query } as DetailProps<K>));
 }
 
 export const CORE_ROUTES: RouteDef[] = [
@@ -101,7 +135,7 @@ export const CORE_ROUTES: RouteDef[] = [
     order: 30,
     load: page(() => import('./pages/Automations').then((m) => m.Automations)),
   },
-  { path: 'signals', group: 'agent', label: 'Signals', icon: 'signal', order: 40, load: page(() => import('./pages/Google').then((m) => m.Signals)) },
+  { path: 'signals', group: 'agent', label: 'Signals', icon: 'signal', order: 40, load: page(() => import('./pages/Signals').then((m) => m.Signals)) },
   {
     path: 'approvals',
     group: 'agent',
@@ -189,20 +223,36 @@ export interface RouteMatch {
   query: URLSearchParams;
 }
 
+// a typed or cut link can hold a bad percent escape, and decodeURIComponent throws on it. such a value gives no
+// match, so the shell shows its missing page and does not crash while it renders.
+function decode(value: string): string | undefined {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+}
+
+// a param never matches an empty value, so runs/ is not a run with the id ''.
 function matchPath(pattern: string, segments: string[]): Record<string, string> | undefined {
   const parts = pattern === '' ? [] : pattern.split('/');
   const params: Record<string, string> = {};
   for (const [index, part] of parts.entries()) {
     if (part.startsWith(':') && part.endsWith('*') && index === parts.length - 1) {
-      const rest = segments.slice(index);
-      if (rest.length === 0) return undefined;
-      params[part.slice(1, -1)] = decodeURIComponent(rest.join('/'));
+      const rest = segments.slice(index).join('/');
+      if (rest === '') return undefined;
+      const value = decode(rest);
+      if (value === undefined) return undefined;
+      params[part.slice(1, -1)] = value;
       return params;
     }
     const segment = segments[index];
     if (segment === undefined) return undefined;
-    if (part.startsWith(':')) params[part.slice(1)] = decodeURIComponent(segment);
-    else if (part !== segment) return undefined;
+    if (part.startsWith(':')) {
+      const value = segment === '' ? undefined : decode(segment);
+      if (value === undefined) return undefined;
+      params[part.slice(1)] = value;
+    } else if (part !== segment) return undefined;
   }
   return parts.length === segments.length ? params : undefined;
 }
@@ -213,9 +263,13 @@ function rank(pattern: string): number {
   return pattern.split('/').reduce((sum, part) => sum + (part.endsWith('*') ? 1 : part.startsWith(':') ? 10 : 100), 0);
 }
 
-// the hash is the part after #/, for example runs/run-1 or search?q=essay.
+// the hash is the part after #/, for example runs/run-1 or search?q=essay. the query starts at the first ?, so a
+// later ? stays in the query. one trailing slash is dropped, so runs/ is the runs page.
 export function matchRoute(hash: string, routes: RouteDef[] = ROUTES): RouteMatch | undefined {
-  const [path = '', search = ''] = hash.replace(/^#?\/?/, '').split('?', 2);
+  const raw = hash.replace(/^#?\/?/, '');
+  const at = raw.indexOf('?');
+  const path = (at < 0 ? raw : raw.slice(0, at)).replace(/\/$/, '');
+  const search = at < 0 ? '' : raw.slice(at + 1);
   const segments = path === '' ? [] : path.split('/');
   const sorted = [...routes].sort((a, b) => rank(b.path) - rank(a.path));
   for (const route of sorted) {
@@ -223,6 +277,12 @@ export function matchRoute(hash: string, routes: RouteDef[] = ROUTES): RouteMatc
     if (params) return { route, params, query: new URLSearchParams(search) };
   }
   return undefined;
+}
+
+// the key that the app and the shell give the page of a match. the query is never part of it, so a new filter keeps
+// the page.
+export function pageKeyOf(match: RouteMatch): string {
+  return match.route.pageKey?.(match.params) ?? `${match.route.path}:${JSON.stringify(match.params)}`;
 }
 
 export interface NavSection {

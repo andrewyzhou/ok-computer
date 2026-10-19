@@ -12,6 +12,7 @@ import { BUILTIN_RULES } from '../../src/policy/policy';
 import { REVIEW_TOOL } from '../../src/policy/reviewer';
 import { createTestApp } from '../../test/app-harness';
 import { App } from './App';
+import './testing';
 
 // the test keeps the stream, so that it can send the messages that the server sends.
 let stream: { onmessage: ((event: { data: string }) => void) | null } | undefined;
