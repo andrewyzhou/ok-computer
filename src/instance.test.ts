@@ -48,11 +48,28 @@ describe('the instance lock', () => {
   it('names a socket file that fits the socket path limit on macos', () => {
     const data = mkdtempSync(join(tmpdir(), 'okc-lock-'));
     const name = lockName(data, 'darwin');
-    expect(name).toMatch(/okc-[0-9a-f]{32}\.sock$/);
+    expect(name).toMatch(/^\/.*\/okc-(\d+-)?[0-9a-f]{32}\.sock$/);
     expect(Buffer.byteLength(name)).toBeLessThanOrEqual(103);
     expect(lockName(join(data, '.'), 'darwin')).toBe(name);
     expect(lockName(data, 'linux')).toMatch(/^\0okc-[0-9a-f]{32}$/);
     expect(lockName(data, 'win32')).toMatch(/^\\\\\.\\pipe\\okc-[0-9a-f]{32}$/);
+  });
+
+  // an ssh or sudo shell can start the agent without TMPDIR, and it must still see the lock of the login agent.
+  it('names the same socket file on macos whatever TMPDIR holds', () => {
+    const data = mkdtempSync(join(tmpdir(), 'okc-lock-'));
+    const name = lockName(data, 'darwin');
+    const saved = process.env.TMPDIR;
+    try {
+      process.env.TMPDIR = '/somewhere/else';
+      expect(lockName(data, 'darwin')).toBe(name);
+      delete process.env.TMPDIR;
+      expect(lockName(data, 'darwin')).toBe(name);
+    } finally {
+      if (saved === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = saved;
+    }
+    expect(name.startsWith('/somewhere')).toBe(false);
   });
 
   // a socket file that no process listens on is from a process that ended, so the lock removes it and takes its place.
