@@ -4,7 +4,7 @@ import { settleApprovals } from '../inbox/actions.js';
 import type { ActionResult } from '../inbox/context.js';
 import { inboxAutomation } from '../inbox/inbox.js';
 import { reservedLabel } from '../inbox/newsletters.js';
-import { getDigest, InvalidCursor, listDigests, listDrafts, listProposals, listSenders, listSubscriptions } from '../inbox/views.js';
+import { getDigest, getDraft, getProposal, InvalidCursor, listDigests, listDrafts, listProposals, listSenders, listSubscriptions } from '../inbox/views.js';
 import type { DashboardDeps } from './server.js';
 
 // phase 5 m8 owns this module. it mounts the /api/inbox routes. docs/PHASE5-API.md gives the shapes and the errors.
@@ -148,6 +148,11 @@ export function mountInbox(server: Hono, deps: DashboardDeps): void {
     const { account: alias, state: draftState, before: id, limit: size } = parsed.value;
     return c.json(listDrafts(db, { ...(alias ? { account: alias } : {}), ...(draftState ? { state: draftState } : {}), ...(id !== undefined ? { before: id } : {}), limit: size }));
   });
+  server.get('/api/inbox/drafts/:id', (c) => {
+    const id = idOf(c);
+    const draft = id === undefined ? undefined : getDraft(db, id);
+    return draft ? c.json(draft) : notFound(c, 'draft');
+  });
 
   server.get('/api/inbox/proposals', (c) => {
     const parsed = query(c, proposalsQuery);
@@ -156,6 +161,13 @@ export function mountInbox(server: Hono, deps: DashboardDeps): void {
     settleApprovals(db, deps.clock());
     const { account: alias, state: proposalState, before: id, limit: size } = parsed.value;
     return c.json(listProposals(db, { ...(alias ? { account: alias } : {}), ...(proposalState ? { state: proposalState } : {}), ...(id !== undefined ? { before: id } : {}), limit: size }));
+  });
+  server.get('/api/inbox/proposals/:id', (c) => {
+    const id = idOf(c);
+    // a denied or expired approval declines or expires its proposal here too.
+    settleApprovals(db, deps.clock());
+    const proposal = id === undefined ? undefined : getProposal(db, id);
+    return proposal ? c.json(proposal) : notFound(c, 'proposal');
   });
 
   // each action on a sender or a subscription. the inbox object exists only with a google block, so without it the

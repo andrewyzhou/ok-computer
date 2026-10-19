@@ -236,8 +236,8 @@ function beforePage(db: Db, table: 'inbox_drafts' | 'inbox_proposals', query: In
   return db.prepare(`SELECT * FROM ${table} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ?`).all(...params, query.limit);
 }
 
-export function listDrafts(db: Db, query: InboxListQuery & { limit: number }): DraftView[] {
-  return beforePage(db, 'inbox_drafts', query).map((row) => ({
+function draftView(row: Row): DraftView {
+  return {
     id: Number(row.id),
     account: String(row.account),
     gmailDraftId: String(row.gmailDraftId),
@@ -250,11 +250,21 @@ export function listDrafts(db: Db, query: InboxListQuery & { limit: number }): D
     runId: text(row.runId),
     toolCallId: text(row.toolCallId),
     createdAt: String(row.createdAt),
-  }));
+  };
 }
 
-export function listProposals(db: Db, query: InboxListQuery & { limit: number }): CalendarProposalView[] {
-  return beforePage(db, 'inbox_proposals', query).map((row) => ({
+export function listDrafts(db: Db, query: InboxListQuery & { limit: number }): DraftView[] {
+  return beforePage(db, 'inbox_drafts', query).map(draftView);
+}
+
+// one draft by its id, in any state. a digest links to its draft, which may have left the first page of its tab.
+export function getDraft(db: Db, id: number): DraftView | undefined {
+  const row = db.prepare("SELECT * FROM inbox_drafts WHERE id = ? AND gmailDraftId != ''").get(id);
+  return row ? draftView(row) : undefined;
+}
+
+function proposalView(row: Row): CalendarProposalView {
+  return {
     id: Number(row.id),
     account: String(row.account),
     calendarId: String(row.calendarId),
@@ -273,5 +283,15 @@ export function listProposals(db: Db, query: InboxListQuery & { limit: number })
     runId: text(row.runId),
     createdAt: String(row.createdAt),
     resolvedAt: text(row.resolvedAt),
-  }));
+  };
+}
+
+export function listProposals(db: Db, query: InboxListQuery & { limit: number }): CalendarProposalView[] {
+  return beforePage(db, 'inbox_proposals', query).map(proposalView);
+}
+
+// one proposal by its id, in any state, for the link of a digest.
+export function getProposal(db: Db, id: number): CalendarProposalView | undefined {
+  const row = db.prepare('SELECT * FROM inbox_proposals WHERE id = ?').get(id);
+  return row ? proposalView(row) : undefined;
 }

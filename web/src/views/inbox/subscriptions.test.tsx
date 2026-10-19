@@ -70,9 +70,18 @@ describe('the subscriptions', () => {
     });
     fireEvent.click(rowOf('Streamly').getByRole('button', { name: 'Ignore Streamly' }));
     expect(await rowOf('Streamly').findByText('The subscription is ignored.')).toBeTruthy();
-    fireEvent.click(rowOf('Gym Plus').getByRole('button', { name: 'Ignore Gym Plus' }));
-    expect((await rowOf('Gym Plus').findByRole('alert')).textContent).toBe('the subscription is not active');
-    expect(calls.filter((call) => call.method === 'POST').map((call) => call.url)).toEqual(['/api/inbox/subscriptions/1/ignore', '/api/inbox/subscriptions/3/ignore']);
+    fireEvent.click(rowOf('Cloud Notes').getByRole('button', { name: 'Ignore Cloud Notes' }));
+    expect((await rowOf('Cloud Notes').findByRole('alert')).textContent).toBe('the subscription is not active');
+    expect(calls.filter((call) => call.method === 'POST').map((call) => call.url)).toEqual(['/api/inbox/subscriptions/1/ignore', '/api/inbox/subscriptions/2/ignore']);
+  });
+
+  it('offers no ignore while a cancel is pending, in the row and in the details', async () => {
+    await open();
+    expect(rowOf('Gym Plus').queryByRole('button', { name: 'Ignore Gym Plus' })).toBeNull();
+    fireEvent.click(rowOf('Gym Plus').getByText('Gym Plus'));
+    const panel = within(document.querySelector('.details') as HTMLElement);
+    await panel.findByRole('link', { name: 'task-1' });
+    expect(panel.queryByRole('button', { name: 'Ignore Gym Plus' })).toBeNull();
   });
 
   it('keeps the filters in the hash and sends them to the server', async () => {

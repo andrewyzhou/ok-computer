@@ -121,6 +121,18 @@ describe('the inbox reads', () => {
     expect(await get<SendersPage>(empty.dashboard, '/api/inbox/senders')).toEqual({ accounts: ['personal', 'school'], senders: [], nextCursor: null, lastSweep: null });
   });
 
+  it('reads one draft and one proposal by id in any state, for the links of a digest', async () => {
+    const { dashboard, db } = seed();
+    expect(await get<DraftView>(dashboard, '/api/inbox/drafts/4')).toMatchObject({ id: 4, state: 'sent_by_owner', to: ['club@school.example'] });
+    expect(await get<DraftView>(dashboard, '/api/inbox/drafts/3')).toMatchObject({ id: 3, state: 'discarded' });
+    expect(await get<CalendarProposalView>(dashboard, '/api/inbox/proposals/6')).toMatchObject({ id: 6, state: 'failed', error: 'the calendar answered 403' });
+    for (const path of ['/api/inbox/drafts/99', '/api/inbox/drafts/abc', '/api/inbox/drafts/0']) expect(await error(dashboard.request(path), 404)).toBe('draft not found');
+    for (const path of ['/api/inbox/proposals/99', '/api/inbox/proposals/-1']) expect(await error(dashboard.request(path), 404)).toBe('proposal not found');
+    // a denied approval declines its proposal before the read of that one proposal too.
+    resolveApproval(db, 3, 'deny', 'dashboard', NOW);
+    expect(await get<CalendarProposalView>(dashboard, '/api/inbox/proposals/1')).toMatchObject({ state: 'declined', resolvedAt: NOW.toISOString() });
+  });
+
   it('shows a sender as active again after its approval was denied', async () => {
     const { dashboard, db } = seed();
     const before = await get<SendersPage>(dashboard, '/api/inbox/senders?state=unsubscribe_pending');
@@ -144,7 +156,7 @@ describe('the inbox reads', () => {
 describe('the inbox auth', () => {
   it('needs the token when the dashboard has one', async () => {
     const { dashboard } = seed({ token: 'secret-token' });
-    for (const path of ['/api/inbox/senders', '/api/inbox/subscriptions', '/api/inbox/digests', '/api/inbox/digests/latest', '/api/inbox/drafts', '/api/inbox/proposals']) {
+    for (const path of ['/api/inbox/senders', '/api/inbox/subscriptions', '/api/inbox/digests', '/api/inbox/digests/latest', '/api/inbox/drafts', '/api/inbox/drafts/1', '/api/inbox/proposals', '/api/inbox/proposals/1']) {
       expect(await error(dashboard.request(path), 401)).toBe('unauthorized');
     }
     expect(await error(post(dashboard, '/api/inbox/senders/1/keep'), 401)).toBe('unauthorized');

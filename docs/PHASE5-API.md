@@ -64,17 +64,19 @@ The backend is chosen by `SecretStoreConfig` (`keyring`, `file` with mode 0600, 
 | Method | Path | Query / body | Response | Notes |
 |---|---|---|---|---|
 | GET | `/api/inbox/senders` | `SendersQuery`: `account`, `state`, `sort`, `cursor`, `limit` 1–200 (default 50) | `SendersPage` | Cursor paging. |
-| POST | `/api/inbox/senders/:id/unsubscribe` | `{}` | `InboxActionResponse` | Asks for approval. One-click (RFC 8058), or the https link. `409` when already unsubscribed or pending, or when the method is `none`. |
+| POST | `/api/inbox/senders/:id/unsubscribe` | `{}` | `InboxActionResponse` | Asks for approval. One-click (RFC 8058), or the https link. `409` when already unsubscribed or pending, when the method is `none` or the sender gives no link, and when the method is `mailto`, because ok computer never sends mail. The page turns the button off for each of these and says to unsubscribe by hand. |
 | POST | `/api/inbox/senders/:id/archive` | `InboxArchiveRequest` | `InboxActionResponse` | Asks for approval. |
-| POST | `/api/inbox/senders/:id/keep` | `{}` | `InboxActionResponse` (`done`) | Takes the sender out of later sweeps. |
+| POST | `/api/inbox/senders/:id/keep` | `{}` | `InboxActionResponse` (`done`) | Takes the sender out of later sweeps. `409` while an unsubscribe is pending and after it is done, because a keep would hide the record of the unsubscribe. |
 | GET | `/api/inbox/subscriptions` | `account`, `state` (`SubscriptionState`) | `SubscriptionsPage` | No paging, because the table is small. |
 | POST | `/api/inbox/subscriptions/:id/cancel` | `{}` | `InboxActionResponse` | Asks for approval, then opens the cancel link or a browser task. Each step is approved. `409` unless the state is `active`. |
-| POST | `/api/inbox/subscriptions/:id/ignore` | `{}` | `InboxActionResponse` (`done`) | |
+| POST | `/api/inbox/subscriptions/:id/ignore` | `{}` | `InboxActionResponse` (`done`) | `409` while the state is `cancel_pending`. The page shows ignore only on an `active` row. |
 | GET | `/api/inbox/digests` | `cursor`, `limit` 1–100 (default 30) | `DigestsPage` | Cursor paging. |
 | GET | `/api/inbox/digests/latest` | none | `InboxDigest` | `404 digest not found` when none exists yet. |
 | GET | `/api/inbox/digests/:id` | none | `InboxDigest` | `404`. |
 | GET | `/api/inbox/drafts` | `InboxListQuery` (`state` is a `DraftState`) | `DraftView[]` | Before paging by id. Drafts are never sent. |
+| GET | `/api/inbox/drafts/:id` | none | `DraftView` | One draft in any state, for the draft link of a digest. `404 draft not found`. |
 | GET | `/api/inbox/proposals` | `InboxListQuery` (`state` is a `ProposalState`) | `CalendarProposalView[]` | Before paging by id. The owner decides through the existing `POST /api/approvals/:id`, so there is no decision route here. |
+| GET | `/api/inbox/proposals/:id` | none | `CalendarProposalView` | One proposal in any state, for the proposal link of a digest. `404 proposal not found`. |
 | POST | `/api/inbox/run` | `InboxRunRequest` `{ job }` | `202 { started: true }` | Runs the automation of the job now, like `POST /api/automations/:id/run`. `404` when the job's automation is missing, `409` while a run of the job is still going. |
 
 An approval that an inbox action asks for shows on the Approvals page, in the stream (`approval`), and in Telegram, the same way as any approval.

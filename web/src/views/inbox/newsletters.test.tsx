@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedDashboard } from '../../../../test/seed';
 import { inMain, installEventSource, json, openApp, stubFetch, type StubRoutes } from '../../testing';
 import { setPrefs } from '../../shell/prefs';
-import { sendersPage, sendersPage2 } from './fixtures';
+import { keepBlock, unsubscribeBlock } from './Newsletters';
+import { senders as rows, sendersPage, sendersPage2 } from './fixtures';
 
 installEventSource();
 
@@ -95,6 +96,24 @@ describe('the newsletter senders', () => {
     expect(done.disabled).toBe(true);
     expect(done.title).toBe('This sender is already unsubscribed.');
     expect((rowOf('Weekly Deals').getByRole('button', { name: 'Unsubscribe from Weekly Deals' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('turns unsubscribe off for a mail method or a missing link, because the server refuses both', () => {
+    const mail = { ...rows[0]!, unsubscribe: { method: 'mailto' as const, url: 'mailto:leave@deals.example.com' } };
+    expect(unsubscribeBlock(mail)).toMatch(/unsubscribes by mail.*by hand/);
+    const noLink = { ...rows[0]!, unsubscribe: { method: 'one_click' as const, url: null } };
+    expect(unsubscribeBlock(noLink)).toMatch(/no unsubscribe link.*by hand/);
+    expect(unsubscribeBlock(rows[0]!)).toBeNull();
+  });
+
+  it('turns keep off with a reason for a sender that is kept, pending or unsubscribed', async () => {
+    await open();
+    const keep = (name: string) => rowOf(name).getByRole('button', { name: `Keep ${name}` }) as HTMLButtonElement;
+    expect(keep('Daily Brief')).toMatchObject({ disabled: true, title: 'This sender is already kept.' });
+    expect(keep('promo@shop.example.com')).toMatchObject({ disabled: true, title: 'This sender is unsubscribed, so it cannot be kept.' });
+    expect(keep('Weekly Deals').disabled).toBe(false);
+    expect(keepBlock(rows[4]!)).toBe('The unsubscribe of this sender is under way, so it cannot be kept now.');
+    expect(keepBlock(rows[5]!)).toBeNull();
   });
 
   it('archives the old mail of a sender from the drawer form', async () => {

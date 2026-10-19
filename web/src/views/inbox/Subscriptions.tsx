@@ -75,7 +75,7 @@ export function SubscriptionsPage({ query }: RouteProps) {
   const base = (id: number) => `/api/inbox/subscriptions/${id}`;
 
   // the actions show in the row on a wide screen, and in the details panel of the selected row on each screen, so a
-  // phone reaches them too.
+  // phone reaches them too. a cancel that is under way cannot be ignored, so both actions show only on an active row.
   const actionsFor = (each: SubscriptionRow) => (
     <div className="inbox-actions">
       <div className="inbox-action-buttons">
@@ -84,7 +84,7 @@ export function SubscriptionsPage({ query }: RouteProps) {
             Cancel
           </Button>
         ) : null}
-        {each.state !== 'ignored' && each.state !== 'cancelled' ? (
+        {each.state === 'active' ? (
           <Button size="sm" variant="ghost" disabled={answers[each.id]?.busy} aria-label={`Ignore ${each.merchant}`} onClick={() => void act(each.id, `${base(each.id)}/ignore`)}>
             Ignore
           </Button>
@@ -168,7 +168,7 @@ export function SubscriptionsPage({ query }: RouteProps) {
       )}
       {row ? (
         <DetailsPanel title={row.merchant} openKey={row.id} onClose={() => setSelected(null)}>
-          {row.state === 'active' || row.state === 'cancel_pending' ? <div className="inbox-detail-actions">{actionsFor(row)}</div> : null}
+          {row.state === 'active' ? <div className="inbox-detail-actions">{actionsFor(row)}</div> : null}
           <SubscriptionFacts row={row} approvals={approvals} onDecided={reload} />
         </DetailsPanel>
       ) : (

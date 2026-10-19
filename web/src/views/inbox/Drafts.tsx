@@ -1,4 +1,5 @@
 import type { DraftState, DraftView } from '../../../../src/dashboard/types';
+import { useApi } from '../../api';
 import { time } from '../../format';
 import type { RouteProps } from '../../routes';
 import { DetailsPanel, EmptyState, Facts, FilterBar, Page, Skeleton, Table, Tabs, type Column, type Tone } from '../../ui';
@@ -59,7 +60,12 @@ export function DraftsPage({ query }: RouteProps) {
     last.length < LIMIT ? null : withQuery('/api/inbox/drafts', { ...filters, before: last.at(-1)!.id }),
   );
   const drafts = paged.pages.flat();
-  const draft = selectedId ? drafts.find((each) => String(each.id) === selectedId) : undefined;
+  const listed = selectedId ? drafts.find((each) => String(each.id) === selectedId) : undefined;
+  // a link from the digest names a draft that may be in another tab or older than the loaded rows, so the page asks
+  // for that one draft by its id when the list does not have it.
+  const lookup = selectedId && /^[1-9]\d{0,15}$/.test(selectedId) && paged.data !== undefined && !listed ? `/api/inbox/drafts/${selectedId}` : null;
+  const single = useApi<DraftView>(lookup);
+  const draft = listed ?? single.data;
   const select = (id: string | null) => setHashQuery(PATH, query, { id });
 
   return (
@@ -100,8 +106,12 @@ export function DraftsPage({ query }: RouteProps) {
         </DetailsPanel>
       ) : (
         <DetailsPanel title="Drafts" {...(selectedId ? { onClose: () => select(null) } : {})}>
-          {selectedId && paged.data !== undefined ? (
-            <p className="muted">Draft #{selectedId} is not in this list. It may be in another tab, or older than the rows that are loaded.</p>
+          {selectedId && paged.data !== undefined && (lookup === null || /not found/i.test(single.error ?? '')) ? (
+            <p className="muted">Draft #{selectedId} was not found.</p>
+          ) : selectedId && single.error !== undefined ? (
+            <p className="error-text">Could not load draft #{selectedId}: {single.error}</p>
+          ) : selectedId && paged.data !== undefined ? (
+            <Skeleton lines={3} />
           ) : (
             <p className="muted">Select a draft to read its text.</p>
           )}

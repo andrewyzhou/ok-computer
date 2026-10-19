@@ -83,6 +83,26 @@ describe('the calendar proposals', () => {
     expect(await panel.findByText('Your October statement')).toBeTruthy();
   });
 
+  it('loads the proposal of ?id= by its id when it is in another tab, as for a link from a digest', async () => {
+    const calls = stubFetch(seeded.dashboard, {
+      'GET /api/inbox/proposals': () => waiting(),
+      'GET /api/inbox/proposals/:id': () => proposal(30, { title: 'Pay the water bill', state: 'declined', description: 'The owner said no.' }),
+    });
+    openApp('#/inbox/proposals?id=30');
+    await inMain().findByTestId('proposal-12');
+    const panel = within(document.querySelector('.details') as HTMLElement);
+    expect(await panel.findByText('The owner said no.')).toBeTruthy();
+    expect(calls.some((call) => call.url === '/api/inbox/proposals/30')).toBe(true);
+  });
+
+  it('says so when no proposal has the id of ?id=', async () => {
+    stubFetch(seeded.dashboard, { 'GET /api/inbox/proposals': () => waiting() });
+    openApp('#/inbox/proposals?id=99');
+    await inMain().findByTestId('proposal-12');
+    const panel = within(document.querySelector('.details') as HTMLElement);
+    expect(await panel.findByText('Proposal #99 was not found.')).toBeTruthy();
+  });
+
   it('shows an empty state when no proposal waits', async () => {
     stubFetch(seeded.dashboard, { 'GET /api/inbox/proposals': () => [] });
     openApp('#/inbox/proposals');

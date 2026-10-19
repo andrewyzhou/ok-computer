@@ -67,11 +67,23 @@ describe('the drafts', () => {
     expect(await details().findByText(/Tuesday or Wednesday/)).toBeTruthy();
   });
 
-  it('says so when the draft of ?id= is not in the list', async () => {
+  it('loads the draft of ?id= by its id when the list does not have it, as for a sent draft that a digest links to', async () => {
+    const calls = stubFetch(seeded.dashboard, {
+      'GET /api/inbox/drafts': () => drafts,
+      'GET /api/inbox/drafts/:id': () => draft(7, { subject: 'Re: an answered question', state: 'sent_by_owner', body: 'I sent this one myself.' }),
+    });
+    openApp('#/inbox/drafts?id=7');
+    await inMain().findByText('Re: Dinner next week?');
+    expect(await details().findByText('I sent this one myself.')).toBeTruthy();
+    expect(details().getByText('sent by you')).toBeTruthy();
+    expect(calls.some((call) => call.url === '/api/inbox/drafts/7')).toBe(true);
+  });
+
+  it('says so when no draft has the id of ?id=', async () => {
     stubFetch(seeded.dashboard, { 'GET /api/inbox/drafts': () => drafts });
     openApp('#/inbox/drafts?id=7');
     await inMain().findByText('Re: Dinner next week?');
-    expect(await details().findByText(/Draft #7 is not in this list/)).toBeTruthy();
+    expect(await details().findByText('Draft #7 was not found.')).toBeTruthy();
   });
 
   it('shows an empty state for a tab with no drafts', async () => {
