@@ -45,6 +45,36 @@ function ownerOnlyAcl(file: string) {
   execFileSync('icacls', [file, '/inheritance:r', '/grant:r', `${user}:F`], { stdio: 'ignore', windowsHide: true });
 }
 
+// windows refuses a rename onto a file that another program holds for a moment, for example a virus scanner or the
+// search indexer, with EPERM, EBUSY or EACCES. the rename then tries again a few times with a short wait, and gives up
+// after about a second, so a write never waits for ever.
+const RENAME_WAITS_MS = [10, 20, 40, 80, 160, 320, 400];
+const isBusy = (err: unknown) => ['EPERM', 'EBUSY', 'EACCES'].includes((err as NodeJS.ErrnoException | null)?.code ?? '');
+
+export async function replace(from: string, to: string, windows: boolean, rename: (from: string, to: string) => void = renameSync): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      rename(from, to);
+      return;
+    } catch (err) {
+      const wait = RENAME_WAITS_MS[attempt];
+      if (!windows || wait === undefined || !isBusy(err)) throw err;
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+}
+
+// the stores of one process that share a file take turns, also when a rename above waits. without this, a second store
+// could read the file while the first one waits, and its write would drop the value of the first.
+const turns = new Map<string, Promise<unknown>>();
+function inTurn(file: string, work: () => Promise<void>): Promise<void> {
+  const next = (turns.get(file) ?? Promise.resolve()).then(work);
+  const tail = next.catch(() => {});
+  turns.set(file, tail);
+  void tail.then(() => turns.get(file) === tail && turns.delete(file));
+  return next;
+}
+
 export interface FileSecretStoreDeps {
   // the tests try the windows path on other systems.
   platform?: NodeJS.Platform;
@@ -108,7 +138,7 @@ export function createFileSecretStore(path: string, deps: FileSecretStoreDeps = 
 
   // the new contents go to a temporary file with mode 0600 first. the rename then replaces the old file in one
   // step, so a reader sees the old map or the new map, never a mix.
-  const write = (secrets: Map<string, string>) => {
+  const write = async (secrets: Map<string, string>) => {
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
     const tmp = `${file}.${randomBytes(6).toString('hex')}.tmp`;
     const body: SecretFile = { version: 1, secrets: Object.fromEntries(secrets) };
@@ -123,7 +153,7 @@ export function createFileSecretStore(path: string, deps: FileSecretStoreDeps = 
       } finally {
         closeSync(fd);
       }
-      renameSync(tmp, file);
+      await replace(tmp, file, windows);
     } catch (err) {
       rmSync(tmp, { force: true });
       if (err instanceof CredentialStoreError) throw err;
@@ -131,17 +161,42 @@ export function createFileSecretStore(path: string, deps: FileSecretStoreDeps = 
     }
   };
 
-  // the writes of this process run one after another. each one reads the map again, so two sets at the same time
-  // both land.
-  let chain: Promise<unknown> = Promise.resolve();
-  const queue = (change: (secrets: Map<string, string>) => boolean): Promise<void> => {
-    const next = chain.then(() => {
-      const secrets = read() ?? new Map<string, string>();
-      if (change(secrets)) write(secrets);
-    });
-    chain = next.catch(() => {});
-    return next;
+  // the writes of this process run one after another. each batch reads the map again, so two sets at the same time
+  // both land. the changes that wait for a write go into the next write together: on windows each write starts
+  // icacls, and one write for each of 100 sets took more than 5 s.
+  let pending: Array<{ change: (secrets: Map<string, string>) => boolean; done: () => void; fail: (err: unknown) => void }> = [];
+  let draining = false;
+  const drain = async () => {
+    draining = true;
+    try {
+      while (pending.length) {
+        const batch = pending;
+        pending = [];
+        try {
+          await inTurn(windows ? file.toLowerCase() : file, async () => {
+            const secrets = read() ?? new Map<string, string>();
+            let changed = false;
+            for (const each of batch) changed = each.change(secrets) || changed;
+            if (changed) await write(secrets);
+          });
+          for (const each of batch) each.done();
+        } catch (err) {
+          for (const each of batch) each.fail(err);
+        }
+      }
+    } finally {
+      draining = false;
+    }
   };
+  const queue = (change: (secrets: Map<string, string>) => boolean): Promise<void> =>
+    new Promise((done, fail) => {
+      pending.push({ change, done, fail });
+      // the drain starts once the code that runs now is done, so the sets and deletes that it makes share a write.
+      if (!draining) {
+        draining = true;
+        queueMicrotask(() => void drain());
+      }
+    });
 
   return {
     async get(ref) {

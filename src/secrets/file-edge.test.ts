@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CredentialStoreError } from '../integrations/secrets.js';
-import { createFileSecretStore } from './file.js';
+import { createFileSecretStore, replace } from './file.js';
 import { createSecretVault } from './index.js';
 
 // these tests try to break the file backend: refs that look like object keys, files of a wrong shape, many writes at
@@ -214,4 +214,53 @@ describe('the file secret store on windows', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('writes the sets and deletes that come at the same time together, so icacls does not run once for each', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'okc-secret-acl-'));
+    try {
+      const path = join(root, 'secrets.json');
+      const seen: string[] = [];
+      const store = createFileSecretStore(path, { platform: 'win32', protect: (file) => seen.push(file) });
+      await Promise.all(Array.from({ length: 50 }, (_, i) => store.set(`ref:${i}`, `value-number-${i}-abcdef`)));
+      await Promise.all(Array.from({ length: 50 }, (_, i) => (i % 2 ? store.delete(`ref:${i}`) : store.set(`ref:${i}`, `again-${i}-abcdef`))));
+      for (let i = 0; i < 50; i++) expect(await store.get(`ref:${i}`)).toBe(i % 2 ? undefined : `again-${i}-abcdef`);
+      // one temporary file for each of the two rounds, and the file itself once at its first read.
+      expect(seen.filter((file) => file.endsWith('.tmp'))).toHaveLength(2);
+      expect(readdirSync(root)).toEqual(['secrets.json']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('tries a rename again while another program holds the file, and gives up after a short while', async () => {
+    const busy = (code: string) => Object.assign(new Error(`${code}: the file is in use`), { code });
+    let calls = 0;
+    await replace('a.tmp', 'a', true, () => {
+      if (++calls < 3) throw busy(calls === 1 ? 'EPERM' : 'EBUSY');
+    });
+    expect(calls).toBe(3);
+
+    calls = 0;
+    const started = Date.now();
+    const err = await replace('a.tmp', 'a', true, () => {
+      calls++;
+      throw busy('EACCES');
+    }).catch((caught: unknown) => caught);
+    expect((err as NodeJS.ErrnoException).code).toBe('EACCES');
+    expect(calls).toBe(8);
+    expect(Date.now() - started).toBeLessThan(5_000);
+
+    // another error, or the same error on another system, fails at once.
+    for (const [code, windows] of [['ENOENT', true], ['EPERM', false]] as const) {
+      calls = 0;
+      await expect(
+        replace('a.tmp', 'a', windows, () => {
+          calls++;
+          throw busy(code);
+        }),
+      ).rejects.toMatchObject({ code });
+      expect(calls).toBe(1);
+    }
+  });
 });
+
