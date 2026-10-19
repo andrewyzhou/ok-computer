@@ -547,7 +547,8 @@ export interface Span {
   endAt: string | null;
   startMs: number;
   endMs: number | null;
-  // a word from the row: the run status, the tool outcome, the approval status, an http status or an exit code.
+  // a word from the row: the run status, the tool outcome (the outcomeOf word of the run detail), the approval status,
+  // an http status or an exit code.
   status: string | null;
   error: string | null;
   costUsd: number | null;

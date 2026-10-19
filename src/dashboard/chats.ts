@@ -271,21 +271,34 @@ function deliveredText(text: string, guardNote: string): string {
   return withoutLinks(text, dataUrls(text).map((each) => each.url));
 }
 
+// the model gets outside text inside an untrusted wrapper. the chat shows the text without the tags, and the stored
+// event keeps them. the wrapper turns each closing tag in the outside text into square brackets, so a closing tag here
+// is always the end of a wrapper.
+const WRAPPER_TAGS = /<untrusted source="[^"]*">\n?|\n?<\/untrusted>/g;
+
+export function withoutWrapper(text: string): string {
+  return text.replace(WRAPPER_TAGS, '');
+}
+
 function toMessage(row: Row): ChatMessage {
   const type = String(row.type);
-  const text = str(row.text) ?? '';
+  const raw = str(row.text) ?? '';
+  const text = withoutWrapper(raw);
   const base = { id: Number(row.id), runId: str(row.runId), channel: null, guarded: false, approvalId: null, createdAt: String(row.createdAt) };
   switch (type) {
     case 'user_message':
-      return { ...base, role: 'owner', channel: str(row.channel), text };
+      return { ...base, role: 'owner', channel: str(row.channel), text: raw };
     case 'assistant_message': {
       const guardNote = str(row.guardNote);
+      const approvalId = num(row.approvalId);
+      // a turn that only asked for an approval has no text, so it gets a short label, and the page draws the card under it.
+      const shown = guardNote === null ? text : deliveredText(text, guardNote);
       return {
         ...base,
         role: 'agent',
-        text: guardNote === null ? text : deliveredText(text, guardNote),
+        text: approvalId !== null && shown.trim() === '' ? `Asked for approval #${approvalId}.` : shown,
         guarded: guardNote !== null,
-        approvalId: num(row.approvalId),
+        approvalId,
       };
     }
     case 'note':

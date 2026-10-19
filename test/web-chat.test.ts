@@ -4,7 +4,15 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createTelegramChannel } from '../src/channels/telegram.js';
 import { createWebChannel } from '../src/channels/web.js';
 import { createDashboard } from '../src/dashboard/server.js';
-import type { ChatSendResponse, ChatStreamEvent, ChatStopResponse } from '../src/dashboard/types.js';
+import type {
+  ChatMessagesPage,
+  ChatSendResponse,
+  ChatsPage,
+  ChatStreamEvent,
+  ChatStopResponse,
+  RunSpans,
+  SearchResults,
+} from '../src/dashboard/types.js';
 import { listEvents } from '../src/events/log.js';
 import { parseIntegrations } from '../src/integrations/config.js';
 import { fakeResponse, textStep, toolStep, type FakeStep } from '../src/models/fake.js';
@@ -429,6 +437,49 @@ describe('the web chat', () => {
       expect(JSON.stringify(t.model.calls)).not.toContain(data);
       expect(JSON.stringify(listEvents(t.db, 'main'))).not.toContain(data);
     }
+  });
+
+  it('links an approved call to its approval in the spans, finds its output in the search, and shows the chat without wrapper tags', async () => {
+    const t = await setup([call('c1', 'notes__add_note', { note: 'descale the kettle' }), textStep('It waits for you.')], { integrations: true });
+    await expect.poll(() => t.app.integrations.status()[0]!.state.status).toBe('connected');
+    const reader = await t.stream();
+    const { turnId } = await t.send('add a note about the kettle');
+    await waitFor(() => hasState(reader, turnId, 'done'), 'the done state');
+    await t.app.idle();
+    const approve = of(reader.events, 'reply')[0]!.buttons.flat().find((button) => button.data.startsWith('approval:1:approve.'));
+    expect((await t.post('/api/chat/button', { data: approve!.data })).status).toBe(200);
+    await waitFor(() => of(reader.events, 'reply').length === 3, 'the reply to the button');
+    await t.app.idle();
+    // the model got the result in the wrapper. the stored event keeps it.
+    const note = t.rows("SELECT json_extract(payload, '$.text') AS text FROM events WHERE type = 'system_event' AND json_extract(payload, '$.text') LIKE 'The owner approved #1%'");
+    expect(note).toEqual([{ text: expect.stringContaining('<untrusted source="mcp:notes">') }]);
+
+    // the waterfall reads ask, approval, run.
+    const { runId, asked, ran } = t.rows(
+      `SELECT runId, (SELECT id FROM tool_calls WHERE toolCallId = 'c1') AS asked, (SELECT id FROM tool_calls WHERE toolCallId = 'approval-1') AS ran
+       FROM approvals WHERE id = 1`,
+    )[0] as { runId: string; asked: number; ran: number };
+    const spans = ((await (await t.dashboard.request(`/api/runs/${runId}/spans`)).json()) as RunSpans).spans;
+    const parent = (id: string) => spans.find((span) => span.id === id)?.parentId;
+    expect(parent('approval:1')).toBe(`tool:${asked}`);
+    expect(parent(`tool:${ran}`)).toBe('approval:1');
+    expect(spans.find((span) => span.id === `tool:${asked}`)!.status).toBe('approved');
+    expect(spans.find((span) => span.id === `tool:${ran}`)!.status).toBe('ran');
+    expect(spans.find((span) => span.kind === 'mcp')!.parentId).toBe(`tool:${ran}`);
+
+    // the output of the approved call is a tools hit, and no snippet shows the wrapper tags.
+    const found = (await (await t.dashboard.request('/api/search?q=kettle')).json()) as SearchResults;
+    const group = (scope: string) => found.groups.find((each) => each.scope === scope)!.hits;
+    expect(group('tools').map((hit) => hit.id)).toContain(String(ran));
+    for (const each of found.groups) for (const hit of each.hits) expect(hit.snippet).not.toContain('untrusted');
+
+    // the chat shows the result without the tags, and the turn that asked for the approval has a label.
+    const { chats } = (await (await t.dashboard.request('/api/chats')).json()) as ChatsPage;
+    const main = chats.find((chat) => chat.kind === 'main')!;
+    const { messages } = (await (await t.dashboard.request(`/api/chats/${encodeURIComponent(main.key)}/messages`)).json()) as ChatMessagesPage;
+    for (const message of messages) expect(message.text).not.toContain('untrusted');
+    expect(messages.find((message) => message.approvalId === 1)).toMatchObject({ role: 'agent', text: 'Asked for approval #1.' });
+    expect(messages.find((message) => message.text.startsWith('The owner approved #1'))!.text).toContain('descale the kettle');
   });
 
   it('refuses a button without the mark of the server, also while the real card is out, and the approval stays pending', async () => {

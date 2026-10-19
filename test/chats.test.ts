@@ -267,7 +267,8 @@ describe('the messages of a chat', () => {
 
     const page = await get<ChatMessagesPage>(dashboard, messagesPath(`main@${resetEventId}`));
     const card = page.messages.find((message) => message.id === ask.id)!;
-    expect(card).toMatchObject({ role: 'agent', text: '', approvalId: ids.approvalId, guarded: false });
+    // the turn has no text of its own, so it gets a short label for the card.
+    expect(card).toMatchObject({ role: 'agent', text: `Asked for approval #${ids.approvalId}.`, approvalId: ids.approvalId, guarded: false });
     expect(page.messages.some((message) => message.id === quiet.id)).toBe(false);
     expect(page.messages.at(-1)).toMatchObject({ role: 'agent', text: 'Bought it.', approvalId: null });
     expect(page.chat.runs).toBe(2);
