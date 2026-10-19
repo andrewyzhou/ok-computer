@@ -33,6 +33,9 @@ describe('migrate', () => {
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
     expect(tables).toContain('t');
     expect(tables).not.toContain('u');
+    // the files before the failed one stay applied, so the next start goes on from there.
+    expect(db.prepare('SELECT name FROM migrations').all().map((r) => r.name)).toEqual(['001_a.sql']);
+    expect(db.isTransaction).toBe(false);
   });
 });
 
