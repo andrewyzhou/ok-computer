@@ -1,7 +1,7 @@
 import type { SecretStoreConfig, SecretStoreView } from '../dashboard/types.js';
-import { createKeyringStore, type SecretStore } from '../integrations/secrets.js';
+import { createKeyringStore, CredentialStoreError, type SecretStore } from '../integrations/secrets.js';
 import { createAwsSecretStore, type SecretsManagerPort } from './aws.js';
-import { DEFAULT_AWS_PREFIX } from './config.js';
+import { DEFAULT_AWS_PREFIX, PROBE_REF } from './config.js';
 import { createFileSecretStore } from './file.js';
 
 // a store that can say if it answers. check rejects when the backend cannot be reached or refuses the access.
@@ -24,11 +24,27 @@ export interface SecretVaultDeps {
   awsClient?: SecretsManagerPort;
 }
 
-// the keyring has no request that only checks the access, so its check reads a ref that nothing writes.
-export const PROBE_REF = 'okc.probe';
+// the keyring has no request that only checks the access, so its check reads a ref that nothing writes. the constant
+// lives in config.ts, so the backends can import it without an import cycle.
+export { PROBE_REF };
 
-// TODO(m7 secrets): make sure that each backend gives each value that it reads or writes to the redactor, as the
-// keyring store does, and that the error text of view() is one sentence that the page can show.
+// the page shows this text when a backend fails with an error that this code did not write. such a text can hold
+// a ref or a name, so the page never shows it.
+const UNKNOWN_FAILURE: Record<SecretStoreConfig['backend'], string> = {
+  keyring: 'the credential store of the os did not answer.',
+  file: 'the secret file cannot be used.',
+  aws: 'aws secrets manager did not answer.',
+};
+
+// each backend gives each value that it reads or writes to the redactor. the error texts of the file and aws
+// backends name a path or a region only, so view() shows them. any other text gives a fixed sentence.
+function viewError(backend: SecretStoreConfig['backend'], err: unknown): string {
+  if (backend !== 'keyring' && err instanceof CredentialStoreError && !err.message.includes(PROBE_REF)) {
+    return err.message;
+  }
+  return UNKNOWN_FAILURE[backend];
+}
+
 export function createSecretVault(config: SecretStoreConfig, deps: SecretVaultDeps = {}): SecretVault {
   const { store, detail } = open(config, deps);
   return {
@@ -40,7 +56,7 @@ export function createSecretVault(config: SecretStoreConfig, deps: SecretVaultDe
         await store.check();
         return { backend: config.backend, detail, ok: true, error: null };
       } catch (err) {
-        return { backend: config.backend, detail, ok: false, error: err instanceof Error ? err.message : String(err) };
+        return { backend: config.backend, detail, ok: false, error: viewError(config.backend, err) };
       }
     },
   };
