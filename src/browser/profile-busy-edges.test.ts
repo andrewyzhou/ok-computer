@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { join, posix } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { chromePaths } from './login.js';
 import { profileBusy, staleLockHint } from './worker.js';
@@ -71,16 +71,18 @@ describe.skipIf(process.platform === 'win32')('the profile lock of chrome on mac
 
 describe('the places of chrome, at their edges', () => {
   it('gives only absolute places on macos and linux', () => {
-    for (const each of chromePaths('darwin', { HOME: '/Users/owner' })) expect(isAbsolute(each), each).toBe(true);
-    for (const each of chromePaths('linux', {})) expect(isAbsolute(each), each).toBe(true);
+    for (const each of chromePaths('darwin', { HOME: '/Users/owner' })) expect(posix.isAbsolute(each), each).toBe(true);
+    for (const each of chromePaths('linux', {})) expect(posix.isAbsolute(each), each).toBe(true);
   });
 
   it('gives only absolute places on macos when HOME is not set', () => {
-    for (const each of chromePaths('darwin', {})) expect(isAbsolute(each), each).toBe(true);
+    for (const each of chromePaths('darwin', {})) expect(posix.isAbsolute(each), each).toBe(true);
   });
 
   it('gives only absolute places on windows when LOCALAPPDATA is not set', () => {
-    for (const each of chromePaths('win32', {})) expect(each.startsWith('C:/'), each).toBe(true);
+    // a path from the root of a drive, with the separator of windows. a path like \foo has no drive, and windows
+    // would read it against the drive of the working folder.
+    for (const each of chromePaths('win32', {})) expect(each, each).toMatch(/^[A-Za-z]:\\/);
   });
 
   it('looks in the system folder first on macos, then in the folder of the owner', () => {
