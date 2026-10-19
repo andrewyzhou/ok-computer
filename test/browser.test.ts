@@ -1025,8 +1025,8 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
   });
 
   // the start of a tab had no time limit, so a chrome that gave no answer held each later open of every session (r8
-  // probe).
-  it('refuses an open when chrome gives no new tab in time, and the next open starts chrome again', async () => {
+  // probe). the test starts chrome four times, which took 20 to 70 s on a busy machine, so it has more time.
+  it('refuses an open when chrome gives no new tab in time, and the next open starts chrome again', { timeout: 120_000 }, async () => {
     const h = harness();
     await h.run('browser_open', { url: site.url('shop.test') });
     await h.run('browser_close', {});
