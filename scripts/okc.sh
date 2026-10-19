@@ -167,7 +167,9 @@ agent_data_path() {
     try { config = JSON.parse(require("node:fs").readFileSync(file, "utf8")); } catch { process.exit(2); }
     const configured = config && config.paths && config.paths.data;
     if (typeof configured === "string" && configured) console.log(require("node:path").resolve(root, configured));'
-  if found="$(node -e "$script" "$root" "$config" 2>/dev/null)"; then
+  local node
+  node="$(find_node)"
+  if found="$("$node" -e "$script" "$root" "$config" 2>/dev/null)"; then
     if [[ -n "$found" ]]; then agent_data="$found"; fi
   else
     echo "okc.config.json is not valid json, so the stop token is read from $data."
@@ -200,17 +202,46 @@ run_build() {
 # seconds, so the stamp counts as newer only from the next second on.
 code_is_newer() {
   build_is_old && return 0
-  local started
+  local started node
   started="$(LC_ALL=C ps -p "$1" -o lstart= 2>/dev/null)" || return 1
-  node -e '
+  node="$(find_node)" || return 1
+  "$node" -e '
     const [started, stamp] = process.argv.slice(1);
     const built = Math.floor(require("node:fs").statSync(stamp).mtimeMs / 1000) * 1000;
     process.exit(built > Date.parse(started) ? 0 : 1);' "$started" "$stamp"
 }
 
+# OKC_NODE names the node of the agent, so a machine with several versions can pick one that is not first on the path.
+# the errors go to stderr, because the callers read the path from stdout.
 find_node() {
-  has node || fail 'node is not on the path.'
-  command -v node
+  local found
+  if [[ -n "${OKC_NODE:-}" ]]; then
+    [[ -f "$OKC_NODE" && -x "$OKC_NODE" ]] || fail "OKC_NODE is $OKC_NODE, and that is not a program that can run." >&2
+    found="$OKC_NODE"
+  else
+    has node || fail 'node is not on the path. put it on the path or set OKC_NODE to its full path.' >&2
+    found="$(command -v node)"
+  fi
+  # a relative entry on the path gives a relative node, and launchd cannot start that. only the folder is made
+  # absolute, so a link such as /opt/homebrew/bin/node stays a link, and a brew cleanup of the old version does not
+  # break the login agent.
+  if [[ "$found" != /* ]]; then found="$(cd "$(dirname "$found")" && pwd)/$(basename "$found")"; fi
+  echo "$found"
+}
+
+# the same range as engines in package.json. the tests check that the two agree.
+node_major_min=24
+node_major_max=26
+
+# a brew upgrade can move the node of the path to a version outside engines, so the install checks the version
+# before it writes the login agent.
+check_node_version() {
+  local version major
+  version="$("$1" -p 'process.versions.node' 2>/dev/null)" || fail "$1 does not run."
+  major="${version%%.*}"
+  if [[ ! "$major" =~ ^[0-9]+$ ]] || ((major < node_major_min || major > node_major_max)); then
+    fail "$1 is node $version, and ok computer needs node $node_major_min to $node_major_max. set OKC_NODE to the full path of a node in that range."
+  fi
 }
 
 start_agent() {
@@ -381,10 +412,12 @@ browser_login() {
   fi
   # a build replaces the files of a running agent, and its dashboard then serves a page that is newer than its api.
   if ! agent_pid && build_is_old; then run_build; fi
+  local node
+  node="$(find_node)"
   if [[ -n "${2:-}" ]]; then
-    (cd "$root" && node dist/browser/login.js "$2")
+    (cd "$root" && "$node" dist/browser/login.js "$2")
   else
-    (cd "$root" && node dist/browser/login.js)
+    (cd "$root" && "$node" dist/browser/login.js)
   fi
 }
 
@@ -412,14 +445,16 @@ install_agent() {
     echo 'installed: okc command. linux has no login agent yet, so run okc start after you sign in.'
     return 0
   fi
+  # the node check comes first, so a node outside engines leaves the running agent and its login agent as they are.
+  local node logs path
+  node="$(find_node)"
+  check_node_version "$node"
   # a second agent cannot hold the data folder next to the one that launchd starts. an agent of launchd also gets the
   # graceful stop first, because the bootout below would stop it at once.
   if agent_pid; then stop_agent; fi
   # launchd starts dist/main.js at once, because of RunAtLoad.
   if build_is_old; then run_build; fi
   link_command
-  local node logs path
-  node="$(find_node)"
   logs="$data/logs"
   mkdir -p "$logs" "$(dirname "$plist")"
   path="$(dirname "$node"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"

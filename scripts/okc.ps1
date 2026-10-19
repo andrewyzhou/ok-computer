@@ -149,6 +149,18 @@ function Show-Logs {
   if ($latest) { Get-Content $latest.FullName -Tail 40 -Wait } else { Write-Host 'no logs yet.' }
 }
 
+# OKC_NODE names the node of the agent, as in okc.sh and run.ps1, so a machine with several versions can pick one that
+# is not first on the path.
+function Find-Node {
+  if ($env:OKC_NODE) {
+    if (-not (Test-Path -LiteralPath $env:OKC_NODE -PathType Leaf)) { throw "OKC_NODE is $($env:OKC_NODE), and that is not a program that can run." }
+    return (Resolve-Path -LiteralPath $env:OKC_NODE).ProviderPath
+  }
+  $found = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $found) { throw 'node is not on the path. put it on the path or set OKC_NODE to its full path.' }
+  return $found.Source
+}
+
 # the owner signs in to sites in the agent's own chrome profile. the window is plain chrome, and the agent cannot use
 # the profile while it is open.
 function Start-BrowserLogin {
@@ -158,7 +170,8 @@ function Start-BrowserLogin {
     # a build replaces the files of a running agent, and its dashboard then serves a page that is newer than its api.
     # an agent can also run without its supervisor, so both must be absent.
     if (-not (Get-Supervisor) -and -not (Get-AgentProcess) -and (Test-BuildIsOld)) { Invoke-Build }
-    if ($Target) { node dist/browser/login.js $Target } else { node dist/browser/login.js }
+    $node = Find-Node
+    if ($Target) { & $node dist/browser/login.js $Target } else { & $node dist/browser/login.js }
   }
   finally { Pop-Location }
 }

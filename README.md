@@ -20,7 +20,7 @@ It runs on your machine, so your data stays with you. Its persona files (`AGENTS
 
 ## Running it
 
-Node 24 to 26 runs the app (`.nvmrc` names 24). The app runs on macOS, Windows and Linux.
+Node 24 to 26 runs the app (`.nvmrc` names 24). The app runs on macOS, Windows and Linux. The `okc` command uses the `node` on your `PATH`. To use another one, set `OKC_NODE` to its full path, for example `OKC_NODE=~/.local/share/node24/current/bin/node okc install`. On macOS, `okc install` refuses a node outside 24 to 26 and writes the chosen path into the LaunchAgent, so run it again after a Node upgrade. On Windows the logon task sees `OKC_NODE` only as a user environment variable, for example from `setx OKC_NODE C:\path\to\node.exe`.
 
 ### On Windows
 
