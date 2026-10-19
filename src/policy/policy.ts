@@ -3,7 +3,9 @@ import { z } from 'zod';
 import type { Result } from '../config/load.js';
 import { headOf } from '../text.js';
 
-export type Risk = 'read' | 'write' | 'external';
+// exec runs code that the model wrote in the code sandbox (src/sandbox). the container has no network, so the call
+// cannot send data off the pc, but the code can change the scratch files and use the cpu, so a reviewer checks it.
+export type Risk = 'read' | 'write' | 'exec' | 'external';
 export type Decision = 'allow' | 'review' | 'approve' | 'deny';
 
 const ruleSchema = z.object({
@@ -123,6 +125,8 @@ function decideAny(input: PolicyInput, rules: readonly Rule[]): Verdict {
       return { decision: 'allow', rule: 'risk:read', reason: `${input.tool} only reads` };
     case 'write':
       return { decision: 'review', rule: 'risk:write', reason: `${input.tool} changes data, so a reviewer checks it first` };
+    case 'exec':
+      return { decision: 'review', rule: 'risk:exec', reason: `${input.tool} runs code in the sandbox, so a reviewer checks it first` };
     case 'external':
       return {
         decision: 'approve',

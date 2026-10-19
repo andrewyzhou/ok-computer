@@ -20,6 +20,7 @@ describe('policy decisions', () => {
   it('decides by risk when no rule matches', () => {
     expect(decide(call({ risk: 'read' }), [])).toMatchObject({ decision: 'allow', rule: 'risk:read' });
     expect(decide(call({ risk: 'write' }), [])).toMatchObject({ decision: 'review', rule: 'risk:write' });
+    expect(decide(call({ risk: 'exec' }), [])).toMatchObject({ decision: 'review', rule: 'risk:exec' });
     expect(decide(call({ risk: 'external' }), [])).toMatchObject({ decision: 'approve', rule: 'risk:external' });
   });
 

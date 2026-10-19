@@ -972,11 +972,16 @@ export interface SandboxLimits {
 // docker before the command ran.
 export type SandboxExecStatus = 'running' | 'ok' | 'failed' | 'timeout' | 'killed' | 'error';
 
+// bash runs the code with bash -c, python with python3 -c, and node with node -e.
+export type SandboxLanguage = 'bash' | 'python' | 'node';
+
 export interface SandboxExecRow {
   id: number;
   runId: string | null;
   toolCallId: string | null;
   sessionKey: string | null;
+  language: SandboxLanguage;
+  // the code that ran.
   command: string;
   image: string;
   network: 'none' | 'allowlist';
@@ -1000,24 +1005,57 @@ export interface SandboxFile {
   mime: string;
 }
 
+// the policy decision of the tool call of an exec, with the verdict of the reviewer and the approval of a network
+// call. it is null when the tool call has no decision row yet, for example while the call runs.
+export interface SandboxPolicyView {
+  decisionId: number;
+  decision: 'allow' | 'review' | 'approve' | 'deny';
+  rule: string;
+  reason: string;
+  reviewerVerdict: 'allow' | 'hold' | null;
+  reviewerReason: string | null;
+  reviewerModelCallId: number | null;
+  approvalId: number | null;
+  approvalStatus: string | null;
+}
+
+// the egress of a call with network access: the hosts that the proxy let through, and the requests that it refused
+// with the reason.
+export interface SandboxEgress {
+  passed: string[];
+  refused: Array<{ target: string; reason: string }>;
+}
+
 // stdout and stderr hold at most 64 kb each. the full text is in the blob.
 export interface SandboxExecDetail extends SandboxExecRow {
   cwd: string;
+  imageId: string | null;
+  containerId: string | null;
   stdout: string | null;
   stderr: string | null;
   stdoutBlob: string | null;
   stderrBlob: string | null;
   error: string | null;
   files: SandboxFile[];
+  // null for a call without network access, and for a call that ended before its network was made.
+  egress: SandboxEgress | null;
+  // the collect paths that did not come back, with the reason.
+  notCollected: Array<{ path: string; reason: string }>;
+  policy: SandboxPolicyView | null;
+  endedAt: string | null;
 }
 
-// available is false when docker is missing or does not answer. reason then tells why, and the tool is off.
+// available is false when docker is missing or does not answer, or when the image is missing. reason then tells why,
+// and the tool is off. network is false when the allowlist mode cannot work on this docker host, and networkReason
+// then tells why. a call with an allowlist then fails, and a call without one still works.
 export interface SandboxStatus {
   available: boolean;
   reason: string | null;
   engine: string | null;
   image: string;
   defaults: SandboxLimits;
+  network: boolean;
+  networkReason: string | null;
 }
 
 export interface SandboxQuery {

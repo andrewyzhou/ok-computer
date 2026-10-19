@@ -125,6 +125,8 @@ async function main(): Promise<void> {
     connectIntegrations: !chatMode,
     background: !chatMode,
     ...(loginCodes ? { loginCodes } : {}),
+    // the code sandbox finds the docker of this host. without docker the tool is off and the rest runs.
+    sandbox: {},
   });
   process.on('SIGINT', () => void stop('SIGINT'));
   process.on('SIGTERM', () => void stop('SIGTERM'));

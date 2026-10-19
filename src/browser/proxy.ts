@@ -1,6 +1,18 @@
 import { createServer, request, type IncomingMessage, type ServerResponse } from 'node:http';
-import { connect, type Socket } from 'node:net';
+import { connect, isIP, type Socket } from 'node:net';
 import { checkHost, type Egress } from '../web/egress.js';
+
+export interface EgressProxyOptions {
+  // a check that runs before the address check, for example the allowlist of a sandbox call. it gives the reason of a
+  // refusal, or undefined to go on.
+  allowHost?: (host: string) => string | undefined;
+  // the address that the proxy listens on. the default is the loopback address. it must be one address and never
+  // 0.0.0.0 or ::, because the local network must not reach the proxy.
+  listen?: string;
+}
+
+// an unspecified address listens on every interface of this pc.
+const everyInterface = (address: string) => (isIP(address) === 4 ? address === '0.0.0.0' : address.replace(/[:0]/g, '') === '');
 
 export interface EgressProxy {
   // the address for --proxy-server.
@@ -18,13 +30,23 @@ export async function startEgressProxy(
   egress: Egress,
   onRefused: (target: string, reason: string) => void,
   onPassed: (host: string) => void = () => undefined,
+  options: EgressProxyOptions = {},
 ): Promise<EgressProxy> {
+  const listen = options.listen ?? '127.0.0.1';
+  if (!isIP(listen)) throw new Error(`the proxy listens on an address, not on ${JSON.stringify(listen)}`);
+  if (everyInterface(listen)) throw new Error(`the proxy must not listen on ${listen}, because the local network could then reach it`);
+  const allowHost = options.allowHost ?? (() => undefined);
   // a plain http request comes with its full address.
   // a throw in a handler is uncaught, and it ended the whole app (r8 probe), so each handler catches.
   const server = createServer((req, res) => void handle(req, res).catch(() => res.destroy()));
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = URL.parse(req.url ?? '');
     if (!url || url.protocol !== 'http:') return void res.writeHead(400).end();
+    const refusal = allowHost(url.hostname);
+    if (refusal !== undefined) {
+      onRefused(url.href, refusal);
+      return void res.writeHead(403).end();
+    }
     const host = await checkHost(egress, url.hostname);
     if (!host.ok) {
       onRefused(url.href, host.reason);
@@ -55,6 +77,11 @@ export async function startEgressProxy(
   async function tunnel(req: IncomingMessage, client: Socket, head: Buffer): Promise<void> {
     client.on('error', () => undefined);
     const target = URL.parse(`http://${req.url ?? ''}`);
+    const refusal = target ? allowHost(target.hostname) : undefined;
+    if (refusal !== undefined) {
+      onRefused(req.url ?? '', refusal);
+      return void client.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+    }
     const host = target ? await checkHost(egress, target.hostname) : ({ ok: false, reason: 'the address is not valid' } as const);
     if (!target || !host.ok) {
       onRefused(req.url ?? '', host.ok ? 'the address is not valid' : host.reason);
@@ -76,10 +103,16 @@ export async function startEgressProxy(
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, listen, () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
   const { port } = server.address() as { port: number };
   return {
-    url: `http://127.0.0.1:${port}`,
+    url: `http://${isIP(listen) === 6 ? `[${listen}]` : listen}:${port}`,
     close: () =>
       new Promise((resolve) => {
         for (const socket of sockets) socket.destroy();

@@ -31,6 +31,7 @@ export interface Discovery {
 const RISK_TEXT: Record<Risk, string> = {
   read: 'risk read: it runs without approval.',
   write: 'risk write: it is reviewed first, and until a reviewer exists the owner approves each call.',
+  exec: 'risk exec: it is reviewed first.',
   external: 'risk external: the owner approves each call.',
 };
 // a list of names helps the model when no word matched. this limit keeps it well inside the search budget.

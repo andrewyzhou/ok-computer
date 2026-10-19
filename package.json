@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "test": "vitest run",
     "smoke": "tsx src/smoke.ts",
-    "smoke:reviewer": "tsx src/smoke-reviewer.ts"
+    "smoke:reviewer": "tsx src/smoke-reviewer.ts",
+    "sandbox:image": "docker build -t okc-sandbox:1 sandbox"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
