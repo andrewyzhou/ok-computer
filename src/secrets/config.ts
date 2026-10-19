@@ -1,4 +1,5 @@
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import type { SecretStoreConfig } from '../dashboard/types.js';
 
@@ -34,13 +35,38 @@ export const secretStoreConfigSchema = z.discriminatedUnion('backend', [
 export const DEFAULT_SECRET_STORE: SecretStoreConfig = { backend: 'keyring' };
 export const DEFAULT_AWS_PREFIX = 'okc/';
 
+// the real path of a path whose end may not exist yet: the longest part that exists goes through realpath, so a link
+// in it counts, and the rest is added as written.
+function realPath(path: string): string {
+  const rest: string[] = [];
+  for (let at = path; ; ) {
+    try {
+      return join(realpathSync.native(at), ...rest);
+    } catch {
+      const parent = dirname(at);
+      if (parent === at) return path;
+      rest.unshift(basename(at));
+      at = parent;
+    }
+  }
+}
+
 // the name of the folder that holds the secret file when the agent can read that folder, or undefined. both paths
-// resolve from the working folder, as createFileSecretStore does.
-export function secretFileExposedIn(path: string, folders: Record<string, string>): string | undefined {
-  const file = resolve(process.cwd(), path);
+// resolve from the working folder, as createFileSecretStore does. links count, so a link into the workspace or a
+// workspace that is a link is still caught. the file systems of macos and windows ignore case by default, so there
+// the comparison ignores case too.
+export function secretFileExposedIn(path: string, folders: Record<string, string>, platform: NodeJS.Platform = process.platform): string | undefined {
+  const fold = platform === 'darwin' || platform === 'win32' ? (text: string) => text.toLowerCase() : (text: string) => text;
+  const lexical = resolve(process.cwd(), path);
+  const files = [lexical, realPath(lexical)].map(fold);
   for (const [name, folder] of Object.entries(folders)) {
-    const rel = relative(resolve(process.cwd(), folder), file);
-    if (rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))) return name;
+    const base = resolve(process.cwd(), folder);
+    for (const dir of [base, realPath(base)].map(fold)) {
+      for (const file of files) {
+        const rel = relative(dir, file);
+        if (rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))) return name;
+      }
+    }
   }
   return undefined;
 }

@@ -11,6 +11,7 @@ import {
   readlinkSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
@@ -114,7 +115,7 @@ async function makeCase(uname: 'Darwin' | 'Linux', name = 'okc-sh-'): Promise<Ca
     chmodSync(join(stub, 'bin', file), 0o755);
   }
   const path = [join(stub, 'bin'), dirname(process.execPath), process.env.PATH].join(':');
-  const env = { ...process.env, PATH: path, HOME: home, OKC_URL: `http://127.0.0.1:${await freePort()}`, STUB_DIR: stub, STUB_UNAME: uname };
+  const env = { ...process.env, PATH: path, HOME: home, OKC_URL: `http://127.0.0.1:${await freePort()}`, STUB_DIR: stub, STUB_UNAME: uname, OKC_NODE: undefined };
   const made = { root, home, stub, env };
   cases.push(made);
   return made;
@@ -416,5 +417,65 @@ describe.runIf(process.platform !== 'win32')('okc.sh', { timeout: 60_000 }, () =
     spawnSync('ln', ['-s', '/elsewhere/okc.sh', join(c.home, '.local', 'bin', 'okc')]);
     expect((await okc(c, ['uninstall'])).out).toBe('ok computer is not running.\nuninstalled.');
     expect(readlinkSync(join(c.home, '.local', 'bin', 'okc'))).toBe('/elsewhere/okc.sh');
+  });
+
+  // a node that is not first on the path wraps the real one and records each run, so a test sees which node ran.
+  function wrappedNode(c: Case, version?: string): string {
+    const folder = join(c.stub, 'other node');
+    mkdirSync(folder, { recursive: true });
+    const file = join(folder, 'node');
+    const fake = version === undefined ? '' : `if [ "$1" = -p ]; then echo '${version}'; exit 0; fi\n`;
+    writeFileSync(file, `#!/bin/bash\necho "$*" >> "$STUB_DIR/other-node.log"\n${fake}exec '${process.execPath}' "$@"\n`);
+    chmodSync(file, 0o755);
+    return file;
+  }
+
+  it('takes the node of OKC_NODE for the login agent and the browser login', async () => {
+    const c = await makeCase('Darwin', 'okc sh node-');
+    const node = wrappedNode(c);
+    const result = await okc(c, ['install'], { OKC_NODE: node });
+    expect(result.status).toBe(0);
+    const text = read(join(c.home, 'Library', 'LaunchAgents', `${label}.plist`));
+    expect(text).toContain(`<array>\n    <string>${node}</string>`);
+    expect(text).toContain(`<string>${dirname(node)}:/opt/homebrew/bin:`);
+    expect(read(join(c.stub, 'other-node.log'))).toContain('-p process.versions.node');
+
+    mkdirSync(join(c.root, 'dist', 'browser'));
+    writeFileSync(join(c.root, 'dist', 'browser', 'login.js'), "console.log('login');\n");
+    expect((await okc(c, ['browser', 'login'], { OKC_NODE: node })).out).toBe('login');
+    expect(read(join(c.stub, 'other-node.log'))).toContain('dist/browser/login.js');
+  });
+
+  it('refuses an OKC_NODE that cannot run, and a node outside engines, before it writes the login agent', async () => {
+    const c = await makeCase('Darwin');
+    writeFileSync(join(c.root, 'dist', '.build-ok'), '');
+    const plist = join(c.home, 'Library', 'LaunchAgents', `${label}.plist`);
+    const missing = join(c.stub, 'no-node');
+    expect(await okc(c, ['install'], { OKC_NODE: missing })).toEqual({
+      status: 1,
+      out: `error: OKC_NODE is ${missing}, and that is not a program that can run.`,
+    });
+    const old = wrappedNode(c, '27.0.0');
+    expect(await okc(c, ['install'], { OKC_NODE: old })).toEqual({
+      status: 1,
+      out: `error: ${old} is node 27.0.0, and ok computer needs node 24 to 26. set OKC_NODE to the full path of a node in that range.`,
+    });
+    expect(existsSync(plist)).toBe(false);
+    expect(existsSync(join(c.stub, 'launchctl.log'))).toBe(false);
+  });
+
+  it('makes a node of a relative path entry absolute, and keeps a link to node as a link', async () => {
+    const c = await makeCase('Linux');
+    mkdirSync(join(c.stub, 'rel'));
+    symlinkSync(process.execPath, join(c.stub, 'rel', 'node'));
+    expect(sourced(c, 'cd "$STUB_DIR" && PATH="rel:$PATH" find_node')).toBe(join(c.stub, 'rel', 'node'));
+  });
+
+  it('checks the same node range as engines in package.json', () => {
+    const engines = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).engines.node as string;
+    const script = readFileSync(join(scripts, 'okc.sh'), 'utf8');
+    const min = /^node_major_min=(\d+)$/m.exec(script)![1];
+    const max = Number(/^node_major_max=(\d+)$/m.exec(script)![1]);
+    expect(engines).toBe(`>=${min} <${max + 1}`);
   });
 });

@@ -1,6 +1,10 @@
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../config/load.js';
 import { awsSecretName } from './aws.js';
+import { secretFileExposedIn } from './config.js';
 
 // these tests try the edges of the secrets block: each region form that aws uses, values of a wrong type, and the
 // longest prefix that the schema takes.
@@ -57,5 +61,36 @@ describe('the secrets block at its edges', () => {
     if (!result.ok) throw new Error(result.error);
     expect(result.value.secrets).toEqual({ backend: 'keyring' });
     expect(result.value.dashboard.port).toBe(5000);
+  });
+});
+
+// the file tools of the agent can read the workspace through another letter case or through a link, so the check
+// must not compare the paths only as text.
+describe('a secret file next to the folders of the agent', () => {
+  it('ignores letter case on macos and windows, and keeps it on linux', () => {
+    // the folders do not exist, so no real path of this machine changes the case.
+    const folders = { workspace: 'okc-no-workspace', skills: 'okc-no-skills' };
+    expect(secretFileExposedIn('OKC-No-Workspace/secrets.json', folders, 'darwin')).toBe('workspace');
+    expect(secretFileExposedIn('OKC-NO-SKILLS/secrets.json', folders, 'win32')).toBe('skills');
+    expect(secretFileExposedIn('OKC-No-Workspace/secrets.json', folders, 'linux')).toBeUndefined();
+    expect(secretFileExposedIn('data/secrets.json', folders, 'darwin')).toBeUndefined();
+  });
+
+  it.runIf(process.platform !== 'win32')('follows a link into the workspace and a workspace that is a link', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'okc-secret-path-')));
+    try {
+      mkdirSync(join(root, 'workspace'));
+      mkdirSync(join(root, 'data'));
+      symlinkSync(join(root, 'workspace'), join(root, 'data', 'shared'));
+      const folders = { workspace: join(root, 'workspace') };
+      expect(secretFileExposedIn(join(root, 'data', 'shared', 'secrets.json'), folders, 'linux')).toBe('workspace');
+      expect(secretFileExposedIn(join(root, 'data', 'secrets.json'), folders, 'linux')).toBeUndefined();
+
+      // a link to a secret file in the data folder is still a file in the workspace.
+      symlinkSync(join(root, 'data'), join(root, 'ws-link'));
+      expect(secretFileExposedIn(join(root, 'data', 'secrets.json'), { workspace: join(root, 'ws-link') }, 'linux')).toBe('workspace');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

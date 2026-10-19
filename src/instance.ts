@@ -1,7 +1,8 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { realpathSync, rmSync } from 'node:fs';
 import { connect, createServer } from 'node:net';
-import { tmpdir } from 'node:os';
+import { userInfo } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 
 export interface InstanceLock {
@@ -22,6 +23,22 @@ function realPath(path: string): string {
   }
 }
 
+// the temp folder of the user on macos, such as /var/folders/xx/yyyy/T/, from the system and not from TMPDIR. launchd
+// and a shell of the desktop set TMPDIR to this folder, but an ssh or sudo shell can leave it out, and a lock that
+// follows TMPDIR would then not see the lock of the login agent. undefined when getconf does not give it.
+let userTemp: string | null | undefined;
+function darwinUserTemp(): string | undefined {
+  if (userTemp === undefined) {
+    try {
+      const out = execFileSync('/usr/bin/getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      userTemp = out.startsWith('/') ? out : null;
+    } catch {
+      userTemp = null;
+    }
+  }
+  return userTemp ?? undefined;
+}
+
 // on windows the lock is a named pipe, because windows removes a pipe when its process ends, also after a crash. a
 // lock file can stay after a crash, and a pid in it can belong to a new process. the name comes from the data folder,
 // so one database has one service, and a copy of the app with its own data folder has its own lock.
@@ -33,10 +50,11 @@ export function lockName(dataDir: string, platform: NodeJS.Platform = process.pl
   // linux removes a socket in the abstract namespace when its process ends, as windows removes a pipe.
   if (platform === 'linux') return `\0okc-${id}`;
   // macos has no abstract namespace, so the lock is a socket file. the file stays after a crash, and
-  // holdInstanceLock removes it when no process answers on it. a long temp folder gives a path that does not fit, so
-  // then the file goes in /tmp.
-  const file = join(tmpdir(), `okc-${id}.sock`);
-  return Buffer.byteLength(file) <= SOCKET_PATH_LIMIT ? file : `/tmp/okc-${id}.sock`;
+  // holdInstanceLock removes it when no process answers on it. without the temp folder of the user, or when its path
+  // does not fit, the file goes in /tmp with the user id in its name, so the path never depends on the environment.
+  const temp = darwinUserTemp();
+  const file = temp ? join(temp, `okc-${id}.sock`) : '';
+  return file && Buffer.byteLength(file) <= SOCKET_PATH_LIMIT ? file : `/tmp/okc-${process.getuid?.() ?? userInfo().uid}-${id}.sock`;
 }
 
 const isFile = (name: string) => !name.startsWith('\0') && !name.startsWith('\\\\.\\pipe\\');

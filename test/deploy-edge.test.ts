@@ -124,9 +124,12 @@ describe('the deploy files match the app', () => {
 describe('.github/workflows/ci.yml', () => {
   const ci = withoutComments(read('.github/workflows/ci.yml'));
 
-  it('tests on the three systems with node 24 and runs the gate in order', () => {
-    expect(ci).toMatch(/os: \[ubuntu-latest, macos-latest, windows-latest\]/);
-    expect(ci).toMatch(/node-version: 24\b/);
+  it('tests on the three systems with node 24, on ubuntu also with node 26, and runs the gate in order', () => {
+    expect(ci).toMatch(/os: \[ubuntu-latest, macos-latest, windows-latest\]\n\s*node: \[24\]/);
+    expect(ci).toMatch(/include:\n\s*- os: ubuntu-latest\n\s*node: 26\n/);
+    expect(ci).toContain('node-version: ${{ matrix.node }}');
+    // the two ends of the matrix are the two ends of engines.
+    expect(JSON.parse(read('package.json')).engines.node).toBe('>=24 <27');
     const steps = ['npm ci', 'npm run typecheck', 'npm test', 'npm run build'].map((step) => ci.indexOf(`- run: ${step}`));
     expect(steps.every((at) => at >= 0)).toBe(true);
     expect([...steps].sort((a, b) => a - b)).toEqual(steps);

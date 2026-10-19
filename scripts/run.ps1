@@ -26,7 +26,18 @@ while ($true) {
     $stamp = $started.ToString('yyyyMMdd-HHmmss')
     $out = Join-Path $logs "service-$stamp.out.log"
     $err = Join-Path $logs "service-$stamp.err.log"
-    $node = Start-Process -FilePath 'node' -ArgumentList 'dist/main.js' -WorkingDirectory $root `
+    # OKC_NODE names the node of the agent, as in okc.ps1 and okc.sh. the path is found again at each start, so a node
+    # that was installed later counts.
+    if ($env:OKC_NODE) {
+      if (-not (Test-Path -LiteralPath $env:OKC_NODE -PathType Leaf)) { throw "OKC_NODE is $($env:OKC_NODE), and that is not a program that can run." }
+      $nodePath = (Resolve-Path -LiteralPath $env:OKC_NODE).ProviderPath
+    }
+    else {
+      $found = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+      if (-not $found) { throw 'node is not on the path. put it on the path or set OKC_NODE to its full path.' }
+      $nodePath = $found.Source
+    }
+    $node = Start-Process -FilePath $nodePath -ArgumentList 'dist/main.js' -WorkingDirectory $root `
       -RedirectStandardOutput $out -RedirectStandardError $err -WindowStyle Hidden -PassThru
     # without an open handle, ExitCode stays empty when the output goes to files.
     $null = $node.Handle

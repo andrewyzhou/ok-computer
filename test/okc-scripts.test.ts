@@ -299,4 +299,14 @@ describe.runIf(process.platform === 'win32')('the okc scripts', { timeout: 90_00
     expect(existsSync(join(root, 'built'))).toBe(false);
     process.kill(agent.pid!);
   });
+
+  it('takes the node of OKC_NODE first, and fails clearly when it does not exist', () => {
+    const root = makeRoot();
+    expect(okc(root, `$env:OKC_NODE = '${process.execPath}'; Find-Node`).toLowerCase()).toBe(process.execPath.toLowerCase());
+    expect(okc(root, `$env:OKC_NODE = ''; Find-Node`).toLowerCase()).toMatch(/node(\.exe)?$/);
+    const missing = join(root, 'no-node.exe');
+    expect(okc(root, `$env:OKC_NODE = '${missing}'; try { Find-Node } catch { $_.Exception.Message }`)).toBe(
+      `OKC_NODE is ${missing}, and that is not a program that can run.`,
+    );
+  });
 });

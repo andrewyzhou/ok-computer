@@ -14,6 +14,10 @@ workspace/USER.md
 # design explorations, kept local for the owner to review
 explorations/
 
+# local tool settings and the worktrees of parallel checkouts. an add of all files would take a nested worktree in as
+# a link.
+.claude/
+
 # skills that the workshop writes come from the owner's tasks and can hold personal details
 /skills/
 
