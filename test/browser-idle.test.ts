@@ -71,6 +71,40 @@ describe.skipIf(!hasChrome())('the idle close of chrome', { timeout: 60_000 }, (
     ]);
   });
 
+  it('waits for a slow trace stop of the last task before the limit of a new tab starts', async () => {
+    const h = createBrowserHarness({ idleMs: IDLE_MS });
+    open.push(h);
+    await h.run('browser_open', { url: url() });
+    let delay = 1_900;
+    await slow(h, 'page', 'close', () => delay);
+    // the trace stop of the first task is slow, as on a busy windows machine. with the page close it takes longer than
+    // the limit of a tab start, 5 s here, but each part stays within its own limit.
+    await h.worker.act({ sessionKey: 'main', runId: 'run-1', action: 'patch' }, async (page) => {
+      const proto = Object.getPrototypeOf(page.context().tracing) as Record<string, (...args: unknown[]) => Promise<unknown>>;
+      const original = proto.stop!;
+      let first = true;
+      proto.stop = async function (this: unknown, ...args: unknown[]) {
+        if (first) await sleep(4_000);
+        first = false;
+        return original.apply(this, args);
+      };
+      restore.push(() => (proto.stop = original));
+    });
+    // the next task opens while the first one still ends.
+    await sleep(3 * IDLE_MS);
+    delay = 0;
+    for (const session of ['later0', 'later1']) {
+      const out = await h.run('browser_open', { url: url() }, session);
+      expect(out.isError ? out.content : 'ok').toBe('ok');
+      await h.run('browser_close', {}, session);
+    }
+    expect(h.tasks().map((row) => [row.id, row.status, Boolean(row.tracePath)])).toEqual([
+      ['task-1', 'closed', true],
+      ['task-2', 'closed', true],
+      ['task-3', 'closed', true],
+    ]);
+  });
+
   it('keeps a task open while a submit for it waits for the owner, and ends it when the approval is gone', async () => {
     const h = createBrowserHarness({ idleMs: IDLE_MS });
     open.push(h);
