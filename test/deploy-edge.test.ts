@@ -7,7 +7,8 @@ import { parseConfig } from '../src/config/load.js';
 // the database, the dashboard port, the ci matrix, and which paths reach the build context.
 
 const repo = join(import.meta.dirname, '..');
-const read = (path: string) => readFileSync(join(repo, path), 'utf8');
+// a checkout on windows can turn lf into crlf, so the text is read with lf line ends. .gitattributes asks for lf.
+const read = (path: string) => readFileSync(join(repo, path), 'utf8').replace(/\r\n/g, '\n');
 const withoutComments = (text: string) =>
   text
     .split('\n')
@@ -54,6 +55,17 @@ describe('the build context', () => {
 
   it('leaves out run state and the root files of a run', () => {
     for (const path of ['.env', '.env.local', 'okc.config.json', 'okc.policy.json', 'okc.integrations.json', 'data/okc.sqlite', 'data/secrets.json', 'okc.sqlite-wal', 'node_modules/zod/package.json', 'web/node_modules/x', '.git/HEAD', 'workspace/USER.md']) {
+      expect(dockerIgnored(patterns, path), path).toBe(true);
+    }
+  });
+
+  it('leaves out deploy/.env, which the runbook fills with every secret of the server', () => {
+    for (const path of ['deploy/.env', 'deploy/.env.local', 'web/.env']) expect(dockerIgnored(patterns, path), path).toBe(true);
+  });
+
+  // docs/setup/docker.md makes the run folder inside the project folder, so its secret file and config are near.
+  it('leaves out a run folder and a data folder at any depth', () => {
+    for (const path of ['run/.env', 'run/okc.config.json', 'run/data/secrets.json', 'run/data/blobs/a', 'deploy/data/okc.sqlite', 'x/data/secrets.json', 'x/okc.config.json']) {
       expect(dockerIgnored(patterns, path), path).toBe(true);
     }
   });

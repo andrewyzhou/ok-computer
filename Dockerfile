@@ -7,7 +7,11 @@ FROM --platform=$BUILDPLATFORM node:24.22.0-bookworm-slim AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY . .
+# only what the build reads. a copy of the whole context would put any file that .dockerignore misses into a layer
+# of the build cache.
+COPY tsconfig.json tsconfig.build.json ./
+COPY src ./src
+COPY web ./web
 RUN npm run build
 
 FROM node:24.22.0-bookworm-slim

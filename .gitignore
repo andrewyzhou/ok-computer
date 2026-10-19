@@ -16,3 +16,6 @@ explorations/
 
 # skills that the workshop writes come from the owner's tasks and can hold personal details
 /skills/
+
+# the run folder of docs/setup/docker.md holds the config, the env and the secret file of a local container
+/run/
