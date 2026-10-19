@@ -42,6 +42,13 @@ import { googleRoutes } from './google.js';
 import { integrationDetail, summaryOf } from './integrations.js';
 import { createSessions, LOCAL_SESSION_MS, LOGIN_PAGE, REMOTE_SESSION_MS, type LoginCodes } from './login.js';
 import { mountBrowser } from './browser.js';
+import { mountChat } from './chat.js';
+import { mountChats } from './chats.js';
+import { mountDeploy } from './deploy.js';
+import { mountInbox } from './inbox.js';
+import { mountSandbox } from './sandbox.js';
+import { mountSearch } from './search.js';
+import { mountSpans } from './spans.js';
 import { createFeed } from './stream.js';
 import type { ContextView, MemoryFile, Meta } from './types.js';
 
@@ -335,6 +342,15 @@ export function createDashboard(deps: DashboardDeps): Hono {
       }
     }),
   );
+
+  // the route modules of phase 5. each milestone owns its module, and docs/PHASE5-API.md lists its routes.
+  mountChats(server, deps);
+  mountSearch(server, deps);
+  mountSpans(server, deps);
+  mountChat(server, deps);
+  mountDeploy(server, deps);
+  mountInbox(server, deps);
+  mountSandbox(server, deps);
 
   server.all('/api/*', (c) => notFound(c, 'api route'));
   if (existsSync(join(webDir, 'index.html'))) {
