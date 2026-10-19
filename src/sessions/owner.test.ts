@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChannelAdapter, OutboundMessage } from '../channels/types.js';
 import { openDb } from '../db/index.js';
+import { getSetting, setSetting } from '../db/settings.js';
 import { silentLogger } from '../observability/logger.js';
 import { createOwnerMessenger } from './owner.js';
 
@@ -54,5 +55,46 @@ describe('owner messenger', () => {
   it('gives false when no chat is known', async () => {
     const owner = createOwnerMessenger({ db: openDb(':memory:'), channels: new Map(), logger: silentLogger, clock: () => new Date() });
     expect(await owner.send('lost')).toBe(false);
+  });
+
+  // the web chat shows only while a tab of the dashboard is open, so an approval card sent there could wait unseen.
+  it('keeps the saved telegram chat when the owner writes on the web', async () => {
+    const sent: Array<[string, OutboundMessage]> = [];
+    const db = openDb(':memory:');
+    const channels = new Map([
+      ['telegram', channel('telegram', sent)],
+      ['web', channel('web', sent)],
+    ]);
+    const owner = createOwnerMessenger({ db, channels, logger: silentLogger, clock: () => new Date() });
+    owner.remember({ channel: 'telegram', chatId: '777' });
+    owner.remember({ channel: 'web', chatId: 'web' });
+    expect(getSetting(db, 'owner_chat')).toEqual({ channel: 'telegram', chatId: '777' });
+    await owner.send('alert');
+    expect(sent.map(([id, out]) => `${id} ${out.chatId}`)).toEqual(['telegram 777']);
+  });
+
+  it('skips an old saved web chat for the preferred chat, and then for the cli', () => {
+    const db = openDb(':memory:');
+    setSetting(db, 'owner_chat', { channel: 'web', chatId: 'web' }, new Date());
+    const sent: Array<[string, OutboundMessage]> = [];
+    const preferred = { channel: 'telegram', chatId: '777' };
+    const all = new Map([
+      ['cli', channel('cli', sent)],
+      ['telegram', channel('telegram', sent)],
+      ['web', channel('web', sent)],
+    ]);
+    expect(createOwnerMessenger({ db, channels: all, logger: silentLogger, clock: () => new Date(), preferred }).chat()).toEqual(preferred);
+    all.delete('telegram');
+    expect(createOwnerMessenger({ db, channels: all, logger: silentLogger, clock: () => new Date(), preferred }).chat()).toEqual({ channel: 'cli', chatId: 'local' });
+  });
+
+  it('knows no chat when only the web channel runs', async () => {
+    const db = openDb(':memory:');
+    const sent: Array<[string, OutboundMessage]> = [];
+    const owner = createOwnerMessenger({ db, channels: new Map([['web', channel('web', sent)]]), logger: silentLogger, clock: () => new Date() });
+    owner.remember({ channel: 'web', chatId: 'web' });
+    expect(owner.chat()).toBeUndefined();
+    expect(await owner.send('lost')).toBe(false);
+    expect(sent).toEqual([]);
   });
 });

@@ -1,4 +1,5 @@
 import { CLI_CHAT_ID } from '../channels/cli.js';
+import { WEB } from '../channels/web.js';
 import type { Button, ChannelAdapter, OutboundMessage } from '../channels/types.js';
 import type { Db } from '../db/index.js';
 import { getSetting, setSetting } from '../db/settings.js';
@@ -20,7 +21,10 @@ export interface OwnerMessenger {
 }
 
 // proactive messages go to the chat that the owner used last. the preferred chat, for example the owner's private
-// telegram chat, comes before the cli, because the cli is often not in front of the owner.
+// telegram chat, comes before the cli, because the cli is often not in front of the owner. the web chat is never the
+// target: it shows only while a tab of the dashboard is open, so approvals and alerts stay on telegram. the owner chat
+// ignores a web message, and a saved web chat from an older setting is skipped. when only the web channel runs, no
+// chat is known.
 export function createOwnerMessenger(deps: {
   db: Db;
   channels: Map<string, ChannelAdapter>;
@@ -31,7 +35,7 @@ export function createOwnerMessenger(deps: {
   const { db, channels, logger, preferred } = deps;
   const chat = (): OwnerChat | undefined => {
     const saved = getSetting<OwnerChat>(db, OWNER_CHAT);
-    const running = (candidate: OwnerChat | undefined) => candidate !== undefined && channels.has(candidate.channel);
+    const running = (candidate: OwnerChat | undefined) => candidate !== undefined && candidate.channel !== WEB && channels.has(candidate.channel);
     if (running(saved) && saved!.channel !== 'cli') return saved;
     if (running(preferred)) return preferred;
     if (running(saved)) return saved;
@@ -39,6 +43,7 @@ export function createOwnerMessenger(deps: {
   };
   return {
     remember(next) {
+      if (next.channel === WEB) return;
       const saved = getSetting<OwnerChat>(db, OWNER_CHAT);
       if (saved?.channel !== next.channel || saved.chatId !== next.chatId) setSetting(db, OWNER_CHAT, next, deps.clock());
     },
