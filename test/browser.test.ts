@@ -30,9 +30,10 @@ const harness = (...args: Parameters<typeof createBrowserHarness>) => {
   open.push(made);
   return made;
 };
+// a stop closes chrome and saves the trace. on a busy machine that takes longer than the 10 s of a hook.
 afterEach(async () => {
   for (const each of open.splice(0)) await each.worker.stop();
-});
+}, 60_000);
 
 const refOf = (text: string, pattern: RegExp) => {
   const line = text.split('\n').find((each) => pattern.test(each));
@@ -42,7 +43,9 @@ const refOf = (text: string, pattern: RegExp) => {
 };
 
 describe('the password mask', () => {
-  it('masks the longest value whole, and masks 3,000 long values in one pass', () => {
+  // the time limit is far below the old 246 s, but a machine that runs many tests at once can miss it once by chance,
+  // so the test tries again. a pass for each value fails every try.
+  it('masks the longest value whole, and masks 3,000 long values in one pass', { retry: 2 }, () => {
     expect(maskPasswords('- textbox: abcdef and abc', ['abc', 'abcdef'])).toBe('- textbox: •••••• and ••••••');
     expect(maskPasswords('a.b+c and axb+c', ['a.b+c'])).toBe('•••••• and axb+c');
     // each form of each value went through the whole snapshot once, and this page held the event loop for 246 s.
@@ -1022,8 +1025,8 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
   });
 
   // the start of a tab had no time limit, so a chrome that gave no answer held each later open of every session (r8
-  // probe).
-  it('refuses an open when chrome gives no new tab in time, and the next open starts chrome again', async () => {
+  // probe). the test starts chrome four times, which took 20 to 70 s on a busy machine, so it has more time.
+  it('refuses an open when chrome gives no new tab in time, and the next open starts chrome again', { timeout: 120_000 }, async () => {
     const h = harness();
     await h.run('browser_open', { url: site.url('shop.test') });
     await h.run('browser_close', {});
@@ -1070,7 +1073,11 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(out).toMatchObject({ isError: true, content: expect.stringContaining('stopped responding') });
     expect(await h.run('browser_close', {})).toMatchObject({ content: 'no browser task was open' });
     expect(h.tasks()[0]).toMatchObject({ status: 'crashed', endReason: 'the page stopped responding' });
-    expect(h.steps().at(-1)).toMatchObject({ error: expect.stringContaining('no answer within') });
+    // a request that the gate blocks after the hung step, for example one that chrome makes in the background, goes
+    // into a close row of its own after it. the step of the tool is the last row before that.
+    const rows = h.steps();
+    expect(rows.filter((row) => row.action !== 'close').at(-1)).toMatchObject({ error: expect.stringContaining('no answer within') });
+    expect(rows.slice(rows.findLastIndex((row) => row.action !== 'close') + 1).length).toBeLessThanOrEqual(1);
     expect((await h.run('browser_open', { url: site.url('shop.test') }, 'auto:x')).isError).toBe(false);
   });
 

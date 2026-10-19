@@ -17,10 +17,11 @@ const IDLE_MS = 500;
 type Harness = ReturnType<typeof createBrowserHarness>;
 const restore: Array<() => void> = [];
 const open: Harness[] = [];
+// a stop closes chrome and saves the trace. on a busy machine that takes longer than the 10 s of a hook.
 afterEach(async () => {
   for (const undo of restore.splice(0)) undo();
   for (const each of open.splice(0)) await within(each.worker.stop(), 20_000);
-});
+}, 60_000);
 
 // the patch is on the class of playwright, so it reaches the next context too. the test removes it after.
 async function slow(h: Harness, target: 'context' | 'page', method: string, ms: () => number): Promise<void> {

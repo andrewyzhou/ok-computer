@@ -86,8 +86,11 @@ export function traceEntries(zip: string): Map<string, Buffer> {
 export function killChrome(profileDir: string): number {
   const name = profileDir.split(/[\\/]/).pop()!;
   if (process.platform !== 'win32') {
-    // pgrep exits with 1 when no process matches.
-    const found = spawnSync('pgrep', ['-f', '--', `--user-data-dir=[^ ]*${name}`], { encoding: 'utf8' }).stdout;
+    // pgrep -f reads an extended regular expression against the whole command line, so the name is escaped. the
+    // profile is <name>/profile, under /var/folders on macos and /tmp on linux. pgrep exits with 1 when no process
+    // matches.
+    const pattern = `--user-data-dir=[^ ]*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`;
+    const found = spawnSync('pgrep', ['-f', '--', pattern], { encoding: 'utf8' }).stdout;
     const pids = found.split(/\s+/).filter(Boolean).map(Number);
     for (const pid of pids) {
       try {
