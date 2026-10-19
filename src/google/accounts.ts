@@ -69,7 +69,8 @@ export interface AccountsDeps {
 }
 
 const CLIENT_REF = 'google.client';
-const tokenRef = (alias: string) => `google.${alias}`;
+// the ref of the refresh token of an account. google:push reads it on the desktop.
+export const tokenRef = (alias: string) => `google.${alias}`;
 // a timeout on each request, so a hung connection to google cannot hold a poll or a session queue.
 const REQUEST_TIMEOUT_MS = 30_000;
 const FLOW_MS = 10 * 60_000;
