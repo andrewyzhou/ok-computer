@@ -9,7 +9,7 @@ okc browser login
 okc browser login https://accounts.google.com/
 ```
 
-A normal Chrome window opens on the agent profile. Sign in to the sites that the agent may use, then close the window. The sign-ins stay in the profile.
+A normal Chrome window opens on the agent profile. Sign in to the sites that the agent may use, then close the window. On macOS, quit Chrome with Command-Q instead, because Chrome on macOS keeps running after its last window closes. The sign-ins stay in the profile.
 
 - Password saving and autofill are off in this profile. Sign in by hand. The agent never types or sends a password: a password field is masked in everything the agent reads, and the tools refuse it.
 - Answer Google's consent page once here. Until then, searches go to DuckDuckGo, and the search result says so.
@@ -72,10 +72,10 @@ Nothing removes screenshots and traces yet. Screenshots grow in `data/blobs`, an
 
 | You see | Why | What to do |
 |---|---|---|
-| "The agent browser profile is in use by another Chrome window" | `okc browser login` is open | Close that window. |
+| "The agent browser profile is in use by another Chrome window" | `okc browser login` is open | Close that window (on macOS, quit that Chrome with Command-Q). |
 | "The browser runs only in the background app" | The message came from `npm run chat` | Use Telegram or the background app. |
 | "The browser is busy with a task of another session" | Another conversation has the open task, and its run still works or a submit of it waits for you | Wait, or tell that conversation to call `browser_close`. The task of a sub-agent or an isolated automation that finished is never busy: the next conversation takes it over. |
-| "Google is paused until 14:15 (a CAPTCHA)" | Google asked for a CAPTCHA | Nothing; DuckDuckGo answers until then. Each new CAPTCHA makes the pause longer: 15 minutes, 1 hour, 6 hours, then a day. To end it sooner, solve one with `okc browser login https://www.google.com/`; closing that window ends the pause. A pause that ends on another day shows its date. |
+| "Google is paused until 14:15 (a CAPTCHA)" | Google asked for a CAPTCHA | Nothing; DuckDuckGo answers until then. Each new CAPTCHA makes the pause longer: 15 minutes, 1 hour, 6 hours, then a day. To end it sooner, solve one with `okc browser login https://www.google.com/`; closing that window (on macOS, quitting that Chrome with Command-Q) ends the pause. A pause that ends on another day shows its date. |
 | A submit you approved says "the form was not sent" | The page did not send the form, for example because it opens a new tab, a script changed a field at the click, or the page sent its data to a site off the allowlist | Look at the blocked and sent requests of the step on the Browser page. The form was not sent; a request marked "sent by the page" did leave. |
 | A submit you approved says "the form was sent, but the gate refused ... later requests" | The page sent the form, then something more that was blocked, for example a post to a site off the allowlist or a post more than a second later | Look at the step on the Browser page, and check on the site whether the order or message went through. |
 | A step has no snapshot: "more than 200" password fields | A page with that many filled password fields is not a page a person uses | Nothing. The screenshot is still kept. |

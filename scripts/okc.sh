@@ -4,7 +4,14 @@
 # it runs on the bash 3.2 of macos, so it uses no mapfile, no case changes in expansions and no associative arrays.
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# okc install links ~/.local/bin/okc to this script, so the root comes from the script itself and not from the link.
+# the readlink of older macos has no -f, so the loop follows each link by hand.
+script="${BASH_SOURCE[0]}"
+while [[ -L "$script" ]]; do
+  link="$(readlink "$script")"
+  if [[ "$link" == /* ]]; then script="$link"; else script="$(dirname "$script")/$link"; fi
+done
+root="$(cd "$(dirname "$script")/.." && pwd)"
 data="$root/data"
 # the tests give their own address, because a real agent can listen on the default port of the same machine.
 url="${OKC_URL:-http://127.0.0.1:4317}"

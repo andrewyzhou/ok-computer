@@ -397,6 +397,13 @@ describe.runIf(process.platform !== 'win32')('okc.sh', { timeout: 60_000 }, () =
     expect((await okc(c, ['install'])).out).toBe('installed: okc command. linux has no login agent yet, so run okc start after you sign in.');
     expect(readlinkSync(join(c.home, '.local', 'bin', 'okc'))).toBe(join(c.root, 'scripts', 'okc.sh'));
     expect(existsSync(join(c.home, 'Library'))).toBe(false);
+
+    // the command runs through the link, and it still finds the root of the script and not the folder of the link.
+    writeFileSync(join(c.root, 'data', 'okc.node.pid'), 'not a pid');
+    const linked = spawnSync(bash, [join(c.home, '.local', 'bin', 'okc'), 'status'], { env: c.env, encoding: 'utf8' });
+    expect(linked.stdout).toContain('not running');
+    expect(existsSync(join(c.root, 'data', 'okc.node.pid'))).toBe(false);
+    expect(existsSync(join(c.home, '.local', 'data'))).toBe(false);
     expect(existsSync(join(c.stub, 'launchctl.log'))).toBe(false);
 
     // a link to another script is not ours to remove.
