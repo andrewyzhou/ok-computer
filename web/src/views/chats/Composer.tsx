@@ -34,10 +34,12 @@ export function Composer({ active, onSent }: { active: LiveTurn | undefined; onS
     setBusy(true);
     setError('');
     setNote('');
-    send<ChatSendResponse>('/api/chat', 'POST', { text }).then(
+    const sentText = text;
+    send<ChatSendResponse>('/api/chat', 'POST', { text: sentText }).then(
       (sent) => {
-        applyTurnAction({ kind: 'sent', turnId: sent.turnId, text, state: sent.state });
-        setText('');
+        applyTurnAction({ kind: 'sent', turnId: sent.turnId, text: sentText, state: sent.state });
+        // the box stays editable during the request. a follow-up that the owner wrote meanwhile stays in the box.
+        setText((current) => (current === sentText ? '' : current));
         setBusy(false);
         onSent?.();
       },

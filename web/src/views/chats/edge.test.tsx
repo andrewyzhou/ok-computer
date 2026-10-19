@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ChatMessage, ChatMessagesPage, ChatStreamEvent } from '../../../../src/dashboard/types';
 import { seedDashboard } from '../../../../test/seed';
-import { applyTurnAction, turnsReducer, type TurnAction, type Turns } from '../../chat-stream';
+import { applyTurnAction, isActive, turnsReducer, useLiveTurns, type TurnAction, type Turns } from '../../chat-stream';
 import { setPrefs } from '../../shell/prefs';
 import { FakeEventSource, inMain, installEventSource, json, openApp, stubFetch, type StubRoutes } from '../../testing';
 import { MAX_TEXT } from './Composer';
@@ -150,6 +150,47 @@ describe('a stream that misbehaves', () => {
     expect(inMain().queryByTestId('chat-turn')).toBeNull();
     expect(inMain().queryByRole('textbox', { name: 'Message' })).toBeNull();
   });
+  it('keeps the reply of a turn on the page when the transcript fails to load again after the turn ends', async () => {
+    const { state } = chatStubs([message({ id: 1, text: 'before the turn' })]);
+    openApp('#/chats/main%400');
+    await inMain().findByText('before the turn');
+    emit({ kind: 'owner', turnId: 'web:lost', channel: 'web', text: 'plan my day', at: '2026-10-13T02:00:00.000Z' });
+    emit({ kind: 'state', turnId: 'web:lost', state: 'running' });
+    emit({
+      kind: 'reply',
+      turnId: 'web:lost',
+      messageId: 'reply-lost',
+      runId: 'run-1',
+      text: 'Essay first, then the gym.',
+      markdown: false,
+      details: null,
+      buttons: [],
+      at: '2026-10-13T02:01:00.000Z',
+    });
+    state.fail = true;
+    emit({ kind: 'done', turnId: 'web:lost', ok: true });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(inMain().getByText('Essay first, then the gym.')).toBeTruthy();
+    expect(inMain().getByText(/Could not load the newest messages/)).toBeTruthy();
+  }, 20_000);
+
+  it('loads the transcript again when a snapshot after a reconnect leaves out a turn', async () => {
+    const { state, calls } = chatStubs([message({ id: 1, text: 'before the turn' })]);
+    openApp('#/chats/main%400');
+    await inMain().findByText('before the turn');
+    emit({ kind: 'owner', turnId: 'web:gone', channel: 'web', text: 'plan my day', at: '2026-10-13T02:00:00.000Z' });
+    emit({ kind: 'text', turnId: 'web:gone', delta: 'Essay', reset: false });
+    const loads = () => calls.filter((call) => call.method === 'GET' && call.url.startsWith(messagesPath(CHAT.key).split('?')[0]!)).length;
+    const before = loads();
+    state.messages = [
+      message({ id: 1, text: 'before the turn' }),
+      message({ id: 2, role: 'owner', text: 'plan my day' }),
+      message({ id: 3, role: 'agent', runId: 'run-2', text: 'Essay first.' }),
+    ];
+    emit({ kind: 'snapshot', turns: [] });
+    await waitFor(() => expect(loads()).toBeGreaterThan(before));
+    expect(await inMain().findByText('Essay first.')).toBeTruthy();
+  });
 });
 
 describe('the links and paths of a chat', () => {
@@ -198,5 +239,17 @@ describe('the reducer with events out of order', () => {
     expect(run([{ kind: 'error', turnId: null, error: 'boom' }], start)).toBe(start);
     expect(run([{ kind: 'done', turnId: 'web:unknown', ok: true }], start)).toBe(start);
     expect(run([{ kind: 'drop', turnIds: ['web:unknown'] }], start)).toBe(start);
+  });
+  it('gives no ghost turn when the post answer comes after the turn ended and dropped', () => {
+    const { result } = renderHook(() => useLiveTurns());
+    act(() => {
+      applyTurnAction({ kind: 'owner', turnId: 'web:g', channel: 'web', text: 'quick', at: '2026-10-13T02:00:00.000Z' });
+      applyTurnAction({ kind: 'state', turnId: 'web:g', state: 'running' });
+      applyTurnAction({ kind: 'done', turnId: 'web:g', ok: true });
+      applyTurnAction({ kind: 'drop', turnIds: ['web:g'] });
+      applyTurnAction({ kind: 'sent', turnId: 'web:g', text: 'quick', state: 'queued' });
+    });
+    const turn = result.current.turns.get('web:g');
+    expect(turn === undefined || !isActive(turn)).toBe(true);
   });
 });

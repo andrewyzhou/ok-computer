@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ApprovalRow, ChatButton, ChatMessage, ChatRow, ContextView } from '../../../../src/dashboard/types';
 import { send, useApi, useStream } from '../../api';
-import { applyTurnAction, isActive, useChatConnection, useChatStream, useLiveTurns, type LiveReply, type LiveTurn, type StandaloneReply } from '../../chat-stream';
+import { applyTurnAction, currentTurns, isActive, useChatConnection, useChatStream, useLiveTurns, type LiveReply, type LiveTurn, type StandaloneReply } from '../../chat-stream';
 import { Expand } from '../../components';
 import { clock, time, tokens, usd } from '../../format';
 import type { Crumb } from '../../shell/context';
@@ -9,6 +9,25 @@ import { useDevMode } from '../../shell/prefs';
 import { ApprovalCard, Badge, Button, ButtonLink, DetailsPanel, EmptyState, Facts, Page, Skeleton, Status } from '../../ui';
 import { Composer } from './Composer';
 import { scrollParent, useTranscript } from './data';
+
+// the ended turns of the list that the transcript shows now. a turn with a reply waits until the transcript holds a
+// message of its run, so a reply never leaves the page before the stored copy is there.
+function shownTurns(turnIds: string[], messages: ChatMessage[]): string[] {
+  const runs = new Set(messages.map((message) => message.runId).filter((runId) => runId !== null));
+  const turns = currentTurns();
+  return turnIds.filter((id) => {
+    const turn = turns.get(id);
+    if (!turn || isActive(turn)) return false;
+    if (!turn.reply) return true;
+    if (turn.runId !== null) return runs.has(turn.runId);
+    const text = turn.reply.text;
+    return messages.some((message) => message.role === 'agent' && message.text === text);
+  });
+}
+
+function endedTurns(): string[] {
+  return [...currentTurns().values()].filter((turn) => !isActive(turn)).map((turn) => turn.turnId);
+}
 import { ToolChips } from './ToolChips';
 import './chats.css';
 
@@ -267,10 +286,21 @@ export function ChatView({ chatKey, mode = 'chat', crumbs }: ChatViewProps) {
   const approvalsLoaded = useApi<ApprovalRow[]>(needsApprovals ? '/api/approvals' : null, (message) => message.kind === 'approval');
   const approvals = useMemo(() => (approvalsLoaded.data ? new Map(approvalsLoaded.data.map((row) => [row.id, row])) : undefined), [approvalsLoaded.data]);
 
-  // a turn that ended shows from the transcript, so the live copy goes after the reload.
+  // a turn that ended shows from the transcript, so the live copy goes after the reload. a failed reload keeps the live
+  // copy, and the error shows above the composer. the next end of a turn, or the next snapshot, tries again.
+  const settle = () => {
+    const ended = endedTurns();
+    void transcript.reloadNewest().then((page) => {
+      if (!page) return;
+      const shown = shownTurns(ended, page.messages);
+      if (shown.length) applyTurnAction({ kind: 'drop', turnIds: shown });
+    });
+  };
   useChatStream((event) => {
-    if (!open || event.kind !== 'done') return;
-    void transcript.reloadNewest().then(() => applyTurnAction({ kind: 'drop', turnIds: [event.turnId] }));
+    if (!open) return;
+    // a snapshot after a reconnect leaves out the turns that ended while the stream was down, and the page never saw
+    // their done events, so the transcript loads again for them.
+    if (event.kind === 'done' || (event.kind === 'snapshot' && chat)) settle();
   });
   // a reset ends the open segment. the transcript loads again, so the page shows it as read-only.
   useStream((message) => {
@@ -281,8 +311,8 @@ export function ChatView({ chatKey, mode = 'chat', crumbs }: ChatViewProps) {
   const loadedOnce = Boolean(chat);
   useEffect(() => {
     if (!loadedOnce) return;
-    const ended = [...live.turns.values()].filter((turn) => !isActive(turn)).map((turn) => turn.turnId);
-    if (ended.length) applyTurnAction({ kind: 'drop', turnIds: ended });
+    const shown = shownTurns(endedTurns(), messages);
+    if (shown.length) applyTurnAction({ kind: 'drop', turnIds: shown });
     // only the first load drops, so a turn that ends later stays until its own reload.
   }, [loadedOnce]);
 
@@ -360,6 +390,7 @@ export function ChatView({ chatKey, mode = 'chat', crumbs }: ChatViewProps) {
         ) : null}
         {open ? (
           <div className="chat-dock">
+            {transcript.error ? <p className="error-text">Could not load the newest messages: {transcript.error}</p> : null}
             <Composer active={active} />
           </div>
         ) : mode === 'chat' && chat.kind === 'main' ? (

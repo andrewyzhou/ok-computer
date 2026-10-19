@@ -1,6 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import type { ChatButton, ChatStreamEvent, ChatTurnState } from '../../src/dashboard/types';
-import { apiUrl, type Connection } from './api';
+import { sharedStream, type Connection } from './api';
 
 // the live stream of the web chat. it is a second event stream next to /api/stream, so the app opens it one time and
 // every part of the page shares it. a browser allows six connections to one host, and a second copy of a stream would
@@ -8,7 +8,6 @@ import { apiUrl, type Connection } from './api';
 
 type Listener = (event: ChatStreamEvent) => void;
 const listeners = new Set<Listener>();
-let source: EventSource | undefined;
 let connection: Connection = 'connecting';
 const connectionListeners = new Set<() => void>();
 
@@ -20,31 +19,28 @@ function setConnection(next: Connection): void {
   for (const each of connectionListeners) each();
 }
 
+const stream = sharedStream({
+  path: '/api/chat/stream',
+  setConnection,
+  hasListeners: () => listeners.size > 0,
+  onMessage: (message) => {
+    let event: ChatStreamEvent;
+    try {
+      event = JSON.parse(String(message.data)) as ChatStreamEvent;
+    } catch {
+      return;
+    }
+    // a kind from a newer server is left out, as the contract asks.
+    if (!event || typeof event !== 'object' || !KINDS.has(event.kind)) return;
+    applyTurnAction(event);
+    for (const each of [...listeners]) each(event);
+  },
+});
+
 // the stream opens with the first subscriber. the server sends ready and ping as named events, and the unnamed
 // messages are the chat events, so only onmessage reads them.
 export function subscribeChat(listener: Listener): () => void {
-  if (!source && typeof EventSource !== 'undefined') {
-    source = new EventSource(apiUrl('/api/chat/stream'));
-    // a stream that stays open after a reload can block the requests of the new page.
-    addEventListener('pagehide', () => source?.close());
-    const opened = source;
-    opened.onopen = () => setConnection('live');
-    // the browser connects again by itself after an error, so an error first means connecting. a closed stream does
-    // not come back.
-    opened.onerror = () => setConnection(opened.readyState === 2 ? 'offline' : 'connecting');
-    opened.onmessage = (message) => {
-      let event: ChatStreamEvent;
-      try {
-        event = JSON.parse(String(message.data)) as ChatStreamEvent;
-      } catch {
-        return;
-      }
-      // a kind from a newer server is left out, as the contract asks.
-      if (!event || typeof event !== 'object' || !KINDS.has(event.kind)) return;
-      applyTurnAction(event);
-      for (const each of [...listeners]) each(event);
-    };
-  }
+  stream.ensure();
   listeners.add(listener);
   return () => void listeners.delete(listener);
 }
@@ -204,12 +200,34 @@ export function isActive(turn: Pick<LiveTurn, 'state'>): boolean {
 let live: { turns: Turns; standalone: StandaloneReply[] } = { turns: new Map(), standalone: [] };
 const liveListeners = new Set<() => void>();
 
+// the turns that ended, or that the page dropped. the answer of the post can come after the stream ended the turn,
+// and its sent action must not make a new turn that never ends. the set keeps the newest ids only.
+const ended = new Set<string>();
+const ENDED_KEEP = 200;
+
+function markEnded(turnId: string): void {
+  ended.delete(turnId);
+  ended.add(turnId);
+  if (ended.size > ENDED_KEEP) ended.delete(ended.values().next().value!);
+}
+
 export function applyTurnAction(action: TurnAction): void {
+  if (action.kind === 'sent' && ended.has(action.turnId)) return;
   const turns = turnsReducer(live.turns, action);
   const standalone = standaloneReducer(live.standalone, action);
+  if (action.kind === 'done') markEnded(action.turnId);
+  else if (action.kind === 'drop') for (const id of action.turnIds) markEnded(id);
+  else if (action.kind === 'state' && !isActive(action)) markEnded(action.turnId);
+  // a turn that a snapshot left out ended while the stream was down.
+  else if (action.kind === 'snapshot') for (const id of live.turns.keys()) if (!turns.has(id)) markEnded(id);
   if (turns === live.turns && standalone === live.standalone) return;
   live = { turns, standalone };
   for (const each of liveListeners) each();
+}
+
+// the live turns of the shared stream at this moment, for a handler that runs outside a render.
+export function currentTurns(): Turns {
+  return live.turns;
 }
 
 export function useLiveTurns(): { turns: Turns; standalone: StandaloneReply[] } {

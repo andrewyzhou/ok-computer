@@ -36,8 +36,9 @@ export interface Transcript {
   olderError?: string;
   // it gives false when nothing changed.
   loadOlder(): Promise<boolean>;
-  // the newest page again, after a turn ended or the session was reset. the older pages that the page loaded stay.
-  reloadNewest(): Promise<void>;
+  // the newest page again, after a turn ended or the session was reset. the older pages that the page loaded stay. it
+  // gives the page, or null when the load failed, and then error holds the reason.
+  reloadNewest(): Promise<ChatMessagesPage | null>;
 }
 
 export function useTranscript(key: string): Transcript {
@@ -60,7 +61,7 @@ export function useTranscript(key: string): Transcript {
     () =>
       api<ChatMessagesPage>(messagesPath(key)).then(
         (page) => {
-          if (!alive.current) return;
+          if (!alive.current) return null;
           setState((old) => {
             const first = page.messages[0]?.id;
             // the older messages that the page loaded before stay in front of the new page.
@@ -72,10 +73,12 @@ export function useTranscript(key: string): Transcript {
               notFound: false,
             };
           });
+          return page;
         },
         (err: Error) => {
-          if (!alive.current) return;
+          if (!alive.current) return null;
           setState((old) => ({ ...old, error: err.message, notFound: /not found/i.test(err.message) }));
+          return null;
         },
       ),
     [key],
