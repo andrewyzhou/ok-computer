@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { RunInput, RunResult } from '../agent/loop.js';
 import { repairSession } from '../agent/recovery.js';
 import { parseApprovalButton, type Decision, type ResolvedVia } from '../approvals/store.js';
@@ -12,7 +13,7 @@ import type { Clock } from '../time.js';
 import { wrapUntrusted } from '../tools/untrusted.js';
 import type { Card, RunState } from './commands.js';
 import type { RunQueue } from './queue.js';
-import type { TurnHooks } from './turns.js';
+import { teeProgress, type TurnEnd, type TurnHooks } from './turns.js';
 
 // all owner messages from all channels share one continuous conversation.
 export const MAIN_SESSION = 'main';
@@ -97,6 +98,16 @@ export function createRouter(deps: RouterDeps): Router {
   let queued = 0;
   // the run ended, and its reply goes out now. the queue is still busy, but no approved call or automation holds it.
   let replying = false;
+  // a hook only lets other viewers follow a turn, so its failure never breaks a reply.
+  const hook = <T>(call: (turns: TurnHooks) => T): T | undefined => {
+    if (!deps.turns) return undefined;
+    try {
+      return call(deps.turns);
+    } catch (err) {
+      logger.warn('turn hook failed', { err });
+      return undefined;
+    }
+  };
 
   return {
     async handle(message) {
@@ -105,9 +116,14 @@ export function createRouter(deps: RouterDeps): Router {
         logger.error('message from a channel that is not running', { channel: message.channel });
         return;
       }
+      const fromOwner = deps.isOwner(message);
+      // each reply names the message that it answers, and the hooks mirror it to the viewers of other channels. the
+      // reply to an unknown sender is not part of the owner's conversation, so the hooks never see it.
       const send = async (card: Card & { markdown?: boolean; runId?: string }) => {
         try {
-          await channel.send({ chatId: message.chatId, ...card });
+          const out = { chatId: message.chatId, ...card, ...(message.messageId !== undefined ? { replyTo: message.messageId } : {}) };
+          await channel.send(out);
+          if (fromOwner) hook((turns) => turns.replied(message, out));
           return true;
         } catch (err) {
           logger.error('reply failed', { channel: channel.id, err });
@@ -119,7 +135,7 @@ export function createRouter(deps: RouterDeps): Router {
       };
 
       // the text of an unknown sender never reaches the model or the event log.
-      if (!deps.isOwner(message)) {
+      if (!fromOwner) {
         logger.warn('message from an unknown sender', { channel: message.channel, senderId: message.senderId });
         await reply('Sorry, I only talk with my owner.');
         return;
@@ -149,6 +165,7 @@ export function createRouter(deps: RouterDeps): Router {
         } else logger.warn('unknown button', { data: message.button });
         return;
       }
+      hook((turns) => turns.owner(message));
       // /stop and the commands answer at once. a message that waits in the queue would wait for the run it stops.
       // an approved call or an automation of the main session also holds the queue, but only the router's own run
       // has a stop.
@@ -183,8 +200,22 @@ export function createRouter(deps: RouterDeps): Router {
 
       // the user message goes into the log when its run starts. if it went in earlier, it could land between a
       // tool call and its result in a run that is still active.
+      // the web channel reads the state of the turn right after its onMessage returns. so queued() runs in the same
+      // tick as the call of handle(), and no await comes before it on this path.
+      const busy = queue.busy(MAIN_SESSION);
+      hook((turns) => turns.queued(message, busy));
       queued++;
+      // each queued task ends its turn exactly once, after its last reply went out. a task that throws ends it as
+      // failed.
       const task = async () => {
+        let end: TurnEnd = 'failed';
+        try {
+          end = await answer();
+        } finally {
+          hook((turns) => turns.ended(message, end));
+        }
+      };
+      const answer = async (): Promise<TurnEnd> => {
         queued--;
         // a phone keyboard can write "/New". the commands menu offers /new, so it matches as /stop does.
         if (message.text.trim().toLowerCase() === '/new') {
@@ -198,13 +229,20 @@ export function createRouter(deps: RouterDeps): Router {
           deps.onReset?.();
           appendEvent(db, { sessionKey: MAIN_SESSION, runId: null, type: 'session_reset', payload: {} }, clock());
           await reply('Started a new session.');
-          return;
+          return 'done';
         }
         const stop = new AbortController();
         const run: NonNullable<typeof current> = { stop, since: clock() };
         current = run;
+        // with hooks, the router names the run before it starts, so the viewers of other channels can follow it.
+        const runId = deps.turns ? (deps.newId ?? randomUUID)() : undefined;
+        const stopRun = () => (current === run ? stopCurrent() : undefined);
         // the reply guard reads only the final reply, so the draft hides each data link of a tainted session.
-        const progress = channel.progress?.(message, () => (current === run ? stopCurrent() : undefined), (text) => guardDraft(db, MAIN_SESSION, text));
+        const guard = (text: string) => guardDraft(db, MAIN_SESSION, text);
+        const progress = teeProgress(
+          channel.progress?.(message, stopRun, guard),
+          runId !== undefined ? hook((turns) => turns.started(message, runId, stopRun, guard)) : undefined,
+        );
         let result: RunResult | undefined;
         try {
           result = await deps.agent({
@@ -212,6 +250,7 @@ export function createRouter(deps: RouterDeps): Router {
             trigger: 'message',
             slot: 'main',
             channel: message.channel,
+            ...(runId !== undefined ? { runId } : {}),
             allowedTools: MAIN_TOOLS,
             events: [ownerEvent(message)],
             signal: deps.signal ? AbortSignal.any([deps.signal, stop.signal]) : stop.signal,
@@ -234,18 +273,19 @@ export function createRouter(deps: RouterDeps): Router {
           progress?.done(false);
           appendEvent(db, { sessionKey: MAIN_SESSION, runId: null, type: 'system_event', payload: { text: 'The owner stopped the previous reply before it was done.' } }, clock());
           await reply(run.stoppedWhile ? `Stopped while ${run.stoppedWhile} ran. Its effect is unknown.` : 'Stopped.');
-          return;
+          return 'stopped';
         }
         if (result.status !== 'completed') {
           progress?.done(false);
           await reply(`Sorry, I could not finish that: ${result.error ?? result.status}.`);
-          return;
+          return 'failed';
         }
         const text = result.text.trim();
         if (!text) logger.warn('run completed without text', { runId: result.runId });
         const sent = text && text !== NO_REPLY ? await send({ text: result.text, markdown: true, runId: result.runId }) : true;
         // the done mark shows only for a reply that went out.
         progress?.done(sent);
+        return 'done';
       };
       await queue.enqueue(MAIN_SESSION, () =>
         task().finally(() => {
