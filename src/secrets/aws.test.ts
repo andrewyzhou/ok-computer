@@ -166,6 +166,56 @@ describe('the aws secret store', () => {
     expect(await store.get('a')).toBe('back-value-1234');
   });
 
+  // aws ends a forced delete some seconds after it answers, and a restore of such a secret fails.
+  it('waits and creates again when a forced delete has not ended yet', async () => {
+    const fake = fakeClient();
+    fake.secrets.set('okc/a', 'old-value-1234');
+    fake.deleted.add('okc/a');
+    let restores = 0;
+    const waits: number[] = [];
+    const send = async (command: { input: Record<string, unknown> }, opts?: object) => {
+      if (command.constructor.name === 'RestoreSecretCommand') {
+        restores++;
+        // the deletion ends after the second refused restore.
+        if (restores === 2) {
+          fake.deleted.delete('okc/a');
+          fake.secrets.delete('okc/a');
+        }
+        throw awsError('InvalidRequestException', 'You can\'t restore a secret that is scheduled for permanent deletion.');
+      }
+      return (fake.client.send as (c: object, o?: object) => Promise<unknown>)(command, opts);
+    };
+    const store = createAwsSecretStore({
+      region: 'us-east-1',
+      client: { send } as unknown as SecretsManagerPort,
+      sleep: async (ms) => void waits.push(ms),
+    });
+    await store.set('a', 'new-value-1234');
+    expect(fake.secrets.get('okc/a')).toBe('new-value-1234');
+    expect(waits).toEqual([500, 1000]);
+  });
+
+  it('gives up on a forced delete that does not end, with a text that names no secret', async () => {
+    const fake = fakeClient();
+    fake.secrets.set('okc/a', 'old-value-1234');
+    fake.deleted.add('okc/a');
+    const send = async (command: { input: Record<string, unknown> }, opts?: object) => {
+      if (command.constructor.name === 'RestoreSecretCommand') throw awsError('InvalidRequestException', 'okc/a is scheduled for permanent deletion.');
+      return (fake.client.send as (c: object, o?: object) => Promise<unknown>)(command, opts);
+    };
+    const store = createAwsSecretStore({ region: 'us-east-1', client: { send } as unknown as SecretsManagerPort, sleep: async () => {} });
+    const err = await store.set('a', 'new-value-1234').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CredentialStoreError);
+    expect((err as Error).message).toContain('still deleting');
+    expect((err as Error).message).not.toContain('okc/a');
+  });
+
+  it('never maps a ref onto the reserved names of the host', () => {
+    expect(() => awsSecretName('okc-host/', 'env')).toThrow(CredentialStoreError);
+    expect(() => awsSecretName('', 'okc-host/env')).toThrow(CredentialStoreError);
+    expect(awsSecretName('okc/', 'env')).toBe('okc/env');
+  });
+
   it('refuses a value over 65,536 bytes without a request', async () => {
     const fake = fakeClient();
     const store = createAwsSecretStore({ region: 'us-east-1', client: fake.client });
@@ -213,6 +263,9 @@ describe('the aws secret store', () => {
     fake.failures.push({ command: 'GetSecretValueCommand', error: Object.assign(new Error('connect'), { code: 'ECONNREFUSED' }) });
     await expect(store.check()).rejects.toThrow('aws secrets manager did not answer in eu-west-2.');
     fake.failures.push({ command: 'GetSecretValueCommand', error: awsError('TimeoutError') });
+    await expect(store.check()).rejects.toThrow('did not answer in eu-west-2.');
+    // the time limit of each command ends a hung request with an AbortError.
+    fake.failures.push({ command: 'GetSecretValueCommand', error: awsError('AbortError', 'Request aborted') });
     await expect(store.check()).rejects.toThrow('did not answer in eu-west-2.');
   });
 });

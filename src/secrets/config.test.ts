@@ -58,4 +58,20 @@ describe('the secrets block of the config', () => {
     expect(errorOf({ backend: 'file', path: '' })).toContain('give the path of the secret file');
     expect(errorOf({ backend: 'file', path: 'data/\0x' })).toContain('without a nul character');
   });
+
+  it('refuses a prefix in the reserved space of the host', () => {
+    expect(errorOf({ backend: 'aws', region: 'us-east-1', prefix: 'okc-host/' })).toContain('okc-host/');
+    expect(errorOf({ backend: 'aws', region: 'us-east-1', prefix: 'okc-host/app/' })).toContain('okc-host/');
+    expect(secretsOf({ backend: 'aws', region: 'us-east-1', prefix: 'okc-hostx/' })).toMatchObject({ prefix: 'okc-hostx/' });
+  });
+
+  // the file tools of the agent read the workspace and the skills, so a secret file there is open to the model.
+  it('refuses a secret file inside the workspace or the skills', () => {
+    for (const path of ['workspace/secrets.json', './workspace/x/secrets.json', 'skills/secrets.json', 'data/../workspace/s.json']) {
+      expect(errorOf({ backend: 'file', path }), path).toContain('outside paths.');
+    }
+    const moved = parseConfig({ paths: { workspace: 'ws' }, secrets: { backend: 'file', path: 'ws/s.json' } });
+    expect(moved.ok).toBe(false);
+    expect(secretsOf({ backend: 'file', path: 'workspace-secrets.json' })).toEqual({ backend: 'file', path: 'workspace-secrets.json' });
+  });
 });

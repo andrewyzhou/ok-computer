@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { googleConfigSchema } from '../google/config.js';
-import { DEFAULT_SECRET_STORE, secretStoreConfigSchema } from '../secrets/config.js';
+import { DEFAULT_SECRET_STORE, secretFileExposedIn, secretStoreConfigSchema } from '../secrets/config.js';
 
 export const SLOTS = ['main', 'heartbeat', 'utility', 'batch', 'consolidation', 'compaction'] as const;
 export type Slot = (typeof SLOTS)[number];
@@ -151,6 +151,17 @@ export const configSchema = z.strictObject({
   // the place that keeps the secrets. a desktop uses the keyring, and a server uses a file or aws secrets manager.
   // see docs/setup/aws.md.
   secrets: secretStoreConfigSchema.prefault(DEFAULT_SECRET_STORE),
+}).superRefine((config, ctx) => {
+  // the file tools of the agent read the workspace and the skills, so the secret file must not lie in them.
+  if (config.secrets.backend !== 'file') return;
+  const folder = secretFileExposedIn(config.secrets.path, { workspace: config.paths.workspace, skills: config.paths.skills });
+  if (folder) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['secrets', 'path'],
+      message: `give a path of the secret file outside paths.${folder}, which the agent can read, for example data/secrets.json`,
+    });
+  }
 });
 
 // the result is in milliseconds. "0" gives 0.

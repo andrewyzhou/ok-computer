@@ -1,7 +1,7 @@
 import type { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { CredentialStoreError } from '../integrations/secrets.js';
 import { registerSecret } from '../observability/redact.js';
-import { DEFAULT_AWS_PREFIX, PROBE_REF } from './config.js';
+import { DEFAULT_AWS_PREFIX, PROBE_REF, RESERVED_AWS_PREFIX } from './config.js';
 import type { CheckedSecretStore } from './index.js';
 
 // the part of the sdk client that the store uses. tests give a fake that records the commands.
@@ -15,12 +15,21 @@ export interface AwsSecretStoreOptions {
   client?: SecretsManagerPort;
   // tests give a clock for the cache.
   now?: () => number;
+  // tests give a sleep that does not wait, for the retry of a write after a forced delete.
+  sleep?: (ms: number) => Promise<void>;
 }
 
 // aws secrets manager keeps at most 65,536 bytes in one secret, and a name has at most 512 characters.
 export const AWS_MAX_SECRET_BYTES = 65_536;
 const MAX_NAME = 512;
 const CACHE_MS = 60_000;
+// the sdk client has no time limit of its own, so a host that cannot reach aws would hold each call until the os
+// gives up on the connection. the limit covers the retries of the sdk too.
+export const AWS_REQUEST_TIMEOUT_MS = 10_000;
+// a forced delete ends some seconds after aws answers it. a write of the same ref in that time waits and tries again
+// for at most this long.
+const DELETE_WAIT_MS = 15_000;
+const DELETE_RETRY_MS = 500;
 
 const KEPT = /[A-Za-z0-9/_+=.-]/;
 // with the u flag, this class matches a surrogate only when it is not part of a pair.
@@ -43,6 +52,11 @@ export function awsSecretName(prefix: string, ref: string): string {
   }
   if (prefix.length + name.length > MAX_NAME) {
     throw new CredentialStoreError(`a secret name is longer than ${MAX_NAME} characters, so give a shorter ref or prefix`);
+  }
+  // the runbook keeps the env of the host under this prefix, and the instance role may only read it. no ref of the
+  // app may map onto it, whatever the prefix is.
+  if ((prefix + name).startsWith(RESERVED_AWS_PREFIX)) {
+    throw new CredentialStoreError(`a secret name of the app may not start with ${RESERVED_AWS_PREFIX}, which holds the env of the host`);
   }
   return prefix + name;
 }
@@ -68,16 +82,17 @@ const isDenied = (err: unknown) =>
   ) || errorOf(err).$metadata?.httpStatusCode === 403;
 const NETWORK_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH']);
 const isNetwork = (err: unknown) =>
-  ['TimeoutError', 'NetworkingError', 'RequestTimeout', 'RequestTimeoutException'].includes(nameOf(err)) ||
+  ['TimeoutError', 'AbortError', 'NetworkingError', 'RequestTimeout', 'RequestTimeoutException'].includes(nameOf(err)) ||
   NETWORK_CODES.has(errorOf(err).code ?? '');
 
 // the text names the kind of the error only. the message of an aws error can hold the secret name, which holds the ref.
 const failed = (err: unknown) => new CredentialStoreError(`aws secrets manager failed: ${nameOf(err)}`);
 
-// aws secrets manager with one secret for each ref, named prefix + ref.
+// aws secrets manager with one secret for each ref, named prefix + ref, with the escape of awsSecretName.
 export function createAwsSecretStore(options: AwsSecretStoreOptions): CheckedSecretStore {
   const { region, prefix = DEFAULT_AWS_PREFIX } = options;
   const now = options.now ?? Date.now;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   // the sdk loads on the first call. the client takes its credentials from the default chain, which is the instance
   // role on a server.
@@ -87,10 +102,25 @@ export function createAwsSecretStore(options: AwsSecretStoreOptions): CheckedSec
   const loadClient = () =>
     (client ??= options.client ? Promise.resolve(options.client) : loadSdk().then((mod) => new mod.SecretsManagerClient({ region })));
 
-  // the port types each command as the sdk does, so the call goes through one loose signature.
+  // the port types each command as the sdk does, so the call goes through one loose signature. each command gets
+  // its own time limit.
   const send = async (make: (mod: Sdk) => object): Promise<unknown> => {
     const [mod, port] = await Promise.all([loadSdk(), loadClient()]);
-    return (port.send as (command: object) => Promise<unknown>)(make(mod));
+    const opts = { abortSignal: AbortSignal.timeout(AWS_REQUEST_TIMEOUT_MS) };
+    return (port.send as (command: object, opts: object) => Promise<unknown>)(make(mod), opts);
+  };
+
+  // the sets and deletes of one ref run one after another in the order of the calls, as in the file store. without
+  // this, two sets of a new ref can both create, and the set that was called first can win.
+  const chains = new Map<string, Promise<unknown>>();
+  const inOrder = <T>(ref: string, work: () => Promise<T>): Promise<T> => {
+    const next = (chains.get(ref) ?? Promise.resolve()).then(work);
+    const tail = next.catch(() => {});
+    chains.set(ref, tail);
+    void tail.then(() => {
+      if (chains.get(ref) === tail) chains.delete(ref);
+    });
+    return next;
   };
 
   // a value read in the last minute comes from memory, so a busy ref does not cost a request each time. a set or a
@@ -117,34 +147,53 @@ export function createAwsSecretStore(options: AwsSecretStoreOptions): CheckedSec
     send((mod) => new mod.PutSecretValueCommand({ SecretId: name, SecretString: value }));
   const restore = (name: string) => send((mod) => new mod.RestoreSecretCommand({ SecretId: name }));
 
-  const write = async (name: string, value: string) => {
+  // a secret that is marked for deletion comes back with a restore. a forced delete cannot be restored, and it ends
+  // some seconds later, so a restore that aws refuses means that the write must wait and try again.
+  const revive = async (name: string, value: string): Promise<boolean> => {
+    try {
+      await restore(name);
+    } catch (err) {
+      if (nameOf(err) === 'InvalidRequestException' || isNotFound(err)) return false;
+      throw err;
+    }
+    await put(name, value);
+    return true;
+  };
+
+  // true when the value is stored, and false when a forced delete of the secret has not ended yet.
+  const writeOnce = async (name: string, value: string): Promise<boolean> => {
     try {
       await put(name, value);
-      return;
+      return true;
     } catch (err) {
-      if (isMarkedForDeletion(err)) {
-        await restore(name);
-        await put(name, value);
-        return;
-      }
+      if (isMarkedForDeletion(err)) return revive(name, value);
       if (!isNotFound(err)) throw err;
     }
     try {
       await send(
         (mod) => new mod.CreateSecretCommand({ Name: name, SecretString: value, Description: 'ok computer secret' }),
       );
+      return true;
     } catch (err) {
       // another process created the secret between the put and the create, so a second put works.
       if (isExists(err)) {
         await put(name, value);
-        return;
+        return true;
       }
-      if (isMarkedForDeletion(err)) {
-        await restore(name);
-        await put(name, value);
-        return;
-      }
+      if (isMarkedForDeletion(err)) return revive(name, value);
       throw err;
+    }
+  };
+
+  const write = async (name: string, value: string) => {
+    let waited = 0;
+    for (let wait = DELETE_RETRY_MS; ; wait = Math.min(wait * 2, 4_000)) {
+      if (await writeOnce(name, value)) return;
+      if (waited >= DELETE_WAIT_MS) {
+        throw new CredentialStoreError('aws secrets manager is still deleting the secret, so try again in a minute');
+      }
+      await sleep(wait);
+      waited += wait;
     }
   };
 
@@ -176,24 +225,28 @@ export function createAwsSecretStore(options: AwsSecretStoreOptions): CheckedSec
       }
       const name = awsSecretName(prefix, ref);
       wrote(ref);
-      try {
-        await write(name, value);
-      } catch (err) {
-        throw failed(err);
-      } finally {
-        wrote(ref);
-      }
+      await inOrder(ref, async () => {
+        try {
+          await write(name, value);
+        } catch (err) {
+          throw err instanceof CredentialStoreError ? err : failed(err);
+        } finally {
+          wrote(ref);
+        }
+      });
     },
     async delete(ref) {
       const name = awsSecretName(prefix, ref);
       wrote(ref);
-      try {
-        await send((mod) => new mod.DeleteSecretCommand({ SecretId: name, ForceDeleteWithoutRecovery: true }));
-      } catch (err) {
-        if (!isNotFound(err) && !isMarkedForDeletion(err)) throw failed(err);
-      } finally {
-        wrote(ref);
-      }
+      await inOrder(ref, async () => {
+        try {
+          await send((mod) => new mod.DeleteSecretCommand({ SecretId: name, ForceDeleteWithoutRecovery: true }));
+        } catch (err) {
+          if (!isNotFound(err) && !isMarkedForDeletion(err)) throw failed(err);
+        } finally {
+          wrote(ref);
+        }
+      });
     },
     // the page shows these texts, so they name the region only and never a ref.
     async check() {
