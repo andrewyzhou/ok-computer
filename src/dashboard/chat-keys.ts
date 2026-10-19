@@ -9,7 +9,7 @@ import type { ChatKind } from './types.js';
 export const MAIN_KEY_PREFIX = 'main@';
 
 // the prefix of a background session key gives its kind. the order does not matter, because no prefix starts another.
-const PREFIXES: ReadonlyArray<[string, ChatKind]> = [
+export const KIND_PREFIXES: ReadonlyArray<[string, ChatKind]> = [
   ['auto:', 'auto'],
   ['heartbeat:', 'heartbeat'],
   ['sub:', 'sub'],
@@ -20,7 +20,7 @@ const PREFIXES: ReadonlyArray<[string, ChatKind]> = [
 
 export function chatKindOf(sessionKey: string): ChatKind {
   if (sessionKey === 'main') return 'main';
-  return PREFIXES.find(([prefix]) => sessionKey.startsWith(prefix))?.[1] ?? 'other';
+  return KIND_PREFIXES.find(([prefix]) => sessionKey.startsWith(prefix))?.[1] ?? 'other';
 }
 
 export interface ParsedChatKey {

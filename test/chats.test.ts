@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CHATS_Q_SCAN } from '../src/dashboard/chats.js';
 import type { ChatMessagesPage, ChatRow, ChatsPage } from '../src/dashboard/types.js';
 import type { Db } from '../src/db/index.js';
 import { appendEvent } from '../src/events/log.js';
@@ -311,5 +312,83 @@ describe('the messages of a chat', () => {
     const older = await get<ChatMessagesPage>(dashboard, messagesPath(`main@${resetEventId}`, `?limit=2&before=${page.before}`));
     expect(older.messages.map((message) => message.role)).toEqual(['note', 'owner']);
     expect(older.messages[1]!.text).toBe('send the notes');
+  });
+
+  it('shows only the final reply of a run and not the text of its tool turns', async () => {
+    const { t, dashboard, resetEventId } = await seedM1();
+    addRun(t.db, 'draft-run');
+    appendEvent(t.db, { sessionKey: 'main', runId: 'draft-run', type: 'user_message', payload: { text: 'check the page', channel: 'web', chatId: 'web' } }, new Date(at(30_000)));
+    const draft = appendEvent(
+      t.db,
+      {
+        sessionKey: 'main',
+        runId: 'draft-run',
+        type: 'assistant_message',
+        payload: agentTurn('let me look at https://x.example/?d=draftsecret', [{ id: 'tc-look', name: 'now', input: {} }]),
+      },
+      new Date(at(31_000)),
+    );
+    appendEvent(t.db, { sessionKey: 'main', runId: 'draft-run', type: 'tool_result', payload: { toolCallId: 'tc-look', name: 'now', content: 'noon', isError: false } }, new Date(at(32_000)));
+    appendEvent(t.db, { sessionKey: 'main', runId: 'draft-run', type: 'assistant_message', payload: agentTurn('It is noon.') }, new Date(at(33_000)));
+    // a run that failed after a tool turn has no final reply, so the chat got nothing from it.
+    addRun(t.db, 'broken-run', 'main', 'failed');
+    const broken = appendEvent(
+      t.db,
+      { sessionKey: 'main', runId: 'broken-run', type: 'assistant_message', payload: agentTurn('one moment, https://y.example/?d=x', [{ id: 'tc-b', name: 'now', input: {} }]) },
+      new Date(at(34_000)),
+    );
+
+    const page = await get<ChatMessagesPage>(dashboard, messagesPath(`main@${resetEventId}`, '?limit=200'));
+    const ids = page.messages.map((message) => message.id);
+    expect(ids).not.toContain(draft.id);
+    expect(ids).not.toContain(broken.id);
+    expect(JSON.stringify(page.messages)).not.toContain('draftsecret');
+    expect(page.messages.at(-1)).toMatchObject({ role: 'agent', text: 'It is noon.', guarded: false });
+  });
+});
+
+describe('the chat list at scale', () => {
+  it('pages many automation chats of one kind in order', async () => {
+    const { t, dashboard } = await seedM1();
+    for (let i = 0; i < 30; i++) {
+      appendEvent(t.db, { sessionKey: `auto:job:run-${String(i).padStart(2, '0')}`, runId: null, type: 'note', payload: { text: `run ${i}` } }, new Date(at(40_000 + (i % 7) * 1_000)));
+    }
+    const seen: ChatRow[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: ChatsPage = await get<ChatsPage>(dashboard, `/api/chats?kind=auto&limit=4${cursor ? `&cursor=${cursor}` : ''}`);
+      expect(page.chats.length).toBeLessThanOrEqual(4);
+      seen.push(...page.chats);
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(seen.map((chat) => chat.key)).toHaveLength(30);
+    expect(new Set(seen.map((chat) => chat.key)).size).toBe(30);
+    expect(seen.every((chat) => chat.kind === 'auto')).toBe(true);
+    const sorted = [...seen].sort((a, b) => (a.lastAt === b.lastAt ? (a.key < b.key ? 1 : -1) : a.lastAt < b.lastAt ? 1 : -1));
+    expect(seen.map((chat) => chat.key)).toEqual(sorted.map((chat) => chat.key));
+  });
+
+  it('scans a bounded number of chats for q and goes on with the cursor', async () => {
+    const { t, dashboard } = await seedM1();
+    const count = CHATS_Q_SCAN + 20;
+    const before = (await get<ChatsPage>(dashboard, '/api/chats?q=heartbeat&limit=200')).chats.length;
+    for (let i = 0; i < count; i++) {
+      const key = i % 5 ? `poll:feed-${i}` : `heartbeat:${i}`;
+      appendEvent(t.db, { sessionKey: key, runId: null, type: 'note', payload: { text: 'a beat' } }, new Date(at(40_000 + i)));
+    }
+    const first = await get<ChatsPage>(dashboard, '/api/chats?q=heartbeat&limit=200');
+    // the first page reads at most CHATS_Q_SCAN background chats, so it is short and it has a cursor.
+    expect(first.chats.length).toBeLessThan(200);
+    expect(first.nextCursor).not.toBeNull();
+    const seen = [...first.chats];
+    let cursor = first.nextCursor;
+    while (cursor) {
+      const page: ChatsPage = await get<ChatsPage>(dashboard, `/api/chats?q=heartbeat&limit=200&cursor=${cursor}`);
+      seen.push(...page.chats);
+      cursor = page.nextCursor;
+    }
+    const keys = seen.map((chat) => chat.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys).toHaveLength(before + count / 5);
   });
 });

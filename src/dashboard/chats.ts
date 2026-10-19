@@ -4,7 +4,7 @@ import type { Db } from '../db/index.js';
 import { dataUrls } from '../policy/policy.js';
 import { REMOVED_REPLY, REPLY_CALL_ID, REPLY_NOTE, withoutLinks } from '../policy/reply.js';
 import { NO_REPLY } from '../sessions/router.js';
-import { chatKindOf, mainSegments, parseChatKey, type MainSegment } from './chat-keys.js';
+import { chatKindOf, KIND_PREFIXES, mainKey, mainSegments, parseChatKey, type MainSegment } from './chat-keys.js';
 import { idOf, limitOf } from './params.js';
 import type { DashboardDeps } from './server.js';
 import type { ChatKind, ChatKindFilter, ChatMessage, ChatMessagesPage, ChatRow, ChatsPage } from './types.js';
@@ -91,13 +91,13 @@ function mainStats(db: Db, segment: MainSegment, needSpoken = true): ChatStats |
   };
 }
 
-// the numbers of each background session in one grouped query, or of one session when the key is given.
-function backgroundStats(db: Db, sessionKey?: string): ChatStats[] {
+// the numbers of one background session. a session with no events gives undefined.
+function backgroundStats(db: Db, sessionKey: string): ChatStats | undefined {
   const rows = db
     .prepare(
       `WITH bg AS (
          SELECT sessionKey, MIN(id) AS firstId, MAX(id) AS lastId, COUNT(DISTINCT runId) AS runs
-         FROM events WHERE ${sessionKey === undefined ? "sessionKey != 'main'" : 'sessionKey = $sessionKey'} GROUP BY sessionKey
+         FROM events WHERE sessionKey = $sessionKey GROUP BY sessionKey
        )
        SELECT bg.sessionKey, bg.firstId, bg.runs,
          (SELECT createdAt FROM events WHERE id = bg.firstId) AS firstAt,
@@ -105,8 +105,8 @@ function backgroundStats(db: Db, sessionKey?: string): ChatStats[] {
          ${runStatsSql('SELECT runId FROM events WHERE sessionKey = bg.sessionKey AND runId IS NOT NULL')}
        FROM bg`,
     )
-    .all(sessionKey === undefined ? {} : { sessionKey });
-  return rows.map((row) => {
+    .all({ sessionKey });
+  return rows.map((row): ChatStats => {
     const key = String(row.sessionKey);
     const from = Number(row.firstId);
     return {
@@ -124,7 +124,7 @@ function backgroundStats(db: Db, sessionKey?: string): ChatStats[] {
       firstOwnerText: null,
       channel: null,
     };
-  });
+  })[0];
 }
 
 // the title of a background chat comes from its session key.
@@ -175,12 +175,17 @@ function chatRow(db: Db, stats: ChatStats): ChatRow {
 }
 
 // the events that a chat shows, newest first. the rules of the delivered text are in sql, so a page is never short
-// only because the query skipped a row. a final reply is the last assistant_message of its run. the guard note of
-// such a reply says that the chat got a changed text. a guard decision with no allow and no note means that the run
-// ended before the reply went out, so the chat never got it.
+// only because the query skipped a row. the router and the loop send only the final reply of a run, which is its last
+// assistant_message with no tool calls, and the reply guard checks only that one. the text of a turn that also asked
+// for tools was a draft, so the chat never got it, except for a turn whose call made an approval: the chat got the
+// approval card. the guard note of a final reply says that the chat got a changed text. a guard decision with no allow
+// and no note means that the run ended before the reply went out, so the chat never got it.
 // the sql trim strips spaces, tabs and line ends, as the trim of the router does before it compares NO_REPLY.
-function messageRows(db: Db, range: Range, options: { before?: number; limit: number; spokenOnly?: boolean }): Row[] {
+// with ids, the rows are the events of those ids that a chat shows, for the search. without them, the rows of range.
+function messageRows(db: Db, range: Range | undefined, options: { before?: number; limit: number; spokenOnly?: boolean; ids?: number[] }): Row[] {
   const types = options.spokenOnly ? "('user_message', 'assistant_message')" : "('user_message', 'assistant_message', 'note', 'system_event', 'session_reset')";
+  const where = options.ids ? 'e.id IN (SELECT value FROM json_each($ids))' : RANGE_SQL;
+  const noCalls = (alias: string) => `COALESCE(json_array_length(${alias}.payload, '$.toolCalls'), 0) = 0`;
   return db
     .prepare(
       `WITH m AS (
@@ -193,11 +198,12 @@ function messageRows(db: Db, range: Range, options: { before?: number; limit: nu
                AND d.toolCallId IN (SELECT json_extract(value, '$.id') FROM json_each(e.payload, '$.toolCalls'))
              ORDER BY d.id LIMIT 1
            ) END AS approvalId,
-           e.type = 'assistant_message' AND e.runId IS NOT NULL AND NOT EXISTS (
-             SELECT 1 FROM events x WHERE x.runId = e.runId AND x.type = 'assistant_message' AND x.id > e.id
+           ${noCalls('e')} AS noCalls,
+           e.type = 'assistant_message' AND e.runId IS NOT NULL AND ${noCalls('e')} AND NOT EXISTS (
+             SELECT 1 FROM events x WHERE x.runId = e.runId AND x.type = 'assistant_message' AND x.id > e.id AND ${noCalls('x')}
            ) AS isFinal
          FROM events e
-         WHERE ${RANGE_SQL} AND e.type IN ${types} AND ($before IS NULL OR e.id < $before)
+         WHERE ${where} AND e.type IN ${types} AND ($before IS NULL OR e.id < $before)
        ),
        g AS (
          SELECT m.*,
@@ -215,7 +221,8 @@ function messageRows(db: Db, range: Range, options: { before?: number; limit: nu
        SELECT id, type, runId, createdAt, text, channel, approvalId, guardNote FROM g
        WHERE CASE type
          WHEN 'assistant_message' THEN
-           trim(COALESCE(text, ''), char(32, 9, 10, 13)) != $noReply
+           (noCalls OR approvalId IS NOT NULL)
+           AND trim(COALESCE(text, ''), char(32, 9, 10, 13)) != $noReply
            AND (trim(COALESCE(text, ''), char(32, 9, 10, 13)) != '' OR approvalId IS NOT NULL)
            AND NOT (reviewed AND guardNote IS NULL)
            ${options.spokenOnly ? "AND trim(COALESCE(text, ''), char(32, 9, 10, 13)) != ''" : ''}
@@ -224,7 +231,7 @@ function messageRows(db: Db, range: Range, options: { before?: number; limit: nu
        ORDER BY id DESC LIMIT $limit`,
     )
     .all({
-      ...rangeParams(range),
+      ...(options.ids ? { ids: JSON.stringify(options.ids) } : rangeParams(range!)),
       before: options.before ?? null,
       limit: options.limit,
       note: REPLY_NOTE,
@@ -232,6 +239,15 @@ function messageRows(db: Db, range: Range, options: { before?: number; limit: nu
       replyCall: REPLY_CALL_ID,
       noReply: NO_REPLY,
     });
+}
+
+// the text that a chat shows for each of these events, by event id. an event that no chat shows, for example a
+// NO_REPLY answer, a draft of a tool turn or a reply that the guard held, is not in the map. the search uses this, so
+// a hit never shows a text that the chat did not get.
+export function deliveredTexts(db: Db, ids: number[]): Map<number, string> {
+  if (!ids.length) return new Map();
+  const rows = messageRows(db, undefined, { ids, limit: ids.length });
+  return new Map(rows.map((row) => [Number(row.id), toMessage(row).text]));
 }
 
 // the text that the chat got. a reply that the guard changed shows at most the text that the guard let through: the
@@ -286,8 +302,12 @@ function decodeCursor(value: string): Cursor | undefined {
   }
 }
 
-// newest lastAt first. the seeds use a fixed clock, so the key breaks the many ties.
-const newerFirst = (a: Cursor, b: Cursor) => (a.lastAt === b.lastAt ? (a.key === b.key ? 0 : a.key < b.key ? 1 : -1) : a.lastAt < b.lastAt ? 1 : -1);
+// newest lastAt first. the seeds use a fixed clock, so the key breaks the many ties. the keys compare as utf-8 bytes,
+// as sqlite compares text, so the order here and the order of the sql below agree.
+const newerFirst = (a: Cursor, b: Cursor) => {
+  if (a.lastAt !== b.lastAt) return a.lastAt < b.lastAt ? 1 : -1;
+  return -Buffer.compare(Buffer.from(a.key), Buffer.from(b.key));
+};
 
 export interface ChatsInput {
   kind?: ChatKindFilter;
@@ -297,26 +317,100 @@ export interface ChatsInput {
   limit: number;
 }
 
-// the chat list: each segment of main and each background session, newest lastAt first, with cursor paging. a cursor
+// a chat of the list before its numbers are known. stats reads them, and it gives undefined for a segment of main
+// that is not a chat.
+interface Candidate extends Cursor {
+  stats: () => ChatStats | undefined;
+}
+
+// with q, one page reads at most this many background chats. a page can then hold fewer chats than the limit and still
+// have a nextCursor, and the next page goes on from the last chat that this page read.
+export const CHATS_Q_SCAN = 500;
+
+// the segments of main with the time of the last event of each. the seq of the next reset bounds a segment, so each
+// segment costs one read of the (sessionKey, seq) index.
+function mainCandidates(db: Db): Candidate[] {
+  const resets = db.prepare("SELECT id, seq FROM events WHERE sessionKey = 'main' AND type = 'session_reset' ORDER BY seq").all();
+  const starts = [{ id: 0, seq: null as number | null }, ...resets.map((row) => ({ id: Number(row.id), seq: Number(row.seq) }))];
+  const lastBefore = db.prepare("SELECT createdAt FROM events WHERE sessionKey = 'main' AND seq < ? ORDER BY seq DESC LIMIT 1");
+  const lastOf = db.prepare("SELECT createdAt FROM events WHERE sessionKey = 'main' ORDER BY seq DESC LIMIT 1");
+  return starts.flatMap((start, i) => {
+    const next = starts[i + 1];
+    const last = next ? lastBefore.get(next.seq) : lastOf.get();
+    // the segment before the first reset can have no events. every other segment holds at least its reset.
+    if (!last) return [];
+    const segment: MainSegment = { key: mainKey(start.id), resetEventId: start.id, fromEventId: start.id, toEventId: next ? next.id - 1 : null };
+    return [{ key: segment.key, lastAt: String(last.createdAt), stats: () => mainStats(db, segment) }];
+  });
+}
+
+// the where clause on the session key for a kind. a kind with a prefix reads a range of the index.
+function kindClause(kind: ChatKindFilter | undefined): { sql: string; params: Params } {
+  const prefix = KIND_PREFIXES.find(([, each]) => each === kind)?.[0];
+  if (prefix) {
+    const end = prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
+    return { sql: 'sessionKey >= $prefix AND sessionKey < $prefixEnd', params: { prefix, prefixEnd: end } };
+  }
+  if (kind === 'other') {
+    const known = KIND_PREFIXES.map(([each]) => `substr(sessionKey, 1, ${each.length}) = '${each}'`).join(' OR ');
+    return { sql: `sessionKey != 'main' AND NOT (${known})`, params: {} };
+  }
+  return { sql: "sessionKey != 'main'", params: {} };
+}
+
+// the background sessions after the cursor, newest lastAt first, at most limit of them. the grouped read uses only the
+// (sessionKey, seq) index, because each of its rows holds the event id.
+function backgroundCandidates(db: Db, kind: ChatKindFilter | undefined, cursor: Cursor | undefined, limit: number): Candidate[] {
+  const where = kindClause(kind);
+  return db
+    .prepare(
+      `WITH bg AS (SELECT sessionKey, MAX(id) AS lastId FROM events WHERE ${where.sql} GROUP BY sessionKey)
+       SELECT bg.sessionKey, e.createdAt AS lastAt FROM bg JOIN events e ON e.id = bg.lastId
+       WHERE $cursorAt IS NULL OR e.createdAt < $cursorAt OR (e.createdAt = $cursorAt AND bg.sessionKey < $cursorKey)
+       ORDER BY e.createdAt DESC, bg.sessionKey DESC LIMIT $limit`,
+    )
+    .all({ ...where.params, cursorAt: cursor?.lastAt ?? null, cursorKey: cursor?.key ?? null, limit })
+    .map((row) => {
+      const key = String(row.sessionKey);
+      return { key, lastAt: String(row.lastAt), stats: () => backgroundStats(db, key) };
+    });
+}
+
+// the chat list: each segment of main and each background session, newest lastAt first, with cursor paging. the sort
+// and the cursor are in sql, and the numbers of a chat are read only for the chats that the page looks at. a cursor
 // that cannot be read gives undefined, and the route answers 400.
 export function listChats(db: Db, input: ChatsInput): ChatsPage | undefined {
   const cursor = input.cursor === undefined ? undefined : decodeCursor(input.cursor);
   if (input.cursor !== undefined && !cursor) return undefined;
   const { kind } = input;
-  const keep = (each: ChatKind) => kind === undefined || (kind === 'activity' ? each !== 'main' : each === kind);
-  const stats: ChatStats[] = [
-    ...(keep('main') ? mainSegments(db).flatMap((segment) => mainStats(db, segment) ?? []) : []),
-    ...(kind === 'main' ? [] : backgroundStats(db).filter((each) => keep(each.kind))),
-  ].sort(newerFirst);
-  const after = cursor ? stats.filter((each) => newerFirst(each, cursor) > 0) : stats;
-  // the q filter reads the title and the preview, so it builds every row. without it, only the rows of the page.
   const q = input.q?.toLowerCase();
-  const rows = q
-    ? after.map((each) => chatRow(db, each)).filter((row) => row.title.toLowerCase().includes(q) || (row.preview ?? '').toLowerCase().includes(q))
-    : after.slice(0, input.limit + 1).map((each) => chatRow(db, each));
+  const withMain = kind === undefined || kind === 'main';
+  const withBackground = kind !== 'main';
+  // without q every background chat is a row, so limit + 1 of them fill the page.
+  const take = q ? CHATS_Q_SCAN : input.limit + 1;
+  const background = withBackground ? backgroundCandidates(db, kind === 'activity' ? undefined : kind, cursor, take) : [];
+  const cut = background.length === take ? background.at(-1) : undefined;
+  const after = (each: Cursor) => !cursor || newerFirst(each, cursor) > 0;
+  // when the background read was cut, a chat older than its last one may have a background chat before it that the read
+  // did not get, so the page stops there.
+  const candidates = [...(withMain ? mainCandidates(db).filter(after) : []), ...background]
+    .sort(newerFirst)
+    .filter((each) => !cut || newerFirst(each, cut) <= 0);
+  const rows: ChatRow[] = [];
+  let seen: Cursor | undefined;
+  for (const each of candidates) {
+    if (rows.length > input.limit) break;
+    seen = each;
+    const stats = each.stats();
+    if (!stats) continue;
+    const row = chatRow(db, stats);
+    if (q && !row.title.toLowerCase().includes(q) && !(row.preview ?? '').toLowerCase().includes(q)) continue;
+    rows.push(row);
+  }
   const chats = rows.slice(0, input.limit);
   const last = chats.at(-1);
-  return { chats, nextCursor: rows.length > input.limit && last ? encodeCursor({ lastAt: last.lastAt, key: last.key }) : null };
+  if (rows.length > input.limit && last) return { chats, nextCursor: encodeCursor({ lastAt: last.lastAt, key: last.key }) };
+  return { chats, nextCursor: cut && seen ? encodeCursor({ lastAt: seen.lastAt, key: seen.key }) : null };
 }
 
 export interface ChatMessagesInput {
@@ -331,7 +425,7 @@ export function chatMessages(db: Db, key: string, input: ChatMessagesInput): Cha
   if (!parsed) return undefined;
   let stats: ChatStats | undefined;
   if (parsed.resetEventId === null) {
-    stats = backgroundStats(db, parsed.sessionKey)[0];
+    stats = backgroundStats(db, parsed.sessionKey);
   } else {
     // the key names the reset that starts the segment. a segment with no events at all is not a chat.
     const segment = mainSegments(db).find((each) => each.resetEventId === parsed.resetEventId);
