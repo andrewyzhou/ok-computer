@@ -104,7 +104,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
     try {
       return await work();
     } catch (err) {
-      throw new CredentialStoreError(`the credential manager failed: ${errorText(err)}`, { cause: err });
+      throw new CredentialStoreError(`the system credential store failed: ${errorText(err)}`, { cause: err });
     }
   };
   const readJson = async <T>(ref: string): Promise<T | undefined> => {
@@ -115,7 +115,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
     } catch {
       // the message of JSON.parse can quote the value, and the value is a secret. a terminal also drops the quotes of
       // json that it gives to cmdkey, so this is the usual result of a client that the owner stored with cmdkey.
-      throw new CredentialStoreError(`the secret ${ref} in the credential manager is not valid json`);
+      throw new CredentialStoreError(`the secret ${ref} in the system credential store is not valid json`);
     }
   };
   // the issuer that the sdk adds to a pre-registered client. the client itself is never copied, so a new client that

@@ -191,7 +191,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       } catch (err) {
         // the credential manager can fail, for example while its service starts. the connection reads the tokens
         // again, and its retry gives the owner the error and tries again later.
-        logger.warn('the credential manager failed before an oauth integration started', { integration: entry.id, err });
+        logger.warn('the system credential store failed before an oauth integration started', { integration: entry.id, err });
       }
       if (!signedIn) {
         parked.set(entry.id, { status: 'needs_auth', error: 'it is not signed in yet. connect it from the dashboard.' });
@@ -233,7 +233,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
         ...(deps.setTimer ? { setTimer: deps.setTimer } : {}),
         ...(entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' && deps.oauth ? { signInOutage: () => deps.oauth?.signInOutage(entry.id) } : {}),
         ...(entry.kind === 'mcp-http' && entry.auth?.type === 'bearer'
-          ? { refusedKeyHint: `Update the secret ${entry.auth.secretRef} in the credential manager with cmdkey, then press Connect.` }
+          ? { refusedKeyHint: `Update the secret ${entry.auth.secretRef} in the system credential store (cmdkey on Windows, security on macOS), then press Connect.` }
           : {}),
       }),
     );
@@ -424,7 +424,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
         }
         await deps.secrets.set(ref, JSON.stringify(client));
       } catch (err) {
-        return { error: `the credential manager did not take the client: ${redact(errorText(err))}` };
+        return { error: `the system credential store did not take the client: ${redact(errorText(err))}` };
       }
       logger.info('oauth client stored', { integration: id, clientRef: ref });
       return { stored: true };
@@ -493,7 +493,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
 }
 
 // keptSecret gives the secret of a stored client with the same id, undefined when there is none, and null when the
-// stored value is not json, for example a client that the owner stored with cmdkey.
+// stored value is not json, for example a client that the owner stored with cmdkey or security.
 function keptSecret(stored: string | undefined, clientId: string): string | undefined | null {
   if (stored === undefined) return undefined;
   let old: { client_id?: unknown; client_secret?: unknown };

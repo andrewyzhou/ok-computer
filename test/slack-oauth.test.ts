@@ -426,7 +426,7 @@ describe('slack sign-in with a pre-registered client', () => {
     const t = await setup({ client: '{client_id:1111111111.2222222222,client_secret:cs-secret-from-cmdkey}' });
     await t.integrations.start();
     const started = await t.integrations.connect('slack-work');
-    expect(started).toEqual({ error: expect.stringContaining('the secret slack-work-app in the credential manager is not valid json') });
+    expect(started).toEqual({ error: expect.stringContaining('the secret slack-work-app in the system credential store is not valid json') });
     const shown = [JSON.stringify(started), JSON.stringify(t.integrations.status()), JSON.stringify(t.db.prepare('SELECT * FROM integration_state').all()), ...t.logLines()].join('\n');
     expect(shown).not.toContain('cs-secret-from-cmdkey');
   });

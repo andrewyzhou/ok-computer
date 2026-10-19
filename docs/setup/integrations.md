@@ -40,24 +40,45 @@ Put the file next to `okc.config.json`. Example with one local server and one re
 
 An invalid file stops the app at start with a message that names the field.
 
-## 2. Store secrets in the Windows Credential Manager
+## 2. Store secrets in the system credential store
 
-A `secretRef` (an env value, a bearer token, or a pre-registered OAuth client) names an entry of the service `ok-computer`. Store it in a terminal on the PC:
+The app keeps secrets in the credential store of the system: the Credential Manager on Windows, and the login Keychain on macOS. A `secretRef` (an env value, a bearer token, or a pre-registered OAuth client) names an entry of the service `ok-computer`. Store it in a terminal on this computer.
+
+On Windows:
 
 ```
 cmdkey /generic:notes-token.ok-computer /user:notes-token /pass:THE_SECRET
 ```
 
-The target is `<secretRef>.ok-computer`. The app never writes these values to its database, log or trace. OAuth tokens are stored there by the app itself.
+On macOS:
 
-A pre-registered OAuth client (`auth.clientRef`) is JSON, and a terminal removes its quotes on the way to `cmdkey`. Store it in the **OAuth app** panel of the integration's page instead, as [slack.md](slack.md) step 3 shows.
+```
+security add-generic-password -U -s ok-computer -a notes-token -w
+```
+
+`security` then asks for the secret twice. Keep `-w` last and give it no value, so the secret does not go into the shell history. `-U` replaces an entry that is already there.
+
+An entry that `security` made lets only `security` read it at first. When the agent reads it, macOS asks once whether `node` may use it. Choose **Always Allow**: under the LaunchAgent the read waits until you answer. macOS asks again after a node update, because the program changed.
+
+On Windows the target is `<secretRef>.ok-computer`. On macOS the entry is a generic password with the service `ok-computer` and the account `<secretRef>`. The app never writes these values to its database, log or trace. OAuth tokens are stored there by the app itself.
+
+To remove an entry:
+
+```
+cmdkey /delete:notes-token.ok-computer
+security delete-generic-password -s ok-computer -a notes-token
+```
+
+Store only short values by hand, for example a token of a few hundred characters. The app splits a value of more than 1,200 characters into parts with the names `<secretRef>#<generation>.<index>`, because Windows keeps at most 2,560 bytes in one entry. It does this only for the values that it writes itself, such as OAuth tokens. Do not edit or remove those parts by hand.
+
+A pre-registered OAuth client (`auth.clientRef`) is JSON, and a terminal removes its quotes on the way to `cmdkey`. On every system, store it in the **OAuth app** panel of the integration's page instead, as [slack.md](slack.md) step 3 shows. The panel writes the JSON in the form that the app reads.
 
 ## 3. Restart and connect
 
 Run `okc restart`, then open the dashboard (`okc open`) and go to **Integrations**.
 
 - A stdio or plain http server connects by itself. The page shows its status, its tools, and the next step when something is wrong.
-- An OAuth server waits until you press **Connect**. It makes no request before that. A sign-in page opens in a new tab; finish it on this PC, because the callback listens on `127.0.0.1:4318` while the sign-in waits.
+- An OAuth server waits until you press **Connect**. It makes no request before that. A sign-in page opens in a new tab; finish it on this computer, because the callback listens on `127.0.0.1:4318` while the sign-in waits.
 - If a sign-in that worked stops working (for example a revoked token), you get one Telegram message with the server's reason and a link to the page.
 
 `npm run chat` shows the same tools but never connects to a server; its calls say that the integration runs only in the background app.

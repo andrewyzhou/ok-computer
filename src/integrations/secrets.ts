@@ -32,7 +32,7 @@ const hashOf = (value: string) => createHash('sha256').update(value).digest('hex
 function split(value: string): string[] {
   const parts: string[] = [];
   for (let at = 0; at < value.length; ) {
-    // a part never ends inside a surrogate pair, because the credential manager stores each part as utf-16 text.
+    // a part never ends inside a surrogate pair, because the credential manager of windows stores each part as utf-16 text.
     const end = at + PART_UNITS >= value.length ? value.length : safeEnd(value, at + PART_UNITS);
     parts.push(value.slice(at, end));
     at = end;
@@ -134,7 +134,7 @@ export function createKeyringStore(service = KEYRING_SERVICE): SecretStore {
   });
 }
 
-// tests use this store, so they never touch the credential manager of the pc.
+// tests use this store, so they never touch the credential store of the machine.
 export function createMemorySecretStore(initial: Record<string, string> = {}): SecretStore & { values: Map<string, string> } {
   const values = new Map(Object.entries(initial));
   return {

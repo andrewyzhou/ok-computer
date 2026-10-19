@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Bot } from 'grammy';
 import { createApp } from './app.js';
-import { createCliChannel } from './channels/cli.js';
+import { cliWanted, createCliChannel } from './channels/cli.js';
 import { createTelegramChannel, TELEGRAM } from './channels/telegram.js';
 import type { ChannelAdapter } from './channels/types.js';
 import { loadConfig, loadDotEnv, loadSecrets } from './config/load.js';
@@ -86,8 +86,9 @@ async function main(): Promise<void> {
     logger.info('telegram is off, because TELEGRAM_BOT_TOKEN or TELEGRAM_OWNER_ID is not set');
   }
   const telegram = channels.length > 0;
-  // a service has no terminal. the cli then runs only when no other channel runs.
-  if (chatMode || !telegram || process.stdin.isTTY) {
+  // a service has no terminal, so its stdin ends at once. see cliWanted.
+  const service = process.env.OKC_SERVICE === '1';
+  if (cliWanted({ chatMode, telegram, service, tty: Boolean(process.stdin.isTTY) })) {
     // when piped input ends, the runs that it started finish before the process stops. telegram keeps the process up.
     const onClose = () => (telegram ? logger.info('cli input ended') : void app.idle().then(() => stop('cli input ended')));
     channels.push(createCliChannel({ onClose }));

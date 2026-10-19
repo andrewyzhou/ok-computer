@@ -20,6 +20,10 @@ It runs on your machine, so your data stays with you. Its persona files (`AGENTS
 
 ## Running it
 
+Node 24 to 26 runs the app (`.nvmrc` names 24). The app runs on macOS, Windows and Linux.
+
+### On Windows
+
 `scripts/okc.ps1 install` adds an `okc` command, an "OK Computer" desktop shortcut, and a logon task that starts the agent in the background.
 
 | Command | What it does |
@@ -32,11 +36,29 @@ It runs on your machine, so your data stays with you. Its persona files (`AGENTS
 
 A small supervisor restarts the agent if it stops. The logon task means it runs whenever you are signed in to Windows.
 
+### On macOS
+
+`scripts/okc.sh install` adds an `okc` command in `~/.local/bin` and a LaunchAgent (`~/Library/LaunchAgents/com.okcomputer.agent.plist`) that starts the agent in the background when you sign in. Put `~/.local/bin` on your `PATH` if it is not there yet. The same script is the `okc` command on Linux.
+
+| Command | What it does |
+|---|---|
+| `okc` | Build if needed, start in the background, open the dashboard |
+| `okc stop` / `okc restart` | Stop or restart the agent |
+| `okc status` | Show whether it runs, the dashboard URL, how often launchd started it with its last exit code, and the last errors from launchd |
+| `okc logs` | Follow the agent log |
+| `okc open` | Open the dashboard at http://127.0.0.1:4317 |
+| `okc browser login [url]` | Open the agent's Chrome profile to sign in to sites |
+| `okc install` / `okc uninstall` | Add or remove the `okc` command and the LaunchAgent |
+
+launchd restarts the agent only after a crash, not after `okc stop`, and waits at least a minute between two starts. Its own output goes to `data/logs/launchd.*.log`, which `okc start` and `okc stop` cut to its last 1000 lines when it grows over 1 MB. `okc uninstall` removes the command and the LaunchAgent.
+
+### On every system
+
 `npm run chat` uses the same database as the background agent. That is fine, but do not chat with it while the agent is answering you in Telegram at the same moment: two processes in one conversation can give the same tool call two results. `npm run chat` never connects to MCP servers and runs no automations: only the background agent does, so each server runs once, an OAuth token is refreshed by one process, and reminders always come to Telegram. A second background agent on the same `data` folder (for example `npm start` while the service runs) stops at once with a message.
 
 ## What works now and how to turn each part on
 
-A part that needs setup stays off until the setup is done, and the rest of the app works without it. Settings go in `okc.config.json`, secrets in `.env` or the Windows Credential Manager. Run `okc restart` after a change. The background agent runs the build of its last start, so restart it once after an update.
+A part that needs setup stays off until the setup is done, and the rest of the app works without it. Settings go in `okc.config.json`, secrets in `.env` or the system credential store (the Credential Manager on Windows, the login Keychain on macOS). Run `okc restart` after a change. The background agent runs the build of its last start, so restart it once after an update.
 
 | Part | State | How to turn it on |
 |---|---|---|
@@ -52,7 +74,7 @@ A part that needs setup stays off until the setup is done, and the rest of the a
 | Subscription sweep | Owner test, not a separate feature | After Gmail works, ask the agent for it (see below) |
 | Claude history, Docker sandbox | On hold | Nothing to do |
 
-A call that changes data (risk `write`, for example an archive) goes to the reviewer model on the `utility` slot, not to you. The reviewer holds a call that you did not ask for, a failed review comes to you, and you still approve everything that leaves the PC.
+A call that changes data (risk `write`, for example an archive) goes to the reviewer model on the `utility` slot, not to you. The reviewer holds a call that you did not ask for, a failed review comes to you, and you still approve everything that leaves this computer.
 
 To test the subscription sweep, ask the agent in Telegram, for example: "Look through my newsletters in all accounts from the last month, group them by sender, and unsubscribe me from the ones that I leave unread." It should search with the Gmail tools (or a `delegate` to the `inbox` profile), show you the list, and send one approval card for each unsubscribe. If the test shows a gap, the gap becomes a normal fix.
 

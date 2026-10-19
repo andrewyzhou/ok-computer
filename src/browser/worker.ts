@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { chromium, type BrowserContext, type Page } from 'playwright-core';
 import type { Db } from '../db/index.js';
@@ -238,8 +239,12 @@ export function maskPasswords(snapshot: string, secrets: string[]): string {
 export const renumber = (snapshot: string, n: number) => snapshot.replace(/\[ref=((?:f\d+)?e\d+)\]/g, `[ref=s${n}$1]`);
 
 // chrome keeps a file named lockfile open while it uses a profile, and windows refuses a second open (probe p4). this
-// is exact, also after a crash of the app, so the app needs no lock file of its own.
+// is exact, also after a crash of the app, so the app needs no lock file of its own. on macos and linux chrome makes
+// a link named SingletonLock that points to "<host>-<pid>" and removes it when it closes. a crash leaves the link, so
+// the profile is busy only while that process is alive. a link from another host is busy, because chrome on that host
+// can use the profile through a shared folder.
 export function profileBusy(profile: string): boolean {
+  if (process.platform !== 'win32') return singletonBusy(join(profile, 'SingletonLock'));
   const path = join(profile, 'lockfile');
   if (!existsSync(path)) return false;
   try {
@@ -248,6 +253,39 @@ export function profileBusy(profile: string): boolean {
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === 'EBUSY' || (err as NodeJS.ErrnoException).code === 'EPERM';
   }
+}
+
+function singletonBusy(path: string): boolean {
+  let target: string;
+  try {
+    target = readlinkSync(path);
+  } catch (err) {
+    // no link, or a file that is not a link. chrome makes only a link, so a plain file does not hold the profile.
+    return (err as NodeJS.ErrnoException).code !== 'ENOENT' && (err as NodeJS.ErrnoException).code !== 'EINVAL';
+  }
+  // a host name can hold dashes, so the pid follows the last one. only plain digits count as a pid: Number() also read
+  // "0x10" and "1e3", and a pid of 0 would ask about the whole process group.
+  const at = target.lastIndexOf('-');
+  const digits = target.slice(at + 1);
+  const pid = /^\d+$/.test(digits) ? Number(digits) : 0;
+  // a pid above the largest one of the system makes process.kill throw a type error, so it counts as junk too.
+  if (at < 0 || !Number.isSafeInteger(pid) || pid <= 0 || pid > 0x7fffffff) return true;
+  if (target.slice(0, at) !== hostname()) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // only ESRCH says that the process ended. EPERM means that it is alive and belongs to another user, and any other
+    // error leaves the lock unread, so it counts as busy.
+    return (err as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+// a link from another host stays after a crash, for example when the host name of a mac changed with the network. the
+// check cannot tell that from a live chrome, so a busy message names the link that the owner can delete.
+export function staleLockHint(profile: string): string {
+  if (process.platform === 'win32') return '';
+  return ` If no Chrome window uses the profile, a crash left its lock: delete ${join(profile, 'SingletonLock')} and try again.`;
 }
 
 type Json = Record<string, unknown>;
@@ -469,7 +507,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
       // a second chrome on the profile fails with "target page, context or browser has been closed" (probe p3), so
       // the lock file tells the real reason.
       if (profileBusy(profile)) {
-        return { refused: 'The agent browser profile is in use by another Chrome window, for example okc browser login. Try again after it closes.' };
+        return { refused: `The agent browser profile is in use by another Chrome window, for example okc browser login. Try again after it closes.${staleLockHint(profile)}` };
       }
       return { refused: `The browser did not start: ${errorText(err).split('\n')[0]}` };
     }

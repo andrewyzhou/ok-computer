@@ -12,6 +12,22 @@ export interface CliOptions {
   onClose?: () => void;
 }
 
+export interface CliWanted {
+  chatMode: boolean;
+  telegram: boolean;
+  service: boolean;
+  tty: boolean;
+}
+
+// okc.sh and the login agent of macos start the agent with OKC_SERVICE=1 and /dev/null as stdin. the cli would see the
+// end of its input at once and stop the agent, so a service runs no cli. npm run chat is always the cli. otherwise the
+// cli runs when no other channel runs, or when a terminal is attached.
+export function cliWanted(each: CliWanted): boolean {
+  if (each.chatMode) return true;
+  if (each.service) return false;
+  return !each.telegram || each.tty;
+}
+
 // the cli channel is a terminal chat for development. the person at the terminal is the owner.
 export function createCliChannel(options: CliOptions = {}): ChannelAdapter {
   const output = options.output ?? process.stdout;

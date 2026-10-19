@@ -152,7 +152,8 @@ describe('extraction', () => {
     expect(page.text).not.toContain('foot');
   });
 
-  it('reads a page of 60,000 nested elements without a stack overflow', async () => {
+  // the test is about the stack, not the time. the parse took 10 s on a busy machine, past the 5 s of a test.
+  it('reads a page of 60,000 nested elements without a stack overflow', { timeout: 30_000 }, async () => {
     const got = await fetchFixture(site.url('shop.test', '/deep'));
     expect(got.ok).toBe(true);
     if (got.ok) expect(extractReadable(got.text, got.url).text).toContain('deep text');

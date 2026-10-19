@@ -10,7 +10,7 @@ import { browserLogin } from '../src/browser/login.js';
 import { maskPasswords, profileBusy } from '../src/browser/worker.js';
 import { openDb } from '../src/db/index.js';
 import { registerSecret } from '../src/observability/redact.js';
-import { createBrowserHarness, FIXTURE_ARGS, hasChrome, killChrome, traceEntries } from './browser-harness.js';
+import { createBrowserHarness, FIXTURE_ARGS, hasChrome, hasLanAddress, killChrome, traceEntries } from './browser-harness.js';
 import { FIXTURE_COOKIE, FIXTURE_PASSWORD, startFixture, type Fixture } from './web-fixture.js';
 
 // not real secrets: a value with the shape of an api key, and a value that the test registers.
@@ -30,9 +30,10 @@ const harness = (...args: Parameters<typeof createBrowserHarness>) => {
   open.push(made);
   return made;
 };
+// a stop closes chrome and saves the trace. on a busy machine that takes longer than the 10 s of a hook.
 afterEach(async () => {
   for (const each of open.splice(0)) await each.worker.stop();
-});
+}, 60_000);
 
 const refOf = (text: string, pattern: RegExp) => {
   const line = text.split('\n').find((each) => pattern.test(each));
@@ -42,7 +43,9 @@ const refOf = (text: string, pattern: RegExp) => {
 };
 
 describe('the password mask', () => {
-  it('masks the longest value whole, and masks 3,000 long values in one pass', () => {
+  // the time limit is far below the old 246 s, but a machine that runs many tests at once can miss it once by chance,
+  // so the test tries again. a pass for each value fails every try.
+  it('masks the longest value whole, and masks 3,000 long values in one pass', { retry: 2 }, () => {
     expect(maskPasswords('- textbox: abcdef and abc', ['abc', 'abcdef'])).toBe('- textbox: •••••• and ••••••');
     expect(maskPasswords('a.b+c and axb+c', ['a.b+c'])).toBe('•••••• and axb+c');
     // each form of each value went through the whole snapshot once, and this page held the event loop for 246 s.
@@ -661,7 +664,7 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(posts()).toEqual([]);
   });
 
-  it('sends no webrtc packet over udp, also to an address of this pc', async () => {
+  it.skipIf(!hasLanAddress)('sends no webrtc packet over udp, also to an address of this pc', async () => {
     const udp = createSocket('udp4');
     const packets: Buffer[] = [];
     udp.on('message', (bytes) => packets.push(bytes));
@@ -743,7 +746,7 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
 
   // a shared worker belongs to no tab, so no page layer saw it, and a web socket of a dedicated worker skips the
   // socket route of the tab. both reached the owner's network.
-  it('starts no shared worker, and keeps the requests and sockets of a worker off the owner network', async () => {
+  it.skipIf(!hasLanAddress)('starts no shared worker, and keeps the requests and sockets of a worker off the owner network', async () => {
     const lan = await startLan();
     try {
       const h = harness();
@@ -787,7 +790,7 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
 
   // chrome preloads the pages of speculation rules outside the tab, and the activation of a prerender sends no request,
   // so a click could show an off-list page.
-  it('preloads no page of the speculation rules', async () => {
+  it.skipIf(!hasLanAddress)('preloads no page of the speculation rules', async () => {
     const lan = await startLan();
     try {
       const h = harness();
@@ -807,7 +810,7 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
 
   // the gate resolved a name in node, and chrome resolved it again, so a name that pointed elsewhere the second time
   // (dns rebinding) reached the owner's network. chrome now connects through the proxy, to the address it checked.
-  it('connects to the address that the gate checked, also when the name would resolve elsewhere for chrome', async () => {
+  it.skipIf(!hasLanAddress)('connects to the address that the gate checked, also when the name would resolve elsewhere for chrome', async () => {
     const lan = await startLan();
     try {
       const h = harness({ args: ['--host-resolver-rules=MAP rebind.test 127.0.0.5, MAP *.test 127.0.0.1'] });
@@ -1022,8 +1025,8 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
   });
 
   // the start of a tab had no time limit, so a chrome that gave no answer held each later open of every session (r8
-  // probe).
-  it('refuses an open when chrome gives no new tab in time, and the next open starts chrome again', async () => {
+  // probe). the test starts chrome four times, which took 20 to 70 s on a busy machine, so it has more time.
+  it('refuses an open when chrome gives no new tab in time, and the next open starts chrome again', { timeout: 120_000 }, async () => {
     const h = harness();
     await h.run('browser_open', { url: site.url('shop.test') });
     await h.run('browser_close', {});
@@ -1070,7 +1073,11 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     expect(out).toMatchObject({ isError: true, content: expect.stringContaining('stopped responding') });
     expect(await h.run('browser_close', {})).toMatchObject({ content: 'no browser task was open' });
     expect(h.tasks()[0]).toMatchObject({ status: 'crashed', endReason: 'the page stopped responding' });
-    expect(h.steps().at(-1)).toMatchObject({ error: expect.stringContaining('no answer within') });
+    // a request that the gate blocks after the hung step, for example one that chrome makes in the background, goes
+    // into a close row of its own after it. the step of the tool is the last row before that.
+    const rows = h.steps();
+    expect(rows.filter((row) => row.action !== 'close').at(-1)).toMatchObject({ error: expect.stringContaining('no answer within') });
+    expect(rows.slice(rows.findLastIndex((row) => row.action !== 'close') + 1).length).toBeLessThanOrEqual(1);
     expect((await h.run('browser_open', { url: site.url('shop.test') }, 'auto:x')).isError).toBe(false);
   });
 

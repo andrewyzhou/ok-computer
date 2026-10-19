@@ -153,7 +153,7 @@ export function BrowserTask({ id }: { id: string }) {
                 {step.error ? <p className="error-box">{step.error}</p> : null}
                 {step.blockedRequests.length ? (
                   <>
-                    <h4>Did not leave the PC</h4>
+                    <h4>Did not leave this computer</h4>
                     <ul>
                       {step.blockedRequests.map((blocked, i) => (
                         <li key={i} className="wrap">

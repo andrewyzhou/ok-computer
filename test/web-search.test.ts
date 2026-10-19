@@ -14,22 +14,25 @@ beforeAll(async () => {
 afterAll(() => site?.close());
 
 let h: ReturnType<typeof createBrowserHarness> | undefined;
+// a stop closes chrome and saves the trace. on a busy machine that takes longer than the 10 s of a hook.
 afterEach(async () => {
   await h?.worker.stop();
   h = undefined;
   site.google = 'ok';
-});
+}, 60_000);
 
-function setup() {
-  h = createBrowserHarness();
+function setup(extra: Parameters<typeof createBrowserHarness>[0] = {}) {
+  h = createBrowserHarness(extra);
   let now = new Date('2026-10-13T17:00:00Z');
+  // the gap reads this clock and not the time that chrome takes, so a slow start of chrome leaves the wait the same.
+  let mono = 0;
   const engines: Engine[] = [
     { id: 'google', label: 'Google', hosts: ['google.test'], url: (q) => site.url('www.google.test', `/search?q=${encodeURIComponent(q)}`) },
     { id: 'duckduckgo', label: 'DuckDuckGo', hosts: ['duckduckgo.test'], url: (q) => site.url('html.duckduckgo.test', `/html/?q=${encodeURIComponent(q)}`) },
   ];
   const waits: number[] = [];
   const make = () =>
-    createWebSearchTool({ db: h!.db, worker: h!.worker, clock: () => now, timeZone: 'UTC', engines, sleep: async (ms) => void waits.push(ms) });
+    createWebSearchTool({ db: h!.db, worker: h!.worker, clock: () => now, timeZone: 'UTC', engines, sleep: async (ms) => void waits.push(ms), now: () => mono });
   const tool = make();
   const ctx = { runId: 'run-1', sessionKey: 'main', timeZone: 'UTC', clock: () => now, signal: new AbortController().signal, toolCallId: 'c1' };
   return {
@@ -37,16 +40,21 @@ function setup() {
     waits,
     search: (query: string, which = tool) => which.run({ query }, ctx),
     make,
-    later: (ms: number) => (now = new Date(now.getTime() + ms)),
+    later: (ms: number) => {
+      now = new Date(now.getTime() + ms);
+      mono += ms;
+    },
     state: () => getSetting<Record<string, { strikes: number; until?: string }>>(h!.db, 'web_search.engines') ?? {},
   };
 }
 
 describe.skipIf(!hasChrome())('web_search through the browser', { timeout: 60_000 }, () => {
   it('reads the results of google, and records the search as a step with a screenshot', async () => {
-    const s = setup();
+    // this test waits for no timeout, so its tabs get the timeouts of the app. the short ones of the harness made this
+    // first search fail while chrome started on a busy machine.
+    const s = setup({ timeouts: { action: 10_000, navigation: 30_000, capture: 15_000 } });
     const out = await s.search('autumn shirts');
-    expect(out.untrustedSource).toBe('web_search:google');
+    expect(out.untrustedSource, out.content).toBe('web_search:google');
     expect(out.content).toContain('1. Autumn shirts for autumn shirts\n   https://shirts.example/autumn');
     expect(out.content).toContain('https://wiki.example/Shirt');
     expect(s.h.tasks()).toMatchObject([{ kind: 'search', status: 'closed' }]);
@@ -154,8 +162,8 @@ describe.skipIf(!hasChrome())('web_search through the browser', { timeout: 60_00
   it('keeps a gap between two searches of one engine', async () => {
     const s = setup();
     await Promise.all([s.search('one'), s.search('two')]);
-    expect(s.waits.length).toBe(1);
-    expect(s.waits[0]).toBeGreaterThan(0);
+    // the second search starts at the same time on the clock of the gap, so it waits the whole gap.
+    expect(s.waits).toEqual([2_000]);
   });
 });
 

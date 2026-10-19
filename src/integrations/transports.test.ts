@@ -85,6 +85,12 @@ describe('stdio transport', () => {
     30_000,
   );
 
+  it('names the system credential store when a secret of a stdio server is missing', async () => {
+    const parsed = parseIntegrations({ integrations: [{ id: 'notes', kind: 'mcp-stdio', command: 'x', args: [], env: { TOKEN: { secretRef: 'notes-token' } }, tools: { allow: ['echo'] } }] });
+    if (!parsed.ok) throw new Error(parsed.error);
+    await expect(stdioTransport(parsed.value[0] as StdioEntry, createMemorySecretStore(), silentLogger)).rejects.toThrow('the secret notes-token for TOKEN is not in the system credential store');
+  });
+
   it('keeps a noisy server from filling the log', async () => {
     const { lines, logger } = capture();
     const entry = entryFor(process.execPath, ['--import', 'tsx', FIXTURE, '--noisy']);

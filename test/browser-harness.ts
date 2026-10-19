@@ -1,8 +1,10 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { openDb } from '../src/db/index.js';
+import { findChrome } from '../src/browser/login.js';
 import { createBrowserTools } from '../src/browser/tools.js';
 import { createBrowserWorker, type BrowserDeps } from '../src/browser/worker.js';
 import { createBlobStore } from '../src/observability/blobs.js';
@@ -12,12 +14,17 @@ import type { ToolContext } from '../src/tools/registry.js';
 import { fixtureEgress } from './web-fixture.js';
 
 // the browser tests need the installed chrome. they skip without it, like the docker tests.
-export const hasChrome = () =>
-  [
-    'C:/Program Files/Google/Chrome/Application/chrome.exe',
-    'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-    join(process.env.LOCALAPPDATA ?? '', 'Google/Chrome/Application/chrome.exe'),
-  ].some((path) => existsSync(path));
+export const hasChrome = () => findChrome() !== undefined;
+
+// a server on 127.0.0.5 stands for the owner's network. linux and windows answer on every 127.x address, and macos
+// answers only on 127.0.0.1 until the owner adds an alias with "sudo ifconfig lo0 alias 127.0.0.5 up". the tests
+// that need the address skip without it.
+export const LAN_ADDRESS = '127.0.0.5';
+export const hasLanAddress = await new Promise<boolean>((done) => {
+  const server = createServer();
+  server.once('error', () => done(false));
+  server.listen(0, LAN_ADDRESS, () => server.close(() => done(true)));
+});
 
 // chrome resolves the *.test names to the fixture itself. the gate resolves them with the fixture egress.
 export const FIXTURE_ARGS = ['--host-resolver-rules=MAP *.test 127.0.0.1'];
@@ -58,10 +65,15 @@ export function createBrowserHarness(extra: Partial<BrowserDeps> = {}) {
   };
 }
 
-// the entries of a trace zip with their bytes. windows expands the zip, so the test needs no zip library.
+// the entries of a trace zip with their bytes. windows and the unzip of macos and linux expand the zip, so the test
+// needs no zip library.
 export function traceEntries(zip: string): Map<string, Buffer> {
   const out = mkdtempSync(join(tmpdir(), 'okc-trace-'));
-  execFileSync('powershell', ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${zip}' -DestinationPath '${out}'`]);
+  if (process.platform === 'win32') {
+    execFileSync('powershell', ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${zip}' -DestinationPath '${out}'`]);
+  } else {
+    execFileSync('unzip', ['-q', zip, '-d', out]);
+  }
   const entries = new Map<string, Buffer>();
   for (const name of readdirSync(out, { recursive: true, withFileTypes: true })) {
     const path = join(name.parentPath, name.name);
@@ -73,6 +85,22 @@ export function traceEntries(zip: string): Map<string, Buffer> {
 // a crash of chrome: every chrome process of the profile ends at once.
 export function killChrome(profileDir: string): number {
   const name = profileDir.split(/[\\/]/).pop()!;
+  if (process.platform !== 'win32') {
+    // pgrep -f reads an extended regular expression against the whole command line, so the name is escaped. the
+    // profile is <name>/profile, under /var/folders on macos and /tmp on linux. pgrep exits with 1 when no process
+    // matches.
+    const pattern = `--user-data-dir=[^ ]*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`;
+    const found = spawnSync('pgrep', ['-f', '--', pattern], { encoding: 'utf8' }).stdout;
+    const pids = found.split(/\s+/).filter(Boolean).map(Number);
+    for (const pid of pids) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // the process ended already.
+      }
+    }
+    return pids.length;
+  }
   const out = execFileSync('powershell', [
     '-NoProfile',
     '-Command',

@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
-import { createCliChannel } from './cli.js';
+import { cliWanted, createCliChannel } from './cli.js';
 import type { InboundMessage } from './types.js';
 
 describe('cli channel', () => {
@@ -41,5 +41,24 @@ describe('cli channel', () => {
     await new Promise((resolve) => setImmediate(resolve));
     expect(received.map((m) => [m.text, m.button])).toEqual([['1', undefined]]);
     await cli.stop();
+  });
+});
+
+describe('when the cli runs', () => {
+  const base = { chatMode: false, telegram: false, service: false, tty: false };
+
+  it('runs no cli in a service, also without telegram, because its stdin ends at once', () => {
+    expect(cliWanted({ ...base, service: true })).toBe(false);
+    expect(cliWanted({ ...base, service: true, tty: true })).toBe(false);
+  });
+
+  it('runs the cli for npm run chat, also in a service', () => {
+    expect(cliWanted({ ...base, chatMode: true, service: true, telegram: true })).toBe(true);
+  });
+
+  it('runs the cli outside a service when telegram is off or a terminal is attached', () => {
+    expect(cliWanted(base)).toBe(true);
+    expect(cliWanted({ ...base, telegram: true, tty: true })).toBe(true);
+    expect(cliWanted({ ...base, telegram: true })).toBe(false);
   });
 });
