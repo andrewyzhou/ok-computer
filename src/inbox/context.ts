@@ -28,6 +28,8 @@ export interface InboxDeps {
   agent: (input: RunInput) => Promise<RunResult>;
   queue: RunQueue;
   signal: AbortSignal;
+  // the live runs of the app. a job run is in it while it works, so the sweep of stale runs leaves it alone.
+  activeRuns?: Set<string>;
   newId?: () => string;
 }
 

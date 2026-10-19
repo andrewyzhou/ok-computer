@@ -181,6 +181,9 @@ export async function runDigest(ctx: InboxContext, run: JobRun): Promise<{ note?
       }
     }
   }
+  // a digest that could read no account fails, as the sweep does. it saves no digest, so the dashboard never shows an
+  // empty digest after an outage, and the scheduler counts the failure.
+  if (available.length && !accounts.length) throw new Error(notes.join('; '));
 
   const now = ctx.clock();
   for (const each of found) {

@@ -250,6 +250,43 @@ describe('a calendar proposal for a hostile mail', () => {
   });
 });
 
+describe('the job runs', () => {
+  it('skips a second run of a job while the first one works, and keeps the run live', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    answerSearch(h);
+    const live = new Set<string>();
+    h.ctx.activeRuns = live;
+    // the inbox of the harness copied ctx, so a new inbox gets the live set.
+    const { createInbox } = await import('./inbox.js');
+    const inbox = createInbox(h.ctx);
+    h.google.fake.deliver('personal', listMail('p1'));
+    const seen: number[] = [];
+    h.google.fake.search = (_alias, q, messages) => {
+      seen.push(live.size);
+      return q === SWEEP_QUERY ? messages : [];
+    };
+    const [first, second] = await Promise.all([inbox.runJob('newsletters'), inbox.runJob('newsletters')]);
+    expect(first.status).toBe('completed');
+    expect(second).toEqual({ status: 'skipped', error: 'the newsletters job is already running' });
+    expect(seen).toEqual([1]);
+    expect(live.size).toBe(0);
+    expect(inbox.running('newsletters')).toBe(false);
+    expect((await inbox.runJob('newsletters')).status).toBe('completed');
+  });
+
+  it('fails the scan and the digest when no account could be read, and stores no empty digest', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    answerSearch(h);
+    h.google.fake.fault({ route: 'GET /gmail/v1/users/me/messages', status: 400 });
+    const scan = await h.run('subscriptions');
+    expect(scan.status).toBe('failed');
+    expect(scan.error).toContain('personal: the receipts could not be read');
+    const digest = await h.run('digest');
+    expect(digest.status).toBe('failed');
+    expect(h.rows('SELECT * FROM inbox_digests')).toEqual([]);
+  });
+});
+
 describe('the unsubscribe of a sender that the owner cannot reach', () => {
   it('refuses a cancel of an unknown subscription and an unsubscribe of an unknown sender', async () => {
     h = await createInboxHarness({ accounts: ['personal'] });

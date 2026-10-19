@@ -18,19 +18,34 @@ export const sessionOf = (job: JobRun['job'], runId: string) => `${INBOX_PREFIX}
 export const mailSource = (account: string) => `gmail:${account}`;
 export const calendarSource = (account: string) => `calendar:${account}`;
 
+// the task of each run, its first event. a run of an automation has no message from the owner, so the reviewer reads
+// the first system event of the run as its task. the task must name what the run may do, or a reviewer that checks a
+// call against it holds every draft.
+export const TASKS: Record<JobRun['job'], string> = {
+  digest:
+    'The daily inbox digest of the owner. It reads the new mail, sorts it into replies, deadlines, bills and packages, saves draft replies to Gmail Drafts (they are never sent), proposes calendar events for deadlines (the owner approves each one), and sends the owner a short digest.',
+  newsletters: 'The weekly newsletter sweep of the owner. It reads the list mail of the last 90 days and counts each sender. It changes no mail.',
+  subscriptions: 'The weekly paid subscription finder of the owner. It reads receipts and lists the charges that repeat. It changes no mail.',
+  action: 'An inbox action that the owner asked for on the dashboard. The call waits for the owner\'s approval.',
+};
+
 // startRun writes the runs row before any request leaves, so each google request and each model call of the run is in
-// its timeline.
-export function startRun(ctx: InboxContext, job: JobRun['job'], slot: Slot): JobRun {
+// its timeline. the first event of the run is its task. the app keeps the run in its live runs while it works, so the
+// sweep of stale runs does not abort a long scan.
+export function startRun(ctx: InboxContext, job: JobRun['job'], slot: Slot, task = TASKS[job]): JobRun {
   const runId = ctx.newId();
   const sessionKey = sessionOf(job, runId);
+  ctx.activeRuns?.add(runId);
   ctx.db
     .prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES (?, ?, 'automation', ?, 'running', ?)")
     .run(runId, sessionKey, slot, ctx.clock().toISOString());
+  appendEvent(ctx.db, { sessionKey, runId, type: 'system_event', payload: { text: task } }, ctx.clock());
   return { job, runId, sessionKey };
 }
 
 export function endRun(ctx: InboxContext, run: JobRun, status: 'completed' | 'failed', note?: string): void {
   ctx.db.prepare('UPDATE runs SET status = ?, endedAt = ?, error = ? WHERE id = ?').run(status, ctx.clock().toISOString(), note ? redact(note) : null, run.runId);
+  ctx.activeRuns?.delete(run.runId);
 }
 
 // runJob gives the job its run and ends the run with the result. the google requests of the work carry the run id, so

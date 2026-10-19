@@ -253,9 +253,58 @@ describe('the unsubscribe action', () => {
     await h.ctx.queue.drain();
     expect(h.agentRuns).toHaveLength(1);
     expect(h.agentRuns[0]!.sessionKey).toMatch(/^auto:inbox:/);
-    expect((h.agentRuns[0]!.events[0]!.payload as { text: string }).text).toContain('The owner approved this link: https://shop.example/u/p1');
+    const text = (h.agentRuns[0]!.events[0]!.payload as { text: string }).text;
+    expect(text).toContain('The owner approved the link in the block below.');
+    expect(text).toContain('<untrusted source="gmail:personal">\nlist: news.shop.example\nlink: https://shop.example/u/p1\n</untrusted>');
     expect(h.oneClicks).toEqual([]);
-    expect(row()).toMatchObject({ state: 'unsubscribed', helpSessionKey: h.agentRuns[0]!.sessionKey });
+    expect(row()).toMatchObject({ state: 'unsubscribed', helpSessionKey: h.agentRuns[0]!.sessionKey, unsubscribedAt: expect.any(String) });
+  });
+
+  it('keeps the sender pending while the help run works, and gives it back when the owner denies its form', async () => {
+    let finish: () => void = () => {};
+    h = await createInboxHarness({ accounts: ['personal'], agent: (input) => new Promise((resolve) => (finish = () => resolve({ runId: input.runId!, status: 'completed', text: '' }))) });
+    answerSearch(h);
+    h.google.fake.deliver('personal', listMail('p1', { oneClick: false }));
+    await h.run('newsletters');
+    await requestUnsubscribe(h.ctx, 1);
+    await h.approve(1);
+    for (let tries = 0; tries < 20 && !h.agentRuns.length; tries++) await new Promise((resolve) => setImmediate(resolve));
+    expect(row()).toMatchObject({ state: 'unsubscribe_pending', unsubscribedAt: null });
+    expect(await requestUnsubscribe(h.ctx, 1)).toEqual({ ok: false, status: 409, error: 'a browser task works on the unsubscribe of this sender' });
+    // the help run asked the owner to send a form, and the owner said no.
+    const help = h.agentRuns[0]!;
+    h.ctx.db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES (?, ?, 'automation', 'main', 'running', ?)").run(help.runId!, help.sessionKey, h.ctx.clock().toISOString());
+    h.ctx.db
+      .prepare("INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt) VALUES (?, 'browser_submit', '{}', 'send the form', 'denied', ?)")
+      .run(help.runId!, h.ctx.clock().toISOString());
+    finish();
+    await h.ctx.queue.drain();
+    expect(row()).toMatchObject({ state: 'active', error: 'the owner did not approve a step of the browser help run' });
+    expect(await requestUnsubscribe(h.ctx, 1)).toMatchObject({ ok: true, response: { approvalId: 3 } });
+  });
+
+  it('lets the owner ask again after a sweep changed the link while the approval waited', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    h.google.fake.search = (_a, q, messages) => (q === SWEEP_QUERY ? messages : []);
+    h.google.fake.deliver('personal', listMail('p1', { date: '2026-10-10T12:00:00Z' }));
+    await h.run('newsletters');
+    expect(await requestUnsubscribe(h.ctx, 1)).toMatchObject({ ok: true, response: { approvalId: 1 } });
+    h.google.fake.deliver('personal', listMail('p2', { date: '2026-10-12T12:00:00Z' }));
+    await h.run('newsletters');
+    expect(await h.approve(1)).toContain('changed after the owner was asked');
+    expect(h.oneClicks).toEqual([]);
+    expect(await requestUnsubscribe(h.ctx, 1)).toMatchObject({ ok: true, response: { status: 'pending_approval', approvalId: 2 } });
+  });
+
+  it('gives a pending sender back when its approved tool refused', async () => {
+    await setup();
+    await requestUnsubscribe(h.ctx, 1);
+    // a refusal that did not give the row back itself, for example from an older version of the tool.
+    h.ctx.db.prepare("UPDATE inbox_senders SET unsubscribeMessageId = NULL WHERE id = 1").run();
+    await h.approve(1);
+    h.ctx.db.prepare("UPDATE inbox_senders SET state = 'unsubscribe_pending' WHERE id = 1").run();
+    settleApprovals(h.ctx.db, h.ctx.clock());
+    expect(row()).toMatchObject({ state: 'active' });
   });
 
   it('marks an unsubscribed sender failed when its mail still comes after 7 days', async () => {
@@ -321,6 +370,67 @@ describe('the archive and keep actions', () => {
     expect(await requestArchive(h.ctx, 9, { olderThanDays: 30 })).toEqual({ ok: false, status: 404, error: 'sender not found' });
     expect(keepSender(h.ctx, 9)).toEqual({ ok: false, status: 404, error: 'sender not found' });
     expect(h.rows('SELECT * FROM approvals')).toEqual([]);
+  });
+
+  it('reuses a label that differs only in case', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    answerSearch(h);
+    h.google.fake.deliver('personal', listMail('p1', { date: '2026-08-01T00:00:00Z' }));
+    await h.run('newsletters');
+    const box = h.google.fake.mailbox('personal');
+    box.labels.push({ id: 'Label_9', name: 'Newsletters' });
+    const result = await requestArchive(h.ctx, 1, { olderThanDays: 30, label: 'newsletters' });
+    if (!result.ok) throw new Error(result.error);
+    await h.approve(result.response.approvalId!);
+    expect(h.google.fake.requests.filter((each) => each.method === 'POST' && each.path === '/gmail/v1/users/me/labels')).toEqual([]);
+    expect(box.messages.get('p1')!.labelIds).toContain('Label_9');
+  });
+
+  it('does not keep an unsubscribed sender', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    answerSearch(h);
+    h.google.fake.deliver('personal', listMail('p1'));
+    await h.run('newsletters');
+    await requestUnsubscribe(h.ctx, 1);
+    await h.approve(1);
+    expect(keepSender(h.ctx, 1)).toEqual({ ok: false, status: 409, error: 'this sender is unsubscribed, so it cannot be kept' });
+    expect(h.rows('SELECT state FROM inbox_senders')).toEqual([{ state: 'unsubscribed' }]);
+  });
+});
+
+describe('a forged https unsubscribe', () => {
+  let h: InboxHarness;
+  afterEach(async () => h?.close());
+
+  // a mail with the list id and the from address of a real sender, but without its dkim signature, and with a link
+  // of the forger without the post header.
+  const forged = (id: string, date: string): FakeMessage => {
+    const mail = listMail(id, { date, unsubscribe: '<https://evil.example/x>', oneClick: false });
+    return { ...mail, headers: { ...mail.headers, 'Authentication-Results': 'mx.google.com; dkim=fail header.i=@shop.example; spf=softfail', 'DKIM-Signature': '' } };
+  };
+
+  it('cannot replace the signed link of the sender in a sweep', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    answerSearch(h);
+    h.google.fake.deliver('personal', listMail('p1', { date: '2026-10-01T00:00:00Z' }));
+    h.google.fake.deliver('personal', forged('f1', '2026-10-12T00:00:00Z'));
+    await h.run('newsletters');
+    expect(h.rows('SELECT unsubscribeMethod, unsubscribeUrl, unsubscribeMessageId FROM inbox_senders')).toEqual([
+      { unsubscribeMethod: 'one_click', unsubscribeUrl: 'https://shop.example/u/p1', unsubscribeMessageId: 'p1' },
+    ]);
+  });
+
+  it('is refused at run time and starts no browser run', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    answerSearch(h);
+    h.google.fake.deliver('personal', forged('f1', '2026-10-12T00:00:00Z'));
+    await h.run('newsletters');
+    expect(h.rows('SELECT unsubscribeMethod, unsubscribeUrl FROM inbox_senders')).toEqual([{ unsubscribeMethod: 'https', unsubscribeUrl: 'https://evil.example/x' }]);
+    await requestUnsubscribe(h.ctx, 1);
+    expect(await h.approve(1)).toContain('dkim');
+    await h.ctx.queue.drain();
+    expect(h.agentRuns).toEqual([]);
+    expect(h.rows('SELECT state, error FROM inbox_senders')).toEqual([{ state: 'failed', error: expect.stringContaining('dkim') }]);
   });
 });
 

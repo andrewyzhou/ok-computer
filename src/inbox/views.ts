@@ -218,7 +218,8 @@ export function getDigest(db: Db, id: number | 'latest'): InboxDigest | undefine
 
 // the drafts and the proposals page by id: the rows before the given id, newest first.
 function beforePage(db: Db, table: 'inbox_drafts' | 'inbox_proposals', query: InboxListQuery & { limit: number }): Row[] {
-  const where: string[] = [];
+  // a draft row without a gmail id is the claim of a call that saves the draft now, so it is not a draft yet.
+  const where: string[] = table === 'inbox_drafts' ? ["gmailDraftId != ''"] : [];
   const params: Array<string | number> = [];
   if (query.account) {
     where.push('account = ?');

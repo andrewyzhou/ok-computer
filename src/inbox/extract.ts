@@ -62,7 +62,13 @@ export async function extractItems<T>(slots: SlotRunner, request: ExtractRequest
     for (const raw of Array.isArray(list) ? list : []) {
       const parsed = request.item.safeParse(raw);
       if (!parsed.success) {
-        request.logger.warn('the inbox extraction gave an item in a bad shape', { tool: request.tool.name, item: JSON.stringify(raw)?.slice(0, 200) });
+        // the item holds text from mail, so the log names only its id and the fields that were wrong.
+        const id = (raw as { id?: unknown } | null)?.id;
+        request.logger.warn('the inbox extraction gave an item in a bad shape', {
+          tool: request.tool.name,
+          id: typeof id === 'number' ? id : null,
+          issues: parsed.error.issues.map((issue) => issue.path.join('.')),
+        });
         continue;
       }
       // an id outside the batch is dropped, so the model cannot add facts about a mail that it did not see.

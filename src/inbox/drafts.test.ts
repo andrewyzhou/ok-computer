@@ -3,6 +3,7 @@ import type { FakeMessage } from '../../test/fake-google.js';
 import { createInboxHarness, hostileMail, type InboxHarness } from '../../test/inbox-harness.js';
 import { toolStep } from '../models/fake.js';
 import type { ReviewRequest, ReviewResult } from '../policy/policy.js';
+import { ownerRequest } from '../policy/reviewer.js';
 import { checkDrafts, DRAFT_TOOL, draftReply } from './drafts.js';
 import { markRead, mailSource, startRun } from './run.js';
 
@@ -87,6 +88,31 @@ describe('draftReply', () => {
     expect(h.google.fake.mailbox('personal').drafts.size).toBe(1);
     expect(h.modelCalls).toHaveLength(calls);
     noSend(h);
+  });
+
+  // the reviewer checks the call against the task of the run. the task must say that the digest saves drafts, or a
+  // reviewer would hold every draft.
+  it('gives the reviewer a run task that names the draft replies', async () => {
+    const { h, run } = await setup();
+    h.google.fake.deliver('personal', question('q9'));
+    h.script.push(writeStep(REPLY));
+    await draftReply(h.ctx, run, { account: 'personal', messageId: 'q9', threadId: 't-q9' });
+    const review = h.reviews[0]!;
+    const task = ownerRequest(h.ctx.db, review.sessionKey, review.runId);
+    expect(task).toContain('<run_task>');
+    expect(task).toContain('saves draft replies to Gmail Drafts (they are never sent)');
+  });
+
+  it('makes one gmail draft when two calls for one mail come at once', async () => {
+    const { h, run } = await setup();
+    h.google.fake.deliver('personal', question('q8'));
+    const tool = h.inbox.tools.find((each) => each.name === DRAFT_TOOL)!;
+    const input = { account: 'personal', sourceMessageId: 'q8', threadId: 't-q8', to: ['sam@school.example'], subject: 'Re: Meeting this week', body: REPLY };
+    const ctx = (id: string) => ({ runId: run.runId, sessionKey: run.sessionKey, timeZone: h.ctx.timeZone, clock: h.ctx.clock, signal: h.ctx.signal, toolCallId: id });
+    const outputs = await Promise.all([tool.run(input, ctx('a')), tool.run(input, ctx('b'))]);
+    expect(outputs.map((each) => each.isError)).toEqual([undefined, undefined]);
+    expect(h.google.fake.mailbox('personal').drafts.size).toBe(1);
+    expect(h.rows("SELECT COUNT(*) AS n FROM inbox_drafts WHERE gmailDraftId != ''")).toEqual([{ n: 1 }]);
   });
 
   it('gives null for a no-reply sender', async () => {

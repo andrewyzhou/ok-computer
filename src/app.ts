@@ -189,6 +189,8 @@ export function createApp(deps: AppDeps): App {
         ...ids,
       })
     : undefined;
+  // the runs that work in this process. the sweep of stale runs leaves them alone.
+  const activeRuns = new Set<string>();
   // the inbox jobs (phase 5 m8) use the google accounts. the slot runner, the caller and the agent come later, and
   // the jobs call them only after the start.
   const inbox = google
@@ -206,6 +208,7 @@ export function createApp(deps: AppDeps): App {
         agent: (input) => agent(input),
         queue,
         signal: shutdown.signal,
+        activeRuns,
         ...ids,
       })
     : undefined;
@@ -226,7 +229,6 @@ export function createApp(deps: AppDeps): App {
     ...integrations.allowedNames(sessionKey),
     ...(google?.toolNames(sessionProfile(sessionKey)) ?? []),
   ];
-  const activeRuns = new Set<string>();
 
   const approvals = createApprovalFlow({
     db,

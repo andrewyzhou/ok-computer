@@ -6,11 +6,11 @@ import { toGoogleError } from '../google/errors.js';
 import { fromAddress as parseFrom, header } from '../google/mime.js';
 import { failed } from '../google/send.js';
 import { requestContext } from '../google/trace.js';
-import { planUnsubscribe, unsubscribeTargets } from '../google/unsubscribe.js';
+import { planUnsubscribe, unsubscribeTargets, verifyUnsubscribeHeaders } from '../google/unsubscribe.js';
 import { redact } from '../observability/redact.js';
 import { cleanLine } from '../signals/store.js';
 import { defineTool, errorText, type Tool, type ToolOutput } from '../tools/registry.js';
-import { requestAction, settleApprovals, startBrowserHelp } from './actions.js';
+import { httpsLink, requestAction, settleApprovals, startBrowserHelp } from './actions.js';
 import type { ActionResult, InboxContext, JobRun } from './context.js';
 import { getMessages, inInbox, isUnread, listMessages, receivedAt } from './gmail.js';
 import { mailSource, markRead } from './run.js';
@@ -34,8 +34,12 @@ const BATCH = 1000;
 const GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 const STILL_COMES = 'mail still comes more than 7 days after the unsubscribe';
 
-const SWEEP_HEADERS = ['From', 'List-Id', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'Date'];
+// the sweep reads the dkim headers too, so it takes the link of a sender from a message whose link is signed.
+const SWEEP_HEADERS = ['From', 'List-Id', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'Date', 'Authentication-Results', 'DKIM-Signature'];
 const CHECK_HEADERS = ['From', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'Authentication-Results', 'DKIM-Signature'];
+
+// the longest list id and sender key that a row keeps. the sender writes the List-Id header.
+const KEY_LIMIT = 200;
 
 // the system labels of gmail. an archive must not add one, because the trash and spam hide mail, and the others
 // change what gmail shows to the owner.
@@ -54,7 +58,7 @@ export function senderOf(message: gmail_v1.Schema$Message): { senderKey: string;
   const fromAddress = parseFrom(from);
   if (!fromAddress) return undefined;
   const bracket = /<([^<>]*)>/.exec(listHeader);
-  const listId = (bracket ? bracket[1]! : listHeader).trim().toLowerCase() || null;
+  const listId = (bracket ? bracket[1]! : listHeader).trim().toLowerCase().slice(0, KEY_LIMIT).trim() || null;
   // the name of the from header is the text before its address. the list phrase is the text before the list id.
   const fromName = /^(.*)<[^<>]*>\s*$/.exec(from)?.[1] ?? '';
   const listName = bracket ? listHeader.slice(0, bracket.index) : '';
@@ -66,11 +70,23 @@ export function senderOf(message: gmail_v1.Schema$Message): { senderKey: string;
 // List-Unsubscribe-Post (rfc 8058), https is an https target without it, mailto is a mailto target only.
 export function unsubscribeOf(message: gmail_v1.Schema$Message): { method: UnsubscribeMethod; url: string | null } {
   const targets = unsubscribeTargets(header(message, 'List-Unsubscribe'));
-  const https = targets.find((target) => /^https:/i.test(target));
+  // a target with a space or one that does not parse is text, not a link, so it is never offered.
+  const https = targets.find((target) => /^https:/i.test(target) && httpsLink(target) !== null);
   if (https) return { method: /List-Unsubscribe=One-Click/i.test(header(message, 'List-Unsubscribe-Post')) ? 'one_click' : 'https', url: https };
   const mailto = targets.find((target) => /^mailto:/i.test(target));
   if (mailto) return { method: 'mailto', url: mailto };
   return { method: 'none', url: null };
+}
+
+// the headers that a dkim signature must cover for each way to unsubscribe.
+const SIGNED: Record<'one_click' | 'https', string[]> = { one_click: ['List-Unsubscribe', 'List-Unsubscribe-Post'], https: ['List-Unsubscribe'] };
+
+// true when the unsubscribe header of the message is signed by the domain of its sender, so a forger did not write
+// it. a mailto or no link is never used, so it needs no check.
+function signedLink(message: gmail_v1.Schema$Message, fromAddress: string): boolean {
+  const { method } = unsubscribeOf(message);
+  if (method !== 'one_click' && method !== 'https') return false;
+  return verifyUnsubscribeHeaders(message, fromAddress, SIGNED[method]) === undefined;
 }
 
 // the parts of an inbox_senders row that the actions use.
@@ -86,6 +102,7 @@ interface SenderRecord {
   state: SenderState;
   approvalId: number | null;
   unsubscribedAt: string | null;
+  helpSessionKey: string | null;
 }
 
 function senderRecord(db: Db, id: number): SenderRecord | undefined {
@@ -104,6 +121,7 @@ function senderRecord(db: Db, id: number): SenderRecord | undefined {
     state: String(row.state) as SenderState,
     approvalId: row.approvalId === null ? null : Number(row.approvalId),
     unsubscribedAt: text(row.unsubscribedAt),
+    helpSessionKey: text(row.helpSessionKey),
   };
 }
 
@@ -180,7 +198,12 @@ function saveSweep(ctx: InboxContext, run: JobRun, account: string, messages: gm
       if (before?.state === 'kept') continue;
       const byTime = [...group].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
       const newest = byTime[byTime.length - 1]!;
-      const withLink = [...byTime].reverse().find((each) => header(each.message, 'List-Unsubscribe'));
+      // the link comes from the newest message whose link the sender signed, so a forged mail with the same List-Id
+      // cannot put its own link on the row. without a signed one, the newest link is shown, and the action refuses it
+      // at run time.
+      const newestFirst = [...byTime].reverse();
+      const withLink =
+        newestFirst.find((each) => signedLink(each.message, each.sender.fromAddress)) ?? newestFirst.find((each) => header(each.message, 'List-Unsubscribe'));
       const unsubscribe = withLink ? unsubscribeOf(withLink.message) : { method: 'none' as const, url: null };
       const row = upsert.get(
         account,
@@ -262,11 +285,16 @@ export function createNewsletterTools(ctx: InboxContext): Tool[] {
         const row = senderRecord(db, input.senderId);
         // the card showed the input, so the row must still have the same sender, method and link.
         if (!row) return refuse(UNSUBSCRIBE_TOOL, `the sender ${input.senderId} does not exist`);
-        if (row.account !== input.account || row.senderKey !== input.sender || row.fromAddress !== input.fromAddress || row.unsubscribeMethod !== input.method || row.unsubscribeUrl !== input.target) {
-          return refuse(UNSUBSCRIBE_TOOL, 'the sender row changed after the owner was asked. The owner can ask again on the dashboard');
-        }
         if (row.state === 'unsubscribed') return { content: `${row.senderKey} in ${row.account} is already unsubscribed.` };
-        if (!row.unsubscribeMessageId) return refuse(UNSUBSCRIBE_TOOL, 'the sender row names no message with the unsubscribe link');
+        // a refusal gives the row back, so the owner can ask again with the row as it is now.
+        const giveBack = (text: string) => {
+          db.prepare("UPDATE inbox_senders SET state = 'active', error = ?, updatedAt = ? WHERE id = ? AND state = 'unsubscribe_pending'").run(text, ctx.clock().toISOString(), row.id);
+          return refuse(UNSUBSCRIBE_TOOL, text);
+        };
+        if (row.account !== input.account || row.senderKey !== input.sender || row.fromAddress !== input.fromAddress || row.unsubscribeMethod !== input.method || row.unsubscribeUrl !== input.target) {
+          return giveBack('the sender row changed after the owner was asked. The owner can ask again on the dashboard');
+        }
+        if (!row.unsubscribeMessageId) return giveBack('the sender row names no message with the unsubscribe link');
         // the checks read the message again at run time, so a link that the message no longer offers never runs.
         let message: gmail_v1.Schema$Message;
         try {
@@ -308,30 +336,29 @@ export function createNewsletterTools(ctx: InboxContext): Tool[] {
           setState(row.id, 'failed', result.text);
           return { content, isError: true, effect: 'unknown' };
         }
-        // an https link opens in a browser task. the message must still come from the sender and offer the link.
-        if (parseFrom(header(message, 'From')) !== row.fromAddress) {
-          const text = 'the message with the link is not from the sender any more';
+        // an https link opens in a browser task. the message must still come from the sender, offer the link, and have
+        // the link signed by the domain of the sender, as for a one-click. else a forger chooses the page that the
+        // browser opens for the owner.
+        const failWith = (text: string) => {
           setState(row.id, 'failed', text);
           return refuse(UNSUBSCRIBE_TOOL, text);
-        }
-        if (!unsubscribeTargets(header(message, 'List-Unsubscribe')).includes(input.target)) {
-          const text = 'the message no longer offers the approved link';
-          setState(row.id, 'failed', text);
-          return refuse(UNSUBSCRIBE_TOOL, text);
-        }
+        };
+        if (parseFrom(header(message, 'From')) !== row.fromAddress) return failWith('the message with the link is not from the sender any more');
+        if (!unsubscribeTargets(header(message, 'List-Unsubscribe')).includes(input.target)) return failWith('the message no longer offers the approved link');
+        if (httpsLink(input.target) === null) return failWith('the approved link is not a plain https link');
+        const forged = verifyUnsubscribeHeaders(message, row.fromAddress, SIGNED.https);
+        if (forged !== undefined) return failWith(forged);
+        // the help run settles the row when it ends: unsubscribed when it completed, active again when it did not.
         const help = startBrowserHelp(ctx, {
           account: row.account,
           url: input.target,
-          task: `Unsubscribe the owner from the mailing list ${row.senderKey} on this page. Do not sign in or give any data other than the owner's email address when the page asks for it.`,
+          task: "Unsubscribe the owner from the mailing list in the block below on its page. Do not sign in or give any data other than the owner's email address when the page asks for it.",
+          facts: { list: row.senderKey },
           toolName: UNSUBSCRIBE_TOOL,
+          kind: 'unsubscribe',
+          rowId: row.id,
         });
-        // the sweep checks the row again: mail that still comes after 7 days marks it failed.
-        db.prepare("UPDATE inbox_senders SET state = 'unsubscribed', unsubscribedAt = ?, helpSessionKey = ?, error = NULL, updatedAt = ? WHERE id = ?").run(
-          now,
-          help.sessionKey,
-          now,
-          row.id,
-        );
+        db.prepare('UPDATE inbox_senders SET helpSessionKey = ?, error = NULL, updatedAt = ? WHERE id = ?').run(help.sessionKey, now, row.id);
         return {
           content: `a browser task now helps to unsubscribe ${row.senderKey} in ${row.account} (session ${help.sessionKey}). Each form that it sends asks the owner first.`,
         };
@@ -370,11 +397,23 @@ export function createNewsletterTools(ctx: InboxContext): Tool[] {
             if (!mine.length) return mine;
             let labelId: string | undefined;
             if (input.label !== undefined) {
-              const { data } = await apis.gmail.users.labels.list({ userId: 'me' });
-              labelId = (data.labels ?? []).find((each) => each.name === input.label)?.id ?? undefined;
+              // gmail label names do not depend on case, so "newsletters" is the label "Newsletters".
+              const name = input.label.toLowerCase();
+              const find = async () => {
+                const { data } = await apis.gmail.users.labels.list({ userId: 'me' });
+                return (data.labels ?? []).find((each) => each.name?.toLowerCase() === name)?.id ?? undefined;
+              };
+              labelId = await find();
               if (!labelId) {
-                const created = await apis.gmail.users.labels.create({ userId: 'me', requestBody: { name: input.label, labelListVisibility: 'labelShow', messageListVisibility: 'show' } });
-                labelId = created.data.id ?? undefined;
+                try {
+                  const created = await apis.gmail.users.labels.create({ userId: 'me', requestBody: { name: input.label, labelListVisibility: 'labelShow', messageListVisibility: 'show' } });
+                  labelId = created.data.id ?? undefined;
+                } catch (err) {
+                  // a label that another client made a moment ago conflicts, so the list has it now.
+                  if (toGoogleError(err).status !== 409) throw err;
+                  labelId = await find();
+                  if (!labelId) throw err;
+                }
               }
             }
             for (let at = 0; at < mine.length; at += BATCH) {
@@ -415,6 +454,11 @@ const notFound: ActionResult = { ok: false, status: 404, error: 'sender not foun
 const conflict = (error: string): ActionResult => ({ ok: false, status: 409, error });
 // a request that claimed the row a moment ago has no approval id yet.
 const waitsFor = (approvalId: number | null) => `the unsubscribe of this sender waits for approval${approvalId === null ? '' : ` #${approvalId}`}`;
+const HELP_WORKS = 'a browser task works on the unsubscribe of this sender';
+
+// the senders whose archive is being asked for in this process. the check of a pending approval and the approval
+// itself are apart in time, so two archives at once would both pass the check without this claim.
+const archiveClaims = new WeakMap<Db, Set<number>>();
 
 export async function requestUnsubscribe(ctx: InboxContext, senderId: number): Promise<ActionResult> {
   // a denied or expired approval gives its row back first, so the owner can ask again.
@@ -422,7 +466,7 @@ export async function requestUnsubscribe(ctx: InboxContext, senderId: number): P
   const row = senderRecord(ctx.db, senderId);
   if (!row) return notFound;
   if (row.state === 'unsubscribed') return conflict('this sender is already unsubscribed');
-  if (row.state === 'unsubscribe_pending') return conflict(waitsFor(row.approvalId));
+  if (row.state === 'unsubscribe_pending') return conflict(row.helpSessionKey ? HELP_WORKS : waitsFor(row.approvalId));
   if (row.unsubscribeMethod === 'none' || !row.unsubscribeUrl) return conflict('this sender offers no unsubscribe link');
   if (row.unsubscribeMethod === 'mailto') {
     return conflict('this sender unsubscribes by mail, and ok computer never sends mail. The link is on the page, so the owner can do it by hand');
@@ -430,7 +474,7 @@ export async function requestUnsubscribe(ctx: InboxContext, senderId: number): P
   // the compare and set claims the row, so two requests at the same time ask the owner one time.
   const now = ctx.clock().toISOString();
   const claim = ctx.db
-    .prepare("UPDATE inbox_senders SET state = 'unsubscribe_pending', approvalId = NULL, updatedAt = ? WHERE id = ? AND state NOT IN ('unsubscribe_pending', 'unsubscribed')")
+    .prepare("UPDATE inbox_senders SET state = 'unsubscribe_pending', approvalId = NULL, helpSessionKey = NULL, updatedAt = ? WHERE id = ? AND state NOT IN ('unsubscribe_pending', 'unsubscribed')")
     .run(now, senderId);
   if (Number(claim.changes) === 0) return conflict('the unsubscribe of this sender already started');
   const giveBack = () =>
@@ -457,24 +501,35 @@ export async function requestUnsubscribe(ctx: InboxContext, senderId: number): P
 export async function requestArchive(ctx: InboxContext, senderId: number, request: { olderThanDays: number; label?: string }): Promise<ActionResult> {
   const row = senderRecord(ctx.db, senderId);
   if (!row) return notFound;
+  const claims = archiveClaims.get(ctx.db) ?? new Set<number>();
+  archiveClaims.set(ctx.db, claims);
+  if (claims.has(senderId)) return conflict('the archive of this sender already started');
   const pending = ctx.db
     .prepare("SELECT id FROM approvals WHERE status = 'pending' AND toolName = ? AND json_extract(input, '$.senderId') = ? ORDER BY id LIMIT 1")
     .get(ARCHIVE_TOOL, senderId);
   if (pending) return conflict(`the archive of this sender waits for approval #${Number(pending.id)}`);
   if (request.label !== undefined && reservedLabel(request.label)) return conflict(`${JSON.stringify(request.label)} is a system label of gmail, so the archive cannot add it`);
-  const result = await requestAction(ctx, {
-    tool: ARCHIVE_TOOL,
-    input: { senderId, account: row.account, sender: row.senderKey, olderThanDays: request.olderThanDays, ...(request.label !== undefined ? { label: request.label } : {}) },
-    account: row.account,
-  });
-  if (!result.ok) return { ok: false, status: result.status, error: result.error };
-  return { ok: true, response: result.response };
+  // the claim and the checks above have no await between them, so a second request sees the claim.
+  claims.add(senderId);
+  try {
+    const result = await requestAction(ctx, {
+      tool: ARCHIVE_TOOL,
+      input: { senderId, account: row.account, sender: row.senderKey, olderThanDays: request.olderThanDays, ...(request.label !== undefined ? { label: request.label } : {}) },
+      account: row.account,
+    });
+    if (!result.ok) return { ok: false, status: result.status, error: result.error };
+    return { ok: true, response: result.response };
+  } finally {
+    claims.delete(senderId);
+  }
 }
 
 export function keepSender(ctx: InboxContext, senderId: number): ActionResult {
   const row = senderRecord(ctx.db, senderId);
   if (!row) return notFound;
-  if (row.state === 'unsubscribe_pending') return conflict(waitsFor(row.approvalId));
+  if (row.state === 'unsubscribe_pending') return conflict(row.helpSessionKey ? HELP_WORKS : waitsFor(row.approvalId));
+  // a keep would hide the record of the unsubscribe and stop the check that the mail stopped.
+  if (row.state === 'unsubscribed') return conflict('this sender is unsubscribed, so it cannot be kept');
   ctx.db.prepare("UPDATE inbox_senders SET state = 'kept', updatedAt = ? WHERE id = ?").run(ctx.clock().toISOString(), senderId);
   return { ok: true, response: { status: 'done', approvalId: null, message: `${row.senderKey} is kept and leaves the later sweeps.` } };
 }

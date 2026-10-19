@@ -2,9 +2,11 @@ import type { gmail_v1 } from '@googleapis/gmail';
 import { z } from 'zod';
 import type { SubscriptionCadence, SubscriptionState } from '../dashboard/types.js';
 import { bodyText, fromAddress, header } from '../google/mime.js';
+import { requestContext } from '../google/trace.js';
+import { redact } from '../observability/redact.js';
 import { cleanLine } from '../signals/store.js';
 import { headOf } from '../text.js';
-import { defineTool, errorText, type Tool } from '../tools/registry.js';
+import { defineTool, errorText, type Tool, type ToolOutput } from '../tools/registry.js';
 import { requestAction, settleApprovals, startBrowserHelp } from './actions.js';
 import type { ActionResult, InboxContext, JobRun } from './context.js';
 import { extractItems, itemsTool, type ExtractInput } from './extract.js';
@@ -63,14 +65,16 @@ const CHARGE = z.object({
 });
 type Charge = z.infer<typeof CHARGE>;
 
-// the merchant key: the name in lower case, without spaces and marks, so "Stream Co." and "streamco" are one row.
+// the merchant key: the name in lower case, without spaces and marks, so "Stream Co." and "streamco" are one row. a
+// company suffix goes first, and only as a word of its own, so "Zinc" stays "zinc" and is not "Z Inc".
 export function merchantKeyOf(merchant: string): string {
-  const flat = merchant
+  return merchant
     .normalize('NFKD')
     .replace(/\p{M}/gu, '')
     .toLowerCase()
+    .trim()
+    .replace(/[\s,.]+(inc|llc|ltd)\.?$/, '')
     .replace(/[^a-z0-9]/g, '');
-  return flat.replace(/(inc|llc|ltd)$/, '');
 }
 
 const median = (sorted: readonly number[]) => {
@@ -99,12 +103,14 @@ function addMonths(at: Date, months: number): Date {
 const MONTHS: Partial<Record<SubscriptionCadence, number>> = { monthly: 1, quarterly: 3, yearly: 12 };
 
 // the cadence of a list of charge times (iso, any order), the next charge after the last one, and the confidence
-// that the charge repeats (0 to 1).
+// that the charge repeats (0 to 1). the charges of one day count as one, because an order mail and its payment mail
+// are one charge. a cadence that fits no range stays below 0.5, so two charges at a random gap are not a subscription.
 export function cadenceOf(charges: readonly string[]): { cadence: SubscriptionCadence; nextChargeAt: string | null; confidence: number } {
-  const times = charges
+  const sorted = charges
     .map((each) => Date.parse(each))
     .filter((each) => Number.isFinite(each))
     .sort((a, b) => a - b);
+  const times = sorted.filter((each, index) => index === 0 || Math.floor(each / DAY_MS) !== Math.floor(sorted[index - 1]! / DAY_MS));
   if (times.length < 2) return { cadence: 'unknown', nextChargeAt: null, confidence: 0.3 };
   const gaps = times.slice(1).map((each, index) => (each - times[index]!) / DAY_MS);
   const middle = median([...gaps].sort((a, b) => a - b));
@@ -117,6 +123,7 @@ export function cadenceOf(charges: readonly string[]): { cadence: SubscriptionCa
   const near = gaps.filter((gap) => Math.abs(gap - middle) <= 0.2 * middle).length;
   let confidence = Math.min(0.95, 0.5 + 0.1 * Math.max(0, near - 1));
   if (gaps.some((gap) => Math.abs(gap - middle) > 0.5 * middle)) confidence = Math.max(0.1, confidence - 0.2);
+  if (cadence === 'unknown') confidence = Math.min(confidence, 0.3);
   return { cadence, nextChargeAt, confidence: Math.round(confidence * 100) / 100 };
 }
 
@@ -124,8 +131,9 @@ export function cadenceOf(charges: readonly string[]): { cadence: SubscriptionCa
 const domainOf = (from: string) => fromAddress(from)?.split('@')[1] ?? undefined;
 
 // the model reads untrusted mail, so a cancel link that it gives is kept only when the mail holds the same text and
-// the link goes to the sender's own domain. the model cannot invent a link, and a link that injected text points to
-// another domain is dropped.
+// the link goes to the sender's own domain or a child of it. the model cannot invent a link, and a link that injected
+// text points to another domain is dropped. a parent domain is dropped too, as for an unsubscribe: it can be another
+// organisation, such as a public suffix or a platform that hosts the sender.
 export function trustedCancelUrl(url: string | null | undefined, text: string, from: string): string | null {
   if (!url || !text.includes(url)) return null;
   let parsed: URL;
@@ -138,8 +146,7 @@ export function trustedCancelUrl(url: string | null | undefined, text: string, f
   const domain = domainOf(from);
   if (!domain) return null;
   const host = parsed.hostname.toLowerCase();
-  const sameSite = host === domain || host.endsWith(`.${domain}`) || (domain.endsWith(`.${host}`) && host.includes('.'));
-  return sameSite ? url : null;
+  return host === domain || host.endsWith(`.${domain}`) ? url : null;
 }
 
 interface Receipt {
@@ -329,12 +336,16 @@ export async function scanSubscriptions(ctx: InboxContext, run: JobRun): Promise
   markRead(ctx, run, aliases.map(mailSource), 'inbox_subscriptions');
   let subscriptions = 0;
   let saved = 0;
+  let failures = 0;
   for (const alias of aliases) {
     let receipts: Receipt[];
     try {
       receipts = await newReceipts(ctx, alias);
     } catch (err) {
-      notes.push(`${alias}: the receipts could not be read: ${errorText(err)}`);
+      failures++;
+      notes.push(`${alias}: the receipts could not be read: ${redact(errorText(err))}`);
+      // a scan that could read no account failed, as the sweep does, so the scheduler counts it and backs off.
+      if (failures === aliases.length) throw new Error(notes.join('; '));
       continue;
     }
     const read = await readReceipts(ctx, run, alias, receipts);
@@ -356,56 +367,74 @@ interface SubscriptionRef {
   cancelUrl: string | null;
   state: SubscriptionState;
   approvalId: number | null;
+  helpSessionKey: string | null;
 }
 
 const rowById = (ctx: InboxContext, id: number) =>
-  ctx.db.prepare('SELECT id, account, merchant, cancelUrl, state, approvalId FROM inbox_subscriptions WHERE id = ?').get(id) as SubscriptionRef | undefined;
+  ctx.db.prepare('SELECT id, account, merchant, cancelUrl, state, approvalId, helpSessionKey FROM inbox_subscriptions WHERE id = ?').get(id) as SubscriptionRef | undefined;
 
-// the tool that an approved cancellation runs: inbox_cancel_subscription.
+// the tool that an approved cancellation runs: inbox_cancel_subscription. it names its account and its google source
+// as the other inbox tools do, so the trace groups it with them.
 export function createSubscriptionTools(ctx: InboxContext): Tool[] {
   const aliases = ctx.googleConfig.accounts.map((each) => each.alias);
   if (!aliases.length) return [];
+  const input = z.object({
+    subscriptionId: z.number().int(),
+    account: z.enum(aliases as [string, ...string[]]),
+    merchant: z.string().max(100),
+    cancelUrl: z.string().max(2000).nullable(),
+  });
+  type Input = z.infer<typeof input>;
+  // a refusal has no effect field, because a second approval of the same call cannot help. it gives the row back, so
+  // the owner can ask again with the row as it is now.
+  const refuse = (id: number, text: string): ToolOutput => {
+    ctx.db.prepare("UPDATE inbox_subscriptions SET state = 'active', error = ?, updatedAt = ? WHERE id = ? AND state = 'cancel_pending'").run(text, ctx.clock().toISOString(), id);
+    return { content: `${CANCEL_TOOL} did not run: ${text}.`, isError: true };
+  };
+  const cancel = ({ subscriptionId, account, merchant, cancelUrl }: Input): ToolOutput => {
+    const row = rowById(ctx, subscriptionId);
+    // the owner approved this merchant and this link. a row that is gone or that a later scan changed is not what
+    // the owner approved.
+    if (!row) return { content: `${CANCEL_TOOL} did not run: the subscription ${subscriptionId} is gone.`, isError: true };
+    if (row.state === 'cancelled') return { content: `The subscription ${subscriptionId} is already cancelled.` };
+    if (row.account !== account || row.merchant !== merchant || row.cancelUrl !== cancelUrl) {
+      return refuse(subscriptionId, `the subscription ${subscriptionId} has another merchant or cancel link now, so it is not the one that the owner approved. The owner can ask again on the dashboard`);
+    }
+    // the row stays cancel_pending while the help run works. the end of the run marks it cancelled, or active again.
+    const help = startBrowserHelp(ctx, {
+      account,
+      url: cancelUrl,
+      task: 'Help the owner cancel the paid plan of the merchant in the block below. Stop before any step that pays, and ask the owner before each form send.',
+      facts: { merchant },
+      toolName: CANCEL_TOOL,
+      kind: 'cancel',
+      rowId: subscriptionId,
+    });
+    ctx.db.prepare('UPDATE inbox_subscriptions SET helpSessionKey = ?, error = NULL, updatedAt = ? WHERE id = ?').run(help.sessionKey, ctx.clock().toISOString(), subscriptionId);
+    return { content: `A browser task now helps the owner cancel the subscription ${subscriptionId}. The owner approves each step of it.` };
+  };
   return [
-    defineTool({
+    defineTool<Input>({
       name: CANCEL_TOOL,
       description:
         'Start a browser task that helps the owner cancel a paid subscription. It opens the cancel link of the receipt, or finds the page, and asks the owner before each form send.',
-      input: z.object({
-        subscriptionId: z.number().int(),
-        account: z.enum(aliases as [string, ...string[]]),
-        merchant: z.string().max(100),
-        cancelUrl: z.string().max(2000).nullable(),
-      }),
+      input,
       risk: 'external',
       needsApproval: true,
-      accountOf: (input) => input.account,
-      async run({ subscriptionId, account, merchant, cancelUrl }) {
-        const row = rowById(ctx, subscriptionId);
-        // the owner approved this merchant and this link. a row that is gone or that a later scan changed is not what
-        // the owner approved. a second approval of the same call cannot help, so the refusal has no effect field.
-        if (!row) return { content: `${CANCEL_TOOL} did not run: the subscription ${subscriptionId} is gone.`, isError: true };
-        if (row.account !== account || row.merchant !== merchant || row.cancelUrl !== cancelUrl) {
-          return { content: `${CANCEL_TOOL} did not run: the subscription ${subscriptionId} has another merchant or cancel link now, so it is not the one that the owner approved.`, isError: true };
-        }
-        if (row.state === 'cancelled') return { content: `The subscription ${subscriptionId} is already cancelled.` };
-        const help = startBrowserHelp(ctx, {
-          account,
-          url: cancelUrl,
-          task: `Help the owner cancel the paid plan of ${merchant}. Stop before any step that pays, and ask the owner before each form send.`,
-          toolName: CANCEL_TOOL,
-        });
-        ctx.db
-          .prepare("UPDATE inbox_subscriptions SET helpSessionKey = ?, state = 'cancelled', updatedAt = ? WHERE id = ?")
-          .run(help.sessionKey, ctx.clock().toISOString(), subscriptionId);
-        return { content: `A browser task now helps the owner cancel the subscription ${subscriptionId}. The owner approves each step of it.` };
-      },
+      source: 'google',
+      serverId: 'google',
+      accountOf: (each) => each.account,
+      run: async (each, toolCtx) =>
+        requestContext.run({ ...requestContext.getStore(), runId: toolCtx.runId, ...(toolCtx.toolCallId ? { toolCallId: toolCtx.toolCallId } : {}) }, () => cancel(each)),
     }),
   ];
 }
 
 const notActive = (row: SubscriptionRef): string =>
   row.state === 'cancel_pending'
-    ? `the cancellation of this subscription waits for approval #${row.approvalId ?? '?'}`
+    ? row.helpSessionKey
+      ? 'a browser task works on the cancellation of this subscription'
+      : `the cancellation of this subscription waits for approval #${row.approvalId ?? '?'}`
     : row.state === 'cancelled'
       ? 'this subscription is cancelled'
       : 'this subscription is ignored';
@@ -417,7 +446,7 @@ export async function requestCancel(ctx: InboxContext, subscriptionId: number): 
   if (row.state !== 'active') return { ok: false, status: 409, error: notActive(row) };
   // the claim lets one request ask the owner. a second click while the first one waits gets 409.
   const claimed = ctx.db
-    .prepare("UPDATE inbox_subscriptions SET state = 'cancel_pending', updatedAt = ? WHERE id = ? AND state = 'active'")
+    .prepare("UPDATE inbox_subscriptions SET state = 'cancel_pending', approvalId = NULL, helpSessionKey = NULL, updatedAt = ? WHERE id = ? AND state = 'active'")
     .run(ctx.clock().toISOString(), subscriptionId);
   if (Number(claimed.changes) === 0) return { ok: false, status: 409, error: notActive(rowById(ctx, subscriptionId) ?? row) };
   const release = () =>

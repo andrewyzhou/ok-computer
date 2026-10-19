@@ -226,13 +226,32 @@ describe('the inbox actions', () => {
 
 describe('POST /api/inbox/run', () => {
   it('runs the automation of the job now', async () => {
-    const { dashboard, db, runNow } = seed({ inbox: false });
+    const { dashboard, db, runNow } = seed();
     const response = await post(dashboard, '/api/inbox/run', { job: 'newsletters' });
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ started: true });
     expect(runNow).toEqual([inboxAutomation(db, 'newsletters')!.id]);
     expect(await error(post(dashboard, '/api/inbox/run', { job: 'calendar' }), 400)).toBe('give job as one of: newsletters, subscriptions, digest');
     expect(await error(post(dashboard, '/api/inbox/run', {}), 400)).toBe('give job as one of: newsletters, subscriptions, digest');
+  });
+
+  it('gives 503 for POST /api/inbox/run without the google integration', async () => {
+    const { dashboard, runNow } = seed({ inbox: false });
+    expect(await error(post(dashboard, '/api/inbox/run', { job: 'digest' }), 503)).toBe('the inbox jobs need the google integration');
+    expect(runNow).toEqual([]);
+  });
+
+  it('gives 409 while the job runs', async () => {
+    const { dashboard, inbox, runNow } = seed();
+    inbox.runningJobs.add('digest');
+    expect(await error(post(dashboard, '/api/inbox/run', { job: 'digest' }), 409)).toBe('the digest job is already running');
+    expect(runNow).toEqual([]);
+  });
+
+  it('gives 400 for a label with spaces around a system label', async () => {
+    const { dashboard, inbox } = seed();
+    expect(await error(post(dashboard, '/api/inbox/senders/1/archive', { label: ' INBOX ' }), 400)).toBe('give a label of your own, not a gmail system label such as INBOX or SPAM');
+    expect(inbox.calls).toEqual([]);
   });
 
   it('gives 404 when the automation of the job is missing', async () => {

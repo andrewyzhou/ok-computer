@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { settleApprovals } from '../inbox/actions.js';
 import type { ActionResult } from '../inbox/context.js';
 import { inboxAutomation } from '../inbox/inbox.js';
+import { reservedLabel } from '../inbox/newsletters.js';
 import { getDigest, InvalidCursor, listDigests, listDrafts, listProposals, listSenders, listSubscriptions } from '../inbox/views.js';
 import type { DashboardDeps } from './server.js';
 
@@ -34,16 +35,15 @@ const before = z
   .transform(Number)
   .optional();
 
-// gmail keeps these labels for itself, so the archive cannot add one of them.
-const RESERVED_LABELS = new Set(['INBOX', 'SPAM', 'TRASH', 'UNREAD', 'STARRED', 'IMPORTANT', 'SENT', 'DRAFT', 'CHAT']);
-const reservedLabel = (label: string) => RESERVED_LABELS.has(label.toUpperCase()) || label.toUpperCase().startsWith('CATEGORY_');
-
 const emptyBody = z.object({}).strict();
+// gmail keeps its system labels for itself, so the archive cannot add one of them. the list is the one of the inbox
+// code, and the label is trimmed first, as gmail trims it.
 const archiveBody = z
   .object({
     olderThanDays: z.number({ error: 'give olderThanDays as a whole number from 0 to 3650' }).int('give olderThanDays as a whole number from 0 to 3650').min(0, 'give olderThanDays as a whole number from 0 to 3650').max(3650, 'give olderThanDays as a whole number from 0 to 3650').default(30),
     label: z
       .string({ error: 'give label as text of 1 to 100 characters' })
+      .trim()
       .min(1, 'give label as text of 1 to 100 characters')
       .max(100, 'give label as text of 1 to 100 characters')
       .refine((label) => !/[\r\n]/.test(label), 'give label on one line, without a line break')
@@ -187,8 +187,11 @@ export function mountInbox(server: Hono, deps: DashboardDeps): void {
   server.post('/api/inbox/run', async (c) => {
     const input = await body(c, runBody);
     if (!input.ok) return c.json({ error: input.error }, 400);
+    // without the google block the automations of the jobs can still exist, but each run would be skipped.
+    if (!app.inbox) return c.json({ error: 'the inbox jobs need the google integration' }, 503);
     const automation = inboxAutomation(db, input.value.job);
     if (!automation) return notFound(c, 'inbox automation');
+    if (app.inbox.running(input.value.job)) return c.json({ error: `the ${input.value.job} job is already running` }, 409);
     logger.info('dashboard runs an inbox job now', { job: input.value.job, automationId: automation.id });
     void app.scheduler.runNow(automation.id).catch((err: unknown) => logger.error('run now failed', { automationId: automation.id, err }));
     return c.json({ started: true }, 202);

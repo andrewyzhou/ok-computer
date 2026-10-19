@@ -1,6 +1,6 @@
 import type { DashboardDeps } from '../src/dashboard/server.js';
 import { createDashboard } from '../src/dashboard/server.js';
-import type { DigestItem } from '../src/dashboard/types.js';
+import type { DigestItem, InboxJob } from '../src/dashboard/types.js';
 import { googleConfigSchema } from '../src/google/config.js';
 import type { ActionResult } from '../src/inbox/context.js';
 import { installInboxJobs, type Inbox } from '../src/inbox/inbox.js';
@@ -58,11 +58,14 @@ type InboxAction = 'unsubscribe' | 'archive' | 'keep' | 'cancel' | 'ignore';
 export interface FakeInbox extends Inbox {
   calls: Array<{ action: InboxAction; id: number; request?: { olderThanDays: number; label?: string } }>;
   results: Partial<Record<InboxAction, ActionResult>>;
+  // the jobs that the fake says are running. a test adds a job to see the answer of a second start.
+  runningJobs: Set<InboxJob>;
 }
 
 function fakeInbox(): FakeInbox {
   const calls: FakeInbox['calls'] = [];
   const results: FakeInbox['results'] = {};
+  const runningJobs = new Set<InboxJob>();
   const answer = (action: InboxAction): ActionResult =>
     results[action] ??
     (action === 'keep' || action === 'ignore'
@@ -77,6 +80,8 @@ function fakeInbox(): FakeInbox {
     results,
     tools: [],
     runJob: () => Promise.reject(new Error('the fake inbox runs no job')),
+    runningJobs,
+    running: (job) => runningJobs.has(job),
     unsubscribe: (id) => Promise.resolve(record('unsubscribe', id)),
     archive: (id, request) => Promise.resolve(record('archive', id, request)),
     keep: (id) => record('keep', id),

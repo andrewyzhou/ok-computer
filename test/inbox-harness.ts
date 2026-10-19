@@ -1,4 +1,4 @@
-import type { RunInput } from '../src/agent/loop.js';
+import type { RunInput, RunResult } from '../src/agent/loop.js';
 import { createApprovalFlow, type ApprovalFlow } from '../src/approvals/flow.js';
 import type { Button } from '../src/channels/types.js';
 import type { InboxJob } from '../src/dashboard/types.js';
@@ -52,6 +52,8 @@ export async function createInboxHarness(
     accounts?: string[];
     oneClick?: (target: string) => Promise<OneClickResult>;
     review?: (request: ReviewRequest) => Promise<ReviewResult>;
+    // the result of a browser help run. the default completes at once.
+    agent?: (input: RunInput) => Promise<RunResult>;
   } = {},
 ): Promise<InboxHarness> {
   const google = await createGoogleHarness({ accounts: options.accounts ?? ['personal', 'school'], config: { send: false } });
@@ -117,7 +119,7 @@ export async function createInboxHarness(
     owner,
     async agent(input) {
       agentRuns.push(input);
-      return { runId: input.runId ?? 'help', status: 'completed', text: '' };
+      return options.agent ? options.agent(input) : { runId: input.runId ?? 'help', status: 'completed', text: '' };
     },
     queue,
     signal,

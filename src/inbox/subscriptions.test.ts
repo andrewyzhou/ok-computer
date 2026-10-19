@@ -37,6 +37,32 @@ describe('merchantKeyOf', () => {
     expect(merchantKeyOf('Widgets Ltd')).toBe('widgets');
     expect(merchantKeyOf('...')).toBe('');
   });
+
+  it('cuts a company suffix only when it is a word of its own', () => {
+    expect(merchantKeyOf('Zinc')).toBe('zinc');
+    expect(merchantKeyOf('Z Inc')).toBe('z');
+    expect(merchantKeyOf('Healthinc')).not.toBe(merchantKeyOf('Health'));
+    expect(merchantKeyOf('Acme LLC')).toBe('acme');
+  });
+});
+
+describe('one purchase', () => {
+  let h: InboxHarness;
+  afterEach(async () => h?.close());
+
+  it('does not list one purchase with two mails as a subscription', async () => {
+    expect(cadenceOf(['2026-10-01T10:00:00Z', '2026-10-01T10:05:00Z']).confidence).toBeLessThan(0.5);
+    expect(cadenceOf(['2026-10-01T10:00:00Z', '2026-10-04T10:00:00Z']).confidence).toBeLessThan(0.5);
+    h = await createInboxHarness({ accounts: ['personal'] });
+    h.google.fake.search = (_a, q, messages) => (q === RECEIPT_QUERY ? messages : []);
+    const mail = (id: string, date: string, subject: string): FakeMessage => ({ id, labelIds: ['INBOX'], internalDate: String(Date.parse(date)), snippet: subject, body: 'Your order of a lamp: $40.00', headers: { From: 'Shop <orders@shop.example>', Subject: subject, Date: new Date(date).toUTCString() } });
+    h.google.fake.deliver('personal', mail('o1', '2026-10-01T10:00:00Z', 'Your order'));
+    h.google.fake.deliver('personal', mail('o2', '2026-10-01T10:05:00Z', 'Payment received'));
+    const charge = (id: number) => ({ id, merchant: 'Shop', amount: 40, currency: 'USD', recurring: false, cancelUrl: null });
+    h.script.push(toolStep({ id: 'c1', name: 'record_charges', input: { items: [charge(1), charge(2)] } }));
+    await h.run('subscriptions');
+    expect(h.rows('SELECT * FROM inbox_subscriptions')).toEqual([]);
+  });
 });
 
 describe('cadenceOf', () => {
@@ -87,8 +113,12 @@ describe('trustedCancelUrl', () => {
   const text = 'links: https://streamco.example/c https://help.streamco.example/c https://evil.example/c http://streamco.example/c https://example/c';
   const from = 'Stream <billing@mail.streamco.example>';
   it('keeps an https link of the mail on the domain of the sender', () => {
-    expect(trustedCancelUrl('https://streamco.example/c', text, from)).toBe('https://streamco.example/c');
+    expect(trustedCancelUrl('https://streamco.example/c', text, 'billing@streamco.example')).toBe('https://streamco.example/c');
     expect(trustedCancelUrl('https://help.streamco.example/c', text, 'billing@streamco.example')).toBe('https://help.streamco.example/c');
+    // a parent of the from domain can be another organisation: a public suffix, or a platform that hosts the sender.
+    expect(trustedCancelUrl('https://streamco.example/c', text, from)).toBeNull();
+    expect(trustedCancelUrl('https://co.uk/c', 'https://co.uk/c', 'billing@shop.co.uk')).toBeNull();
+    expect(trustedCancelUrl('https://platform.example/c', 'https://platform.example/c', 'a@x.platform.example')).toBeNull();
     expect(trustedCancelUrl('https://evil.example/c', text, from)).toBeNull();
     expect(trustedCancelUrl('http://streamco.example/c', text, from)).toBeNull();
     expect(trustedCancelUrl('https://example/c', text, 'a@example')).toBeNull();
@@ -277,8 +307,10 @@ describe('the cancel and ignore actions', () => {
     await h.ctx.queue.drain();
     expect(h.agentRuns).toHaveLength(1);
     const payload = h.agentRuns[0]!.events[0]!.payload as { text: string };
-    expect(payload.text).toContain(`The owner approved this link: ${CANCEL}`);
-    expect(payload.text).toContain('Help the owner cancel the paid plan of Stream Co.');
+    expect(payload.text).toContain('The owner approved the link in the block below.');
+    expect(payload.text).toContain('Help the owner cancel the paid plan of the merchant in the block below.');
+    // the merchant and the link come from mail, so they are in the untrusted block.
+    expect(payload.text).toContain(`<untrusted source="gmail:personal">\nmerchant: Stream Co.\nlink: ${CANCEL}\n</untrusted>`);
     const row = h.rows('SELECT state, helpSessionKey FROM inbox_subscriptions')[0]!;
     expect(row).toEqual({ state: 'cancelled', helpSessionKey: h.agentRuns[0]!.sessionKey });
     expect(await requestCancel(h.ctx, id)).toEqual({ ok: false, status: 409, error: 'this subscription is cancelled' });
@@ -302,7 +334,52 @@ describe('the cancel and ignore actions', () => {
     await h.approve(1);
     await h.ctx.queue.drain();
     expect(h.agentRuns).toEqual([]);
+    // the refusal gives the row back, so the owner can ask again with the row as it is now.
+    expect(h.rows('SELECT state FROM inbox_subscriptions')).toEqual([{ state: 'active' }]);
+  });
+
+  it('lets the owner ask again after a scan changed the row while the approval waited', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    h.google.fake.search = (_a, q, messages) => (q === RECEIPT_QUERY ? messages : []);
+    const mail = (id: string, date: string): FakeMessage => ({ id, labelIds: ['INBOX'], internalDate: String(Date.parse(date)), snippet: 'receipt', body: 'Paid $9.99. Renews monthly.', headers: { From: 'Stream <billing@streamco.example>', Subject: 'Receipt', Date: new Date(date).toUTCString() } });
+    h.google.fake.deliver('personal', mail('r1', '2026-08-10T12:00:00Z'));
+    h.google.fake.deliver('personal', mail('r2', '2026-09-10T12:00:00Z'));
+    const charge = (id: number, merchant = 'Stream') => ({ id, merchant, amount: 9.99, currency: 'USD', recurring: true, cancelUrl: null });
+    h.script.push(toolStep({ id: 'c1', name: 'record_charges', input: { items: [charge(1), charge(2)] } }));
+    await h.run('subscriptions');
+    expect(await requestCancel(h.ctx, 1)).toMatchObject({ ok: true, response: { approvalId: 1 } });
+    h.google.fake.deliver('personal', mail('r3', '2026-10-10T12:00:00Z'));
+    h.script.push(toolStep({ id: 'c2', name: 'record_charges', input: { items: [charge(1, 'Stream.')] } }));
+    await h.run('subscriptions');
+    await h.approve(1);
+    await h.ctx.queue.drain();
+    expect(h.agentRuns).toEqual([]);
+    expect(await requestCancel(h.ctx, 1)).toMatchObject({ ok: true, response: { status: 'pending_approval', approvalId: 2 } });
+  });
+
+  it('keeps the row pending while the help run works, and gives it back when the run fails', async () => {
+    let finish: (status: 'completed' | 'failed') => void = () => {};
+    h = await createInboxHarness({
+      accounts: ['personal'],
+      agent: (input) => new Promise((resolve) => (finish = (status) => resolve({ runId: input.runId!, status, text: '', ...(status === 'failed' ? { error: 'the page did not load' } : {}) }))),
+    });
+    h.google.fake.search = (_alias, q, messages) => (q === RECEIPT_QUERY ? messages : []);
+    h.google.fake.deliver('personal', receipt('r1', '2026-09-10T12:00:00Z'));
+    h.google.fake.deliver('personal', receipt('r2', '2026-10-10T12:00:00Z'));
+    h.script.push(step([charge(1), charge(2)]));
+    await h.run('subscriptions');
+    const id = Number(h.rows('SELECT id FROM inbox_subscriptions')[0]!.id);
+    await requestCancel(h.ctx, id);
+    await h.approve(1);
+    // the help run starts on the queue of its session.
+    for (let tries = 0; tries < 20 && !h.agentRuns.length; tries++) await new Promise((resolve) => setImmediate(resolve));
+    expect(h.agentRuns).toHaveLength(1);
     expect(h.rows('SELECT state FROM inbox_subscriptions')).toEqual([{ state: 'cancel_pending' }]);
+    expect(await requestCancel(h.ctx, id)).toEqual({ ok: false, status: 409, error: 'a browser task works on the cancellation of this subscription' });
+    finish('failed');
+    await h.ctx.queue.drain();
+    expect(h.rows('SELECT state, error FROM inbox_subscriptions')).toEqual([{ state: 'active', error: 'the browser help run ended as failed: the page did not load' }]);
+    expect(await requestCancel(h.ctx, id)).toMatchObject({ ok: true, response: { approvalId: 2 } });
   });
 
   it('gives 404 for a missing row and hides a row on ignore', async () => {

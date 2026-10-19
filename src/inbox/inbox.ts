@@ -22,7 +22,9 @@ export interface Inbox {
   // the tools that the approved actions run. they are in the registry, but no session lists them, so only the inbox
   // code calls them, through the tool caller. an approval finds its tool by name.
   tools: Tool[];
+  // a job that runs already is skipped, so a second start gives { status: 'skipped' }.
   runJob(job: InboxJob): Promise<JobResult>;
+  running(job: InboxJob): boolean;
   unsubscribe(senderId: number): Promise<ActionResult>;
   archive(senderId: number, request: { olderThanDays: number; label?: string }): Promise<ActionResult>;
   keep(senderId: number): ActionResult;
@@ -37,13 +39,23 @@ export function createInbox(deps: InboxDeps): Inbox {
     subscriptions: () => runJob(ctx, 'subscriptions', 'batch', (run) => scanSubscriptions(ctx, run)),
     digest: () => runJob(ctx, 'digest', 'utility', (run) => runDigest(ctx, run)),
   };
+  const running = new Set<InboxJob>();
   return {
     tools: [...createNewsletterTools(ctx), ...createSubscriptionTools(ctx), ...createDraftTools(ctx), ...createProposalTools(ctx)],
-    runJob(job) {
-      // a denied or expired approval leaves its row pending until something settles it, so each job starts with it.
-      settleApprovals(ctx.db, ctx.clock());
-      return jobs[job]();
+    async runJob(job) {
+      // one run of a job at a time: two digests would send the owner two messages and could save two drafts for one
+      // mail, and two scans would pay for the same receipts twice.
+      if (running.has(job)) return { status: 'skipped', error: `the ${job} job is already running` };
+      running.add(job);
+      try {
+        // a denied or expired approval leaves its row pending until something settles it, so each job starts with it.
+        settleApprovals(ctx.db, ctx.clock());
+        return await jobs[job]();
+      } finally {
+        running.delete(job);
+      }
     },
+    running: (job) => running.has(job),
     unsubscribe: (senderId) => requestUnsubscribe(ctx, senderId),
     archive: (senderId, request) => requestArchive(ctx, senderId, request),
     keep: (senderId) => keepSender(ctx, senderId),

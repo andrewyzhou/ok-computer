@@ -50,9 +50,22 @@ const headerLine = (max: number) => z.string().max(max).regex(/^[^\r\n]*$/, 'a l
 
 const flat = (text: string) => text.replace(/[\r\n]+/g, ' ');
 
+// a draft row with an empty gmailDraftId is a claim: a call saves the draft of that mail now, so a second call at the
+// same time makes no second draft. a claim older than this is of a call that stopped.
+const CLAIM_MS = 10 * 60 * 1000;
+
+const alreadySaved = (gmailDraftId: string, account: string) =>
+  gmailDraftId ? `the draft ${gmailDraftId} for this mail is already saved in ${account}. It is not sent.` : `a draft for this mail is being saved in ${account} now. It is not sent.`;
+
 function draftRow(ctx: InboxContext, account: string, sourceMessageId: string): { id: number; gmailDraftId: string } | undefined {
-  const row = ctx.db.prepare('SELECT id, gmailDraftId FROM inbox_drafts WHERE account = ? AND sourceMessageId = ?').get(account, sourceMessageId);
-  return row ? { id: Number(row.id), gmailDraftId: String(row.gmailDraftId) } : undefined;
+  const row = ctx.db.prepare('SELECT id, gmailDraftId, createdAt FROM inbox_drafts WHERE account = ? AND sourceMessageId = ?').get(account, sourceMessageId);
+  if (!row) return undefined;
+  // a claim that is this old belongs to a call that stopped before it saved the draft, so a new call may try.
+  if (String(row.gmailDraftId) === '' && Date.parse(String(row.createdAt)) < ctx.clock().getTime() - CLAIM_MS) {
+    ctx.db.prepare("DELETE FROM inbox_drafts WHERE id = ? AND gmailDraftId = ''").run(Number(row.id));
+    return undefined;
+  }
+  return { id: Number(row.id), gmailDraftId: String(row.gmailDraftId) };
 }
 
 // the subject of the reply: "Re: " and the subject of the mail, without a second "Re:".
@@ -116,7 +129,7 @@ const normalized = (text: string) => text.replace(/\s+/g, ' ').trim();
 // checkDrafts updates the state of the drafted rows: discarded when the draft is gone without a sent mail with its
 // text, sent_by_owner when a sent mail in the thread has its text.
 export async function checkDrafts(ctx: InboxContext, _run: JobRun): Promise<void> {
-  const rows = ctx.db.prepare("SELECT id, account, gmailDraftId, threadId, body, createdAt FROM inbox_drafts WHERE state = 'drafted' ORDER BY id").all();
+  const rows = ctx.db.prepare("SELECT id, account, gmailDraftId, threadId, body, createdAt FROM inbox_drafts WHERE state = 'drafted' AND gmailDraftId != '' ORDER BY id").all();
   const check = ctx.db.prepare('UPDATE inbox_drafts SET state = ?, checkedAt = ? WHERE id = ?');
   for (const row of rows) {
     const account = String(row.account);
@@ -182,7 +195,7 @@ export function createDraftTools(ctx: InboxContext): Tool[] {
 
   async function saveDraft(draft: Input, runId: string, toolCallId: string | undefined): Promise<ToolOutput> {
     const existing = draftRow(ctx, draft.account, draft.sourceMessageId);
-    if (existing) return { content: `the draft ${existing.gmailDraftId} for this mail is already saved in ${draft.account}. It is not sent.` };
+    if (existing) return { content: alreadySaved(existing.gmailDraftId, draft.account) };
     const bad = badAddress(draft.to);
     if (bad !== undefined) return { content: `${JSON.stringify(bad)} is not a plain email address.`, isError: true, effect: 'none' };
     let source: gmail_v1.Schema$Message;
@@ -198,6 +211,17 @@ export function createDraftTools(ctx: InboxContext): Tool[] {
     if (fromAddress(header(source, 'From')) !== draft.to[0]) {
       return { content: `${DRAFT_TOOL} did not run: a draft reply goes only to the sender of the mail.`, isError: true };
     }
+    // the claim comes before the draft, and no await is between the insert and its check. a second call for the same
+    // mail finds the claim and makes no second draft in gmail.
+    const claim = ctx.db
+      .prepare(
+        `INSERT INTO inbox_drafts (account, gmailDraftId, threadId, sourceMessageId, inReplyTo, toAddresses, subject, body, state, runId, toolCallId, createdAt)
+         VALUES (?, '', ?, ?, ?, ?, ?, ?, 'drafted', ?, ?, ?)
+         ON CONFLICT (account, sourceMessageId) DO NOTHING RETURNING id`,
+      )
+      .get(draft.account, draft.threadId, draft.sourceMessageId, draft.inReplyTo ?? null, JSON.stringify(draft.to), draft.subject, draft.body, runId, toolCallId ?? null, ctx.clock().toISOString());
+    if (!claim) return { content: alreadySaved(draftRow(ctx, draft.account, draft.sourceMessageId)?.gmailDraftId ?? '', draft.account) };
+    const rowId = Number(claim.id);
     let gmailDraftId: string;
     try {
       const { data } = await ctx.google.accounts.run(draft.account, (apis) =>
@@ -208,14 +232,10 @@ export function createDraftTools(ctx: InboxContext): Tool[] {
       );
       gmailDraftId = String(data.id);
     } catch (err) {
+      ctx.db.prepare("DELETE FROM inbox_drafts WHERE id = ? AND gmailDraftId = ''").run(rowId);
       return failed(DRAFT_TOOL, draft.account, toGoogleError(err), true);
     }
-    ctx.db
-      .prepare(
-        `INSERT INTO inbox_drafts (account, gmailDraftId, threadId, sourceMessageId, inReplyTo, toAddresses, subject, body, state, runId, toolCallId, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'drafted', ?, ?, ?)`,
-      )
-      .run(draft.account, gmailDraftId, draft.threadId, draft.sourceMessageId, draft.inReplyTo ?? null, JSON.stringify(draft.to), draft.subject, draft.body, runId, toolCallId ?? null, ctx.clock().toISOString());
+    ctx.db.prepare('UPDATE inbox_drafts SET gmailDraftId = ? WHERE id = ?').run(gmailDraftId, rowId);
     return { content: `saved draft ${gmailDraftId} in ${draft.account}. It is not sent.` };
   }
 
