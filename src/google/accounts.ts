@@ -131,8 +131,8 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
       refresh = await secrets.get(tokenRef(alias));
     } catch (err) {
       // the credential manager can fail while its service starts. the request did not leave, and a later poll tries again.
-      logger.warn('the credential manager failed for a google account', { alias, err });
-      throw new GoogleError('transient', 'the credential manager failed, so the request did not go out', undefined, false);
+      logger.warn('the system credential store failed for a google account', { alias, err });
+      throw new GoogleError('transient', 'the system credential store failed, so the request did not go out', undefined, false);
     }
     if (!refresh) throw new GoogleError('auth', `${alias} is not signed in yet. The owner connects it on the dashboard.`, undefined, false);
     registerSecret(refresh, tokenRef(alias));
@@ -200,7 +200,7 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
     for (const each of claim('(lastError IS NULL OR lastError NOT LIKE ?)')) {
       const age = clock().getTime() - Date.parse(each.authorizedAt);
       const testing = age > 6.5 * DAY_MS && age < 7.5 * DAY_MS ? ' The sign-in is about 7 days old, so the consent screen is probably still in Testing mode; set it to In production.' : '';
-      sends.push(tell([each.alias], `Google stopped accepting the sign-in of the ${each.alias} account (${each.lastError ?? 'unknown reason'}). Its mail and calendar are not checked until you sign in again on the PC.${testing}`));
+      sends.push(tell([each.alias], `Google stopped accepting the sign-in of the ${each.alias} account (${each.lastError ?? 'unknown reason'}). Its mail and calendar are not checked until you sign in again on the computer that runs the agent.${testing}`));
     }
     await Promise.all(sends);
   };
@@ -352,7 +352,7 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
         await secrets.set(CLIENT_REF, installed.client_secret);
       } catch (err) {
         logger.error('the google client was not stored', { err });
-        return { error: 'the credential manager did not take the client.' };
+        return { error: 'the system credential store did not take the client.' };
       }
       cached.clear();
       // the accounts that the refused client stopped work again. their refresh tokens are still valid.

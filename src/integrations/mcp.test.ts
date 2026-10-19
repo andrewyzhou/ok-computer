@@ -762,9 +762,9 @@ describe('a server that breaks the rules', () => {
   });
 
   it('says that a call did not run when the credential manager fails', () => {
-    expect(classify(new CredentialStoreError('the credential manager failed: locked'))).toEqual({
+    expect(classify(new CredentialStoreError('the system credential store failed: locked'))).toEqual({
       kind: 'not_sent',
-      reason: 'the credential manager failed: locked',
+      reason: 'the system credential store failed: locked',
     });
   });
 });

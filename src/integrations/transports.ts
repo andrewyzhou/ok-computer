@@ -24,7 +24,7 @@ export async function stdioTransport(entry: StdioEntry, secrets: SecretStore, lo
       continue;
     }
     const secret = await secrets.get(value.secretRef);
-    if (secret === undefined) throw new Error(`the secret ${value.secretRef} for ${name} is not in the credential manager`);
+    if (secret === undefined) throw new Error(`the secret ${value.secretRef} for ${name} is not in the system credential store`);
     env[name] = secret;
   }
   // on macos and linux the server leads its own process group, and the close ends the whole group. windows has no
@@ -180,7 +180,7 @@ export async function httpTransport(
     transport = new StreamableHTTPClientTransport(url, { authProvider: oauth.provider(entry), fetch: limited(oauth.fetchFor(entry)) });
   } else if (entry.auth?.type === 'bearer') {
     const token = await secrets.get(entry.auth.secretRef);
-    if (token === undefined) throw new Error(`the secret ${entry.auth.secretRef} is not in the credential manager`);
+    if (token === undefined) throw new Error(`the secret ${entry.auth.secretRef} is not in the system credential store`);
     transport = new StreamableHTTPClientTransport(url, { requestInit: { headers: { authorization: `Bearer ${token}` } }, fetch: limited(fetch) });
   } else {
     transport = new StreamableHTTPClientTransport(url, { fetch: limited(fetch) });

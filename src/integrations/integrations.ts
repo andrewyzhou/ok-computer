@@ -191,7 +191,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       } catch (err) {
         // the credential manager can fail, for example while its service starts. the connection reads the tokens
         // again, and its retry gives the owner the error and tries again later.
-        logger.warn('the credential manager failed before an oauth integration started', { integration: entry.id, err });
+        logger.warn('the system credential store failed before an oauth integration started', { integration: entry.id, err });
       }
       if (!signedIn) {
         parked.set(entry.id, { status: 'needs_auth', error: 'it is not signed in yet. connect it from the dashboard.' });
@@ -424,7 +424,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
         }
         await deps.secrets.set(ref, JSON.stringify(client));
       } catch (err) {
-        return { error: `the credential manager did not take the client: ${redact(errorText(err))}` };
+        return { error: `the system credential store did not take the client: ${redact(errorText(err))}` };
       }
       logger.info('oauth client stored', { integration: id, clientRef: ref });
       return { stored: true };
