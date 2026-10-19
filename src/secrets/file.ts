@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import {
   accessSync,
@@ -13,6 +14,7 @@ import {
   statSync,
   writeSync,
 } from 'node:fs';
+import { userInfo } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { CredentialStoreError } from '../integrations/secrets.js';
 import { registerSecret } from '../observability/redact.js';
@@ -34,10 +36,38 @@ function isSecretFile(value: unknown): value is SecretFile {
   return Object.values(secrets).every((entry) => typeof entry === 'string');
 }
 
-// a json file that maps each ref to its value, for a server without a keyring. the file has mode 0600, and each
-// write replaces the whole file through a temporary file and a rename, so a crash never leaves half a file.
-export function createFileSecretStore(path: string): CheckedSecretStore {
+// windows has no unix mode bits, and a new file takes the access list of its folder. a folder outside the user
+// profile, such as C:\okc\data, lets other local users read it. so the file drops the inherited entries and only its
+// owner keeps access. icacls ships with windows.
+function ownerOnlyAcl(file: string) {
+  const name = userInfo().username;
+  const user = process.env.USERDOMAIN ? `${process.env.USERDOMAIN}\\${name}` : name;
+  execFileSync('icacls', [file, '/inheritance:r', '/grant:r', `${user}:F`], { stdio: 'ignore', windowsHide: true });
+}
+
+export interface FileSecretStoreDeps {
+  // the tests try the windows path on other systems.
+  platform?: NodeJS.Platform;
+  // this limits a file to its owner on windows. the tests give a fake one.
+  protect?: (file: string) => void;
+}
+
+// a json file that maps each ref to its value, for a server without a keyring. the file has mode 0600, or an access
+// list for its owner only on windows, and each write replaces the whole file through a temporary file and a rename,
+// so a crash never leaves half a file.
+export function createFileSecretStore(path: string, deps: FileSecretStoreDeps = {}): CheckedSecretStore {
   const file = resolve(process.cwd(), path);
+  const windows = (deps.platform ?? process.platform) === 'win32';
+  const protect = (target: string) => {
+    try {
+      (deps.protect ?? ownerOnlyAcl)(target);
+    } catch {
+      throw new CredentialStoreError(`the secret file ${target} cannot be limited to its owner. Check that icacls runs.`);
+    }
+  };
+  // a file that was made by hand or by an older version keeps the access list of its folder, so the first read on
+  // windows limits it too.
+  let checkedAcl = false;
 
   // the file is read on each call, so a value that another process wrote is seen at once. a missing file holds no
   // secrets. the error texts name the path only, never a ref or a part of the contents.
@@ -49,8 +79,13 @@ export function createFileSecretStore(path: string): CheckedSecretStore {
       if (isMissing(err)) return undefined;
       throw new CredentialStoreError(`the secret file ${file} cannot be read`);
     }
-    // windows has no unix mode bits, so the check runs only on other systems.
-    if (process.platform !== 'win32' && (mode & 0o077) !== 0) {
+    // windows has no unix mode bits, so the mode check runs only on other systems, and windows sets the access list.
+    if (windows) {
+      if (!checkedAcl) {
+        protect(file);
+        checkedAcl = true;
+      }
+    } else if ((mode & 0o077) !== 0) {
       throw new CredentialStoreError(`the secret file ${file} can be read by other users. Run chmod 600 ${file}.`);
     }
     let text: string;
@@ -80,6 +115,9 @@ export function createFileSecretStore(path: string): CheckedSecretStore {
     try {
       const fd = openSync(tmp, 'wx', 0o600);
       try {
+        // the access list is set while the file is still empty, so no value is ever open to other users. the rename
+        // keeps it.
+        if (windows) protect(tmp);
         writeSync(fd, `${JSON.stringify(body, null, 2)}\n`);
         fsyncSync(fd);
       } finally {

@@ -165,3 +165,53 @@ describe('the file vault', () => {
     expect(view.error).toBe(`the secret file ${path} can be read by other users. Run chmod 600 ${path}.`);
   });
 });
+
+// windows has no mode bits, so the store limits the file to its owner with an access list. a fake protect records
+// each file, so this runs on every system.
+describe('the file secret store on windows', () => {
+  it('limits a new file before a value is in it, and an old file at its first read', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'okc-secret-acl-'));
+    try {
+      const path = join(root, 'secrets.json');
+      const seen: { file: string; size: number }[] = [];
+      const protect = (file: string) => seen.push({ file, size: statSync(file).size });
+      const store = createFileSecretStore(path, { platform: 'win32', protect });
+      await store.set('a', 'value-of-a-1234');
+      expect(seen).toHaveLength(1);
+      expect(seen[0]!.file).toMatch(/secrets\.json\.[0-9a-f]+\.tmp$/);
+      expect(seen[0]!.size).toBe(0);
+      // the set read no file, because none was there. the next read finds the file and limits it once.
+      expect(await store.get('a')).toBe('value-of-a-1234');
+      expect(await store.get('a')).toBe('value-of-a-1234');
+      expect(seen.map((each) => each.file).filter((file) => file === path)).toHaveLength(1);
+
+      // an old file with an open mode is fine on windows, because the mode bits mean nothing there.
+      writeFileSync(path, JSON.stringify({ version: 1, secrets: { b: 'value-of-b-1234' } }), { mode: 0o644 });
+      const old: string[] = [];
+      expect(await createFileSecretStore(path, { platform: 'win32', protect: (file) => old.push(file) }).get('b')).toBe('value-of-b-1234');
+      expect(old).toEqual([path]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('fails without the value when the access list cannot be set, and leaves no temporary file', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'okc-secret-acl-'));
+    try {
+      const path = join(root, 'secrets.json');
+      const store = createFileSecretStore(path, {
+        platform: 'win32',
+        protect: () => {
+          throw new Error('icacls failed for value-of-a-1234');
+        },
+      });
+      const err = await store.set('a', 'value-of-a-1234').catch((caught: unknown) => caught);
+      expect(err).toBeInstanceOf(CredentialStoreError);
+      expect((err as Error).message).toContain('cannot be limited to its owner');
+      expect((err as Error).message).not.toContain('value-of-a');
+      expect(readdirSync(root)).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
