@@ -108,6 +108,7 @@ const routes = (extra: StubRoutes = {}): StubRoutes => ({
   'GET /api/sandbox/execs/:id': ({ params }) => (params.id === '1' ? DETAIL : json({ error: 'sandbox exec not found' }, 404)),
   'GET /api/browser/tasks/:id': ({ params }) => (params.id === 'task-live' ? TASK : json({ error: 'browser task not found' }, 404)),
   'GET /api/blobs/:hash': ({ params }) => ({ hash: params.hash, size: 9, mime: 'text/plain', createdAt: '2026-10-13T01:00:00.000Z', text: `the full text of ${(params.hash ?? '').slice(0, 1)}` }),
+  'GET /api/sandbox/files/:hash': ({ params }) => new Response(`the full text of ${(params.hash ?? '').slice(0, 1)}`, { headers: { 'content-type': 'text/plain' } }),
   ...extra,
 });
 
@@ -203,14 +204,57 @@ describe('the sandbox views', () => {
     openApp('#/sandbox/code/1');
     expect(await inMain().findByText(/line 1\s+line 2/)).toBeTruthy();
     expect(inMain().getByText('stderr: no output.')).toBeTruthy();
-    expect(inMain().getByRole('note').textContent).toMatch(/cut to 64.0 KB per stream/);
+    expect(inMain().getByRole('note').textContent).toMatch(/only the first 64.0 KB of each stream was kept/);
     expect(inMain().getByText('/work')).toBeTruthy();
-    fireEvent.click(inMain().getByRole('button', { name: 'Load the full stdout' }));
+    fireEvent.click(inMain().getByRole('button', { name: 'Load the kept stdout' }));
     expect(await inMain().findByText('the full text of b')).toBeTruthy();
     expect(inMain().getByText('out/result.txt')).toBeTruthy();
     fireEvent.click(within(inMain().getByRole('table', { name: 'files out' })).getByRole('button', { name: 'Load' }));
     expect(await inMain().findByText('the full text of c')).toBeTruthy();
     expect(inMain().getByRole('link', { name: 'its trace' }).getAttribute('href')).toBe('#/trace/run-1');
+  });
+
+  // the detail route gives 64 KB of each stream, and the output limit is larger, so a longer output was cut in the page
+  // with no note and no way to load the rest.
+  it('says that the page shows only the first 64 KB of a stream, and loads the rest from the blob', async () => {
+    const shown = 'x'.repeat(64 * 1024);
+    calls = stubFetch(
+      seeded.dashboard,
+      routes({
+        'GET /api/sandbox/execs/:id': () => ({ ...DETAIL, truncated: false, stdoutBytes: 200_000, limits: { ...LIMITS, outputBytes: 1_048_576 }, stdout: shown }),
+      }),
+    );
+    openApp('#/sandbox/code/1');
+    const note = await inMain().findByText(/This page shows the first 64.0 KB of stdout/);
+    expect(note.textContent).toMatch(/holds 195.3 KB/);
+    expect(inMain().queryByText(/of each stream was kept/)).toBeNull();
+    fireEvent.click(inMain().getByRole('button', { name: 'Load the full stdout' }));
+    expect(await inMain().findByText('the full text of b')).toBeTruthy();
+  });
+
+  it('gives no cut note and no load button to a short output', async () => {
+    calls = stubFetch(seeded.dashboard, routes({ 'GET /api/sandbox/execs/:id': () => ({ ...DETAIL, truncated: false, stdoutBytes: 13 }) }));
+    openApp('#/sandbox/code/1');
+    expect(await inMain().findByText(/line 1\s+line 2/)).toBeTruthy();
+    expect(inMain().queryByRole('note')).toBeNull();
+    expect(inMain().queryByRole('button', { name: /Load the (full|kept) stdout/ })).toBeNull();
+  });
+
+  // the server keeps a file with a nul byte in the byte store even when its type says text, so the text loads through
+  // the files route, which reads both stores, and not through /api/blobs.
+  it('loads the text of a file through the files route', async () => {
+    calls = stubFetch(
+      seeded.dashboard,
+      routes({
+        'GET /api/blobs/:hash': () => json({ error: 'blob not found' }, 404),
+        'GET /api/sandbox/files/:hash': () => new Response(new Uint8Array([0x6f, 0x6b, 0x00, 0x21]), { headers: { 'content-type': 'text/plain' } }),
+      }),
+    );
+    openApp('#/sandbox/code/1');
+    await inMain().findByText('out/result.txt');
+    fireEvent.click(within(inMain().getByRole('table', { name: 'files out' })).getByRole('button', { name: 'Load' }));
+    expect(await inMain().findByText('ok\u0000!')).toBeTruthy();
+    expect(calls.some((call) => call.url === `/api/sandbox/files/${'c'.repeat(64)}`)).toBe(true);
   });
 
   it('shows the policy, the egress, the files that did not come back, and an image file from the sandbox route', async () => {

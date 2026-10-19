@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { BlobBody, SandboxExecRow, SandboxExecStatus, SandboxFile, SandboxLimits } from '../../../../src/dashboard/types';
 import { apiUrl, useApi, type Loaded } from '../../api';
 import { bytes, ms } from '../../format';
@@ -95,19 +95,58 @@ export function BlobOnDemand({ hash, label, button }: { hash: string; label: str
 // as a page of the dashboard.
 const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
-// a file that is utf-8 text is in the text store, so its text loads like any blob. the mime of such a file says text.
+// a file whose type says text can show its text in the page. the server picks the store by the bytes, not by the type,
+// so the type only decides if the page offers the text.
 function textual(mime: string): boolean {
   return mime.startsWith('text/') || /json|xml|javascript|yaml|csv|charset=utf-8/.test(mime);
+}
+
+// the text of a file of an exec. it loads through the files route, which reads both stores, so a text file with a nul
+// byte or bad utf-8, which is in the byte store, loads too. a bad byte shows as the replacement character.
+function FileText({ file, label }: { file: SandboxFile; label: string }) {
+  const [loaded, setLoaded] = useState<{ text?: string; error?: string }>({});
+  useEffect(() => {
+    let current = true;
+    fetch(apiUrl(`/api/sandbox/files/${encodeURIComponent(file.blob)}`))
+      .then(async (response) => {
+        if (!response.ok) {
+          const body = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? `${response.status} ${response.statusText}`);
+        }
+        return new TextDecoder().decode(await response.arrayBuffer());
+      })
+      .then(
+        (text) => current && setLoaded({ text }),
+        (err: Error) => current && setLoaded({ error: err.message }),
+      );
+    return () => {
+      current = false;
+    };
+  }, [file.blob]);
+  return (
+    <LoadRow loaded={{ ...(loaded.text !== undefined ? { data: loaded.text } : {}), ...(loaded.error !== undefined ? { error: loaded.error } : {}), reload: () => undefined }}>
+      {(text) => <CodeBlock label={`${label}, blob ${file.blob.slice(0, 12)}, ${file.mime}`} text={text} />}
+    </LoadRow>
+  );
 }
 
 // the content of a file of an exec. GET /api/sandbox/files/:hash gives its bytes: a raster image shows, and any other
 // file downloads. a text file can also show its text in the page.
 export function FileContent({ file }: { file: SandboxFile }) {
+  const [open, setOpen] = useState(false);
   const url = apiUrl(`/api/sandbox/files/${encodeURIComponent(file.blob)}`);
   if (INLINE.has(file.mime)) return <img className="sandbox-file-image" alt={file.path} src={url} />;
   return (
     <span className="sandbox-file">
-      {textual(file.mime) ? <BlobOnDemand hash={file.blob} label={file.path} button="Load" /> : null}
+      {textual(file.mime) ? (
+        open ? (
+          <FileText file={file} label={file.path} />
+        ) : (
+          <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
+            Load
+          </Button>
+        )
+      ) : null}
       <a href={url} download>
         Download
       </a>

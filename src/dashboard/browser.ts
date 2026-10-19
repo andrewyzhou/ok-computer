@@ -144,6 +144,9 @@ export function tracePathOf(db: Db, id: string): string | undefined {
   return row?.tracePath === `traces/${id}.zip` ? `traces/${id}.zip` : undefined;
 }
 
+// the types that a screenshot of the browser can have. svg is not one, because it can hold a script.
+const SCREENSHOT_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+
 // the routes of the browser page. they go on the server after its access checks, like the other api routes.
 export function mountBrowser(server: Hono, deps: { db: Db; dataDir: string; clock: Clock }): void {
   const { db, dataDir, clock } = deps;
@@ -157,12 +160,22 @@ export function mountBrowser(server: Hono, deps: { db: Db; dataDir: string; cloc
     const detail = browserTask(db, c.req.param('id'));
     return detail ? c.json(detail) : notFound(c, 'browser task');
   });
-  // a screenshot is bytes. only an image goes out, with its type fixed, so a blob of text never renders as a page.
+  // a screenshot is bytes. the blobs table also holds the files of the sandbox, and an svg file there is text with an
+  // image type, so a script in it would run at the origin of the dashboard. the route serves only a blob that a browser
+  // step names as its screenshot, only with a raster type, and with a policy that runs no script.
   server.get('/api/browser/screenshots/:hash', (c) => {
     try {
-      const blob = bytes.read(c.req.param('hash'));
-      if (!blob || !blob.mime.startsWith('image/')) return notFound(c, 'screenshot');
-      return c.body(new Uint8Array(blob.bytes), 200, { 'content-type': blob.mime, 'x-content-type-options': 'nosniff' });
+      const hash = c.req.param('hash');
+      if (!/^[0-9a-f]{64}$/.test(hash)) return notFound(c, 'screenshot');
+      if (!db.prepare('SELECT 1 FROM browser_steps WHERE screenshotBlob = ? LIMIT 1').get(hash)) return notFound(c, 'screenshot');
+      const blob = bytes.read(hash);
+      const mime = blob?.mime.split(';')[0]!.trim().toLowerCase();
+      if (!blob || !mime || !SCREENSHOT_TYPES.has(mime)) return notFound(c, 'screenshot');
+      return c.body(new Uint8Array(blob.bytes), 200, {
+        'content-type': mime,
+        'x-content-type-options': 'nosniff',
+        'content-security-policy': "default-src 'none'; sandbox",
+      });
     } catch (err) {
       return c.json({ error: (err as Error).message }, 500);
     }

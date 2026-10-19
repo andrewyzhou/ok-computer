@@ -7,11 +7,28 @@ import { ButtonLink, CodeBlock, Facts, Page, Section, Status, Table, type Column
 import { BlobOnDemand, ExecStatus, FileContent, limitFacts, LoadRow } from './parts';
 import './sandbox.css';
 
-function Output({ label, text, blob, truncated }: { label: string; text: string | null; blob: string | null; truncated: boolean }) {
+// the detail route gives at most this many bytes of each stream, as DETAIL_TEXT_BYTES in src/sandbox/limits.ts. the
+// cut moves back to the start of a character, so a cut text can be up to 3 bytes shorter.
+const DETAIL_TEXT_BYTES = 64 * 1024;
+
+// the text of a stream is cut in the page when it is at the limit of the detail route and the blob kept more of it.
+// the blob holds the first outputBytes of the stream, and the redaction can make it a little shorter than that.
+function cutInPage(text: string | null, total: number, outputBytes: number): boolean {
+  const shown = text === null ? 0 : new TextEncoder().encode(text).length;
+  return text !== null && shown > DETAIL_TEXT_BYTES - 4 && Math.min(total, outputBytes) > shown;
+}
+
+function Output({ label, text, blob, total, outputBytes, truncated }: { label: string; text: string | null; blob: string | null; total: number; outputBytes: number; truncated: boolean }) {
+  const cut = cutInPage(text, total, outputBytes);
   return (
     <div className="sandbox-output">
       {text === null ? <p className="muted">{label}: no output.</p> : <CodeBlock label={label} text={text} />}
-      {truncated && blob ? <BlobOnDemand hash={blob} label={`full ${label}`} button={`Load the full ${label}`} /> : null}
+      {cut ? (
+        <p className="sandbox-note" role="note">
+          This page shows the first {bytes(DETAIL_TEXT_BYTES)} of {label}. The blob store holds {bytes(Math.min(total, outputBytes))}.
+        </p>
+      ) : null}
+      {(cut || truncated) && blob ? <BlobOnDemand hash={blob} label={truncated ? `kept ${label}` : `full ${label}`} button={truncated ? `Load the kept ${label}` : `Load the full ${label}`} /> : null}
     </div>
   );
 }
@@ -102,11 +119,12 @@ function ExecBody({ exec }: { exec: SandboxExecDetail }) {
       <Section title="Output">
         {cut ? (
           <p className="sandbox-note" role="note">
-            The output was cut to {bytes(exec.limits.outputBytes)} per stream. The full text is in the blob store.
+            The output went over the limit, so only the first {bytes(exec.limits.outputBytes)} of each stream was kept. The blob store
+            holds that first part, and the rest is gone.
           </p>
         ) : null}
-        <Output label="stdout" text={exec.stdout} blob={exec.stdoutBlob} truncated={cut} />
-        <Output label="stderr" text={exec.stderr} blob={exec.stderrBlob} truncated={cut} />
+        <Output label="stdout" text={exec.stdout} blob={exec.stdoutBlob} total={exec.stdoutBytes} outputBytes={exec.limits.outputBytes} truncated={cut} />
+        <Output label="stderr" text={exec.stderr} blob={exec.stderrBlob} total={exec.stderrBytes} outputBytes={exec.limits.outputBytes} truncated={cut} />
       </Section>
       <Section title="Facts">
         <Facts
