@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- okc install fills the @@NAME@@ places with absolute paths and writes the result to
+     ~/Library/LaunchAgents/com.okcomputer.agent.plist. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.okcomputer.agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@@NODE@@</string>
+    <string>@@ROOT@@/dist/main.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>@@ROOT@@</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@@PATH@@</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>@@LOGS@@/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>@@LOGS@@/launchd.err.log</string>
+</dict>
+</plist>
