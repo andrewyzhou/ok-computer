@@ -1,5 +1,9 @@
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { BrowserOverview, BrowserTaskDetail } from '../src/dashboard/browser-types.js';
+import { createBlobStore } from '../src/observability/blobs.js';
+import { createByteStore } from '../src/observability/byte-blobs.js';
+import { storeOutputs } from '../src/sandbox/files.js';
 import { JPEG, seedBrowser } from './seed-browser.js';
 
 describe('the browser api', () => {
@@ -40,9 +44,32 @@ describe('the browser api', () => {
     const image = await dashboard.request(`/api/browser/screenshots/${shot}`);
     expect(image.headers.get('content-type')).toBe('image/jpeg');
     expect(image.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(image.headers.get('content-security-policy')).toBe("default-src 'none'; sandbox");
     expect(Buffer.from(await image.arrayBuffer())).toEqual(JPEG);
     expect((await dashboard.request(`/api/browser/screenshots/${snapshot}`)).status).toBe(404);
     expect((await dashboard.request('/api/browser/screenshots/..%2F..%2Fokc.sqlite')).status).toBe(404);
+  });
+
+  // the sandbox writes its files into the same blobs table. an svg that the code wrote is text with an image type, and
+  // served here it ran its script at the origin of the dashboard.
+  it('never serves a file of the sandbox, not even an svg that a step names', async () => {
+    const { t, dashboard } = seedBrowser();
+    const clock = () => new Date('2026-10-13T17:00:00Z');
+    const stores = { blobs: createBlobStore(t.db, join(t.dataDir, 'blobs'), clock), bytes: createByteStore(t.db, join(t.dataDir, 'blobs'), clock) };
+    const [svg, png] = storeOutputs(
+      [
+        { path: 'out/x.svg', bytes: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>') },
+        { path: 'out/chart.png', bytes: Buffer.from('89504e470d0a1a0a0000', 'hex') },
+      ],
+      stores,
+    );
+    expect(svg!.mime).toMatch(/^image\/svg\+xml/);
+    expect((await dashboard.request(`/api/browser/screenshots/${svg!.blob}`)).status).toBe(404);
+    // a raster file that no step names is not a screenshot either.
+    expect((await dashboard.request(`/api/browser/screenshots/${png!.blob}`)).status).toBe(404);
+    // a damaged step row that names the svg still gets no svg, because the type is checked too.
+    t.db.prepare('INSERT INTO browser_steps (taskId, action, urlBefore, urlAfter, screenshotBlob, durationMs, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)').run('bt_2', 'open', '', '', svg!.blob, 1, '2026-10-13T17:02:01Z');
+    expect((await dashboard.request(`/api/browser/screenshots/${svg!.blob}`)).status).toBe(404);
   });
 
   it('gives a trace zip, and a damaged row cannot name another file', async () => {
