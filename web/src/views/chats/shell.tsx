@@ -13,11 +13,15 @@ const DEBOUNCE_MS = 200;
 // a burst of stream events gives one reload of the list.
 const REFRESH_MS = 300;
 
-function chatsPath(filter: string, cursor?: string): string {
+const PAGE_SIZE = 30;
+// the server gives at most 200 rows in one page.
+const MAX_LIMIT = 200;
+
+function chatsPath(filter: string, cursor?: string, limit = PAGE_SIZE): string {
   const query = new URLSearchParams({ kind: 'main' });
   if (filter) query.set('q', filter);
   if (cursor) query.set('cursor', cursor);
-  query.set('limit', '30');
+  query.set('limit', String(limit));
   return `/api/chats?${query}`;
 }
 
@@ -55,7 +59,9 @@ function ChatLink({ chat, current, onNavigate }: { chat: ChatRow; current: boole
 // the main chats under the Chats heading of the nav, newest first. the search field of the nav filters them on the
 // server, by title and preview.
 export function ChatNavList({ filter, onNavigate }: NavPanelProps) {
-  const [page, setPage] = useState<{ chats: ChatRow[]; nextCursor: string | null } | null>(null);
+  // the page keeps the filter it is for, so an answer for an older filter never joins the list of a newer one.
+  const [page, setPage] = useState<{ filter: string; chats: ChatRow[]; nextCursor: string | null } | null>(null);
+  const shown = useRef({ filter: '', count: 0 });
   const [error, setError] = useState('');
   const [more, setMore] = useState(false);
   const [version, setVersion] = useState(0);
@@ -63,13 +69,17 @@ export function ChatNavList({ filter, onNavigate }: NavPanelProps) {
   const needle = filter.trim();
   const refresh = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
+  if (page) shown.current = { filter: page.filter, count: page.chats.length };
+
   useEffect(() => {
     const controller = new AbortController();
+    // a reload from the stream asks for as many rows as the list shows, so the rows of Load more stay.
+    const limit = shown.current.filter === needle ? Math.min(MAX_LIMIT, Math.max(PAGE_SIZE, shown.current.count)) : PAGE_SIZE;
     const timer = setTimeout(
       () =>
-        api<ChatsPage>(chatsPath(needle), { signal: controller.signal }).then(
+        api<ChatsPage>(chatsPath(needle, undefined, limit), { signal: controller.signal }).then(
           (loaded) => {
-            setPage(loaded);
+            setPage({ filter: needle, chats: loaded.chats, nextCursor: loaded.nextCursor });
             setError('');
           },
           (err: Error) => !controller.signal.aborted && setError(err.message),
@@ -97,11 +107,12 @@ export function ChatNavList({ filter, onNavigate }: NavPanelProps) {
 
   const loadMore = () => {
     if (!page?.nextCursor) return;
+    const asked = page.filter;
     setMore(true);
-    api<ChatsPage>(chatsPath(needle, page.nextCursor)).then(
+    api<ChatsPage>(chatsPath(asked, page.nextCursor)).then(
       (next) => {
         setMore(false);
-        setPage((old) => ({ chats: [...(old?.chats ?? []), ...next.chats], nextCursor: next.nextCursor }));
+        setPage((old) => (old && old.filter === asked ? { ...old, chats: [...old.chats, ...next.chats], nextCursor: next.nextCursor } : old));
       },
       (err: Error) => {
         setMore(false);

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { BrowserLive, BrowserLiveTask, SandboxExecRow, SandboxExecStatus, SandboxPage as SandboxPageData } from '../../../../src/dashboard/types';
 import { api, apiUrl, useApi } from '../../api';
 import { Load } from '../../components';
@@ -12,6 +12,13 @@ type Tab = 'browser' | 'code';
 
 const STATUSES: SandboxExecStatus[] = ['running', 'ok', 'failed', 'timeout', 'killed', 'error'];
 const PAGE_SIZE = 50;
+
+// an old or edited link can hold a status that the server refuses with a 400, so only a status of the contract is
+// used, and any other value shows every status.
+function statusOf(query: URLSearchParams): SandboxExecStatus | null {
+  const value = query.get('status');
+  return STATUSES.find((status) => status === value) ?? null;
+}
 
 // the tab and the filters live in the query of the hash, so a link opens the same view.
 function goTo(query: URLSearchParams, change: Record<string, string | null>): void {
@@ -117,19 +124,26 @@ const COLUMNS: Array<Column<SandboxExecRow>> = [
   { key: 'created', header: 'Created', align: 'end', hideBelow: 'sm', cell: (exec) => time(exec.createdAt) },
 ];
 
-// the first page reloads when a tool call ends, so a new run shows. the older pages stay as they loaded.
+// the first page reloads when a tool call ends, so a new run shows. the older pages belong to the first page that they
+// followed: a new run pushes a row off the end of the first page, and that row is in no older page, so the older pages
+// go when the first page changes, and an answer for an older first page is left out.
 function CodeList({ path }: { path: string }) {
   const first = useApi<SandboxPageData>(path, (message) => message.kind === 'tool_call');
-  const [older, setOlder] = useState<{ execs: SandboxExecRow[]; before: number | null } | null>(null);
+  const [older, setOlder] = useState<{ after: string; execs: SandboxExecRow[]; before: number | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const current = useRef('');
   return (
     <Load loaded={first}>
       {(page) => {
+        // the key of the first page: its path and its rows.
+        const after = `${path}|${page.execs.map((exec) => exec.id).join(',')}`;
+        current.current = after;
+        const mine = older && older.after === after ? older : null;
         const seen = new Set(page.execs.map((exec) => exec.id));
-        const rows = [...page.execs, ...(older?.execs ?? []).filter((exec) => !seen.has(exec.id))];
-        const before = older ? older.before : page.before;
+        const rows = [...page.execs, ...(mine?.execs ?? []).filter((exec) => !seen.has(exec.id))];
+        const before = mine ? mine.before : page.before;
         const loadOlder = () => {
           if (before === null) return;
           setBusy(true);
@@ -137,7 +151,12 @@ function CodeList({ path }: { path: string }) {
           api<SandboxPageData>(`${path}&before=${before}`).then(
             (next) => {
               setBusy(false);
-              setOlder({ execs: [...(older?.execs ?? []), ...next.execs], before: next.before });
+              if (current.current !== after) return;
+              setOlder((old) => {
+                const kept = old && old.after === after ? old.execs : [];
+                const have = new Set(kept.map((exec) => exec.id));
+                return { after, execs: [...kept, ...next.execs.filter((exec) => !have.has(exec.id))], before: next.before };
+              });
             },
             (err: Error) => {
               setBusy(false);
@@ -203,7 +222,7 @@ function CodeList({ path }: { path: string }) {
 
 function codePath(query: URLSearchParams): string {
   const params = new URLSearchParams();
-  const status = query.get('status');
+  const status = statusOf(query);
   const runId = query.get('runId');
   if (status) params.set('status', status);
   if (runId) params.set('runId', runId);
@@ -215,7 +234,7 @@ function CodeFilters({ query }: { query: URLSearchParams }) {
   const runId = query.get('runId');
   return (
     <>
-      <Select label="status" value={query.get('status') ?? ''} allLabel="all" options={STATUSES} onChange={(value) => goTo(query, { status: value || null })} />
+      <Select label="status" value={statusOf(query) ?? ''} allLabel="all" options={STATUSES} onChange={(value) => goTo(query, { status: value || null })} />
       {runId ? (
         <Pill icon="close" pressed onClick={() => goTo(query, { runId: null })} title="Clear the run filter">
           run {runId}

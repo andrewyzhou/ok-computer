@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { BrowserLive, SandboxExecRow, SandboxStatus } from '../../../../src/dashboard/types';
 import { seedDashboard } from '../../../../test/seed';
 import { setPrefs } from '../../shell/prefs';
-import { inMain, installEventSource, json, openApp, stubFetch, type StubRoutes } from '../../testing';
+import { FakeEventSource, inMain, installEventSource, json, openApp, stubFetch, type StubRoutes } from '../../testing';
 
 // the edge cases of the sandbox views: a live task with no step yet, an older page that fails, the views outside
 // developer mode, and errors of the server.
@@ -109,5 +109,43 @@ describe('the sandbox edge cases', () => {
     const calls = open({ 'GET /api/sandbox/execs/:id': () => json({ error: 'sandbox exec not found' }, 404) }, '#/sandbox/code/not%2Fa%20number');
     expect(await inMain().findByText('Not found: sandbox exec not found')).toBeTruthy();
     expect(calls.some((call) => call.url === '/api/sandbox/execs/not%2Fa%20number')).toBe(true);
+  });
+
+  it('sends only a status of the contract to the sandbox endpoint', async () => {
+    const calls = open(
+      {
+        'GET /api/sandbox': ({ query }) => (query.get('status') === 'bogus' ? json({ error: 'give a known status' }, 400) : { status: STATUS, execs: [], before: null }),
+      },
+      '#/sandbox?tab=code&status=bogus',
+    );
+    expect(await inMain().findByText('No code ran in the sandbox yet.')).toBeTruthy();
+    expect(calls.some((call) => call.url.includes('status=bogus'))).toBe(false);
+  });
+
+  it('drops the older rows when a new run changes the first page, so no row is skipped', async () => {
+    let first = [exec(3), exec(2)];
+    open(
+      {
+        'GET /api/sandbox': ({ query }) => {
+          if (!query.get('before')) return { status: STATUS, execs: first, before: first.at(-1)!.id };
+          return { status: STATUS, execs: [exec(1)], before: null };
+        },
+      },
+      '#/sandbox?tab=code',
+    );
+    const table = within(await inMain().findByRole('table', { name: 'code runs' }));
+    fireEvent.click(inMain().getByRole('button', { name: 'Load older' }));
+    expect(await table.findByText('#1')).toBeTruthy();
+    first = [exec(4), exec(3)];
+    act(() =>
+      FakeEventSource.find('/api/stream')!.emit({
+        kind: 'tool_call',
+        call: { id: 9, runId: 'run-1', toolCallId: 'c9', name: 'code_run', outcome: 'ran', durationMs: 3, createdAt: '2026-10-13T01:00:01.000Z' },
+      }),
+    );
+    expect(await table.findByText('#4')).toBeTruthy();
+    // the row #2 left the first page. the list now ends at #3 and offers the older rows again, so #2 is not skipped.
+    await waitFor(() => expect(table.queryByText('#1')).toBeNull());
+    expect(inMain().getByRole('button', { name: 'Load older' })).toBeTruthy();
   });
 });

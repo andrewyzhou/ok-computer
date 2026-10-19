@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChatKind, ChatRow, ChatsPage } from '../../../../src/dashboard/types';
 import { api, useStream } from '../../api';
 import { time, usd } from '../../format';
@@ -27,10 +27,15 @@ function tabOf(query: URLSearchParams): Tab {
   return TABS.some((tab) => tab.id === kind) ? (kind as Tab) : 'all';
 }
 
-function listPath(tab: Tab, q: string, cursor?: string): string {
+// the server gives 50 rows by default and at most 200 in one page.
+const PAGE_SIZE = 50;
+const MAX_LIMIT = 200;
+
+function listPath(tab: Tab, q: string, cursor?: string, limit?: number): string {
   const query = new URLSearchParams({ kind: tab === 'all' ? 'activity' : tab });
   if (q) query.set('q', q);
   if (cursor) query.set('cursor', cursor);
+  if (limit !== undefined && limit !== PAGE_SIZE) query.set('limit', String(limit));
   return `/api/chats?${query}`;
 }
 
@@ -83,7 +88,11 @@ export function ActivityList({ query }: RouteProps) {
   const tab = tabOf(query);
   const [text, setText] = useState('');
   const [q, setQ] = useState('');
-  const [page, setPage] = useState<ChatsPage | null>(null);
+  // the page keeps the tab and the text it is for, so an answer for an older filter never joins the list of a newer one.
+  const [page, setPage] = useState<(ChatsPage & { key: string }) | null>(null);
+  const shown = useRef({ key: '', count: 0 });
+  const key = `${tab}|${q}`;
+  if (page) shown.current = { key: page.key, count: page.chats.length };
   const [error, setError] = useState('');
   const [more, setMore] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -97,8 +106,10 @@ export function ActivityList({ query }: RouteProps) {
   useEffect(() => {
     const controller = new AbortController();
     setError('');
-    api<ChatsPage>(listPath(tab, q), { signal: controller.signal }).then(
-      (loaded) => setPage(loaded),
+    // a reload from the stream asks for as many rows as the list shows, so the rows of Load more stay.
+    const limit = shown.current.key === `${tab}|${q}` ? Math.min(MAX_LIMIT, Math.max(PAGE_SIZE, shown.current.count)) : PAGE_SIZE;
+    api<ChatsPage>(listPath(tab, q, undefined, limit), { signal: controller.signal }).then(
+      (loaded) => setPage({ ...loaded, key: `${tab}|${q}` }),
       (err: Error) => !controller.signal.aborted && setError(err.message),
     );
     return () => controller.abort();
@@ -116,12 +127,13 @@ export function ActivityList({ query }: RouteProps) {
   };
 
   const loadMore = () => {
-    if (!page?.nextCursor) return;
+    if (!page?.nextCursor || page.key !== key) return;
+    const asked = page.key;
     setMore(true);
     api<ChatsPage>(listPath(tab, q, page.nextCursor)).then(
       (next) => {
         setMore(false);
-        setPage((old) => ({ chats: [...(old?.chats ?? []), ...next.chats], nextCursor: next.nextCursor }));
+        setPage((old) => (old && old.key === asked ? { ...old, chats: [...old.chats, ...next.chats], nextCursor: next.nextCursor } : old));
       },
       (err: Error) => {
         setMore(false);
