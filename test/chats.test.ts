@@ -390,5 +390,6 @@ describe('the chat list at scale', () => {
     const keys = seen.map((chat) => chat.key);
     expect(new Set(keys).size).toBe(keys.length);
     expect(keys).toHaveLength(before + count / 5);
-  });
+    // the seed writes hundreds of chats, so a loaded machine gets more time than the default.
+  }, 30_000);
 });

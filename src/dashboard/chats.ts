@@ -151,20 +151,33 @@ function backgroundTitle(db: Db, kind: ChatKind, sessionKey: string): string {
   }
 }
 
-// the one builder of a chat row, for the list and for the messages page.
-function chatRow(db: Db, stats: ChatStats): ChatRow {
-  const title = stats.kind === 'main' ? (stats.firstOwnerText ? collapse(stats.firstOwnerText, 80) : '') || 'New chat' : collapse(backgroundTitle(db, stats.kind, stats.key), 80);
-  const last = messageRows(db, stats.range, { limit: 1, spokenOnly: true })[0];
+// the title and the preview of a chat. they need the range and the first owner text, but not the numbers of a chat.
+interface ChatHead {
+  title: string;
+  preview: string | null;
+}
+
+function chatHead(db: Db, kind: ChatKind, key: string, range: Range, firstOwnerText: string | null): ChatHead {
+  const title = kind === 'main' ? (firstOwnerText ? collapse(firstOwnerText, 80) : '') || 'New chat' : collapse(backgroundTitle(db, kind, key), 80);
+  const last = messageRows(db, range, { limit: 1, spokenOnly: true })[0];
   const preview = last ? collapse(toMessage(last).text, 200) : '';
+  return { title, preview: preview || null };
+}
+
+const headMatches = (head: ChatHead, q: string) => head.title.toLowerCase().includes(q) || (head.preview ?? '').toLowerCase().includes(q);
+
+// the one builder of a chat row, for the list and for the messages page. the list passes the head when it has already
+// read it for q.
+function chatRow(db: Db, stats: ChatStats, head = chatHead(db, stats.kind, stats.key, stats.range, stats.firstOwnerText)): ChatRow {
   return {
     key: stats.key,
     kind: stats.kind,
     sessionKey: stats.range.sessionKey,
     fromEventId: stats.fromEventId,
     toEventId: stats.toEventId,
-    title,
+    title: head.title,
     channel: stats.channel,
-    preview: preview || null,
+    preview: head.preview,
     firstAt: stats.firstAt,
     lastAt: stats.lastAt,
     runs: stats.runs,
@@ -318,9 +331,11 @@ export interface ChatsInput {
 }
 
 // a chat of the list before its numbers are known. stats reads them, and it gives undefined for a segment of main
-// that is not a chat.
+// that is not a chat. a background chat also has head, which reads its title and preview without the numbers, so
+// with q the list reads the numbers only of the chats that match.
 interface Candidate extends Cursor {
   stats: () => ChatStats | undefined;
+  head?: () => ChatHead;
 }
 
 // with q, one page reads at most this many background chats. a page can then hold fewer chats than the limit and still
@@ -372,7 +387,9 @@ function backgroundCandidates(db: Db, kind: ChatKindFilter | undefined, cursor: 
     .all({ ...where.params, cursorAt: cursor?.lastAt ?? null, cursorKey: cursor?.key ?? null, limit })
     .map((row) => {
       const key = String(row.sessionKey);
-      return { key, lastAt: String(row.lastAt), stats: () => backgroundStats(db, key) };
+      // a background chat is every event of its session, so its range starts at event 0.
+      const head = () => chatHead(db, chatKindOf(key), key, { sessionKey: key, from: 0, to: null }, null);
+      return { key, lastAt: String(row.lastAt), stats: () => backgroundStats(db, key), head };
     });
 }
 
@@ -401,10 +418,12 @@ export function listChats(db: Db, input: ChatsInput): ChatsPage | undefined {
   for (const each of candidates) {
     if (rows.length > input.limit) break;
     seen = each;
+    const head = q && each.head ? each.head() : undefined;
+    if (q && head && !headMatches(head, q)) continue;
     const stats = each.stats();
     if (!stats) continue;
-    const row = chatRow(db, stats);
-    if (q && !row.title.toLowerCase().includes(q) && !(row.preview ?? '').toLowerCase().includes(q)) continue;
+    const row = chatRow(db, stats, head);
+    if (q && !headMatches(row, q)) continue;
     rows.push(row);
   }
   const chats = rows.slice(0, input.limit);
