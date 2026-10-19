@@ -356,6 +356,8 @@ export function createDashboard(deps: DashboardDeps): Hono {
       await stream.writeSSE({ event: 'ready', data: '{}' });
       while (!stream.aborted) {
         await stream.sleep(deps.pollMs ?? 1000);
+        // a stop closes the database while a stream sleeps, so the stream ends before it reads again.
+        if (stream.aborted || !db.isOpen) break;
         for (const message of poll()) await stream.writeSSE({ data: JSON.stringify(message) });
       }
     }),

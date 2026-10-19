@@ -298,6 +298,25 @@ ${WEEKLY}`);
       .map((line) => JSON.parse(line.slice(6)) as StreamMessage);
     expect(data).toMatchObject([{ kind: 'event', event: { type: 'note', payload: { text: 'a new note' } } }]);
   });
+
+  // a stop closes the database while a stream waits for its next poll. the stream must end, not read a closed database.
+  it('ends a stream when the database closes', async () => {
+    const { t, dashboard } = await seedDashboard({ pollMs: 5 });
+    const response = await dashboard.request('/api/stream');
+    const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
+    let received = '';
+    while (!received.includes('event: ready')) received += (await reader.read()).value ?? '';
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      t.db.close();
+      let done = false;
+      while (!done) done = (await reader.read()).done;
+      await new Promise((settle) => setTimeout(settle, 20));
+      expect(logged).not.toHaveBeenCalled();
+    } finally {
+      logged.mockRestore();
+    }
+  });
 });
 
 describe('the dashboard server', () => {
