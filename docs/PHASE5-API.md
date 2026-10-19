@@ -50,7 +50,7 @@ Status: the shared contract for the parallel work of phase 5 (see `docs/PHASE5-P
 
 | Method | Path | Query / body | Response | Notes |
 |---|---|---|---|---|
-| POST | `/api/google/accounts/:alias/token` | `GoogleTokenImportRequest` `{ refreshToken, clientId }` | `GoogleTokenImportResponse` | The server refreshes the token one time, then stores it in the `SecretStore` under the alias's ref. The token never appears in a log or an answer. `400` for a bad body. `404` for an alias that is not in the config. `409` when `clientId` is not the configured client. `422` when Google refuses the token. `503` when the secret store fails. |
+| POST | `/api/google/accounts/:alias/token` | `GoogleTokenImportRequest` `{ refreshToken, clientId }` | `GoogleTokenImportResponse` | The server refreshes the token one time, then stores it in the `SecretStore` under the alias's ref. The token never appears in a log or an answer. `400` for a bad body. `404` for an alias that is not in the config. `409` when `clientId` is not the configured client. `409` also when the server has no client secret yet. `422` when Google refuses the token. `503` when the secret store fails or Google does not answer. |
 | GET | `/api/secrets` | none | `SecretStoreView` | The backend and whether it answers. It never shows a value or a ref. |
 
 The backend is chosen by `SecretStoreConfig` (`keyring`, `file` with mode 0600, or `aws` with one secret per ref named `prefix + ref`, where the default prefix is `okc/`). It goes in `okc.config.json` as `secrets`, and the default is `{ "backend": "keyring" }`. The desktop sends the token with a CLI command that M7 adds, so the web app needs no page for it.
