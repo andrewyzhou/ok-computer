@@ -127,6 +127,15 @@ export function createSandbox(deps: Deps): Sandbox {
       };
     },
     async start() {
+      if (!deps.enabled) return;
+      // the rows of a stopped process are closed also when docker is off now, so the trace never shows a command that
+      // runs forever. this needs only the database.
+      try {
+        const closed = closeStale(db, clock(), staleMs, live);
+        if (closed.length) logger.warn('closed the sandbox execs of a stopped app', { execs: closed });
+      } catch (err) {
+        logger.error('sandbox stale sweep failed', { err });
+      }
       if (!parts) return;
       const found = await probe();
       atStart = found.available;
@@ -135,8 +144,6 @@ export function createSandbox(deps: Deps): Sandbox {
         return;
       }
       try {
-        const closed = closeStale(db, clock(), staleMs, live);
-        if (closed.length) logger.warn('closed the sandbox execs of a stopped app', { execs: closed });
         const keep = (execId: number) =>
           db.prepare("SELECT 1 AS x FROM sandbox_execs WHERE id = ? AND status = 'running' AND createdAt > ?").get(execId, new Date(clock().getTime() - staleMs).toISOString()) !== undefined;
         const containers = await sweepContainers(parts.docker, instance, keep);
