@@ -2,6 +2,8 @@ import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { gzipSync } from 'node:zlib';
 import type { Egress } from '../src/web/egress.js';
 
+const BOMB_PART = gzipSync(Buffer.alloc(1_000_000));
+
 // one local server plays several sites. the host name tells them apart: shop.test is the site of the task, evil.test
 // is a site that the task must never reach, and cdn.test serves images. tests map every *.test name to 127.0.0.1.
 export interface Fixture {
@@ -473,8 +475,9 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
       case 'shop.test/pdf':
         return send(200, '%PDF-1.4 '.repeat(1000), 'application/pdf');
       case 'shop.test/bomb':
-        // 50 mb of zeros, about 50 kb on the wire.
-        return res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'gzip' }).end(gzipSync(Buffer.alloc(50_000_000)));
+        // 50 mb of zeros, about 50 kb on the wire. the body is 50 gzip members of 1 mb each, so the fixture does not
+        // hold 50 mb itself. the test measures the memory of the reader, and the fixture runs in the same process.
+        return res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'gzip' }).end(Buffer.concat(Array.from({ length: 50 }, () => BOMB_PART)));
       case 'shop.test/slow':
         res.writeHead(200, { 'content-type': 'text/plain' });
         res.write('first part');
