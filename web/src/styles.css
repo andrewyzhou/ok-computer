@@ -623,6 +623,20 @@ button.sb-item.dev-toggle.is-on:hover {
   opacity: 0.88;
 }
 
+/* a header action can give a long label and a short one. the short one shows on a narrow phone, so the title of the
+   page keeps its room in the header. */
+.label-narrow {
+  display: none;
+}
+@media (max-width: 499.98px) {
+  .label-wide {
+    display: none;
+  }
+  .label-narrow {
+    display: inline;
+  }
+}
+
 /* page */
 
 .page {
@@ -1967,8 +1981,17 @@ li.wrap {
   .hide-below-sm {
     display: none;
   }
+  /* the first and the last item sit 16px from the edges, as the page does. an item has 8px of its own padding, and the
+     dev pill has a border, so its edge needs the full 16px. */
   .statusbar {
-    padding: 0 4px;
+    padding: 0 16px 0 8px;
+  }
+  /* a tab strip that is wider than a phone scrolls, and its right edge fades, so a cut tab reads as more to scroll.
+     the padding at the end lets the last tab scroll out of the fade. */
+  .tabs {
+    padding-right: 24px;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
   }
   .statusbar .sb-item > .icon:not(.sb-keep) {
     display: none;

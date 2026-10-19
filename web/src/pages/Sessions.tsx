@@ -197,7 +197,8 @@ export function SessionDetail({ sessionKey }: { sessionKey: string; query?: URLS
             aria-label="Show what the model saw"
             onClick={() => setShowModel(!showModel)}
           >
-            Show what the model saw
+            <span className="label-wide">Show what the model saw</span>
+            <span className="label-narrow">Model view</span>
           </Button>
         </>
       }
