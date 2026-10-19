@@ -1,5 +1,6 @@
 import type { Hono } from 'hono';
 import { z } from 'zod';
+import { redact } from '../observability/redact.js';
 import type { DashboardDeps } from './server.js';
 import type { GoogleTokenImportRequest, GoogleTokenImportResponse, SecretStoreView } from './types.js';
 
@@ -12,16 +13,30 @@ export const tokenImportBody = z
   .object({ refreshToken: z.string().regex(/^\S{1,2048}$/), clientId: z.string().regex(/^\S{1,200}$/) })
   .strict() satisfies z.ZodType<GoogleTokenImportRequest>;
 
-type Answer<T> = { status: 200; body: T } | { status: 400 | 404 | 409 | 422 | 503; body: { error: string } };
+type Answer<T> = { status: 200; body: T } | { status: 400 | 404 | 409 | 422 | 500 | 503; body: { error: string } };
 
-// TODO(m7 routes): build it. the work package gives each status. the token never goes into an answer or a log.
-export async function importGoogleToken(_deps: DashboardDeps, _alias: string, _body: unknown): Promise<Answer<GoogleTokenImportResponse>> {
-  throw new Error('not built: the google token import route');
+// the token never goes into an answer or a log. accounts.importToken gives it to the redactor first, and each error
+// text goes through redact() too, so a text that quotes the token cannot reach the page.
+export async function importGoogleToken(deps: DashboardDeps, alias: string, body: unknown): Promise<Answer<GoogleTokenImportResponse>> {
+  const parsed = tokenImportBody.safeParse(body);
+  if (!parsed.success) return { status: 400, body: { error: 'send {"refreshToken": "...", "clientId": "..."} as json' } };
+  const google = deps.app.google;
+  if (!google) return { status: 404, body: { error: 'google account not found' } };
+  try {
+    const result = await google.accounts.importToken(alias, parsed.data);
+    if (!result.ok) return { status: result.status, body: { error: redact(result.error) } };
+    return { status: 200, body: { alias, email: result.email, status: 'ok', scopes: result.scopes, storedAt: result.storedAt } };
+  } catch (err) {
+    deps.logger.error('the google token import failed', { alias, err });
+    return { status: 500, body: { error: 'the token import failed' } };
+  }
 }
 
-// TODO(m7 routes): build it. without a vault the answer is 503.
-export async function secretsView(_deps: DashboardDeps): Promise<Answer<SecretStoreView>> {
-  throw new Error('not built: the secret store view');
+// a view with ok false is still a 200, because the view carries the state of the store.
+export async function secretsView(deps: DashboardDeps): Promise<Answer<SecretStoreView>> {
+  const vault = deps.app.secretVault;
+  if (!vault) return { status: 503, body: { error: 'the secret store is not set up' } };
+  return { status: 200, body: await vault.view() };
 }
 
 export function mountDeploy(server: Hono, deps: DashboardDeps): void {
