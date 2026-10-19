@@ -233,7 +233,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
         ...(deps.setTimer ? { setTimer: deps.setTimer } : {}),
         ...(entry.kind === 'mcp-http' && entry.auth?.type === 'oauth' && deps.oauth ? { signInOutage: () => deps.oauth?.signInOutage(entry.id) } : {}),
         ...(entry.kind === 'mcp-http' && entry.auth?.type === 'bearer'
-          ? { refusedKeyHint: `Update the secret ${entry.auth.secretRef} in the credential manager with cmdkey, then press Connect.` }
+          ? { refusedKeyHint: `Update the secret ${entry.auth.secretRef} in the system credential store (cmdkey on Windows, security on macOS), then press Connect.` }
           : {}),
       }),
     );
@@ -493,7 +493,7 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
 }
 
 // keptSecret gives the secret of a stored client with the same id, undefined when there is none, and null when the
-// stored value is not json, for example a client that the owner stored with cmdkey.
+// stored value is not json, for example a client that the owner stored with cmdkey or security.
 function keptSecret(stored: string | undefined, clientId: string): string | undefined | null {
   if (stored === undefined) return undefined;
   let old: { client_id?: unknown; client_secret?: unknown };

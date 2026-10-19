@@ -21,7 +21,7 @@ export function OAuthApp({ integration, onDone }: { integration: IntegrationSumm
       client_id: clientId.trim(),
       ...(clientSecret.trim() ? { client_secret: clientSecret.trim() } : {}),
     })
-      .then(() => done('Stored in the credential manager. Press Connect to sign in.'), (err: Error) => setNotice(err.message))
+      .then(() => done('Stored in the system credential store. Press Connect to sign in.'), (err: Error) => setNotice(err.message))
       .finally(() => setClientSecret(''));
   const finish = () =>
     send<{ text: string }>('/api/integrations/callback', 'POST', { url: pasted }).then(
@@ -39,8 +39,9 @@ export function OAuthApp({ integration, onDone }: { integration: IntegrationSumm
       {app.clientRef ? (
         <>
           <p className="muted">
-            The client of the app is stored in the Windows Credential Manager as <code>{app.clientRef}.ok-computer</code>. This page never shows it. Store
-            it again to replace it. With an empty secret, the stored secret of the same client id stays.
+            The client of the app is stored in the system credential store (Credential Manager on Windows, the login Keychain on macOS): as{' '}
+            <code>{app.clientRef}.ok-computer</code> on Windows, and as the account <code>{app.clientRef}</code> of the service <code>ok-computer</code> on
+            macOS. This page never shows it. Store it again to replace it. With an empty secret, the stored secret of the same client id stays.
           </p>
           <div className="row">
             <input aria-label="client id" placeholder="client id" value={clientId} onChange={(event) => setClientId(event.target.value)} />

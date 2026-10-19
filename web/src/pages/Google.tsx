@@ -50,7 +50,7 @@ export function GoogleRequests({ query }: { query: string }) {
 }
 
 // the client file of google cloud has the secret. the page reads it and sends it to the server, which keeps only
-// the secret, in the credential manager.
+// the secret, in the system credential store.
 function ClientUpload({ onDone }: { onDone: (text: string) => void }) {
   const upload = async (file: File) => {
     try {
