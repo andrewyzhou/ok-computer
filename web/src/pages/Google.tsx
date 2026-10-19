@@ -110,7 +110,15 @@ function AccountFacts({ account }: { account: GoogleAccountView }) {
   );
 }
 
-function accountColumns(connect: (alias: string) => void, busy: string | null): Array<Column<GoogleAccountView>> {
+// an address breaks only before the @ and after a dot, so a narrow column never splits a word.
+function breakable(address: string) {
+  return address.split(/(?=@)|(?<=\.)/).flatMap((part, index) => (index ? [<wbr key={index} />, part] : [part]));
+}
+
+// an error of the server can start with a lower-case letter. the notice is a sentence, so it starts with a capital.
+const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+function accountColumns(connect: (alias: string) => void, busy: string | null, ready: boolean): Array<Column<GoogleAccountView>> {
   return [
     {
       key: 'alias',
@@ -118,7 +126,7 @@ function accountColumns(connect: (alias: string) => void, busy: string | null): 
       cell: (account) => (
         <div className="google-account">
           <strong>{account.alias}</strong>
-          <span className="muted google-email">{account.email ?? account.expected ?? 'no address yet'}</span>
+          <span className="muted google-email">{breakable(account.email ?? account.expected ?? 'no address yet')}</span>
         </div>
       ),
     },
@@ -129,7 +137,7 @@ function accountColumns(connect: (alias: string) => void, busy: string | null): 
         <div className="google-account">
           <Status value={account.status} />
           {account.alertedAt ? <span className="muted small">told you at {time(account.alertedAt)}</span> : null}
-          <span className="muted small">{`${account.calls24h} calls, ${account.errors24h} errors`}</span>
+          <span className="muted small google-counts">{`${account.calls24h} calls · ${account.errors24h} errors`}</span>
         </div>
       ),
     },
@@ -139,7 +147,14 @@ function accountColumns(connect: (alias: string) => void, busy: string | null): 
       header: <span className="sr-only">Actions</span>,
       align: 'end',
       cell: (account) => (
-        <Button size="sm" variant={account.status === 'ok' ? 'secondary' : 'primary'} busy={busy === account.alias} onClick={() => connect(account.alias)}>
+        <Button
+          size="sm"
+          variant={account.status === 'ok' ? 'secondary' : 'primary'}
+          busy={busy === account.alias}
+          disabled={!ready}
+          title={ready ? undefined : 'Upload the client file first'}
+          onClick={() => connect(account.alias)}
+        >
           {account.status === 'ok' ? 'Reconnect' : 'Connect'}
         </Button>
       ),
@@ -158,15 +173,41 @@ const TOOL_COLUMNS: Array<Column<GooglePage['tools'][number]>> = [
   { key: 'description', header: 'Description', cell: (tool) => <span className="muted">{tool.description}</span>, wrap: true, hideBelow: 'sm' },
 ];
 
-function GoogleBody({ page, connect, busy, onUpload }: { page: GooglePage; connect: (alias: string) => void; busy: string | null; onUpload: (text: string) => void }) {
+function GoogleBody({
+  page,
+  connect,
+  busy,
+  notice,
+  onUpload,
+}: {
+  page: GooglePage;
+  connect: (alias: string) => void;
+  busy: string | null;
+  notice: string;
+  onUpload: (text: string) => void;
+}) {
   const [selected, setSelected] = useState<string | null>(null);
   const account = page.accounts.find((each) => each.alias === selected);
   return (
     <>
       <Section title="Accounts" description="Select an account to see its sign-in and its last error.">
+        {page.clientStored ? null : (
+          <div className="google-step" data-testid="google-client-step">
+            <strong>First, upload the client file.</strong>
+            <span className="muted">
+              In Google Cloud, download the secret of the desktop client (client_secret_….json), then upload it here. Connect works after that.
+            </span>
+            <ClientUpload onDone={onUpload} />
+          </div>
+        )}
+        {notice ? (
+          <p className="google-notice" role="status">
+            {sentence(notice)}
+          </p>
+        ) : null}
         <Table
           label="google accounts"
-          columns={accountColumns(connect, busy)}
+          columns={accountColumns(connect, busy, page.clientStored)}
           rows={page.accounts}
           rowKey={(each) => each.alias}
           selected={selected}
@@ -174,8 +215,8 @@ function GoogleBody({ page, connect, busy, onUpload }: { page: GooglePage; conne
           empty={<EmptyState icon="google" title="No accounts.">Add an account to the google part of okc.config.json.</EmptyState>}
         />
         <div className="google-client">
-          <span className="muted">{page.clientId ? <>Client <span className="google-client-id">{page.clientId}</span></> : 'No client is stored yet.'}</span>
-          <ClientUpload onDone={onUpload} />
+          <span className="muted">{page.clientId ? <>Client <span className="google-client-id">{page.clientId}</span>{page.clientStored ? '' : ', secret not stored yet'}</> : 'No client is stored yet.'}</span>
+          {page.clientStored ? <ClientUpload onDone={onUpload} /> : null}
         </div>
       </Section>
       <Section title="Polls" description={`Every ${page.pollMinutes} minutes.`}>
@@ -196,7 +237,7 @@ function GoogleBody({ page, connect, busy, onUpload }: { page: GooglePage; conne
         <DetailsPanel title={account.alias} openKey={account.alias} onClose={() => setSelected(null)}>
           <AccountFacts account={account} />
           <div>
-            <Button size="sm" variant="primary" busy={busy === account.alias} onClick={() => connect(account.alias)}>
+            <Button size="sm" variant="primary" busy={busy === account.alias} disabled={!page.clientStored} onClick={() => connect(account.alias)}>
               {account.status === 'ok' ? 'Reconnect' : 'Connect'} {account.alias}
             </Button>
           </div>
@@ -225,15 +266,25 @@ export function Google() {
   const [busy, setBusy] = useState<string | null>(null);
   const connect = (alias: string) => {
     setBusy(alias);
+    setNotice('');
+    // the tab opens during the click. a tab that opens after the request is a popup, and a browser can block it.
+    const tab = window.open('', '_blank');
+    const fail = (text: string) => {
+      tab?.close();
+      setNotice(text);
+    };
     void send<{ url: string } | { error: string }>(`/api/google/accounts/${encodeURIComponent(alias)}/connect`, 'POST', {})
       .then(
         (result) => {
-          if ('error' in result) return setNotice(result.error);
-          // the consent page opens in a new tab. its last page says whether the sign-in worked.
-          window.open(result.url, '_blank', 'noopener');
+          if ('error' in result) return fail(result.error);
+          // the consent page opens in the new tab. its last page says whether the sign-in worked.
+          if (tab) {
+            tab.opener = null;
+            tab.location.href = result.url;
+          } else window.open(result.url, '_blank', 'noopener');
           setNotice(`Sign in to ${alias} in the new tab, then come back and reload.`);
         },
-        (err: Error) => setNotice(err.message),
+        (err: Error) => fail(err.message),
       )
       .finally(() => setBusy(null));
   };
@@ -241,13 +292,6 @@ export function Google() {
     <Page
       title="Google"
       subtitle="Mail and calendar accounts"
-      actions={
-        notice ? (
-          <span className="google-notice" role="status">
-            {notice}
-          </span>
-        ) : undefined
-      }
     >
       <Load loaded={loaded}>
         {(page) =>
@@ -256,7 +300,7 @@ export function Google() {
               See docs/setup/google.md.
             </EmptyState>
           ) : (
-            <GoogleBody page={page} connect={connect} busy={busy} onUpload={(text) => (setNotice(text), loaded.reload())} />
+            <GoogleBody page={page} connect={connect} busy={busy} notice={notice} onUpload={(text) => (setNotice(text), loaded.reload())} />
           )
         }
       </Load>

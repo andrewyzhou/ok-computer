@@ -14,16 +14,18 @@ const DAY_MS = 24 * 60 * 60_000;
 const reason = (error: string | null) => (error ?? 'unknown reason').replace(/\.$/, '');
 
 // the page leads with what the owner must do. the details below it say why.
-function nextStep(account: Omit<GoogleAccountView, 'nextStep'>): string | null {
-  if (account.status === 'signed_out') return `Connect ${account.alias}${account.expected ? ` and pick ${account.expected}` : ''}.`;
+function nextStep(account: Omit<GoogleAccountView, 'nextStep'>, clientStored: boolean): string | null {
+  if (account.status === 'signed_out' && !clientStored) return `Upload the client file, then connect ${account.alias}.`;
+  // the address is in its own column, so the step names the account only.
+  if (account.status === 'signed_out') return `Connect ${account.alias}${account.expected ? ', and pick its address at google' : ''}.`;
   if (account.status === 'needs_auth') return `It stopped working: ${reason(account.lastError)}. Connect it again.`;
   if (account.failures) return `The last ${account.failures} polls failed: ${reason(account.lastError)}. The next poll tries again.`;
   return null;
 }
 
-export function googlePage(db: Db, app: Pick<App, 'google'>, config: Config, now: Date): GooglePage {
+export function googlePage(db: Db, app: Pick<App, 'google'>, config: Config, now: Date, clientStored = false): GooglePage {
   const google = config.google;
-  if (!app.google || !google) return { configured: false, clientId: null, send: false, pollMinutes: 0, sessions: [], accounts: [], lastPoll: null, tools: [] };
+  if (!app.google || !google) return { configured: false, clientId: null, clientStored: false, send: false, pollMinutes: 0, sessions: [], accounts: [], lastPoll: null, tools: [] };
   const since = new Date(now.getTime() - DAY_MS).toISOString();
   const calls = db.prepare(
     "SELECT COUNT(*) AS calls, COALESCE(SUM(isError), 0) AS errors FROM tool_calls WHERE source = 'google' AND account = ? AND createdAt >= ?",
@@ -44,7 +46,7 @@ export function googlePage(db: Db, app: Pick<App, 'google'>, config: Config, now
       calls24h: Number(counts.calls),
       errors24h: Number(counts.errors),
     };
-    return { ...view, nextStep: nextStep(view) };
+    return { ...view, nextStep: nextStep(view, clientStored) };
   });
   const poll = db
     .prepare(
@@ -55,6 +57,7 @@ export function googlePage(db: Db, app: Pick<App, 'google'>, config: Config, now
   return {
     configured: true,
     clientId: google.clientId,
+    clientStored,
     send: google.send,
     pollMinutes: google.pollMinutes,
     sessions: google.sessions,
@@ -123,7 +126,7 @@ export function signalRows(db: Db, limit = 200): SignalRow[] {
 
 export function googleRoutes(server: Hono, deps: { db: Db; app: Pick<App, 'google'>; config: Config; clock: Clock }): void {
   const { db, app } = deps;
-  server.get('/api/google', (c) => c.json(googlePage(db, app, deps.config, deps.clock())));
+  server.get('/api/google', async (c) => c.json(googlePage(db, app, deps.config, deps.clock(), (await app.google?.accounts.hasClient()) ?? false)));
   server.get('/api/google/requests', (c) => {
     const { runId, toolCallId } = c.req.query();
     return c.json(googleRequests(db, { ...(runId ? { runId } : {}), ...(toolCallId ? { toolCallId } : {}) }));

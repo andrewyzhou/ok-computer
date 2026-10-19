@@ -36,6 +36,8 @@ export interface GoogleAccounts {
   alertPending(): Promise<void>;
   // saveClient stores the oauth client from the json file that google cloud gives for a desktop app.
   saveClient(file: unknown): Promise<{ saved: true } | { error: string }>;
+  // true when the client secret is stored. a connect needs it, so the page asks for the client file first.
+  hasClient(): Promise<boolean>;
   beginSignIn(alias: string): Promise<{ url: string } | { error: string }>;
   finishSignIn(state: string, code: string): Promise<{ email: string } | { error: string }>;
   // importToken takes a refresh token that a sign-in on a desktop made, for a server that has no browser. it makes the
@@ -427,6 +429,13 @@ export function createGoogleAccounts(deps: AccountsDeps): GoogleAccounts {
         const error = toGoogleError(err);
         if (error.kind === 'auth' || error.kind === 'client') park(alias, error);
         throw error;
+      }
+    },
+    async hasClient() {
+      try {
+        return Boolean(await secrets.get(CLIENT_REF));
+      } catch {
+        return false;
       }
     },
     async saveClient(file) {

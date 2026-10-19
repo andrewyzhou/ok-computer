@@ -37,7 +37,7 @@ describe('the google page', () => {
     expect(within(personal).getByText('Connect')).toBeTruthy();
     const school = main.getByText('school').closest('tr')!;
     expect(within(school).getByText('ok')).toBeTruthy();
-    expect(within(school).getByText('1 calls, 0 errors')).toBeTruthy();
+    expect(within(school).getByText('1 calls · 0 errors')).toBeTruthy();
     expect(within(school).getByText('Reconnect')).toBeTruthy();
     expect(main.getByText(/Last poll/)).toBeTruthy();
     expect(main.getByText('its requests and labels')).toBeTruthy();
@@ -57,14 +57,44 @@ describe('the google page', () => {
     expect(await details().findByRole('heading', { name: 'Google' })).toBeTruthy();
   });
 
-  it('opens the consent page of an account and says what to do next', async () => {
-    const open = vi.fn();
+  // the tab opens during the click, so a browser does not block it as a popup. the consent page loads in it after.
+  it('opens the consent page of an account in a tab of the click and says what to do next', async () => {
+    const tab = { opener: {} as unknown, location: { href: '' }, close: vi.fn() };
+    const open = vi.fn(() => tab);
     vi.stubGlobal('open', open);
     openApp('#/google');
     const personal = (await inMain().findByText('personal')).closest('tr')!;
     fireEvent.click(within(personal).getByRole('button', { name: 'Connect' }));
-    expect(await screen.findByText('Sign in to personal in the new tab, then come back and reload.')).toBeTruthy();
-    expect(open).toHaveBeenCalledWith('https://accounts.example/consent?alias=personal', '_blank', 'noopener');
+    expect(open).toHaveBeenCalledWith('', '_blank');
+    expect(await inMain().findByText('Sign in to personal in the new tab, then come back and reload.')).toBeTruthy();
+    expect(tab.location.href).toBe('https://accounts.example/consent?alias=personal');
+    expect(tab.opener).toBeNull();
     expect(calls.some((call) => call.method === 'POST' && call.url === '/api/google/accounts/personal/connect')).toBe(true);
+  });
+
+  it('shows a refused connect in full in the accounts section and closes the empty tab', async () => {
+    const error = 'the client secret of the google oauth client is not stored. Upload the client file on the Google page.';
+    calls = stubFetch(seeded.dashboard, { 'POST /api/google/accounts/:alias/connect': () => ({ error }) });
+    const tab = { opener: {}, location: { href: '' }, close: vi.fn() };
+    vi.stubGlobal('open', vi.fn(() => tab));
+    openApp('#/google');
+    const personal = (await inMain().findByText('personal')).closest('tr')!;
+    fireEvent.click(within(personal).getByRole('button', { name: 'Connect' }));
+    const notice = await inMain().findByRole('status');
+    // the notice shows the whole error as a sentence, so nothing is cut at the edge of the header.
+    expect(notice.textContent).toBe(`T${error.slice(1)}`);
+    expect(tab.close).toHaveBeenCalled();
+  });
+
+  it('asks for the client file first and keeps connect off until it is stored', async () => {
+    const page = (await (await seeded.dashboard.request('/api/google')).json()) as { clientStored: boolean };
+    expect(page.clientStored).toBe(true);
+    calls = stubFetch(seeded.dashboard, { 'GET /api/google': () => ({ ...page, clientStored: false }) });
+    openApp('#/google');
+    const step = await screen.findByTestId('google-client-step');
+    expect(within(step).getByText('First, upload the client file.')).toBeTruthy();
+    expect(within(step).getByLabelText(/Upload the client file/)).toBeTruthy();
+    const personal = inMain().getByText('personal').closest('tr')!;
+    expect((within(personal).getByRole('button', { name: 'Connect' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

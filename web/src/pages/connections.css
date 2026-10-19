@@ -18,8 +18,7 @@
   align-items: flex-end;
   gap: 4px;
 }
-.integrations-notice,
-.google-notice {
+.integrations-notice {
   color: var(--ink-2);
   font-size: var(--text-sm);
   max-width: 420px;
@@ -393,12 +392,12 @@
   .integrations-lines li .integrations-time {
     grid-column: 1 / -1;
   }
-  .integrations-notice,
-  .google-notice {
+  .integrations-notice {
     max-width: 160px;
   }
   .google-email {
-    overflow-wrap: anywhere;
+    overflow-wrap: normal;
+    word-break: normal;
   }
 }
 
@@ -406,6 +405,39 @@
 .integrations-code,
 .google-code {
   font-size: var(--text-sm);
+}
+/* the google notice and first step sit in the accounts section, so a long error is read in full. */
+.google-notice {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-left: 2px solid var(--ink);
+  background: var(--surface-2, var(--bg-2, transparent));
+  color: var(--ink);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.google-counts {
+  white-space: nowrap;
+}
+.google-step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+.google-step > strong {
+  flex-basis: 100%;
+  font-weight: 600;
+}
+.google-step > .muted {
+  flex: 1 1 280px;
 }
 .google-client {
   display: flex;

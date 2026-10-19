@@ -20,6 +20,8 @@ export interface GoogleAccountView {
 export interface GooglePage {
   configured: boolean;
   clientId: string | null;
+  // false until the owner uploads the client file. the client id alone, from okc.config.json, is not enough to sign in.
+  clientStored: boolean;
   send: boolean;
   pollMinutes: number;
   sessions: string[];
