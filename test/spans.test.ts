@@ -4,15 +4,22 @@ import type { RunSpans, Span, SpanKind } from '../src/dashboard/types.js';
 import { CHILD_RUN, seedM1, T0, TRACE_RUN } from './seed-m1.js';
 import { seedDashboard } from './seed.js';
 
-const KIND_ORDER: SpanKind[] = ['run', 'subagent', 'model', 'review', 'tool', 'approval', 'mcp', 'google', 'browser', 'sandbox'];
+const KIND_ORDER: SpanKind[] = ['run', 'model', 'tool', 'subagent', 'review', 'approval', 'mcp', 'google', 'browser', 'sandbox'];
 
-// the list is sorted by start, then by kind, then by id, and the run span is first.
+// the run span is first, each parent comes before the spans inside it, and the children of one parent are sorted by
+// start, then by kind, then by id. a child whose start is before the start of its parent waits for its parent.
 function expectSorted(spans: Span[]) {
   expect(spans[0]!.kind).toBe('run');
-  for (let i = 2; i < spans.length; i++) {
-    const [a, b] = [spans[i - 1]!, spans[i]!];
-    const order = a.startMs - b.startMs || KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || (a.id < b.id ? -1 : 1);
-    expect(order, `${a.id} before ${b.id}`).toBeLessThan(0);
+  const position = new Map(spans.map((span, index) => [span.id, index]));
+  for (const span of spans.slice(1)) expect(position.get(span.parentId!)!, `${span.parentId} before ${span.id}`).toBeLessThan(position.get(span.id)!);
+  const siblings = new Map<string, Span[]>();
+  for (const span of spans.slice(1)) siblings.set(span.parentId!, [...(siblings.get(span.parentId!) ?? []), span]);
+  for (const group of siblings.values()) {
+    for (let i = 1; i < group.length; i++) {
+      const [a, b] = [group[i - 1]!, group[i]!];
+      const order = a.startMs - b.startMs || KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || (a.id < b.id ? -1 : 1);
+      expect(order, `${a.id} before ${b.id}`).toBeLessThan(0);
+    }
   }
 }
 
@@ -129,8 +136,8 @@ describe('the spans of a run', () => {
     expect(result.spans).toHaveLength(15);
     expectSorted(result.spans);
     expectParents(result.spans);
-    // the two spans that start at 3000 sort by kind: the sub-agent before the tool calls.
-    expect(result.spans.filter((span) => span.startMs === 3_000).map((span) => span.kind)).toEqual(['subagent', 'tool', 'tool']);
+    // the spans that start at 3000 sort by kind: the tool calls before the sub-agent that one of them holds.
+    expect(result.spans.filter((span) => span.startMs === 3_000).map((span) => span.kind)).toEqual(['tool', 'tool', 'subagent']);
   });
 
   it('gives the child run its own waterfall with the same rules', async () => {
@@ -271,19 +278,62 @@ describe('the spans of a run', () => {
     const { t } = await seedM1();
     const db = t.db;
     expect(runSpans(db, TRACE_RUN)!.spans.some((span) => span.kind === 'sandbox')).toBe(false);
+    // the shape of 020_sandbox.sql. the row is written with status running before the container starts, and the end
+    // sets endedAt and the status.
     db.exec(`CREATE TABLE sandbox_execs (
-      id INTEGER PRIMARY KEY, runId TEXT, toolCallId TEXT, command TEXT NOT NULL, exitCode INTEGER, durationMs INTEGER NOT NULL, createdAt TEXT NOT NULL
+      id INTEGER PRIMARY KEY, runId TEXT, toolCallId TEXT, sessionKey TEXT, taskId TEXT, language TEXT NOT NULL, command TEXT NOT NULL,
+      image TEXT NOT NULL, imageId TEXT, cwd TEXT NOT NULL, network TEXT NOT NULL, allowlist TEXT NOT NULL, limits TEXT NOT NULL,
+      status TEXT NOT NULL, exitCode INTEGER, containerId TEXT, stdoutBlob TEXT, stderrBlob TEXT, stdoutBytes INTEGER NOT NULL DEFAULT 0,
+      stderrBytes INTEGER NOT NULL DEFAULT 0, truncated INTEGER NOT NULL DEFAULT 0, error TEXT, durationMs INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL, endedAt TEXT
     )`);
-    const execId = Number(
-      db
-        .prepare("INSERT INTO sandbox_execs (runId, toolCallId, command, exitCode, durationMs, createdAt) VALUES (?, 'tc-mcp', 'ls', 2, 500, ?) RETURNING id")
-        .get(TRACE_RUN, new Date(Date.parse(T0) + 4_500).toISOString())!.id,
+    const insert = db.prepare(
+      `INSERT INTO sandbox_execs (runId, toolCallId, language, command, image, cwd, network, allowlist, limits, status, exitCode, error, durationMs, createdAt, endedAt)
+       VALUES (?, 'tc-mcp', ?, ?, 'img', '/work', 'none', '[]', '{}', ?, ?, ?, ?, ?, ?) RETURNING id`,
     );
+    const ms = (offset: number) => new Date(Date.parse(T0) + offset).toISOString();
+    const script = `\n${'x'.repeat(200)}\nprint(2)\n`;
+    const done = Number(insert.get(TRACE_RUN, 'python', script, 'error', 2, 'exit code 2', 500, ms(4_000), ms(4_500))!.id);
+    const running = Number(insert.get(TRACE_RUN, 'bash', 'ls -la\necho hi', 'running', null, null, 0, ms(4_200), null)!.id);
     const result = runSpans(db, TRACE_RUN)!;
-    const exec = result.spans.find((span) => span.kind === 'sandbox');
-    expect(exec).toMatchObject({ label: 'ls', startMs: 4_000, endMs: 4_500, status: '2', ref: { kind: 'sandbox', sandboxExecId: execId } });
+    const spans = byId(result);
+    expect(spans.get(`sandbox:${done}`)).toMatchObject({
+      startMs: 4_000,
+      endMs: 4_500,
+      status: 'error',
+      error: 'exit code 2',
+      ref: { kind: 'sandbox', sandboxExecId: done },
+    });
+    const label = spans.get(`sandbox:${done}`)!.label;
+    expect(label.startsWith('python xxx')).toBe(true);
+    expect(label.length).toBeLessThanOrEqual(80);
+    expect(spans.get(`sandbox:${running}`)).toMatchObject({ label: 'bash ls -la', startMs: 4_200, endMs: null, endAt: null, status: 'running', error: null });
     expectSorted(result.spans);
     expectParents(result.spans);
+  });
+
+  it('puts each parent before the spans inside it', async () => {
+    const { t } = await seedM1();
+    const { spans } = runSpans(t.db, TRACE_RUN)!;
+    const position = new Map(spans.map((span, index) => [span.id, index]));
+    expect(spans.filter((span) => span.parentId !== null && position.get(span.parentId)! > position.get(span.id)!).map((span) => span.id)).toEqual([]);
+  });
+
+  it('draws a model call whose response is not valid json, with no tool calls in it', async () => {
+    const { t, dashboard } = await seedM1();
+    const id = Number(
+      t.db
+        .prepare(
+          `INSERT INTO model_calls (runId, slot, provider, model, inputTokens, outputTokens, costUsd, latencyMs, stopReason, request, response, createdAt)
+           VALUES (?, 'main', 'fake', 'm', 1, 1, 0, 10, 'end_turn', '{}', 'not json', ?) RETURNING id`,
+        )
+        .get(TRACE_RUN, new Date(Date.parse(T0) + 19_000).toISOString())!.id,
+    );
+    const response = await dashboard.request(`/api/runs/${TRACE_RUN}/spans`);
+    expect(response.status).toBe(200);
+    const result = (await response.json()) as RunSpans;
+    expect(byId(result).get(`model:${id}`)).toMatchObject({ kind: 'model', startMs: 18_990, endMs: 19_000 });
+    expect(result.spans.filter((span) => span.parentId === `model:${id}`)).toEqual([]);
   });
 
   it('answers 404 for a run that does not exist', async () => {

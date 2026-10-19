@@ -11,7 +11,8 @@ import type { RunSpans, Span, SpanKind, SpanRef } from './types.js';
 type Row = Record<string, unknown>;
 
 // spans that start at the same ms are sorted in this order, so a parent comes before the spans inside it.
-const KIND_ORDER: readonly SpanKind[] = ['run', 'subagent', 'model', 'review', 'tool', 'approval', 'mcp', 'google', 'browser', 'sandbox'];
+// a model call holds tool calls, and a tool call holds a sub-agent, a review and the rest.
+const KIND_ORDER: readonly SpanKind[] = ['run', 'model', 'tool', 'subagent', 'review', 'approval', 'mcp', 'google', 'browser', 'sandbox'];
 
 const str = (value: unknown) => (value === null || value === undefined ? null : String(value));
 const num = (value: unknown) => (value === null || value === undefined ? null : Number(value));
@@ -76,12 +77,33 @@ function usageOf(db: Db, runId: string) {
   return { costUsd: num(row.costUsd), inputTokens: Number(row.inputTokens), outputTokens: Number(row.outputTokens) };
 }
 
-// migration 006 dropped sandbox_execs and m9 brings it back, so the spans read it only when it has the columns they use.
+// migration 006 dropped sandbox_execs and m9 makes it again in 020, so the spans read it only when it has the columns
+// they use.
 function hasSandbox(db: Db): boolean {
   const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sandbox_execs'").get();
   if (!table) return false;
   const columns = new Set(db.prepare("SELECT name FROM pragma_table_info('sandbox_execs')").all().map((row) => String(row.name)));
-  return ['runId', 'durationMs', 'createdAt'].every((column) => columns.has(column));
+  return ['runId', 'toolCallId', 'language', 'command', 'status', 'error', 'createdAt', 'endedAt'].every((column) => columns.has(column));
+}
+
+// the language and the first line of the code that ran. the command is the whole script, so the label is cut.
+function sandboxLabel(language: string | null, command: string | null): string {
+  const line = (command ?? '').split('\n').find((each) => each.trim() !== '')?.trim() ?? '';
+  const label = [language, line].filter(Boolean).join(' ') || 'sandbox';
+  return label.length > 80 ? `${label.slice(0, 79)}…` : label;
+}
+
+// the tool calls that a model response asked for. a response that is not valid json asked for none, so a damaged row
+// still draws its model span.
+function askedCalls(response: unknown): Set<string> {
+  if (!response) return new Set();
+  try {
+    const parsed = JSON.parse(String(response)) as { toolCalls?: unknown } | null;
+    const calls = Array.isArray(parsed?.toolCalls) ? (parsed.toolCalls as Array<{ id?: unknown } | null>) : [];
+    return new Set(calls.map((call) => String(call?.id)));
+  } catch {
+    return new Set();
+  }
 }
 
 // the method, the host and the path of a google request. the query string can hold the words of a search, so it is cut.
@@ -117,9 +139,10 @@ export function runSpans(db: Db, runId: string): RunSpans | undefined {
   });
   collect(walk, runId, root.id);
   const rank = (kind: SpanKind) => KIND_ORDER.indexOf(kind);
-  const rest = walk.spans
+  const sorted = walk.spans
     .slice(1)
     .sort((a, b) => a.startMs - b.startMs || rank(a.kind) - rank(b.kind) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const rest = parentsFirst(root.id, sorted);
   return {
     runId,
     startedAt,
@@ -128,6 +151,29 @@ export function runSpans(db: Db, runId: string): RunSpans | undefined {
     costUsd: walk.costs.length ? walk.costs.reduce((sum, cost) => sum + cost, 0) : null,
     spans: [root, ...rest],
   };
+}
+
+// the kind order puts a parent first at the same ms in most cases, but a child run can start in the same ms as a span
+// of an earlier kind. so a span whose parent is not out yet waits, and it goes right after its parent. the rest keeps
+// the sorted order.
+function parentsFirst(rootId: string, sorted: Span[]): Span[] {
+  const out: Span[] = [];
+  const placed = new Set([rootId]);
+  const waiting = new Map<string, Span[]>();
+  const place = (each: Span) => {
+    out.push(each);
+    placed.add(each.id);
+    const children = waiting.get(each.id);
+    waiting.delete(each.id);
+    for (const child of children ?? []) place(child);
+  };
+  for (const each of sorted) {
+    if (each.parentId === null || placed.has(each.parentId)) place(each);
+    else waiting.set(each.parentId, [...(waiting.get(each.parentId) ?? []), each]);
+  }
+  // a span whose parent is not in the list goes at the end, so no span is lost.
+  for (const children of waiting.values()) out.push(...children);
+  return out;
 }
 
 // adds the spans of one run below parentId: the run span for the root run, the sub-agent span for a child run.
@@ -153,7 +199,6 @@ function collect(walk: Walk, runId: string, parentId: string): void {
       reviews.push(row);
       continue;
     }
-    const response = row.response ? (JSON.parse(String(row.response)) as { toolCalls?: Array<{ id?: unknown }> } | null) : null;
     const made = span(walk, {
       id: `model:${Number(row.id)}`,
       parentId,
@@ -168,7 +213,7 @@ function collect(walk: Walk, runId: string, parentId: string): void {
       outputTokens: Number(row.outputTokens),
       ref: { kind: 'model', modelCallId: Number(row.id) },
     });
-    turns.push({ id: made.id, asked: new Set((response?.toolCalls ?? []).map((call) => String(call.id))) });
+    turns.push({ id: made.id, asked: askedCalls(row.response) });
   }
   // a tool call goes inside the latest model call that asked for it. an approved call has no such model call.
   const askedBy = (toolCallId: string) => turns.findLast((turn) => turn.asked.has(toolCallId))?.id ?? parentId;
@@ -336,6 +381,8 @@ function collect(walk: Walk, runId: string, parentId: string): void {
     });
   }
 
+  // the sandbox writes its row with status running before the container starts, and it sets endedAt and the status when
+  // the command ends. so createdAt is the start.
   if (!walk.sandbox) return;
   for (const row of db.prepare('SELECT * FROM sandbox_execs WHERE runId = ? ORDER BY id').all(runId)) {
     const toolCallId = str(row.toolCallId);
@@ -343,10 +390,10 @@ function collect(walk: Walk, runId: string, parentId: string): void {
       id: `sandbox:${Number(row.id)}`,
       parentId: (toolCallId !== null && toolByCall.get(toolCallId)) || parentId,
       kind: 'sandbox',
-      label: str(row.command) ?? 'sandbox',
-      startAt: minus(String(row.createdAt), Number(row.durationMs)),
-      endAt: String(row.createdAt),
-      status: str(row.exitCode),
+      label: sandboxLabel(str(row.language), str(row.command)),
+      startAt: String(row.createdAt),
+      endAt: str(row.endedAt),
+      status: str(row.status),
       error: str(row.error),
       ref: { kind: 'sandbox', sandboxExecId: Number(row.id) },
     });
