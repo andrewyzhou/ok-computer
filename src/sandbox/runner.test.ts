@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createLogger } from '../observability/logger.js';
 import { DockerError } from './docker.js';
 import { DEFAULT_LIMITS, FILE_LIMITS, LABELS, SANDBOX_USER, SCRATCH_BYTES, TMP_MOUNT, WORK_DIR } from './limits.js';
+import { packTar } from './tar.js';
 import { commandFor, containerName, containerSpec, createRunner, sweepContainers, type TarParts } from './runner.js';
 import type { ContainerSpec, ContainerState, DockerClient, ExecRequest, FileIn, NetworkPlan } from './types.js';
 
@@ -180,6 +181,7 @@ function fakeDocker(options: FakeOptions = {}) {
     listVolumes: async () => [],
     createNetwork: async () => 'n1',
     removeNetwork: async () => {},
+    listNetworks: async () => [],
   };
   return { docker, calls, specs, puts, archiveCalls, removed };
 }
@@ -333,11 +335,26 @@ describe('createRunner', () => {
       { path: 'plots/link', reason: 'a link is not a file' },
       { path: 'huge.bin', reason: `the collected files are over ${FILE_LIMITS.totalBytes} bytes in all` },
     ]);
-    expect(unpackCalls[0]).toEqual({ strip: 'report.txt', prefix: 'out', maxFiles: FILE_LIMITS.count, maxFileBytes: FILE_LIMITS.fileBytes, maxTotalBytes: FILE_LIMITS.totalBytes });
-    expect(unpackCalls[1]).toMatchObject({ strip: 'plots', prefix: '', maxFiles: FILE_LIMITS.count - 1, maxTotalBytes: FILE_LIMITS.totalBytes - 4 });
+    expect(unpackCalls[0]).toEqual({ strip: 'report.txt', prefix: 'out/report.txt', maxFiles: FILE_LIMITS.count, maxFileBytes: FILE_LIMITS.fileBytes, maxTotalBytes: FILE_LIMITS.totalBytes });
+    expect(unpackCalls[1]).toMatchObject({ strip: 'plots', prefix: 'plots', maxFiles: FILE_LIMITS.count - 1, maxTotalBytes: FILE_LIMITS.totalBytes - 4 });
     // the second read may only use what is left of the total.
     expect(fake.archiveCalls[0]).toEqual({ path: '/work/out/report.txt', maxBytes: FILE_LIMITS.totalBytes });
     expect(fake.archiveCalls.find((call) => call.path === '/work/plots')!.maxBytes).toBe(FILE_LIMITS.totalBytes - 4);
+  });
+
+  it('gives the paths under /work with the real tar, as the engine names the entries', async () => {
+    // the engine names the entry of a file by its base name, and the entries of a folder under the folder name.
+    const fake = fakeDocker({
+      archives: {
+        '/work/out/report.txt': packTar([{ path: 'report.txt', bytes: Buffer.from('done') }], new Date(0)),
+        '/work/plots': packTar([{ path: 'plots/a.png', bytes: Buffer.from('png') }], new Date(0)),
+      },
+    });
+    const result = await createRunner({ docker: fake.docker, logger, instance: 'inst' }).run(request({ collect: ['out/report.txt', 'plots'] }));
+    expect(result.collected.map((file) => [file.path, file.bytes.toString()])).toEqual([
+      ['out/report.txt', 'done'],
+      ['plots/a.png', 'png'],
+    ]);
   });
 
   it('collects after a failed command and after a timeout', async () => {

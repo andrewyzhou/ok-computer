@@ -354,5 +354,14 @@ describe.skipIf(process.platform === 'win32')('createDockerClient with a fake en
     expect(last()).toMatchObject({ method: 'DELETE', url: `${prefix}/networks/okc-net` });
     handle = reply(404, { message: 'gone' });
     await docker.removeNetwork('okc-net');
+
+    handle = reply(200, [{ Name: 'okc-net', Labels: { 'okc.exec': '7' } }, { Name: 'other', Labels: null }]);
+    expect(await docker.listNetworks('okc.instance=inst')).toEqual([
+      { name: 'okc-net', labels: { 'okc.exec': '7' } },
+      { name: 'other', labels: {} },
+    ]);
+    expect(last()).toMatchObject({ method: 'GET' });
+    expect(new URL(last().url, 'http://x').pathname).toBe(`${prefix}/networks`);
+    expect(JSON.parse(new URL(last().url, 'http://x').searchParams.get('filters')!)).toEqual({ label: ['okc.instance=inst'] });
   });
 });

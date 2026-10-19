@@ -33,9 +33,6 @@ vi.mock('./files.js', () => ({
 vi.mock('./network.js', () => ({
   checkAllowlist: (allow: string[]) => (allow.includes('com') ? 'com is too broad' : undefined),
 }));
-vi.mock('./runner.js', () => ({
-  commandFor: (language: string, code: string) => (language === 'python' ? ['python3', '-c', code] : language === 'node' ? ['node', '-e', code] : ['bash', '-c', code]),
-}));
 
 const now = new Date('2026-10-18T10:00:00Z');
 const clock = () => now;

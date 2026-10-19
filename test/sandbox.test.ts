@@ -10,30 +10,20 @@ import { SANDBOX_EXEC } from '../src/sandbox/tool.js';
 import type { DockerClient, ExecRequest, ExecResult, NetworkGate, NetworkPlan } from '../src/sandbox/types.js';
 import { createTestApp } from './app-harness.js';
 
-// the files, the allowlist check, the command and the container sweep belong to other parts of the sandbox, and each
-// has its own tests. the fakes keep their contracts, so this test proves the policy, the approval and the trace.
-vi.mock('../src/sandbox/files.js', () => ({
-  checkPath: () => undefined,
-  resolveInputs: () => ({ ok: true, files: [], rows: [] }),
-  storeOutputs: () => [],
-}));
-vi.mock('../src/sandbox/network.js', () => ({ checkAllowlist: () => undefined }));
-vi.mock('../src/sandbox/runner.js', () => ({
-  commandFor: (language: string, code: string) => [language === 'python' ? 'python3' : language, '-c', code],
-  sweepContainers: async () => 0,
-}));
-
 const start = '2026-10-18T09:00:00-07:00';
 
 const exec = (id: string, input: Record<string, unknown>) => toolStep({ id, name: SANDBOX_EXEC, input });
 const verdict = (value: 'allow' | 'hold', reason: string) => toolStep({ id: 'v', name: REVIEW_TOOL, input: { verdict: value, reason } });
 
-// the fake docker answers the probe. a test that reaches any other method fails, because the runner is a fake too.
+// the fake docker answers the probe and the start sweep. a test that reaches any other method fails, because the runner
+// is a fake too.
 const fakeDocker = (): DockerClient =>
   new Proxy({} as DockerClient, {
     get(_target, key) {
       if (key === 'info') return async () => ({ engine: 'docker 28.3.0 (linux/arm64)', os: 'linux', arch: 'arm64' });
       if (key === 'imageId') return async () => 'sha256:img';
+      // the start sweep finds nothing to remove.
+      if (key === 'listContainers' || key === 'listNetworks') return async () => [];
       if (key === 'then') return undefined;
       return () => {
         throw new Error(`docker.${String(key)} is not expected in this test`);

@@ -291,6 +291,10 @@ export function createDockerClient(endpoint: Endpoint): DockerClient {
     async removeNetwork(name) {
       await send('DELETE', `/networks/${encodeURIComponent(name)}`, {}, [404]);
     },
+    async listNetworks(label) {
+      const { body } = await send('GET', `/networks?filters=${filters(label)}`);
+      return json<Array<{ Name: string; Labels?: Record<string, string> | null }>>(body).map((network) => ({ name: network.Name, labels: network.Labels ?? {} }));
+    },
   };
 }
 

@@ -141,10 +141,11 @@ export function createRunner(deps: { docker: DockerClient; logger: Logger; insta
       }
       try {
         const bytes = await docker.getArchive(id, `${WORK_DIR}/${path}`, remaining);
-        const dir = posix.dirname(path);
+        // the engine names the entries under the base name of the path, so strip takes it off and prefix puts the
+        // whole path back. a file gives the path itself, and a folder gives the path and the names under it.
         const unpacked = tar.unpack(bytes, {
           strip: posix.basename(path),
-          prefix: dir === '.' || dir === '/' ? '' : dir,
+          prefix: path,
           maxFiles: filesLeft,
           maxFileBytes: FILE_LIMITS.fileBytes,
           maxTotalBytes: remaining,

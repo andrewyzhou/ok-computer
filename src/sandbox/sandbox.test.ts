@@ -12,12 +12,22 @@ import { STALE_ERROR, startExec } from './store.js';
 import { SANDBOX_EXEC } from './tool.js';
 import type { DockerClient, NetworkGate } from './types.js';
 
-// the container sweep belongs to runner.ts. the fake records its calls, so a test sees that the start sweeps.
-const sweeps = vi.hoisted(() => ({ containers: [] as string[] }));
-vi.mock('./runner.js', () => ({
-  commandFor: (language: string, code: string) => [language, code],
+// the container sweep belongs to runner.ts and the network sweep to network.ts. the fakes record their calls, so a
+// test sees that the start sweeps, and in which order.
+const sweeps = vi.hoisted(() => ({ containers: [] as string[], networks: [] as string[], order: [] as string[] }));
+vi.mock('./runner.js', async (original) => ({
+  ...(await original<typeof import('./runner.js')>()),
   sweepContainers: async (_docker: unknown, instance: string) => {
     sweeps.containers.push(instance);
+    sweeps.order.push('containers');
+    return 0;
+  },
+}));
+vi.mock('./network.js', async (original) => ({
+  ...(await original<typeof import('./network.js')>()),
+  sweepNetworks: async (_docker: unknown, instance: string) => {
+    sweeps.networks.push(instance);
+    sweeps.order.push('networks');
     return 0;
   },
 }));
@@ -28,6 +38,8 @@ const clock = () => start;
 afterEach(() => {
   vi.restoreAllMocks();
   sweeps.containers.length = 0;
+  sweeps.networks.length = 0;
+  sweeps.order.length = 0;
 });
 
 // only info and imageId matter for the probe. the other methods throw, so a test sees an unexpected call.
@@ -104,6 +116,7 @@ describe('the code sandbox', () => {
     // nothing is swept while docker cannot run the tool.
     expect(scratch.sweep).not.toHaveBeenCalled();
     expect(sweeps.containers).toEqual([]);
+    expect(sweeps.networks).toEqual([]);
   });
 
   it('is off with the reason when docker does not answer', async () => {
@@ -131,6 +144,9 @@ describe('the code sandbox', () => {
     });
     expect(scratch.sweep).toHaveBeenCalledOnce();
     expect(sweeps.containers).toEqual([instance]);
+    // the relay containers go first, so their networks are free to remove.
+    expect(sweeps.networks).toEqual([instance]);
+    expect(sweeps.order).toEqual(['containers', 'networks']);
   });
 
   it('keeps the tool list of the start, and probes again only after the status ttl', async () => {

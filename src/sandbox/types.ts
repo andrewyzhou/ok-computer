@@ -91,7 +91,9 @@ export interface DockerClient {
   removeVolume(name: string): Promise<void>;
   listVolumes(label: string): Promise<Array<{ name: string; labels: Record<string, string> }>>;
   createNetwork(name: string, options: { internal: boolean; labels: Record<string, string> }): Promise<string>;
+  // a missing network is not an error.
   removeNetwork(name: string): Promise<void>;
+  listNetworks(label: string): Promise<Array<{ name: string; labels: Record<string, string> }>>;
 }
 
 // --- one exec (runner.ts) ---

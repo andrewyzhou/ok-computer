@@ -292,10 +292,10 @@ function relayBody(spec: {
 }
 
 // sweepNetworks removes the sandbox networks of this instance whose exec does not run now, for example after a crash.
-// the relay containers carry the same labels, so sweepContainers in runner.ts removes them first. DockerClient has no
-// list of networks yet, so the function takes a client that has one. it gives the number of networks that it removed.
+// the relay containers carry the same labels, so sweepContainers in runner.ts removes them first. it gives the number
+// of networks that it removed.
 export async function sweepNetworks(
-  docker: Pick<DockerClient, 'removeNetwork'> & { listNetworks(label: string): Promise<Array<{ name: string; labels: Record<string, string> }>> },
+  docker: Pick<DockerClient, 'listNetworks' | 'removeNetwork'>,
   instance: string,
   keep: (execId: number) => boolean,
 ): Promise<number> {

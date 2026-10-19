@@ -14,7 +14,7 @@ import { errorText, type Tool } from '../tools/registry.js';
 import { publicEgress, type Egress } from '../web/egress.js';
 import { createDockerClient, endpointOf } from './docker.js';
 import { DEFAULT_LIMITS, MAX_LIMITS, PROBE_TIMEOUT_MS, SANDBOX_IMAGE, STALE_MARGIN_MS, STATUS_TTL_MS } from './limits.js';
-import { createNetworkGate } from './network.js';
+import { createNetworkGate, sweepNetworks } from './network.js';
 import { createRunner, sweepContainers } from './runner.js';
 import { createScratch, type Scratch } from './scratch.js';
 import { closeStale } from './store.js';
@@ -40,7 +40,7 @@ export interface Sandbox {
   toolsFor(sessionKey: string): readonly string[];
   // the status for the dashboard. it probes docker again after STATUS_TTL_MS.
   status(): Promise<SandboxStatus>;
-  // start probes docker, closes the rows of a stopped process, and removes its containers and idle volumes.
+  // start probes docker, closes the rows of a stopped process, and removes its containers, networks and idle volumes.
   start(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -82,7 +82,7 @@ export function createSandbox(deps: Deps): Sandbox {
       const found = deps.docker ? undefined : endpointOf(process.env, process.platform, homedir(), existsSync);
       if (found && 'error' in found) throw new Error(found.error);
       const docker = deps.docker ?? createDockerClient(found!);
-      const network = deps.network ?? createNetworkGate({ docker, egress: deps.egress ?? publicEgress, logger, instance });
+      const network = deps.network ?? createNetworkGate({ docker, egress: deps.egress ?? publicEgress, logger, instance, image });
       const scratch = deps.scratch ?? createScratch({ db, docker, clock, instance });
       const runner = deps.runner ?? createRunner({ docker, logger, instance });
       const stores = { blobs: deps.blobs, bytes: createByteStore(db, join(config.paths.data, 'blobs'), clock) };
@@ -146,9 +146,12 @@ export function createSandbox(deps: Deps): Sandbox {
       try {
         const keep = (execId: number) =>
           db.prepare("SELECT 1 AS x FROM sandbox_execs WHERE id = ? AND status = 'running' AND createdAt > ?").get(execId, new Date(clock().getTime() - staleMs).toISOString()) !== undefined;
+        // the relay containers of a call with network access go with the other containers, so their networks are
+        // free to remove after them.
         const containers = await sweepContainers(parts.docker, instance, keep);
+        const networks = await sweepNetworks(parts.docker, instance, keep);
         const volumes = await parts.scratch.sweep();
-        if (containers || volumes) logger.info('sandbox sweep', { containers, volumes });
+        if (containers || networks || volumes) logger.info('sandbox sweep', { containers, networks, volumes });
       } catch (err) {
         logger.error('sandbox sweep failed', { err });
       }
