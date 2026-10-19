@@ -30,12 +30,6 @@ type Shot = {
   stubs?: Record<string, unknown>;
 };
 
-const CHROME: Record<string, string> = {
-  darwin: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  win32: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-  linux: '/usr/bin/google-chrome',
-};
-
 const [spec, out, only] = process.argv.slice(2) as [string, string, string | undefined];
 const shots = JSON.parse(readFileSync(spec, 'utf8')) as Shot[];
 mkdirSync(out, { recursive: true });
@@ -43,7 +37,9 @@ const seeded = await seedDashboard({ webDir: resolve(import.meta.dirname, '../di
 const server = serve({ fetch: seeded.dashboard.fetch, port: 0, hostname: '127.0.0.1' });
 await new Promise((done) => server.once('listening', done));
 const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
-const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH ?? CHROME[process.platform], headless: true });
+// the chrome channel finds the installed chrome on each system, as the browser worker of the app does. CHROME_PATH
+// names another build, for example a chromium.
+const browser = await chromium.launch({ ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }), headless: true });
 
 for (const shot of shots.filter((each) => !only || each.name.includes(only))) {
   const context = await browser.newContext({
