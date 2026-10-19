@@ -1436,6 +1436,41 @@ kbd {
   word-break: break-all;
 }
 
+.approval-card {
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  background: var(--bg-raised);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.approval-head,
+.approval-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.approval-time {
+  margin-left: auto;
+  font-size: 12px;
+}
+.approval-summary {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  font-size: 12px;
+}
+.approval-run {
+  font-size: var(--text-sm);
+}
+.approval-card.is-compact {
+  padding: 10px 12px;
+}
+
 /* the classes of the pages from before phase 5. each page package moves its page to the parts above, and the last
    one to go removes the rule that no page uses. events.tsx keeps its classes. */
 

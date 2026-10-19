@@ -3,7 +3,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ICON_NAMES } from '../icons';
-import { DetailsPanel, Drawer, Highlight, Page, Table, Tabs } from '.';
+import { stubFetch } from '../testing';
+import { ApprovalCard, DetailsPanel, Drawer, Highlight, Page, Table, Tabs } from '.';
 
 afterEach(() => cleanup());
 
@@ -92,6 +93,22 @@ describe('the shared parts', () => {
       </Drawer>,
     );
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('approves from a card and hides the buttons after the answer', async () => {
+    const calls = stubFetch(null, { 'POST /api/approvals/:id': ({ params }) => ({ message: `Approved #${params.id}. It ran.` }) });
+    let told = '';
+    render(
+      <ApprovalCard
+        approval={{ id: 3, runId: 'run-1', toolName: 'mail_send', summary: 'send a mail', status: 'pending', requestedAt: '2026-10-12T18:00:00Z' }}
+        onDecided={(message) => (told = message)}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Approve/ }));
+    expect(await screen.findByText('Approved #3. It ran.')).toBeTruthy();
+    expect(calls).toEqual([{ method: 'POST', url: '/api/approvals/3', body: { decision: 'approve' } }]);
+    expect(told).toBe('Approved #3. It ran.');
+    expect(screen.queryByRole('button', { name: /Approve/ })).toBeNull();
   });
 
   it('has a drawing for each icon name', () => {

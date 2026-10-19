@@ -20,3 +20,62 @@ export function Count({ value, label }: { value: number; label?: string }) {
     </span>
   );
 }
+
+// the tone of each status word of the api. a word that is not here is muted.
+const STATUS_TONE: Record<string, Tone> = {
+  completed: 'good',
+  approved: 'good',
+  done: 'good',
+  running: 'info',
+  on: 'good',
+  off: 'muted',
+  open: 'info',
+  pending: 'warning',
+  skipped: 'muted',
+  expired: 'muted',
+  dropped: 'muted',
+  aborted: 'serious',
+  denied: 'serious',
+  failed: 'critical',
+  error: 'critical',
+  warn: 'warning',
+  allow: 'good',
+  review: 'warning',
+  approve: 'warning',
+  deny: 'critical',
+  hold: 'serious',
+  tainted: 'serious',
+  ran: 'good',
+  invalid: 'critical',
+  held: 'serious',
+  waiting: 'warning',
+  declined: 'serious',
+  abandoned: 'serious',
+  late: 'warning',
+  interrupted: 'serious',
+  unsent: 'warning',
+  connected: 'good',
+  connecting: 'info',
+  needs_auth: 'warning',
+  paused: 'muted',
+  ready: 'good',
+  stopped: 'muted',
+  read: 'muted',
+  write: 'warning',
+  external: 'serious',
+  ok: 'good',
+  signed_out: 'warning',
+  notified: 'good',
+  seen: 'muted',
+  filtered: 'muted',
+  stale: 'muted',
+};
+
+export function toneOf(status: string): Tone {
+  return STATUS_TONE[status] ?? 'muted';
+}
+
+// a status always shows its word, so the color is never the only signal.
+export function Status({ value }: { value: string }) {
+  return <Badge tone={toneOf(value)}>{value}</Badge>;
+}

@@ -1,5 +1,6 @@
 // the shared parts of the views. a view imports them from here, and only the shell track changes them.
-export { Badge, Count, type Tone } from './Badge';
+export { ApprovalCard, type ApprovalLike } from './ApprovalCard';
+export { Badge, Count, Status, toneOf, type Tone } from './Badge';
 export { Button, ButtonLink, IconButton, Pill, type ButtonProps, type ButtonVariant } from './Button';
 export { DetailsPanel, type DetailsPanelProps } from './DetailsPanel';
 export { Drawer, useDialogFocus } from './Drawer';

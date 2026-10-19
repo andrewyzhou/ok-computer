@@ -2,59 +2,8 @@ import { useState, type ReactNode } from 'react';
 import type { Loaded } from './api';
 import { Page as UiPage, Section, Skeleton } from './ui';
 
-const STATUS_TONE: Record<string, string> = {
-  completed: 'good',
-  approved: 'good',
-  done: 'good',
-  running: 'info',
-  on: 'good',
-  off: 'muted',
-  open: 'info',
-  pending: 'warning',
-  skipped: 'muted',
-  expired: 'muted',
-  dropped: 'muted',
-  aborted: 'serious',
-  denied: 'serious',
-  failed: 'critical',
-  error: 'critical',
-  warn: 'warning',
-  allow: 'good',
-  review: 'warning',
-  approve: 'warning',
-  deny: 'critical',
-  hold: 'serious',
-  tainted: 'serious',
-  ran: 'good',
-  invalid: 'critical',
-  held: 'serious',
-  waiting: 'warning',
-  declined: 'serious',
-  abandoned: 'serious',
-  late: 'warning',
-  interrupted: 'serious',
-  unsent: 'warning',
-  connected: 'good',
-  connecting: 'info',
-  needs_auth: 'warning',
-  paused: 'muted',
-  ready: 'good',
-  stopped: 'muted',
-  read: 'muted',
-  write: 'warning',
-  external: 'serious',
-  ok: 'good',
-  signed_out: 'warning',
-  notified: 'good',
-  seen: 'muted',
-  filtered: 'muted',
-  stale: 'muted',
-};
-
-// a status always shows its word, so the color is never the only signal.
-export function Status({ value }: { value: string }) {
-  return <span className={`badge tone-${STATUS_TONE[value] ?? 'muted'}`}>{value}</span>;
-}
+// Status lives in web/src/ui/Badge.tsx. this file gives it to the pages from before phase 5.
+export { Status } from './ui';
 
 // Page and Panel are the parts of the pages from before phase 5. they now use the shared parts in web/src/ui, so each
 // old page sits in the shell until its restyle.
