@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -38,8 +38,53 @@ describe('the instance lock', () => {
     const ended = new Promise((exit) => child.once('exit', exit));
     child.kill('SIGKILL');
     await ended;
+    // on macos the socket file stays after the crash, and the next start removes it.
+    if (process.platform === 'darwin') expect(existsSync(lockName(data))).toBe(true);
     const lock = await holdInstanceLock(data);
     expect(lock).toBeDefined();
     await lock!.release();
+  });
+
+  it('names a socket file that fits the socket path limit on macos', () => {
+    const data = mkdtempSync(join(tmpdir(), 'okc-lock-'));
+    const name = lockName(data, 'darwin');
+    expect(name).toMatch(/okc-[0-9a-f]{32}\.sock$/);
+    expect(Buffer.byteLength(name)).toBeLessThanOrEqual(103);
+    expect(lockName(join(data, '.'), 'darwin')).toBe(name);
+    expect(lockName(data, 'linux')).toMatch(/^\0okc-[0-9a-f]{32}$/);
+    expect(lockName(data, 'win32')).toMatch(/^\\\\\.\\pipe\\okc-[0-9a-f]{32}$/);
+  });
+
+  // a socket file that no process listens on is from a process that ended, so the lock removes it and takes its place.
+  it.runIf(process.platform !== 'win32' && process.platform !== 'linux')('takes the place of a socket file that no process answers on', async () => {
+    const data = mkdtempSync(join(tmpdir(), 'okc-lock-'));
+    const name = lockName(data);
+    const body = `require('node:net').createServer().listen(${JSON.stringify(name)}, () => console.log('held'));`;
+    const child = spawn(process.execPath, ['-e', body], { stdio: ['ignore', 'pipe', 'inherit'] });
+    await new Promise<void>((held) => child.stdout.on('data', (chunk: Buffer) => chunk.toString().includes('held') && held()));
+    const ended = new Promise((exit) => child.once('exit', exit));
+    child.kill('SIGKILL');
+    await ended;
+    expect(lstatSync(name).isSocket()).toBe(true);
+    const lock = await holdInstanceLock(data);
+    expect(lock).toBeDefined();
+    expect(await holdInstanceLock(data)).toBeUndefined();
+    await lock!.release();
+    expect(existsSync(name)).toBe(false);
+  });
+
+  it.runIf(process.platform !== 'win32' && process.platform !== 'linux')('does not remove a file that is not a socket', async () => {
+    const data = mkdtempSync(join(tmpdir(), 'okc-lock-'));
+    writeFileSync(lockName(data), 'x');
+    await expect(holdInstanceLock(data)).rejects.toThrow();
+    expect(existsSync(lockName(data))).toBe(true);
+    rmSync(lockName(data));
+  });
+
+  it('gives a data folder the same name before and after it exists', () => {
+    const data = join(mkdtempSync(join(tmpdir(), 'okc-lock-')), 'data');
+    const before = lockName(data);
+    mkdirSync(data);
+    expect(lockName(data)).toBe(before);
   });
 });
