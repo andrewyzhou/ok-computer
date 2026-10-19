@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { navSections, type RouteDef, type RouteMatch } from '../routes';
+import { navSections, pageKeyOf, type RouteDef, type RouteMatch } from '../routes';
 import { hasMod, IconButton, useDialogFocus } from '../ui';
 import { CommandMenu } from './CommandMenu';
 import { ShellContext, type Crumb, type PageInfo, type ShellApi } from './context';
@@ -77,8 +77,9 @@ export function Shell({ match, routes, children }: { match: RouteMatch | undefin
     else setPrefs({ detailsHidden: !detailsHidden });
   }, [detailsHidden]);
 
-  // a new page starts at the top, with the sheet and the drawer closed.
-  const path = match ? `${match.route.path}:${JSON.stringify(match.params)}` : '';
+  // a new page starts at the top, with the sheet and the drawer closed. a page that stays, for example a trace with a
+  // new span, keeps its scroll.
+  const path = match ? pageKeyOf(match) : '';
   useEffect(() => {
     setSheetOpen(false);
     setDetailsOpen(false);

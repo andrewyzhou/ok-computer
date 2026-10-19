@@ -61,7 +61,7 @@ describe('the drafts', () => {
     expect(details().getByRole('link', { name: 'run run-1' }).getAttribute('href')).toBe('#/runs/run-1');
     expect(details().getByText('ok computer never sends a draft. Open your mail drafts to send it.')).toBeTruthy();
     const row = inMain().getByText('Re: Office hours moved to Thursday').closest('tr')!;
-    expect(row.getAttribute('aria-selected')).toBe('true');
+    expect(row.getAttribute('aria-current')).toBe('true');
     fireEvent.click(inMain().getByText('Re: Dinner next week?'));
     await waitFor(() => expect(location.hash).toBe('#/inbox/drafts?id=42'));
     expect(await details().findByText(/Tuesday or Wednesday/)).toBeTruthy();

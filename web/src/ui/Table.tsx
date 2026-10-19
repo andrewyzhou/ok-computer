@@ -19,7 +19,9 @@ export interface TableProps<T> {
   columns: Array<Column<T>>;
   rows: T[];
   rowKey: (row: T) => string;
-  // with onSelect a row is a target: a click, Enter or Space selects it, and the arrow keys move between the rows.
+  // with onSelect a row is a target: a click, Enter or Space selects it, and the arrow keys move between the rows. the
+  // selected row has aria-current, because a row of a plain table cannot be aria-selected, and a screen reader then
+  // says nothing.
   onSelect?: (row: T) => void;
   selected?: string | null;
   // dense is for the developer views. the other views keep the default spacing.
@@ -76,7 +78,7 @@ export function Table<T>({ label, columns, rows, rowKey, onSelect, selected, den
                 {...(onSelect
                   ? {
                       tabIndex: 0,
-                      'aria-selected': isSelected,
+                      ...(isSelected ? { 'aria-current': 'true' as const } : {}),
                       onClick: (event: MouseEvent<HTMLTableRowElement>) => !fromControl(event) && onSelect(row),
                       onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) => move(event, row),
                     }

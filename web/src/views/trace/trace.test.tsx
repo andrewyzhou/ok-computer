@@ -95,7 +95,7 @@ describe('the trace waterfall', () => {
     expect(order()).toContain('3:model:99');
   });
 
-  it('selects a span into the hash and shows the stored model request, raw or formatted', async () => {
+  it('selects a span into the hash and shows the stored model request, compact or formatted', async () => {
     openApp('#/trace/run-1');
     await inMain().findByTestId('span-model:1');
     fireEvent.click(screen.getByTestId('span-model:1').closest('tr')!);
@@ -104,13 +104,13 @@ describe('the trace waterfall', () => {
     expect(request.textContent).toContain('"role": "user"');
     expect(inspector().getByText(/stop reason/i)).toBeTruthy();
     expect(inspector().getByText('tool_use', { selector: 'dd' })).toBeTruthy();
-    fireEvent.click(inspector().getByRole('button', { name: 'raw' }));
+    fireEvent.click(inspector().getByRole('button', { name: 'compact' }));
     const raw = inspector().getByText(/my goals: essay by 21:00, and gym/);
     expect(raw.textContent).toContain('"role":"user"');
     const body = (await (await fetch('/api/model-calls/1')).json()) as { request: unknown };
     expect(raw.textContent).toBe(JSON.stringify(body.request));
     expect(inspector().getByText(/28 tools offered/)).toBeTruthy();
-    expect(screen.getByTestId('span-model:1').closest('tr')!.getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId('span-model:1').closest('tr')!.getAttribute('aria-current')).toBe('true');
   });
 
   it('shows the tool call with its policy decision, taint and raw result', async () => {

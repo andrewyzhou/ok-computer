@@ -34,15 +34,22 @@ export interface InspectorProps {
   byId: ReadonlyMap<string, Span>;
 }
 
+// the tool call of the tool span above a span, or null when the parent is not a tool span.
+function toolCallOf(span: Span, byId: ReadonlyMap<string, Span>): string | null {
+  const parent = span.parentId === null ? undefined : byId.get(span.parentId);
+  return parent?.ref.kind === 'tool' ? parent.ref.toolCallId : null;
+}
+
 const runHref = (id: string) => `#/runs/${encodeURIComponent(id)}`;
 
-// raw is the value as the server sent it, with no spaces. formatted has line breaks for reading. both are the same
-// json, so formatted never hides a byte of the stored body.
-type BodyMode = 'raw' | 'formatted';
+// compact is the json with no spaces, and formatted has line breaks for reading. the server parses the stored body
+// and adds the tool catalog to the request, so both are a new serialization of the same value, and neither is the
+// stored text byte for byte: number forms, escapes and the place of the tools key can differ.
+type BodyMode = 'compact' | 'formatted';
 let lastMode: BodyMode = 'formatted';
 
 export function jsonText(value: unknown, mode: BodyMode): string {
-  return (mode === 'raw' ? JSON.stringify(value) : JSON.stringify(value, null, 2)) ?? 'undefined';
+  return (mode === 'compact' ? JSON.stringify(value) : JSON.stringify(value, null, 2)) ?? 'undefined';
 }
 
 function spanDuration(span: Span): string {
@@ -118,7 +125,7 @@ function ModelRowFacts({ call }: { call: ModelCallRow }) {
   );
 }
 
-// the stored request and response of a model call, byte for byte.
+// the stored request and response of a model call, as the server parsed them.
 export function ModelBody({ id }: { id: number }) {
   const [mode, setMode] = useState<BodyMode>(lastMode);
   const loaded = useApi<ModelCallBody>(`/api/model-calls/${id}`);
@@ -133,7 +140,7 @@ export function ModelBody({ id }: { id: number }) {
         value={mode}
         onChange={change}
         options={[
-          { value: 'raw', label: 'raw' },
+          { value: 'compact', label: 'compact' },
           { value: 'formatted', label: 'formatted' },
         ]}
       />
@@ -443,8 +450,11 @@ function McpInspector({ id }: { id: number }) {
   );
 }
 
-function GoogleInspector({ id, run }: { id: number; run: string }) {
-  const loaded = useApi<GoogleRequestRow[]>(`/api/google/requests?runId=${encodeURIComponent(run)}`);
+// the list of a run is capped, so a request under a tool span asks for the requests of that tool call only.
+function GoogleInspector({ id, run, toolCallId }: { id: number; run: string; toolCallId: string | null }) {
+  const query = new URLSearchParams({ runId: run });
+  if (toolCallId) query.set('toolCallId', toolCallId);
+  const loaded = useApi<GoogleRequestRow[]>(`/api/google/requests?${query}`);
   return (
     <Load loaded={loaded}>
       {(rows) => {
@@ -618,7 +628,7 @@ export function SpanInspector(props: InspectorProps) {
       body = <McpInspector id={ref.mcpMessageId} />;
       break;
     case 'google':
-      body = <GoogleInspector id={ref.googleRequestId} run={runOfSpan(span, props.byId, props.runId)} />;
+      body = <GoogleInspector id={ref.googleRequestId} run={runOfSpan(span, props.byId, props.runId)} toolCallId={toolCallOf(span, props.byId)} />;
       break;
     case 'browser':
       body = <BrowserInspector taskId={ref.taskId} stepId={ref.browserStepId} />;

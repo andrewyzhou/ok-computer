@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ICON_NAMES } from '../icons';
 import { stubFetch } from '../testing';
-import { ApprovalCard, DetailsPanel, Drawer, Highlight, Page, Table, Tabs } from '.';
+import { ApprovalCard, DetailsPanel, Drawer, Highlight, Page, Table, Tabs, toneOf } from '.';
 
 afterEach(() => cleanup());
 
@@ -49,6 +49,20 @@ describe('the shared parts', () => {
     fireEvent.click(screen.getByText('two'));
     fireEvent.click(rows[1]!);
     expect(picked).toEqual(['one', 'two']);
+  });
+
+  it('marks the selected row as current, so a screen reader says it', () => {
+    render(<Table label="rows" rows={['one', 'two']} rowKey={(row) => row} selected="two" onSelect={() => {}} columns={[{ key: 'name', header: 'Name', cell: (row) => row }]} />);
+    const rows = screen.getAllByRole('row').slice(1);
+    expect(rows[0]!.getAttribute('aria-current')).toBeNull();
+    expect(rows[1]!.getAttribute('aria-current')).toBe('true');
+    expect(rows.some((row) => row.hasAttribute('aria-selected'))).toBe(false);
+  });
+
+  it('gives each status word of the trace, the chat and the status bar a tone', () => {
+    for (const word of ['live', 'offline', 'connecting', 'queued', 'running', 'done', 'failed', 'error', 'timeout', 'killed', 'crashed']) {
+      expect([word, toneOf(word)]).not.toEqual([word, 'muted']);
+    }
   });
 
   it('renders the details panel and the page actions in place outside the shell', () => {

@@ -2,9 +2,8 @@ import { useEffect, useState, type ComponentType } from 'react';
 import type { Meta } from '../../src/dashboard/types';
 import { useApi } from './api';
 import { setTimeZone } from './format';
-import { matchRoute, ROUTES, type RouteDef, type RouteMatch, type RouteProps } from './routes';
+import { matchRoute, pageKeyOf, ROUTES, type RouteDef, type RouteMatch, type RouteProps } from './routes';
 import { Shell } from './shell/Shell';
-import { hashPath } from './shell/model';
 import { EmptyState, Skeleton } from './ui';
 
 // the routes live in the hash, so the server needs to serve only index.html and the assets.
@@ -55,8 +54,8 @@ export function App() {
       ) : !meta.data ? (
         <Skeleton lines={5} />
       ) : match ? (
-        // the key is the path without the query, so a new param gives a new page and a new filter keeps the page.
-        <RouteView key={hashPath(hash)} match={match} />
+        // the key leaves out the query, so a new param gives a new page and a new filter keeps the page.
+        <RouteView key={pageKeyOf(match)} match={match} />
       ) : (
         <EmptyState icon="search" title="This page does not exist.">
           <a href="#/">Go to the overview</a>

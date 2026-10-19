@@ -35,7 +35,7 @@ describe('the agent pages load against the seeded database', () => {
     expect(details().getByRole('heading', { name: 'History' })).toBeTruthy();
     // the history loads by itself, and an automation of the seed may have no run yet.
     await waitFor(() => expect(details().queryByText('Loading…')).toBeNull());
-    expect(row.getAttribute('aria-selected')).toBe('true');
+    expect(row.getAttribute('aria-current')).toBe('true');
   });
 
   it('shows goals with stats and charts', async () => {

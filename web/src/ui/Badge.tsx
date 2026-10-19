@@ -69,6 +69,12 @@ const STATUS_TONE: Record<string, Tone> = {
   seen: 'muted',
   filtered: 'muted',
   stale: 'muted',
+  live: 'good',
+  offline: 'critical',
+  queued: 'warning',
+  timeout: 'warning',
+  killed: 'serious',
+  crashed: 'critical',
 };
 
 export function toneOf(status: string): Tone {

@@ -46,7 +46,7 @@ describe('the integrations pages', () => {
     const row = (await inMain().findByText('notes')).closest('tr')!;
     expect(details().getByText('Integrations')).toBeTruthy();
     fireEvent.click(row);
-    expect(row.getAttribute('aria-selected')).toBe('true');
+    expect(row.getAttribute('aria-current')).toBe('true');
     expect(await details().findByRole('heading', { name: 'notes' })).toBeTruthy();
     expect(details().getByText('connected')).toBeTruthy();
     expect(details().getByText('Token expires')).toBeTruthy();

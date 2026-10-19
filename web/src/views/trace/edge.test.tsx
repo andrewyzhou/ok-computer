@@ -130,4 +130,36 @@ describe('the trace page', () => {
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(spansCalls(calls).length).toBe(before);
   });
+
+  it('keeps the waterfall, its data and its scroll when a span is clicked', async () => {
+    const calls = open();
+    openApp('#/trace/run-1');
+    const row = (await inMain().findByTestId('span-model:1')).closest('tr')!;
+    const before = spansCalls(calls).length;
+    const main = document.querySelector('main')!;
+    main.scrollTop = 120;
+    fireEvent.click(row);
+    await waitFor(() => expect(location.hash).toBe('#/trace/run-1/model%3A1'));
+    expect(await screen.findByTestId('span-inspector')).toBeTruthy();
+    expect(screen.getByTestId('span-model:1').closest('tr')).toBe(row);
+    expect(spansCalls(calls).length).toBe(before);
+    expect(main.scrollTop).toBe(120);
+  });
+
+  it('loads an open trace again one time for a sub-agent run of another parent', async () => {
+    spans = { ...runOneSpans(), endedAt: null, durationMs: null };
+    const calls = open();
+    openApp('#/trace/run-1');
+    await inMain().findByTestId('span-model:1');
+    const before = spansCalls(calls).length;
+    const run = (status: string) => ({
+      kind: 'run',
+      run: { id: 'run-stranger', sessionKey: 'subagent:research:run-stranger', trigger: 'subagent', slot: 'main', status, startedAt: '2026-10-13T01:00:01.000Z', endedAt: null, error: null, costUsd: null, modelCalls: 0, toolCalls: 0 },
+    });
+    act(() => FakeEventSource.find('/api/stream')!.emit(run('running')));
+    await waitFor(() => expect(spansCalls(calls).length).toBe(before + 1));
+    act(() => FakeEventSource.find('/api/stream')!.emit(run('completed')));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(spansCalls(calls).length).toBe(before + 1);
+  });
 });

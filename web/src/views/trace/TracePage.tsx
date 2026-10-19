@@ -11,14 +11,16 @@ import { SpanInspector } from './inspectors';
 import { axisTicks, barGeometry, isErrorSpan, kindIcon, runIdsOf, totalMs, traceHref, visibleRows, type SpanRow } from './tree';
 import './trace.css';
 
-// the shell gives a new span in the hash a new page, so the last spans of each run and the collapsed subtrees live
-// here. the page then draws the waterfall at once while it loads the spans again.
+// a new span in the hash keeps the page, but a visit to another page and back mounts it again, so the last spans of
+// each run and the collapsed subtrees live here. the page then draws the waterfall at once while it loads the spans
+// again.
 const lastSpans = new Map<string, RunSpans>();
 const collapsedOf = new Map<string, Set<string>>();
 
-// a message about the run or one of its child runs. a new sub-agent run can start under any parent, so each sub-agent
-// run reloads an open trace too.
-function aboutTrace(message: StreamMessage, ids: ReadonlySet<string>): boolean {
+// a message about the run or one of its child runs. a run row does not name its parent, so a new sub-agent run that
+// is not in the trace reloads an open trace one time. when the reload does not show it, it belongs to another run, and
+// its later messages are left out.
+function aboutTrace(message: StreamMessage, ids: ReadonlySet<string>, foreign: Set<string>): boolean {
   switch (message.kind) {
     case 'model_call':
       return ids.has(message.call.runId ?? '');
@@ -30,8 +32,12 @@ function aboutTrace(message: StreamMessage, ids: ReadonlySet<string>): boolean {
       return ids.has(message.approval.runId);
     case 'policy':
       return ids.has(message.decision.runId);
-    case 'run':
-      return ids.has(message.run.id) || message.run.trigger === 'subagent';
+    case 'run': {
+      if (ids.has(message.run.id)) return true;
+      if (message.run.trigger !== 'subagent' || foreign.has(message.run.id)) return false;
+      foreign.add(message.run.id);
+      return true;
+    }
     default:
       return false;
   }
@@ -82,12 +88,11 @@ function Waterfall({ trace, spanId }: { trace: RunSpans; spanId: string | null }
     setCollapsed(next);
   };
 
-  // a click on a row gives a new page, and the row it clicked is gone. the new page puts the focus back on the selected
-  // row, so the arrow keys go on from there.
+  // a page that opens with a span in its hash puts the focus on the selected row, so the arrow keys go on from there.
   useEffect(() => {
     const active = document.activeElement;
     if (active && active !== document.body) return;
-    table.current?.querySelector<HTMLElement>('tr[aria-selected="true"]')?.focus({ preventScroll: true });
+    table.current?.querySelector<HTMLElement>('tr[aria-current="true"]')?.focus({ preventScroll: true });
   }, []);
 
   const columns: Array<Column<SpanRow>> = [
@@ -222,7 +227,11 @@ export function TracePage({ params }: RouteProps) {
   const spanId = params.spanId || null;
   const devMode = useDevMode();
   const watch = useRef<{ ids: ReadonlySet<string>; open: boolean }>({ ids: new Set([runId]), open: true });
-  const loaded = useApi<RunSpans>(`/api/runs/${encodeURIComponent(runId)}/spans`, (message) => watch.current.open && aboutTrace(message, watch.current.ids));
+  const foreign = useRef(new Set<string>());
+  const loaded = useApi<RunSpans>(
+    `/api/runs/${encodeURIComponent(runId)}/spans`,
+    (message) => watch.current.open && aboutTrace(message, watch.current.ids, foreign.current),
+  );
   if (loaded.data) lastSpans.set(runId, loaded.data);
   const trace = loaded.error ? undefined : (loaded.data ?? lastSpans.get(runId));
   if (trace) watch.current = { ids: runIdsOf(trace), open: trace.endedAt === null };

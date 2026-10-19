@@ -99,6 +99,10 @@ export interface RouteDef {
   devOnly?: boolean;
   // the place in its group. a lower number comes first, and the default is 100.
   order?: number;
+  // the key of the page for its params. two hashes with the same key show one page that stays mounted, and the shell
+  // keeps its scroll, so a param that only selects a row, for example the span of a trace, changes the page in place.
+  // the default is the route path with every param, so each new param gives a new page.
+  pageKey?: (params: Record<string, string>) => string;
 }
 
 // a helper that gives a view's list its type.
@@ -273,6 +277,12 @@ export function matchRoute(hash: string, routes: RouteDef[] = ROUTES): RouteMatc
     if (params) return { route, params, query: new URLSearchParams(search) };
   }
   return undefined;
+}
+
+// the key that the app and the shell give the page of a match. the query is never part of it, so a new filter keeps
+// the page.
+export function pageKeyOf(match: RouteMatch): string {
+  return match.route.pageKey?.(match.params) ?? `${match.route.path}:${JSON.stringify(match.params)}`;
 }
 
 export interface NavSection {
