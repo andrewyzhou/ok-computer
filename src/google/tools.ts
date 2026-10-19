@@ -26,6 +26,145 @@ function whenOf(event: { start?: { dateTime?: string | null; date?: string | nul
   const last = new Date(Date.parse(`${end}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
   return last > start ? `${start} to ${last} all day` : `${start} all day`;
 }
+
+// gmail gives a snippet with html entities, and a newsletter pads its preview with invisible characters.
+function snippetOf(snippet: string | null | undefined): string {
+  return plainText((snippet ?? '').replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code) > 0x10ffff ? 0xfffd : Number(code))))
+    .replace(/[\u034f\u00ad\u200b-\u200f\u2060\ufeff]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// the state of a message that an assistant cares about: unread, starred, important, and whether files came with it.
+// a search reads only the headers, so a multipart/mixed message counts as one with files.
+function flagsOf(message: gmail_v1.Schema$Message): string[] {
+  const labels = message.labelIds ?? [];
+  const files = /^multipart\/mixed/i.test(header(message, 'Content-Type')) || attachmentsOf(message.payload).length > 0;
+  return [
+    ...(labels.includes('UNREAD') ? ['unread'] : []),
+    ...(labels.includes('STARRED') ? ['starred'] : []),
+    ...(labels.includes('IMPORTANT') ? ['important'] : []),
+    ...(files ? ['has attachments'] : []),
+  ];
+}
+
+// the files of a message: the name, the type and the size of each part that has a file name.
+function attachmentsOf(part: gmail_v1.Schema$MessagePart | undefined, found: string[] = []): string[] {
+  if (!part) return found;
+  if (part.filename) found.push(`${cleanLine(part.filename, 200)} (${part.mimeType ?? 'unknown type'}, ${Math.max(1, Math.round((part.body?.size ?? 0) / 1024))} KB)`);
+  for (const child of part.parts ?? []) attachmentsOf(child, found);
+  return found;
+}
+
+// the text of an event description. a calendar app writes it in html, and the sender of an invitation writes it, so
+// each step takes linear time and the text stays untrusted.
+function plainText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>|<\/p>|<\/li>/gi, ' ')
+    .replace(/<[^<>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+// a person on an event: the name when google has one, and the address.
+const personOf = (person: { email?: string | null; displayName?: string | null }) =>
+  person.displayName ? `${person.displayName} <${person.email ?? 'no address'}>` : (person.email ?? 'someone');
+
+// google names the answers needsAction, accepted, tentative and declined. the line uses words.
+const ANSWER: Record<string, string> = { needsAction: 'not answered', accepted: 'accepted', tentative: 'maybe', declined: 'declined' };
+const answerOf = (status: string | null | undefined) => ANSWER[status ?? 'needsAction'] ?? status ?? 'not answered';
+
+// the video link of an event: a meet link, or the video entry point of another conference tool.
+// a zoom invitation often puts its link in the location, so a location that is a link counts as the video link.
+const isLink = (text: string | null | undefined) => /^https?:\/\/\S+$/i.test((text ?? '').trim());
+const videoOf = (event: calendar_v3.Schema$Event) =>
+  event.hangoutLink ??
+  event.conferenceData?.entryPoints?.find((point) => point.entryPointType === 'video')?.uri ??
+  (isLink(event.location) ? event.location!.trim() : undefined);
+
+// a meeting with many guests gets a count of the answers. a list of six names out of 46 tells the owner nothing.
+const MANY_GUESTS = 8;
+function guestsOf(guests: calendar_v3.Schema$EventAttendee[]): string | undefined {
+  if (!guests.length) return undefined;
+  if (guests.length > MANY_GUESTS) {
+    const counts = new Map<string, number>();
+    for (const each of guests) counts.set(answerOf(each.responseStatus), (counts.get(answerOf(each.responseStatus)) ?? 0) + 1);
+    return `${guests.length} guests: ${[...counts].map(([answer, count]) => `${count} ${answer}`).join(', ')}`;
+  }
+  return `${guests.length} guests: ${guests.map((each) => `${personOf(each)} ${answerOf(each.responseStatus)}`).join(', ')}`;
+}
+
+// one line for each event, so a day reads at a glance: the time, the title, where, the video link, the owner's own
+// answer, the guests and their answers, and the first words of the description. calendar_get_event gives the rest.
+function eventLine(event: calendar_v3.Schema$Event, label: string): string {
+  const guests = (event.attendees ?? []).filter((each) => !each.self && !each.resource);
+  const rooms = (event.attendees ?? []).filter((each) => each.resource).map((each) => each.displayName ?? each.email);
+  const own = (event.attendees ?? []).find((each) => each.self);
+  const where = [isLink(event.location) ? null : event.location, ...rooms].filter(Boolean).join('; ');
+  const video = videoOf(event);
+  const guestText = guestsOf(guests);
+  const notes = event.description ? cleanLine(plainText(event.description), 160) : '';
+  const parts = [
+    `${whenOf(event)} [${label}] id=${event.id} ${event.summary ?? '(no title)'}${event.organizer?.self ? '' : ` (from ${event.organizer?.email ?? 'someone'})`}`,
+    ...(event.eventType && event.eventType !== 'default' ? [`type ${event.eventType}`] : []),
+    ...(event.status === 'tentative' ? ['tentative'] : []),
+    ...(where ? [`at ${where}`] : []),
+    ...(video ? [`video ${video}`] : []),
+    ...(own && !event.organizer?.self ? [`you: ${answerOf(own.responseStatus)}`] : []),
+    ...(guestText ? [guestText] : []),
+    ...(event.transparency === 'transparent' ? ['shows as free'] : []),
+    ...(event.recurringEventId ? ['repeats'] : []),
+    ...(notes ? [`notes: ${notes}`] : []),
+  ];
+  return cleanLine(parts.join(' | '), 900);
+}
+
+// every detail of one event, for calendar_get_event.
+function eventDetail(event: calendar_v3.Schema$Event, label: string): string {
+  const own = (event.attendees ?? []).find((each) => each.self);
+  const video = videoOf(event);
+  const lines = [
+    `${event.summary ?? '(no title)'} [${label}] id=${event.id}`,
+    `when: ${whenOf(event)}${event.start?.timeZone ? ` (${event.start.timeZone})` : ''}`,
+    ...(event.status && event.status !== 'confirmed' ? [`status: ${event.status}`] : []),
+    ...(event.eventType && event.eventType !== 'default' ? [`type: ${event.eventType}`] : []),
+    ...(event.location && !isLink(event.location) ? [`where: ${cleanLine(event.location, 500)}`] : []),
+    ...(video ? [`video: ${video}`] : []),
+    ...(event.conferenceData?.entryPoints ?? [])
+      .filter((point) => point.entryPointType === 'phone')
+      .map((point) => `phone: ${point.uri ?? point.label}${point.pin ? ` pin ${point.pin}` : ''}`),
+    `organizer: ${event.organizer?.self ? 'the owner' : personOf(event.organizer ?? {})}`,
+    ...(own ? [`the owner's answer: ${answerOf(own.responseStatus)}`] : []),
+    ...(event.transparency === 'transparent' ? ['shows as free'] : []),
+    ...(event.recurringEventId ? [`repeats (series ${event.recurringEventId})`] : []),
+    ...(event.recurrence?.length ? [`rule: ${event.recurrence.join('; ')}`] : []),
+    ...(event.attendees?.length
+      ? ['guests:', ...event.attendees.map((each) => `- ${personOf(each)}: ${answerOf(each.responseStatus)}${each.organizer ? ', organizer' : ''}${each.optional ? ', optional' : ''}${each.resource ? ', room' : ''}${each.self ? ', the owner' : ''}`)]
+      : []),
+    ...(event.attachments?.length ? ['files:', ...event.attachments.map((file) => `- ${cleanLine(file.title ?? 'file', 200)} ${file.fileUrl ?? ''}`.trim())] : []),
+    ...(event.htmlLink ? [`link: ${event.htmlLink}`] : []),
+    ...(event.description ? ['', headOf(plainText(event.description).replace(/[ \t]+/g, ' ').trim(), 8_000)] : []),
+  ];
+  return lines.join('\n');
+}
+
+// the calendars of an account that the owner shows in google calendar. the primary one comes first. a list that
+// fails gives the primary calendar alone, so a read still works.
+async function shownCalendars(apis: GoogleApis): Promise<Array<{ id: string; label: string | null }>> {
+  try {
+    const { data } = await apis.calendar.calendarList.list({ minAccessRole: 'reader', maxResults: 250 });
+    const others = (data.items ?? [])
+      .filter((each) => !each.primary && each.selected && !each.hidden && each.id)
+      .map((each) => ({ id: each.id!, label: cleanLine(each.summaryOverride ?? each.summary ?? each.id!, 60) }));
+    return [{ id: 'primary', label: null }, ...others];
+  } catch {
+    return [{ id: 'primary', label: null }];
+  }
+}
 export const GOOGLE = 'google';
 const name = (tool: string) => `${GOOGLE}__${tool}`;
 
@@ -123,7 +262,8 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
   const tools: Tool[] = [
     googleTool({
       name: name('gmail_search'),
-      description: 'Search Gmail with Gmail search syntax (for example "from:school is:unread newer_than:7d"). Gives the id, thread, date, sender and subject of each message.',
+      description:
+        'Search Gmail with Gmail search syntax (for example "from:school is:unread newer_than:7d"). Gives the id, thread, date, sender, recipients, subject, whether it is unread, starred or important, whether it has attachments, and the first words of each message.',
       input: z.object({ account: anyAccount, query: z.string().max(500), max: z.number().int().min(1).max(MAX_RESULTS).default(10) }),
       risk: 'read',
       untrustedOutput: 'gmail',
@@ -132,13 +272,21 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
           const list = await apis.gmail.users.messages.list({ userId: 'me', q: query, maxResults: max });
           const messages = await Promise.all(
             (list.data.messages ?? []).map((each) =>
-              apis.gmail.users.messages.get({ userId: 'me', id: each.id!, format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date', 'List-Unsubscribe'] }),
+              apis.gmail.users.messages.get({ userId: 'me', id: each.id!, format: 'metadata', metadataHeaders: ['From', 'To', 'Cc', 'Subject', 'Date', 'List-Unsubscribe', 'Content-Type'] }),
             ),
           );
           return messages.map(({ data }) =>
             cleanLine(
-              `[${alias}] id=${data.id} thread=${data.threadId} ${header(data, 'Date')} | ${header(data, 'From')} | ${header(data, 'Subject')} | ${data.snippet ?? ''}${header(data, 'List-Unsubscribe') ? ' | can unsubscribe' : ''}`,
-              600,
+              [
+                `[${alias}] id=${data.id} thread=${data.threadId} ${header(data, 'Date')}`,
+                header(data, 'From'),
+                `to ${cleanLine([header(data, 'To'), header(data, 'Cc')].filter(Boolean).join(', '), 160) || 'no one'}`,
+                header(data, 'Subject'),
+                ...flagsOf(data),
+                snippetOf(data.snippet),
+                ...(header(data, 'List-Unsubscribe') ? ['can unsubscribe'] : []),
+              ].join(' | '),
+              800,
             ),
           );
         }),
@@ -159,6 +307,8 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
               return [
                 `message ${message.id}`,
                 ...['From', 'To', 'Cc', 'Date', 'Subject'].map((key) => `${key}: ${cleanLine(header(message, key), 500)}`),
+                ...(flagsOf(message).length ? [`State: ${flagsOf(message).join(', ')}`] : []),
+                ...attachmentsOf(message.payload).map((file) => `Attachment: ${file}`),
                 ...(targets.length ? [`unsubscribe targets: ${targets.map((target) => `${target}${target.startsWith('https:') && oneClickOk ? ' (one-click)' : ''}`).join(' ')}`] : []),
                 '',
                 bodyText(message.payload),
@@ -262,16 +412,34 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
     }),
     googleTool({
       name: name('calendar_list_events'),
-      description: 'List calendar events between two times (ISO 8601 with an offset). Each line gives the start and the end. account all merges every account.',
+      description:
+        'List calendar events between two times (ISO 8601 with an offset), from every calendar that the owner shows. Each line gives the start and the end, where, the video link, the owner\'s answer, the guests and their answers, and the first words of the notes. account all merges every account. calendar_get_event gives every detail of one event.',
       input: z.object({ account: anyAccount, from: time, to: time }),
       risk: 'read',
       untrustedOutput: 'calendar',
       run: async ({ account: which, from, to }, ctx) => {
         const output = await eachAccount(name('calendar_list_events'), which, 'calendar', async (apis, alias) => {
-          const { data } = await apis.calendar.events.list({ calendarId: 'primary', timeMin: from, timeMax: to, singleEvents: true, orderBy: 'startTime', maxResults: 100 });
-          return (data.items ?? []).map((event) =>
-            cleanLine(`${whenOf(event)} [${alias}] id=${event.id} ${event.summary ?? '(no title)'}${event.organizer?.self ? '' : ` (from ${event.organizer?.email ?? 'someone'})`}`, 400),
+          const calendars = await shownCalendars(apis);
+          const lists = await Promise.all(
+            calendars.map(async (calendar) => {
+              const { data } = await apis.calendar.events.list({ calendarId: calendar.id, timeMin: from, timeMax: to, singleEvents: true, orderBy: 'startTime', maxResults: 100 });
+              return (data.items ?? []).map((event) => ({ event, calendar }));
+            }),
           );
+          // an invitation from a shared calendar is also on the primary one. the first copy, from the primary
+          // calendar, stays.
+          const seen = new Set<string>();
+          const used = new Set<(typeof calendars)[number]>();
+          const events = lists.flat().flatMap(({ event, calendar }) => {
+            const key = `${event.iCalUID ?? event.id}@${event.start?.dateTime ?? event.start?.date}`;
+            if (seen.has(key)) return [];
+            seen.add(key);
+            used.add(calendar);
+            return [eventLine(event, calendar.label ? `${alias}/${calendar.label}` : alias)];
+          });
+          // the id of each other calendar comes once, for calendar_get_event, and not on each line.
+          const legend = [...used].filter((each) => each.label);
+          return legend.length ? [...events, `[${alias}] calendar ids: ${legend.map((each) => `${each.label} = ${each.id}`).join('; ')}`] : events;
         });
         // the lines of all accounts sort by time, so a merged list reads as one day. google writes each start in the
         // zone of its calendar, so the sort uses the time and not the text. an all-day event starts at midnight in the
@@ -285,6 +453,19 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
         lines.sort((a, b) => (a.time === b.time ? 0 : a.time < b.time ? -1 : 1));
         return { ...output, content: lines.map((each) => each.line).join('\n') };
       },
+    }),
+    googleTool({
+      name: name('calendar_get_event'),
+      description:
+        'Read every detail of one calendar event: the time, where, the video and phone links, the organizer, each guest and their answer, the files and the full notes. calendarId is only for an event of a calendar that is not the primary one; calendar_list_events gives it in its calendar ids line.',
+      input: z.object({ account, eventId: z.string().min(1).max(1024), calendarId: z.string().min(1).max(500).optional() }),
+      risk: 'read',
+      untrustedOutput: 'calendar',
+      run: ({ account: alias, eventId, calendarId }) =>
+        eachAccount(name('calendar_get_event'), alias, 'calendar', async (apis) => {
+          const { data } = await apis.calendar.events.get({ calendarId: calendarId ?? 'primary', eventId });
+          return [eventDetail(data, calendarId ? `${alias} calendar=${calendarId}` : alias)];
+        }),
     }),
     googleTool({
       name: name('calendar_freebusy'),
@@ -448,6 +629,7 @@ export function googleToolNames(config: Pick<GoogleConfig, 'send'>): string[] {
     'gmail_unsubscribe',
     ...(config.send ? ['gmail_send'] : []),
     'calendar_list_events',
+    'calendar_get_event',
     'calendar_freebusy',
     'calendar_create_event',
     'calendar_update_event',
@@ -455,7 +637,7 @@ export function googleToolNames(config: Pick<GoogleConfig, 'send'>): string[] {
   ].map(name);
 }
 
-const READ_TOOLS = ['gmail_search', 'gmail_read_thread', 'gmail_list_labels', 'calendar_list_events', 'calendar_freebusy'].map(name);
+const READ_TOOLS = ['gmail_search', 'gmail_read_thread', 'gmail_list_labels', 'calendar_list_events', 'calendar_get_event', 'calendar_freebusy'].map(name);
 
 // the tools of a session profile. an automation with auto-read can check mail and the calendar, but it cannot change
 // them, also when a mail that it reads asks for that.

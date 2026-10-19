@@ -338,8 +338,9 @@ The `tools` parameter therefore never changes inside a session. A changed server
 
   | Tool | Risk |
   |---|---|
-  | `calendar_list_events` | read; all accounts merged |
-  | `calendar_freebusy` | read |
+  | `calendar_list_events` | read; all accounts merged; every calendar that the owner shows; one line for each event with the start and end, where, the video link, the owner's answer, the guests and their answers, and the first words of the notes |
+  | `calendar_get_event` | read; every detail of one event: phone links, each guest, the files and the full notes |
+  | `calendar_freebusy` | read; the primary calendar |
   | `calendar_create_event` | write; external with approval if it invites other people |
   | `calendar_update_event`, `calendar_delete_event` | external; approval |
 
@@ -599,7 +600,7 @@ Three designs were built and judged (minimal, failure modes first, owner experie
 - **Suspects get a run each.** A failed run still counts against all the signals that it showed, but the digest then shows at most one signal with 1 failure per run (the first in its order); the other suspects wait, neither shown nor closed. So a real deadline that sat next to a refused mail gets a run of its own and keeps its text; only the refused mail reaches 2 and is shown without text. Signals with 0 failures and held signals show as before.
 - **A heartbeat that read outside text cannot change the checklist.** `heartbeat_respond` ignores `checklist` when the run's session has taint (a digest, or a checklist that a tainted session wrote), and says so in its result; `notify` and `text` still count. The main session keeps `heartbeat_checklist_set`, where the owner sees the change. Rejected: an approval for the field (the heartbeat session has no owner in it) and removing the field (a clean heartbeat could tidy its own checklist since phase 1).
 - **The poll does not wait for its alerts.** The stall message and `alertPending()` start without `await`; the stall claim is released when its send ends without success. A send that hangs (Telegram waits up to 500 s per request) no longer keeps the poll run open, which hid every account's new mail from the digest.
-- **Only the primary calendar counts.** The sync, the detectors, `calendar_list_events`, `calendar_freebusy` and the writes use each account's primary calendar. A deadline on another calendar of the account (a class calendar, a subscribed feed) gets a `date_not_on_calendar` hit, and the hit's detail says "the primary calendars", so the heartbeat does not claim more than it checked. Reading the calendar list was left for later: the calendars that the owner shows also include holidays and other people's calendars, and each of the detector, the event-soon signals and free/busy would need its own choice of which ones count.
+- **Only the primary calendar counts, except for reading.** The sync, the detectors, `calendar_freebusy` and the writes use each account's primary calendar. `calendar_list_events` reads every calendar that the owner shows in Google Calendar, because the owner asks the agent about the day that they see, and a class calendar holds real events. Each line names its calendar, and an event that is also on the primary calendar shows once. A deadline on another calendar of the account (a class calendar, a subscribed feed) gets a `date_not_on_calendar` hit, and the hit's detail says "the primary calendars", so the heartbeat does not claim more than it checked. Reading the calendar list was left for later: the calendars that the owner shows also include holidays and other people's calendars, and each of the detector, the event-soon signals and free/busy would need its own choice of which ones count.
 
 ### 4.11 Decisions from phase 2 M3, verification round 2 after the merge
 

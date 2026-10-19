@@ -122,7 +122,7 @@ describe('google tools of a session profile', () => {
   // the owner wants automations to check mail and the calendar, but not to change them.
   it('gives automations with auto-read only the tools that read', () => {
     const config = (sessions: string[]) => googleConfigSchema.parse({ clientId: CLIENT_ID, accounts: [{ alias: 'personal' }], send: true, sessions });
-    const reads = ['gmail_search', 'gmail_read_thread', 'gmail_list_labels', 'calendar_list_events', 'calendar_freebusy'].map((n) => `google__${n}`);
+    const reads = ['gmail_search', 'gmail_read_thread', 'gmail_list_labels', 'calendar_list_events', 'calendar_get_event', 'calendar_freebusy'].map((n) => `google__${n}`);
     expect(googleToolsFor(config(['main', 'auto-read']), 'auto')).toEqual(reads);
     expect(googleToolsFor(config(['main', 'auto-read']), 'main')).toContain('google__gmail_send');
     expect(googleToolsFor(config(['main', 'auto']), 'auto')).toEqual(googleToolNames(config([])));
@@ -401,6 +401,110 @@ describe('read tools', () => {
     expect(out.untrustedSource).toBe('gmail:personal, gmail:school');
   });
 
+  // an assistant plans a day from where each meeting is, how to join it, who comes and whether the owner said yes.
+  it('gives where, the video link, the answers of the owner and the guests, and the notes of each event', async () => {
+    const call = await setup();
+    h.fake.upsertEvent('personal', {
+      id: 'm1',
+      summary: 'design review',
+      start: { dateTime: '2026-10-14T10:00:00-07:00' },
+      end: { dateTime: '2026-10-14T11:00:00-07:00' },
+      organizer: { email: 'lee@work.example' },
+      location: 'Soda Hall 510',
+      hangoutLink: 'https://meet.google.com/abc-defg-hij',
+      attendees: [
+        { email: 'personal@example.com', self: true, responseStatus: 'needsAction' },
+        { email: 'lee@work.example', displayName: 'Lee', responseStatus: 'accepted', organizer: true },
+        { email: 'kim@work.example', responseStatus: 'declined' },
+        { email: 'room-510@resource.example', displayName: 'Soda 510 (8)', resource: true, responseStatus: 'accepted' },
+      ],
+      description: '<p>Agenda:<br>1. the &amp; plan</p>',
+      recurringEventId: 'series1',
+      transparency: 'transparent',
+      status: 'tentative',
+    });
+    const out = (await call('calendar_list_events', { account: 'personal', from: '2026-10-14T00:00:00-07:00', to: '2026-10-15T00:00:00-07:00' })).content;
+    expect(out).toContain('2026-10-14T10:00:00-07:00 to 2026-10-14T11:00:00-07:00 [personal] id=m1 design review (from lee@work.example)');
+    expect(out).toContain('| tentative | at Soda Hall 510; Soda 510 (8) | video https://meet.google.com/abc-defg-hij | you: not answered |');
+    expect(out).toContain('| 2 guests: Lee <lee@work.example> accepted, kim@work.example declined |');
+    expect(out).toContain('| shows as free | repeats | notes: Agenda: 1. the & plan');
+  });
+
+  // a class calendar or a shared team calendar that the owner shows in google calendar holds events too.
+  it('reads every calendar that the owner shows, once for each event, and gives each its calendar', async () => {
+    const call = await setup();
+    const at = (id: string, summary: string, hour: number, extra = {}) => ({
+      id,
+      summary,
+      start: { dateTime: `2026-10-14T${hour}:00:00-07:00` },
+      end: { dateTime: `2026-10-14T${hour + 1}:00:00-07:00` },
+      organizer: { self: true },
+      ...extra,
+    });
+    h.fake.upsertEvent('personal', at('p1', 'lecture', 11, { iCalUID: 'lec@class' }));
+    h.fake.addCalendar('personal', { id: 'c_class@group.calendar.google.com', summary: 'CS 61A', events: [at('c1', 'lecture copy', 11, { iCalUID: 'lec@class' }), at('c2', 'office hours', 14)] });
+    h.fake.addCalendar('personal', { id: 'c_hidden@group.calendar.google.com', summary: 'Holidays', selected: false, events: [at('h1', 'holiday', 9)] });
+    const out = (await call('calendar_list_events', { account: 'personal', from: '2026-10-14T00:00:00-07:00', to: '2026-10-15T00:00:00-07:00' })).content;
+    const lines = out.split('\n');
+    expect(lines.map((line) => /id=(\w+)/.exec(line)?.[1])).toEqual(['p1', 'c2', undefined]);
+    expect(lines[1]).toContain('[personal/CS 61A] id=c2 office hours');
+    // the id of a calendar comes once at the end, so calendar_get_event can name it.
+    expect(lines[2]).toBe('[personal] calendar ids: CS 61A = c_class@group.calendar.google.com');
+    const detail = (await call('calendar_get_event', { account: 'personal', eventId: 'c2', calendarId: 'c_class@group.calendar.google.com' })).content;
+    expect(detail).toContain('office hours [personal calendar=c_class@group.calendar.google.com] id=c2');
+  });
+
+  // a staff meeting with 46 guests needs a count of the answers, and a zoom invitation puts its link in the location.
+  it('counts the answers of a big meeting and takes a link in the location as the video link', async () => {
+    const call = await setup();
+    const guests = Array.from({ length: 12 }, (_, index) => ({ email: `g${index}@school.example`, responseStatus: index < 9 ? 'accepted' : index < 11 ? 'declined' : 'needsAction' }));
+    h.fake.upsertEvent('personal', {
+      id: 'big',
+      summary: 'staff meeting',
+      start: { dateTime: '2026-10-14T10:00:00-07:00' },
+      end: { dateTime: '2026-10-14T11:00:00-07:00' },
+      organizer: { email: 'ta@school.example' },
+      attendees: [{ email: 'personal@example.com', self: true, responseStatus: 'accepted' }, ...guests],
+      location: 'https://school.zoom.us/j/123?pwd=abc',
+    });
+    const out = (await call('calendar_list_events', { account: 'personal', from: '2026-10-14T00:00:00-07:00', to: '2026-10-15T00:00:00-07:00' })).content;
+    expect(out).toContain('| video https://school.zoom.us/j/123?pwd=abc | you: accepted | 12 guests: 9 accepted, 2 declined, 1 not answered');
+    expect(out).not.toContain('| at https://');
+  });
+
+  it('gives every detail of one event', async () => {
+    const call = await setup();
+    h.fake.upsertEvent('personal', {
+      id: 'd1',
+      summary: 'interview',
+      start: { dateTime: '2026-10-14T15:00:00-07:00' },
+      end: { dateTime: '2026-10-14T15:45:00-07:00' },
+      organizer: { email: 'hr@company.example', displayName: 'Recruiting' },
+      location: '1 Main St',
+      attendees: [
+        { email: 'personal@example.com', self: true, responseStatus: 'accepted' },
+        { email: 'pat@company.example', displayName: 'Pat', responseStatus: 'tentative', optional: true },
+      ],
+      description: 'Bring your portfolio.',
+    });
+    const out = await call('calendar_get_event', { account: 'personal', eventId: 'd1' });
+    expect(out.untrustedSource).toBe('calendar:personal');
+    expect(out.content).toBe(
+      [
+        'interview [personal] id=d1',
+        'when: 2026-10-14T15:00:00-07:00 to 2026-10-14T15:45:00-07:00',
+        'where: 1 Main St',
+        'organizer: Recruiting <hr@company.example>',
+        "the owner's answer: accepted",
+        'guests:',
+        '- personal@example.com: accepted, the owner',
+        '- Pat <pat@company.example>: maybe, optional',
+        '',
+        'Bring your portfolio.',
+      ].join('\n'),
+    );
+  });
+
   // the agent could not say when an event ends, because each line had only its start.
   it('gives the start and the end of each event, and the last day of an all-day event', async () => {
     const call = await setup();
@@ -473,6 +577,30 @@ describe('read tools', () => {
     const out = await call('gmail_read_thread', { account: 'personal', threadId: 'n1' });
     expect(out.content).toContain('unsubscribe targets: mailto:unsub@shop.example?subject=stop https://shop.example/u/abc (one-click)');
     expect(out.content).toContain('Big deals today');
+  });
+
+  // an assistant triages from who a mail went to, whether it is unread or starred, and what files came with it.
+  it('gives the recipients, the state and the files of each message', async () => {
+    const call = await setup();
+    h.fake.deliver('personal', {
+      id: 'f1',
+      labelIds: ['INBOX', 'UNREAD', 'IMPORTANT'],
+      headers: { From: 'Lee <lee@work.example>', To: 'personal@example.com', Cc: 'kim@work.example', Subject: 'contract', Date: 'Tue, 13 Oct 2026 09:00:00 -0700', 'Content-Type': 'multipart/mixed; boundary=x' },
+      snippet: 'please sign',
+      body: 'please sign the contract',
+      attachments: [{ filename: 'contract.pdf', mimeType: 'application/pdf', size: 204_800 }],
+    });
+    h.fake.deliver('personal', {
+      id: 'n2',
+      headers: { From: 'News <news@shop.example>', To: 'personal@example.com', Subject: 'deals', Date: 'Tue, 13 Oct 2026 08:00:00 -0700' },
+      snippet: 'Don&#39;t miss it \u034f \u034f \u034f \u200c today &amp; tomorrow',
+    });
+    expect((await call('gmail_search', { account: 'personal', query: 'deals' })).content).toContain("| deals | Don't miss it today & tomorrow");
+    const found = (await call('gmail_search', { account: 'personal', query: 'contract' })).content;
+    expect(found).toContain('| Lee <lee@work.example> | to personal@example.com, kim@work.example | contract | unread | important | has attachments | please sign');
+    const thread = (await call('gmail_read_thread', { account: 'personal', threadId: 'f1' })).content;
+    expect(thread).toContain('State: unread, important, has attachments');
+    expect(thread).toContain('Attachment: contract.pdf (application/pdf, 200 KB)');
   });
 });
 

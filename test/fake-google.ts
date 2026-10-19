@@ -11,6 +11,8 @@ export interface FakeMessage {
   snippet?: string;
   body?: string;
   internalDate?: string;
+  // files of the message. each becomes a part with a file name, next to the text part.
+  attachments?: Array<{ filename: string; mimeType: string; size: number }>;
 }
 
 export interface FakeEvent {
@@ -19,9 +21,24 @@ export interface FakeEvent {
   status?: string;
   start: { dateTime?: string; date?: string };
   end: { dateTime?: string; date?: string };
-  organizer?: { email?: string; self?: boolean };
-  attendees?: Array<{ email: string; self?: boolean; responseStatus?: string }>;
+  organizer?: { email?: string; self?: boolean; displayName?: string };
+  attendees?: Array<{ email: string; self?: boolean; responseStatus?: string; displayName?: string; resource?: boolean; organizer?: boolean; optional?: boolean }>;
   updated?: string;
+  location?: string;
+  description?: string;
+  hangoutLink?: string;
+  transparency?: string;
+  recurringEventId?: string;
+  eventType?: string;
+  iCalUID?: string;
+}
+
+// a calendar of an account that is not its primary one, for example a shared class calendar.
+export interface FakeCalendar {
+  id: string;
+  summary: string;
+  selected?: boolean;
+  events: FakeEvent[];
 }
 
 interface Mailbox {
@@ -35,6 +52,7 @@ interface Mailbox {
   // the labels that labels.create made, after the system labels.
   labels: Array<{ id: string; name: string }>;
   events: Map<string, FakeEvent & { version: number }>;
+  calendars: FakeCalendar[];
   calendarVersion: number;
   // a sync token older than this version gets a 410.
   oldestSyncVersion: number;
@@ -67,6 +85,7 @@ export interface FakeGoogle {
   revoke(refreshToken: string): void;
   deliver(alias: string, message: FakeMessage): void;
   upsertEvent(alias: string, event: FakeEvent): void;
+  addCalendar(alias: string, calendar: FakeCalendar): void;
   // search picks the messages of a messages.list call with a q, newest first. without it, the list has the inbox mail.
   // the fake does not parse gmail search syntax, so a test that sends a query sets this to answer it.
   search?: (alias: string, q: string, messages: FakeMessage[]) => FakeMessage[];
@@ -109,11 +128,21 @@ export async function startFakeGoogle(): Promise<FakeGoogle> {
     labelIds: message.labelIds ?? ['INBOX'],
     snippet: message.snippet ?? '',
     internalDate: message.internalDate ?? String(Date.parse(message.headers.Date ?? '2026-10-13T00:00:00Z')),
-    payload: {
-      mimeType: 'text/plain',
-      headers: Object.entries(message.headers).map(([name, value]) => ({ name, value })),
-      body: { data: Buffer.from(message.body ?? '').toString('base64url'), size: (message.body ?? '').length },
-    },
+    payload: message.attachments?.length
+      ? {
+          mimeType: 'multipart/mixed',
+          headers: Object.entries(message.headers).map(([name, value]) => ({ name, value })),
+          body: { size: 0 },
+          parts: [
+            { mimeType: 'text/plain', filename: '', body: { data: Buffer.from(message.body ?? '').toString('base64url'), size: (message.body ?? '').length } },
+            ...message.attachments.map((file, index) => ({ mimeType: file.mimeType, filename: file.filename, body: { attachmentId: `att${index}`, size: file.size } })),
+          ],
+        }
+      : {
+          mimeType: 'text/plain',
+          headers: Object.entries(message.headers).map(([name, value]) => ({ name, value })),
+          body: { data: Buffer.from(message.body ?? '').toString('base64url'), size: (message.body ?? '').length },
+        },
   });
 
   const route = async (req: IncomingMessage, res: ServerResponse, url: URL, body: string) => {
@@ -223,6 +252,27 @@ export async function startFakeGoogle(): Promise<FakeGoogle> {
       res.writeHead(204).end();
       return;
     }
+    if (path === '/calendar/v3/users/me/calendarList' && req.method === 'GET') {
+      return json(res, 200, {
+        items: [
+          { id: box.email, summary: box.email, primary: true, selected: true, accessRole: 'owner' },
+          ...box.calendars.map((each) => ({ id: each.id, summary: each.summary, selected: each.selected ?? true, accessRole: 'reader' })),
+        ],
+      });
+    }
+    if ((match = /^\/calendar\/v3\/calendars\/([^/]+)\/events(?:\/([^/]+))?$/.exec(path)) && match[1] !== 'primary' && req.method === 'GET') {
+      const calendar = box.calendars.find((each) => each.id === decodeURIComponent(match![1]!));
+      if (!calendar) return apiError(res, 404, 'Not Found', 'notFound');
+      if (match[2]) {
+        const event = calendar.events.find((each) => each.id === decodeURIComponent(match![2]!));
+        return event ? json(res, 200, event) : apiError(res, 404, 'Not Found', 'notFound');
+      }
+      const at = (when: { dateTime?: string; date?: string }) => Date.parse(when.dateTime ?? `${when.date}T00:00:00Z`);
+      const timeMin = url.searchParams.get('timeMin');
+      const timeMax = url.searchParams.get('timeMax');
+      const items = calendar.events.filter((each) => (!timeMin || at(each.end) > Date.parse(timeMin)) && (!timeMax || at(each.start) < Date.parse(timeMax)));
+      return json(res, 200, { items: items.sort((a, b) => at(a.start) - at(b.start)) });
+    }
     if ((match = /^\/calendar\/v3\/calendars\/primary\/events\/([^/]+)$/.exec(path))) {
       const event = box.events.get(decodeURIComponent(match[1]!));
       if (!event || event.status === 'cancelled') return apiError(res, req.method === 'DELETE' ? 410 : 404, 'Resource has been deleted', 'deleted');
@@ -325,6 +375,7 @@ export async function startFakeGoogle(): Promise<FakeGoogle> {
         drafts: new Map(),
         labels: [{ id: 'Label_1', name: 'school' }],
         events: new Map(),
+        calendars: [],
         calendarVersion: 1,
         oldestSyncVersion: 0,
       });
@@ -344,6 +395,9 @@ export async function startFakeGoogle(): Promise<FakeGoogle> {
       const box = mailboxes.get(alias)!;
       box.calendarVersion++;
       box.events.set(event.id, { status: 'confirmed', updated: new Date(Date.UTC(2026, 9, 13, 0, 0, box.calendarVersion)).toISOString(), ...event, version: box.calendarVersion });
+    },
+    addCalendar(alias, calendar) {
+      mailboxes.get(alias)!.calendars.push(calendar);
     },
     fault: (fault) => void faults.push(fault),
     clearFaults: () => void faults.splice(0),
