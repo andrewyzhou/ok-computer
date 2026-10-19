@@ -26,7 +26,9 @@ const DEVICE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/;
 // one variation selector after an emoji and a joiner between two emoji parts stay, because they make emoji.
 const HIDDEN = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2028\u2029]/gu;
 const EMOJI = /\p{Emoji}$/u;
-const EMOJI_PART = /[\p{Extended_Pictographic}\p{Emoji_Modifier}\ufe0f]$/u;
+// the emoji parts are an alternation and not a set in brackets. on node 26, a set of property classes before "$"
+// does not match an emoji outside the basic plane.
+const EMOJI_PART = /(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\u{fe0f})$/u;
 const EMOJI_NEXT = /^\p{Extended_Pictographic}/u;
 
 function hiddenIn(text: string): string | undefined {
