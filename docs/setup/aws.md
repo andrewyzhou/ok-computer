@@ -124,7 +124,7 @@ The role needs to write secrets too, not only read them:
 
 - The token import (`npm run google:push`, section 11) stores `okc/google.<alias>`, and the client upload stores `okc/google.client`. The first write of a ref creates its secret.
 - Google sometimes rotates a refresh token. The app then stores the new one at once, or the next start has a dead token.
-- A delete of a ref deletes its secret with a recovery window, and a later write of the same ref restores it.
+- A delete of a ref deletes its secret at once, without a recovery window. A write to a secret that someone else marked for deletion restores it first.
 
 1. Save the trust policy as `trust.json`:
 
@@ -155,8 +155,7 @@ The role needs to write secrets too, not only read them:
            "secretsmanager:PutSecretValue",
            "secretsmanager:CreateSecret",
            "secretsmanager:RestoreSecret",
-           "secretsmanager:DeleteSecret",
-           "secretsmanager:DescribeSecret"
+           "secretsmanager:DeleteSecret"
          ],
          "Resource": "arn:aws:secretsmanager:<region>:<account>:secret:okc/*"
        },
@@ -267,9 +266,11 @@ All of these steps run on the instance, in a Session Manager shell.
 2. **Make the run folder.** The app runs as uid 10001 in the container, so that user must own it:
 
    ```sh
-   sudo mkdir -p /opt/okc/run/data /opt/okc/run/workspace /opt/okc/run/skills
+   sudo mkdir -p /opt/okc/run/data
    sudo chown -R 10001:10001 /opt/okc/run
    ```
+
+   Do this before the first `docker compose up`. Otherwise Docker makes `data` as root, and both Litestream and the app fail. Do not make `workspace` or `skills` here: on the first start the container copies the workspace template only when `workspace` is missing.
 
 3. **Write the config.** Start from the example:
 

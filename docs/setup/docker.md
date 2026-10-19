@@ -17,8 +17,10 @@ The image works on linux/amd64 and linux/arm64. On amd64 it has Chrome. On arm64
 ## 2. Make a run folder
 
 ```sh
-mkdir -p run/data run/workspace run/skills
+mkdir -p run/data
 ```
+
+Do not make `run/workspace` yourself. On the first start the container copies the workspace template there only when the folder is missing, and it makes `run/skills` too.
 
 Put an `okc.config.json` in `run/` with the file backend:
 
@@ -30,7 +32,7 @@ Put an `okc.config.json` in `run/` with the file backend:
 
 The app writes `run/data/secrets.json` with mode 0600. Do not commit `run/`.
 
-On Linux, the container user must own the folder: `sudo chown -R 10001:10001 run`. Docker Desktop on macOS and Windows does not need this.
+On Linux, the container user must own the folder, its `data` folder and `okc.config.json` before the first start: `sudo chown -R 10001:10001 run`. Otherwise Docker makes the missing folders as root and the app cannot write them. Docker Desktop on macOS and Windows does not need this.
 
 ## 3. Run it
 
@@ -45,15 +47,21 @@ Copy `deploy/env.example` to `deploy/.env` first and set `OKC_RUN` to the full p
 **With a plain `docker run`:**
 
 ```sh
-docker run -it --name okc-local --env-file run/.env \
+docker run -i --init --name okc-local --env-file run/.env \
   -v $PWD/run:/okc -v $PWD/run/data:/okc/data okc:local
 ```
+
+Keep `-i`. Without Telegram the app starts a CLI channel, and that channel stops the app when stdin ends. `--init` gives the container an init process, because the image has none (compose sets `init: true`). The second `-v` is needed, because the `VOLUME` of the image would otherwise put an empty volume over `run/data`.
 
 `run/.env` holds `ANTHROPIC_API_KEY` and `DASHBOARD_TOKEN`. Leave out `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID` while another host is the live Telegram host (see [aws.md](aws.md), section 10).
 
 ## 4. Reach the dashboard
 
-The dashboard listens on `127.0.0.1:4317` inside the container, so a plain `docker run` cannot reach it from outside. Do not publish the port. Either use the compose file with its Tailscale sidecar, or ask from inside the container:
+The dashboard listens on `127.0.0.1:4317` inside the container, so a plain `docker run` cannot reach it from outside, and publishing the port with `-p` does not help. Do not publish the port. Use one of these:
+
+- On Linux, add `--network host` to the `docker run` command. The dashboard is then at `http://127.0.0.1:4317` on the machine itself.
+- Use the compose file with its Tailscale sidecar.
+- Ask from inside the container:
 
 ```sh
 docker exec okc-local node -e "fetch('http://127.0.0.1:4317/api/secrets',{headers:{authorization:'Bearer '+process.env.DASHBOARD_TOKEN}}).then(r=>r.text()).then(console.log)"
