@@ -58,12 +58,14 @@ export function Composer({ active, onSent }: { active: LiveTurn | undefined; onS
 
   const stop = () => {
     if (!active) return;
+    // the server does not stop a turn that still waits in the queue, so the note says why for such a turn.
+    const queued = active.state === 'queued';
     setStopping(true);
     setNote('');
     send<ChatStopResponse>('/api/chat/stop', 'POST', { turnId: active.turnId }).then(
       (result) => {
         setStopping(false);
-        if (!result.stopped) setNote('the turn already ended');
+        if (!result.stopped) setNote(queued ? 'the turn has not started yet. it can be stopped once it runs' : 'the turn already ended');
       },
       (err: Error) => {
         setStopping(false);

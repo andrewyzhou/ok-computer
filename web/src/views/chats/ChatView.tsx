@@ -317,7 +317,9 @@ export function ChatView({ chatKey, mode = 'chat', crumbs }: ChatViewProps) {
   }, [loadedOnce]);
 
   const turns = open ? [...live.turns.values()] : [];
-  const active = turns.findLast(isActive);
+  // stop goes to the running turn. a follow-up that waits in the queue has nothing to stop yet, so it is the turn of
+  // the Stop button only when no turn runs.
+  const active = turns.find((turn) => turn.state === 'running') ?? turns.find(isActive);
 
   // the first page starts at the newest message. an older page keeps the message that was at the top in its place.
   useLayoutEffect(() => {

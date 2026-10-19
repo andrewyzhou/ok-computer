@@ -178,6 +178,33 @@ describe('the chats', () => {
     expect(inMain().queryByRole('button', { name: 'Stop' })).toBeNull();
   });
 
+  it('stops the running turn when a follow-up waits in the queue', async () => {
+    const { calls } = chatStubs([], { 'POST /api/chat/stop': () => ({ stopped: true }) });
+    openApp('#/chats/main%400');
+    await inMain().findByRole('textbox', { name: 'Message' });
+    emit({
+      kind: 'snapshot',
+      turns: [
+        { turnId: 'web:t3', channel: 'web', state: 'running', runId: null, text: 'working', activity: null },
+        { turnId: 'web:t4', channel: 'web', state: 'queued', runId: null, text: '', activity: null },
+      ],
+    });
+    expect(await inMain().findByText('working')).toBeTruthy();
+    fireEvent.click(inMain().getByRole('button', { name: 'Stop' }));
+    await waitFor(() => expect(calls.find((call) => call.url === '/api/chat/stop')?.body).toEqual({ turnId: 'web:t3' }));
+    emit({ kind: 'snapshot', turns: [] });
+  });
+
+  it('says that a queued turn has not started when the server does not stop it', async () => {
+    chatStubs([], { 'POST /api/chat/stop': () => ({ stopped: false }) });
+    openApp('#/chats/main%400');
+    await inMain().findByRole('textbox', { name: 'Message' });
+    emit({ kind: 'snapshot', turns: [{ turnId: 'web:t5', channel: 'web', state: 'queued', runId: null, text: '', activity: null }] });
+    fireEvent.click(await inMain().findByRole('button', { name: 'Stop' }));
+    expect(await inMain().findByText('the turn has not started yet. it can be stopped once it runs')).toBeTruthy();
+    emit({ kind: 'snapshot', turns: [] });
+  });
+
   it('shows that the web channel is not running, and keeps the draft', async () => {
     chatStubs([], { 'POST /api/chat': () => json({ error: 'the web channel is not running' }, 503) });
     openApp('#/chats/main%400');
