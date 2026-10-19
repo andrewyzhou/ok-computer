@@ -21,7 +21,8 @@ export function chromePaths(platform: NodeJS.Platform = process.platform, env: N
     const app = 'Google Chrome.app/Contents/MacOS/Google Chrome';
     return [join('/Applications', app), ...(env.HOME ? [join(env.HOME, 'Applications', app)] : [])];
   }
-  return ['/opt/google/chrome/chrome', '/usr/bin/google-chrome-stable', '/usr/bin/google-chrome'];
+  // google chrome has no arm64 build for linux, and some distros ship only chromium, so chromium comes after chrome.
+  return ['/opt/google/chrome/chrome', '/usr/bin/google-chrome-stable', '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
 }
 
 export const findChrome = () => chromePaths().find((path) => existsSync(path));

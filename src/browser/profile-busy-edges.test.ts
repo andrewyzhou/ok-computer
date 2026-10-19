@@ -93,5 +93,7 @@ describe('the places of chrome, at their edges', () => {
     const paths = chromePaths('linux', {});
     expect(paths[0]).toBe('/opt/google/chrome/chrome');
     expect(paths).toContain('/usr/bin/google-chrome-stable');
+    // a linux desktop on arm64, or a distro with only chromium, still finds a browser.
+    expect(paths.slice(-2)).toEqual(['/usr/bin/chromium', '/usr/bin/chromium-browser']);
   });
 });
