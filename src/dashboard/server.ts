@@ -57,7 +57,7 @@ export interface DashboardDeps {
   config: Config;
   clock: Clock;
   logger: Logger;
-  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google' | 'rules'>;
+  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google' | 'rules' | 'sandbox'>;
   // with a token, every api request must give it. the browser gives it in the query, because EventSource has no
   // headers.
   token?: string;

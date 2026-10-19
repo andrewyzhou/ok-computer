@@ -82,6 +82,8 @@ An approval that an inbox action asks for shows on the Approvals page, in the st
 | GET | `/api/sandbox` | `SandboxQuery`: `runId`, `status`, `before` (exec id), `limit` 1–200 (default 50) | `SandboxPage` | Before paging. `status.available` is false when Docker is missing. That is not an error. |
 | GET | `/api/sandbox/execs/:id` | none | `SandboxExecDetail` | `404 sandbox exec not found`. The full output and the files load through the existing `GET /api/blobs/:hash`. |
 
+The tool is `sandbox_exec` (input in `src/sandbox/input.ts`) with risk `exec`, which `decide()` sends to the reviewer (rule `risk:exec`). A call with `network.allow` is `external` through `riskFor`, so the owner approves it. `SandboxExecRow.language`, `SandboxExecDetail.policy` (the decision, the reviewer verdict and the approval of the tool call), `imageId`, `containerId`, `endedAt`, and `SandboxStatus.network` with `networkReason` were added by M9.
+
 The waterfall (M1) gives a `sandbox` span with `ref.sandboxExecId` for each exec of a run.
 
 ## 3. Event streams
@@ -136,5 +138,5 @@ Each team edits only its own files. A shared file gets only the change written h
 
 - **Route modules.** Each new module `src/dashboard/<area>.ts` exports `mount<Area>(server, deps)`. The stub exists already, and `server.ts` already mounts it with one line after the sign-in check and before the `/api/*` 404. A team fills its stub and does not edit those lines. A team that needs a new part of `App` adds one key to the `app` pick in `DashboardDeps`.
 - **Types.** Each team adds fields only in its own section of `types.ts`. A new shape that another team reads goes there too, and nothing in that file imports anything.
-- **Migrations** use the numbers in D19. `sandbox_execs` already exists from `004_trace.sql`, so `020_sandbox.sql` adds the columns of `SandboxExecRow` (image, limits, status, allowlist, sizes, files) with `ALTER TABLE`, or makes a new table and copies the rows.
+- **Migrations** use the numbers in D19. `004_trace.sql` made `sandbox_execs` and `006_trace_contract.sql` dropped it, so `020_sandbox.sql` makes it again with the columns of `SandboxExecDetail`, and adds `sandbox_files` (the files in and out of each exec) and `sandbox_scratch` (the scratch volume of each task).
 - **Web views.** Each view lives in its own folder and registers in its own `routes.ts`. It never edits `App.tsx` or another view. A shared component that M4, M5 and M8 need goes to M3, which adds it to `web/src/components.tsx` or `web/src/shell/`.

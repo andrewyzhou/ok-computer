@@ -42,6 +42,7 @@ import type { Logger } from './observability/logger.js';
 import { BUILTIN_RULES, type Rule } from './policy/policy.js';
 import { guardReply } from './policy/reply.js';
 import { createReviewer } from './policy/reviewer.js';
+import { createSandbox, type Sandbox, type SandboxOptions } from './sandbox/sandbox.js';
 import { scheduleContext } from './scheduler/context.js';
 import {
   createHeartbeat,
@@ -101,6 +102,8 @@ export interface AppDeps {
   googleEndpoints?: GoogleEndpoints;
   // tests point the web tools at a local fixture site.
   web?: WebOptions;
+  // the code sandbox runs only when this is set. main.ts sets it, and a test gives fakes.
+  sandbox?: SandboxOptions;
 }
 
 export interface App {
@@ -117,6 +120,7 @@ export interface App {
   rules: readonly Rule[];
   integrations: Integrations;
   google?: Google;
+  sandbox: Pick<Sandbox, 'status'>;
 }
 
 // a run ends at its timeout. the margin covers the end of the run itself, so a live run is never closed as stale.
@@ -196,11 +200,13 @@ export function createApp(deps: AppDeps): App {
         })
       : [];
   const web = createWeb({ db, blobs, logger, clock, config, enabled: deps.connectIntegrations !== false, ...deps.web });
+  const sandbox = createSandbox({ db, blobs, logger, clock, config, enabled: deps.sandbox !== undefined, ...(deps.web?.egress ? { egress: deps.web.egress } : {}), ...deps.sandbox });
   // each run gets the integration tools of its session. the list comes from the config, not from a catalog, so the
   // tools parameter of a session never changes when a server changes its tools.
   const withIntegrations = (sessionKey: string, base: readonly string[]) => [
     ...base,
     ...web.toolsFor(sessionKey),
+    ...sandbox.toolsFor(sessionKey),
     ...integrations.allowedNames(sessionKey),
     ...(google?.toolNames(sessionProfile(sessionKey)) ?? []),
   ];
@@ -250,6 +256,7 @@ export function createApp(deps: AppDeps): App {
     createSkillWriteTool({ skillsDir: config.paths.skills }),
     createResultReadTool({ db, blobs }),
     ...web.tools,
+    ...sandbox.tools,
   ];
   // a profile names built-in tools and google tools. a name that this app does not have is left out.
   const registered = new Set([...builtIn, ...(google?.tools ?? [])].map((tool) => tool.name));
@@ -472,6 +479,9 @@ export function createApp(deps: AppDeps): App {
     async start() {
       sweep(clock());
       web.start();
+      // the probe of docker has its own time limit, so a docker that does not answer holds the start for a few seconds
+      // at most. the tool list of each session is fixed after it.
+      await sandbox.start();
       for (const channel of channels.values()) {
         // node stops the process on an unhandled rejection. a failed write in the reply to one message must not stop
         // the service.
@@ -503,9 +513,11 @@ export function createApp(deps: AppDeps): App {
       await oauth?.close();
       await google?.close();
       await web.stop();
+      await sandbox.stop();
     },
     integrations,
     ...(google ? { google } : {}),
+    sandbox,
     // without compaction hooks the strategy only renders. it does not call a model or append an event.
     contextView: (sessionKey) =>
       strategy.build({

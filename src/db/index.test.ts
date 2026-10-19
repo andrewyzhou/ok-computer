@@ -77,7 +77,10 @@ describe('migrations 006 and 007', () => {
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name);
     // 008 creates integration_events again for the slack poll, and 010 builds it again with the columns of the google sync.
     // 014 creates browser_steps again, with the shape that the browser milestone writes.
-    for (const dropped of ['sandbox_execs']) expect(tables).not.toContain(dropped);
+    // 020 creates sandbox_execs again, with the shape that the sandbox milestone writes.
+    expect(tables).toContain('sandbox_execs');
+    expect(columns('sandbox_execs')).toContain('status');
+    expect(columns('sandbox_execs')).not.toContain('filesChanged');
     expect(columns('browser_steps')).toContain('error');
     // 016 makes subagent_runs again, with the delegate call that started the child and without copies of its task.
     expect(columns('subagent_runs')).toEqual(['id', 'parentRunId', 'toolCallId', 'childRunId', 'profile', 'createdAt']);
