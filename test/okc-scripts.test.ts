@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -111,12 +111,17 @@ describe.runIf(process.platform === 'win32')('the okc scripts', { timeout: 90_00
   // token from the data folder of its own root, did not find it, and always ended the agent by force.
   it('reads the stop token from the data folder of the config', () => {
     const root = makeRoot();
-    expect(okc(root, 'Get-AgentDataPath')).toBe(join(root, 'data'));
+    // the temp folder of windows can have a short name such as RUNNER~1, and GetFullPath in powershell gives the long
+    // name. both name the same folder, so the case compares real paths.
+    const real = (path: string) => realpathSync.native(path);
+    const dataPath = () => real(okc(root, 'Get-AgentDataPath'));
+    expect(dataPath()).toBe(real(join(root, 'data')));
     const elsewhere = mkdtempSync(join(tmpdir(), 'okc-data-'));
     writeFileSync(join(root, 'okc.config.json'), JSON.stringify({ paths: { data: elsewhere.replaceAll('\\', '/') } }));
-    expect(okc(root, 'Get-AgentDataPath')).toBe(elsewhere);
+    expect(dataPath()).toBe(real(elsewhere));
+    mkdirSync(join(root, 'state'));
     writeFileSync(join(root, 'okc.config.json'), JSON.stringify({ paths: { data: 'state' } }));
-    expect(okc(root, 'Get-AgentDataPath')).toBe(join(root, 'state'));
+    expect(dataPath()).toBe(real(join(root, 'state')));
   });
 
   it('runs one supervisor for each root, also after a crash of the first one', async () => {
