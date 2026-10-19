@@ -50,7 +50,8 @@ A part that needs setup stays off until the setup is done, and the rest of the a
 | Skill Workshop | On | Nothing. A review at 09:00 can propose a skill; only Approve writes it to `skills/` |
 | Dashboard on the phone and laptop | Optional | `DASHBOARD_TOKEN` and Tailscale Serve: [docs/setup/tailscale.md](docs/setup/tailscale.md) |
 | Subscription sweep | Owner test, not a separate feature | After Gmail works, ask the agent for it (see below) |
-| Claude history, Docker sandbox | On hold | Nothing to do |
+| Code sandbox (`sandbox_exec`): bash, Python and Node in a fresh Docker container for each call | Optional (needs Docker) | Docker Desktop or the Docker engine, then `npm run sandbox:image` and `okc restart`: [docs/setup/sandbox.md](docs/setup/sandbox.md). Without Docker the tool is off and the rest of the app runs. The reviewer checks each call, and you approve each call with network access |
+| Claude history | On hold | Nothing to do |
 
 A call that changes data (risk `write`, for example an archive) goes to the reviewer model on the `utility` slot, not to you. The reviewer holds a call that you did not ask for, a failed review comes to you, and you still approve everything that leaves the PC.
 
@@ -63,7 +64,7 @@ To test the subscription sweep, ask the agent in Telegram, for example: "Look th
 3. **More reach (built; manual checks against the real services pending):** Slack, web search + browser worker, reviewer model + taint + sub-agents.
 4. **Power tools (built; manual checks against the real services pending):** Skill Workshop.
 
-On hold: Claude history (a later design should cover ChatGPT logs too) and the Docker sandbox. The subscription sweep is an owner test of the agent with Gmail, not a separate feature.
+On hold: Claude history (a later design should cover ChatGPT logs too). The Docker sandbox, on hold in phase 4, comes with phase 5 (optional, see [docs/setup/sandbox.md](docs/setup/sandbox.md)). The subscription sweep is an owner test of the agent with Gmail, not a separate feature.
 
 ## TODO (later)
 
@@ -73,7 +74,6 @@ On hold: Claude history (a later design should cover ChatGPT logs too) and the D
 - [ ] Mid-reply steering (new texts adjust a reply in progress)
 - [ ] Event triggers (script detects a condition → wake the agent)
 - [ ] Inbound webhooks
-- [ ] Docker sandbox for shell commands (on hold until there is a use case)
 - [ ] Claude and ChatGPT history import (on hold)
 - [ ] Voice replies / voice notes, PDF and image understanding
 - [ ] Spending alerts

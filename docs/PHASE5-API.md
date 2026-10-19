@@ -86,6 +86,8 @@ The tool is `sandbox_exec` (input in `src/sandbox/input.ts`) with risk `exec`, w
 
 The waterfall (M1) gives a `sandbox` span with `ref.sandboxExecId` for each exec of a run.
 
+The default image is `okc-sandbox:1` (`SANDBOX_IMAGE` in `src/sandbox/limits.ts`), built from `sandbox/Dockerfile` by `npm run sandbox:image`. It runs as `1000:1000` with the home `/work`, has no entrypoint, and holds the relay of the network mode at `/opt/okc/relay.mjs`. A change of what the image holds changes the tag in `limits.ts` and in the `sandbox:image` script together. The decisions are in DESIGN-NEXT 5.8.
+
 ## 3. Event streams
 
 Both streams are SSE. With `DASHBOARD_TOKEN` set, they take `?token=` because `EventSource` sends no headers. The cookie also works. A stream sends `event: ready` with `{}` first. Then each message is an unnamed event whose data is one JSON value.
@@ -134,7 +136,7 @@ Each team edits only its own files. A shared file gets only the change written h
 | M5 | `web/src/views/trace/`, `web/src/views/sandbox/` | none |
 | M7 | `Dockerfile`, `compose.yaml`, `litestream.yml`, `.github/workflows/`, `docs/setup/aws.md`, `src/dashboard/deploy.ts`, `src/secrets/` (the file and aws backends) | `types.ts` (its section), `src/config/schema.ts` (`secrets`), the store choice in `src/app.ts` |
 | M8 | `src/db/migrations/019_inbox.sql`, `src/inbox/`, `src/dashboard/inbox.ts`, `web/src/views/inbox/` | `types.ts` (its section), the tool registration in `src/app.ts`, `src/google/` for new Gmail and Calendar calls |
-| M9 | `src/db/migrations/020_sandbox.sql`, `src/sandbox/`, `src/dashboard/sandbox.ts` | `types.ts` (its section), the tool registration in `src/app.ts` and its policy rule |
+| M9 | `src/db/migrations/020_sandbox.sql`, `src/sandbox/`, `src/dashboard/sandbox.ts`, `sandbox/` (the image), `docs/setup/sandbox.md` | `types.ts` (its section), the tool registration in `src/app.ts` and its policy rule |
 
 - **Route modules.** Each new module `src/dashboard/<area>.ts` exports `mount<Area>(server, deps)`. The stub exists already, and `server.ts` already mounts it with one line after the sign-in check and before the `/api/*` 404. A team fills its stub and does not edit those lines. A team that needs a new part of `App` adds one key to the `app` pick in `DashboardDeps`.
 - **Types.** Each team adds fields only in its own section of `types.ts`. A new shape that another team reads goes there too, and nothing in that file imports anything.
