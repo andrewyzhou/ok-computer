@@ -668,6 +668,8 @@ export interface StreamPolicy {
   toolName: string;
   decision: string;
   rule: string;
+  // the verdict of the reviewer, once it has answered. a policy message comes again when it or approvalId changes.
+  reviewerVerdict: string | null;
   approvalId: number | null;
   createdAt: string;
 }

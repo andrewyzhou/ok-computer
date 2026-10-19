@@ -74,12 +74,16 @@ export interface RunFilter {
   slot?: string;
   status?: string;
   day?: string;
+  // phase 5 m1: the runs of one session, and the runs that started before the run with this id. the caller checks
+  // that the before run exists.
+  sessionKey?: string;
+  before?: string;
   limit?: number;
 }
 
 export function listRuns(db: Db, filter: RunFilter, timeZone: string): RunRow[] {
   const where: string[] = [];
-  const params: string[] = [];
+  const params: (string | number)[] = [];
   for (const key of ['trigger', 'slot', 'status'] as const) {
     if (filter[key]) {
       where.push(`runs.${key} = ?`);
@@ -89,6 +93,17 @@ export function listRuns(db: Db, filter: RunFilter, timeZone: string): RunRow[] 
   if (filter.day) {
     where.push('runs.startedAt >= ? AND runs.startedAt < ?');
     params.push(...dayBounds(filter.day, filter.day, timeZone));
+  }
+  if (filter.sessionKey !== undefined) {
+    where.push('runs.sessionKey = ?');
+    params.push(filter.sessionKey);
+  }
+  if (filter.before !== undefined) {
+    // the page goes on after the before run in the order of the list, and the rowid breaks a tie of startedAt.
+    const before = db.prepare('SELECT startedAt, rowid FROM runs WHERE id = ?').get(filter.before);
+    if (!before) return [];
+    where.push('(runs.startedAt < ? OR (runs.startedAt = ? AND runs.rowid < ?))');
+    params.push(String(before.startedAt), String(before.startedAt), Number(before.rowid));
   }
   const sql = `${RUN_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
     ORDER BY runs.startedAt DESC, runs.rowid DESC LIMIT ${Math.min(filter.limit ?? 200, 1000)}`;

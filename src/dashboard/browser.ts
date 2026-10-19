@@ -7,6 +7,7 @@ import { createByteStore } from '../observability/byte-blobs.js';
 import type { Clock } from '../time.js';
 import { ENGINES, engineStates, pausedNow } from '../web/search.js';
 import type { BrowserOverview, BrowserStep, BrowserTaskDetail, BrowserTaskSummary, SearchEngineState } from './browser-types.js';
+import type { BrowserLive, BrowserLiveStep } from './types.js';
 
 const json = <T>(text: unknown, fallback: T): T => {
   if (typeof text !== 'string') return fallback;
@@ -97,6 +98,44 @@ export function browserTask(db: Db, id: string): BrowserTaskDetail | undefined {
   return { task: toSummary(row), steps };
 }
 
+// phase 5 m1: the open browser tasks, newest first, each with its latest step.
+export function browserLive(db: Db): BrowserLive {
+  const latest = db.prepare('SELECT * FROM browser_steps WHERE taskId = ? ORDER BY id DESC LIMIT 1');
+  const tasks = db
+    .prepare(
+      `SELECT t.*, (SELECT COUNT(*) FROM browser_steps s WHERE s.taskId = t.id) AS steps FROM browser_tasks t
+        WHERE t.status = 'open' ORDER BY t.startedAt DESC, t.rowid DESC`,
+    )
+    .all()
+    .map((row) => {
+      const step = latest.get(String(row.id));
+      return {
+        id: String(row.id),
+        kind: row.kind as BrowserLive['tasks'][number]['kind'],
+        sessionKey: String(row.sessionKey),
+        runId: row.runId === null ? null : String(row.runId),
+        allowlist: json<string[]>(row.allowlist, []),
+        startedAt: String(row.startedAt),
+        steps: Number(row.steps),
+        latest: step ? toLiveStep(step) : null,
+      };
+    });
+  return { tasks };
+}
+
+function toLiveStep(step: Record<string, unknown>): BrowserLiveStep {
+  return {
+    id: Number(step.id),
+    action: String(step.action),
+    target: json<string | null>(step.target, null),
+    urlAfter: (step.urlAfter as string | null) ?? null,
+    screenshotBlob: (step.screenshotBlob as string | null) ?? null,
+    error: (step.error as string | null) ?? null,
+    durationMs: Number(step.durationMs),
+    createdAt: String(step.createdAt),
+  };
+}
+
 // the path of a trace comes from the row, and the row names only traces/<task id>.zip. the id check keeps a damaged
 // row from naming a file outside the folder.
 export function tracePathOf(db: Db, id: string): string | undefined {
@@ -113,6 +152,7 @@ export function mountBrowser(server: Hono, deps: { db: Db; dataDir: string; cloc
   server.get('/api/browser', (c) =>
     c.json({ engines: searchEngines(db, clock()), profileInUse: profileBusy(join(dataDir, 'browser', 'profile')), tasks: browserTasks(db) } satisfies BrowserOverview),
   );
+  server.get('/api/browser/live', (c) => c.json(browserLive(db)));
   server.get('/api/browser/tasks/:id', (c) => {
     const detail = browserTask(db, c.req.param('id'));
     return detail ? c.json(detail) : notFound(c, 'browser task');

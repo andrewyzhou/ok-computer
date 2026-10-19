@@ -88,7 +88,7 @@ export function guardDraft(db: Db, sessionKey: string, text: string): string {
   return replaceLinks(text, found.map((each) => each.url), DRAFT_LINK) ?? '';
 }
 
-function withoutLinks(text: string, urls: string[]): string {
+export function withoutLinks(text: string, urls: string[]): string {
   return replaceLinks(text, urls, REMOVED_LINK) ?? REMOVED_REPLY;
 }
 
