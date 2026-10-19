@@ -263,9 +263,12 @@ function singletonBusy(path: string): boolean {
     // no link, or a file that is not a link. chrome makes only a link, so a plain file does not hold the profile.
     return (err as NodeJS.ErrnoException).code !== 'ENOENT' && (err as NodeJS.ErrnoException).code !== 'EINVAL';
   }
+  // a host name can hold dashes, so the pid follows the last one. only plain digits count as a pid: Number() also read
+  // "0x10" and "1e3", and a pid of 0 would ask about the whole process group.
   const at = target.lastIndexOf('-');
-  const pid = Number(target.slice(at + 1));
-  if (at < 0 || !Number.isInteger(pid) || pid <= 0) return true;
+  const digits = target.slice(at + 1);
+  const pid = /^\d+$/.test(digits) ? Number(digits) : 0;
+  if (at < 0 || !Number.isSafeInteger(pid) || pid <= 0) return true;
   if (target.slice(0, at) !== hostname()) return true;
   try {
     process.kill(pid, 0);

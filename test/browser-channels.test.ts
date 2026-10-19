@@ -140,11 +140,12 @@ afterAll(() => {
 
 type Harness = ReturnType<typeof createBrowserHarness>;
 const open: Harness[] = [];
+// a stop closes chrome and saves the trace. on a busy machine that takes longer than the 10 s of a hook.
 afterEach(async () => {
   for (const each of open.splice(0)) await each.worker.stop();
   hits.length = 0;
   turnBytes.length = 0;
-});
+}, 60_000);
 const harness = (args: string[] = []) => {
   const made = createBrowserHarness({ args: [...FIXTURE_ARGS, ...args] });
   open.push(made);
