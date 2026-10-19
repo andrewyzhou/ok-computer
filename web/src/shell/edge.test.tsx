@@ -94,7 +94,18 @@ describe('the command menu', () => {
     expect(screen.getByRole('option', { name: /Sandbox/ })).toBeTruthy();
   });
 
+  it('lists no dev page outside developer mode, and each of them in it', () => {
+    render(<CommandMenu open onClose={() => {}} routes={ROUTES} sources={[]} />);
+    const pages = () => within(screen.getByRole('group', { name: 'Go to' }));
+    const dev = () => pages().queryAllByRole('option').filter((option) => option.textContent?.endsWith('Dev'));
+    expect(dev()).toEqual([]);
+    for (const label of ['Runs', 'Sessions', 'Policy', 'Cost', 'Logs', 'Sandbox']) expect(pages().queryByRole('option', { name: label })).toBeNull();
+    act(() => setPrefs({ devMode: true }));
+    expect(dev().map((option) => option.querySelector('.cmdk-label')?.textContent)).toEqual(['Runs', 'Sessions', 'Policy', 'Cost', 'Logs', 'Sandbox']);
+  });
+
   it('never lists a detail page, and wraps the arrow keys at both ends', () => {
+    setPrefs({ devMode: true });
     render(<CommandMenu open onClose={() => {}} routes={ROUTES} sources={[]} />);
     const input = screen.getByRole('combobox', { name: 'Search or run a command' });
     fireEvent.change(input, { target: { value: 'run' } });

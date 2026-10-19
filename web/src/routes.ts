@@ -175,7 +175,7 @@ export const CORE_ROUTES: RouteDef[] = [
     icon: 'browser',
     load: detail('id', () => import('./pages/Browser').then((m) => m.BrowserTask)),
   },
-  { path: 'runs', group: 'dev', label: 'Runs', icon: 'run', order: 10, load: page(() => import('./pages/Runs').then((m) => m.Runs)) },
+  { path: 'runs', group: 'dev', devOnly: true, label: 'Runs', icon: 'run', order: 10, load: page(() => import('./pages/Runs').then((m) => m.Runs)) },
   {
     path: 'runs/:id*',
     group: null,
@@ -183,7 +183,7 @@ export const CORE_ROUTES: RouteDef[] = [
     icon: 'run',
     load: detail('id', () => import('./pages/RunDetail').then((m) => m.RunDetail)),
   },
-  { path: 'sessions', group: 'dev', label: 'Sessions', icon: 'session', order: 20, load: page(() => import('./pages/Sessions').then((m) => m.Sessions)) },
+  { path: 'sessions', group: 'dev', devOnly: true, label: 'Sessions', icon: 'session', order: 20, load: page(() => import('./pages/Sessions').then((m) => m.Sessions)) },
   {
     path: 'sessions/:sessionKey*',
     group: null,
@@ -191,9 +191,9 @@ export const CORE_ROUTES: RouteDef[] = [
     icon: 'session',
     load: detail('sessionKey', () => import('./pages/Sessions').then((m) => m.SessionDetail)),
   },
-  { path: 'policy', group: 'dev', label: 'Policy', icon: 'policy', order: 30, load: page(() => import('./pages/Policy').then((m) => m.Policy)) },
-  { path: 'cost', group: 'dev', label: 'Cost', icon: 'cost', order: 40, load: page(() => import('./pages/Cost').then((m) => m.Cost)) },
-  { path: 'logs', group: 'dev', label: 'Logs', icon: 'log', order: 50, load: page(() => import('./pages/Logs').then((m) => m.Logs)) },
+  { path: 'policy', group: 'dev', devOnly: true, label: 'Policy', icon: 'policy', order: 30, load: page(() => import('./pages/Policy').then((m) => m.Policy)) },
+  { path: 'cost', group: 'dev', devOnly: true, label: 'Cost', icon: 'cost', order: 40, load: page(() => import('./pages/Cost').then((m) => m.Cost)) },
+  { path: 'logs', group: 'dev', devOnly: true, label: 'Logs', icon: 'log', order: 50, load: page(() => import('./pages/Logs').then((m) => m.Logs)) },
 ];
 
 // the routes of the view folders. vite finds them when it builds, so a new folder needs no import here.

@@ -106,7 +106,8 @@ export function Nav({
                       >
                         <Icon name={item.icon} size={16} />
                         <span className="nav-label">{item.label}</span>
-                        {item.devOnly ? <span className="nav-tag">dev</span> : null}
+                        {/* each page of the dev group is a dev page, so the tag marks only a dev page in another group. */}
+                        {item.devOnly && section.group !== 'dev' ? <span className="nav-tag">dev</span> : null}
                       </a>
                     </li>
                   );

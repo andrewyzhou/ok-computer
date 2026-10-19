@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { MemoryFile } from '../../../src/dashboard/types';
 import { useApi } from '../api';
+import type { RouteProps } from '../routes';
 import { Load } from '../components';
 import { bytes, time } from '../format';
 import { DetailsPanel, EmptyState, FilterBar, Page, SearchField, Table, type Column } from '../ui';
@@ -45,10 +46,16 @@ function FileView({ path }: { path: string }) {
   );
 }
 
-function MemoryBody({ files, filter }: { files: MemoryFile[]; filter: string }) {
-  const [selected, setSelected] = useState<string | null>(null);
-  // each tap counts, so a second tap on the same file opens the drawer of a phone again after it was closed.
-  const [taps, setTaps] = useState(0);
+// the selected file is the path in the query of the hash, so a memory hit of the search opens its file, and a link
+// to a file can be shared and kept.
+function selectFile(path: string): void {
+  location.hash = `#/memory?path=${encodeURIComponent(path)}`;
+}
+
+function MemoryBody({ files, filter, selected }: { files: MemoryFile[]; filter: string; selected: string | null }) {
+  // each tap counts, so a second tap on the same file opens the drawer of a phone again after it was closed. a link
+  // with a path counts as the first tap, so the drawer of a phone opens on the file of the link.
+  const [taps, setTaps] = useState(selected ? 1 : 0);
   if (!files.length)
     return (
       <EmptyState icon="memory" title="No memory files yet.">
@@ -57,7 +64,7 @@ function MemoryBody({ files, filter }: { files: MemoryFile[]; filter: string }) 
     );
   const needle = filter.trim().toLowerCase();
   const shown = needle ? files.filter((file) => file.path.toLowerCase().includes(needle)) : files;
-  // the first file shows until the owner picks another, so the panel is never empty.
+  // with no path in the hash the first file shows, so the panel is never empty.
   const path = selected ?? files[0]!.path;
   return (
     <>
@@ -68,7 +75,7 @@ function MemoryBody({ files, filter }: { files: MemoryFile[]; filter: string }) 
         rowKey={(file) => file.path}
         selected={path}
         onSelect={(file) => {
-          setSelected(file.path);
+          selectFile(file.path);
           setTaps((count) => count + 1);
         }}
         empty={<EmptyState icon="search" title={`No file matches “${filter.trim()}”.`} />}
@@ -80,7 +87,8 @@ function MemoryBody({ files, filter }: { files: MemoryFile[]; filter: string }) 
   );
 }
 
-export function Memory() {
+export function Memory({ query }: Partial<RouteProps>) {
+  const selected = query?.get('path') || null;
   const loaded = useApi<MemoryFile[]>('/api/memory');
   const [filter, setFilter] = useState('');
   return (
@@ -93,7 +101,7 @@ export function Memory() {
         </FilterBar>
       }
     >
-      <Load loaded={loaded}>{(files) => <MemoryBody files={files} filter={filter} />}</Load>
+      <Load loaded={loaded}>{(files) => <MemoryBody files={files} filter={filter} selected={selected} />}</Load>
     </Page>
   );
 }

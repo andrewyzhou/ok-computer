@@ -64,7 +64,7 @@ All routes go inside `createDashboard` after auth. Shapes go in the import-free 
 
 ### M3: dashboard shell and design system
 - Layout: an icon rail, a left nav with groups and a search field for chats, a ⌘K command menu, a header with breadcrumb and actions, a tabs/filter/sort/display bar, the main area, a right details panel, and a status bar (live state, running runs, pending approvals, cost today, DEV badge).
-- Nav groups, each shown only when its view exists: Today, Desk, Inbox, Calendar, Docs, People, Chats, Activity, Agent (Goals, Memory, Automations, Signals), Connections (Google, Integrations, Browser), Dev (Runs, Policy, Cost, Logs, Sandbox).
+- Nav groups, each shown only when its view exists: Today, Desk, Inbox, Calendar, Docs, People, Chats, Activity, Agent (Goals, Memory, Automations, Signals), Connections (Google, Integrations, Browser), Dev (Runs, Sessions, Policy, Cost, Logs, Sandbox). The nav and the ⌘K menu list the Dev group only in developer mode, but the hash of a dev page opens it in each mode.
 - Look: a warm off-white base `#fbfaf9`, near-black ink, hairline rules, a serif display face for titles, a grotesk for UI text, black pill primary buttons, generous whitespace, and a matching warm dark theme with a toggle.
 - Hash routes stay. A list and its selected item share the screen.
 - Responsive: below 1100px the details panel becomes a drawer. Below 760px the rail and nav collapse into a sheet. It must work at 390px.

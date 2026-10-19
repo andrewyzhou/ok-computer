@@ -37,9 +37,17 @@ describe('the shell', () => {
     const groups = nav()
       .getAllByRole('heading', { level: 2 })
       .map((heading) => heading.textContent);
-    expect(groups).toEqual(['Today', 'Inbox', 'Chats', 'Activity', 'Agent', 'Connections', 'Dev']);
-    expect(nav().getByRole('link', { name: 'Cost' }).getAttribute('aria-current')).toBe('page');
+    // the hash opens a dev page outside developer mode, but the nav and the rail do not list it.
+    expect(groups).toEqual(['Today', 'Inbox', 'Chats', 'Activity', 'Agent', 'Connections']);
+    expect(nav().queryByRole('link', { name: 'Cost' })).toBeNull();
     const rail = within(screen.getByRole('navigation', { name: 'sections' }));
+    expect(rail.queryByRole('link', { name: 'Dev' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Developer mode' }));
+    const devGroups = nav()
+      .getAllByRole('heading', { level: 2 })
+      .map((heading) => heading.textContent);
+    expect(devGroups).toEqual(['Today', 'Inbox', 'Chats', 'Activity', 'Agent', 'Connections', 'Dev']);
+    expect(nav().getByRole('link', { name: 'Cost' }).getAttribute('aria-current')).toBe('page');
     expect(rail.getByRole('link', { name: 'Dev' }).getAttribute('aria-current')).toBe('true');
     fireEvent.change(nav().getByRole('searchbox'), { target: { value: 'goa' } });
     // the chats panel of the nav filters the chats of the real /api/chats too, and the main chat of the seed talks
@@ -60,6 +68,7 @@ describe('the shell', () => {
   });
 
   it('opens the command menu with the keyboard and goes to the chosen page', async () => {
+    setPrefs({ devMode: true });
     openApp('#/');
     await inMain().findByText('Cost today');
     fireEvent.keyDown(window, { key: 'k', metaKey: true });
