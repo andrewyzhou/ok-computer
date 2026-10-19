@@ -1,5 +1,5 @@
 import { realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import type { SecretStoreConfig } from '../dashboard/types.js';
 
@@ -54,7 +54,8 @@ function realPath(path: string): string {
 // the name of the folder that holds the secret file when the agent can read that folder, or undefined. both paths
 // resolve from the working folder, as createFileSecretStore does. links count, so a link into the workspace or a
 // workspace that is a link is still caught. the file systems of macos and windows ignore case by default, so there
-// the comparison ignores case too.
+// the comparison ignores case too. the paths come from this machine and keep its separator, so the check compares
+// plain text: relative() on windows would ignore case even when the check follows the rules of linux.
 export function secretFileExposedIn(path: string, folders: Record<string, string>, platform: NodeJS.Platform = process.platform): string | undefined {
   const fold = platform === 'darwin' || platform === 'win32' ? (text: string) => text.toLowerCase() : (text: string) => text;
   const lexical = resolve(process.cwd(), path);
@@ -62,10 +63,9 @@ export function secretFileExposedIn(path: string, folders: Record<string, string
   for (const [name, folder] of Object.entries(folders)) {
     const base = resolve(process.cwd(), folder);
     for (const dir of [base, realPath(base)].map(fold)) {
-      for (const file of files) {
-        const rel = relative(dir, file);
-        if (rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))) return name;
-      }
+      // a root like / or C:\ already ends with the separator.
+      const prefix = dir.endsWith(sep) ? dir : dir + sep;
+      for (const file of files) if (file === dir || file.startsWith(prefix)) return name;
     }
   }
   return undefined;
