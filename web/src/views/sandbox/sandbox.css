@@ -188,3 +188,19 @@ td.wrap .sandbox-mono {
     width: 120px;
   }
 }
+.sandbox-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.sandbox-file-image {
+  display: block;
+  max-width: min(100%, 480px);
+  height: auto;
+  border: 1px solid var(--rule);
+}
+.sandbox-list {
+  margin: 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}

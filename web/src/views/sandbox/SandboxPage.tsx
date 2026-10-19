@@ -100,6 +100,7 @@ function BrowserTab() {
 const COLUMNS: Array<Column<SandboxExecRow>> = [
   { key: 'id', header: 'Id', cell: (exec) => `#${exec.id}` },
   { key: 'status', header: 'Status', cell: (exec) => <ExecStatus status={exec.status} /> },
+  { key: 'language', header: 'Language', hideBelow: 'sm', cell: (exec) => exec.language },
   {
     key: 'command',
     header: 'Command',
@@ -199,6 +200,8 @@ function CodeList({ path }: { path: string }) {
                 items={[
                   { label: 'Engine', value: page.status.engine ?? 'none' },
                   { label: 'Image', value: <code className="sandbox-mono">{page.status.image}</code> },
+                  // a call with an allowlist needs a route to the egress proxy, which some docker hosts cannot give.
+                  { label: 'Network calls', value: page.status.network ? 'available' : `off: ${page.status.networkReason ?? 'no route to the egress proxy'}` },
                   ...limitFacts(page.status.defaults),
                 ]}
               />

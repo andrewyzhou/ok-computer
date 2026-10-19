@@ -14,7 +14,7 @@ installEventSource();
 let seeded: Awaited<ReturnType<typeof seedDashboard>>;
 
 const LIMITS = { cpus: 1, memoryMb: 512, timeoutMs: 30_000, outputBytes: 65_536, pids: 128 };
-const STATUS: SandboxStatus = { available: true, reason: null, engine: 'engine 27.1', image: 'okc-sandbox:1', defaults: LIMITS };
+const STATUS: SandboxStatus = { available: true, reason: null, engine: 'engine 27.1', image: 'okc-sandbox:1', defaults: LIMITS, network: true, networkReason: null };
 
 function exec(id: number, extra: Partial<SandboxExecRow> = {}): SandboxExecRow {
   return {
@@ -22,6 +22,7 @@ function exec(id: number, extra: Partial<SandboxExecRow> = {}): SandboxExecRow {
     runId: null,
     toolCallId: null,
     sessionKey: null,
+    language: 'bash',
     command: `echo ${id}`,
     image: 'okc-sandbox:1',
     network: 'allowlist',

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { SubscriptionRow, SubscriptionsPage as SubscriptionsData, SubscriptionState } from '../../../../src/dashboard/types';
 import { useApi } from '../../api';
-import { time } from '../../format';
+import { percent, time } from '../../format';
 import type { RouteProps } from '../../routes';
 import { Button, DetailsPanel, EmptyState, Facts, FilterBar, Page, Select, Skeleton, Stat, Stats, Table, type Column, type Tone } from '../../ui';
 import { ApprovalFor, day, ExternalLink, LastRun, PendingAnswers, refreshInbox, RowNote, RunJob, StateBadge, money, setHashQuery, useApprovals, useRowActions, withQuery } from './shared';
@@ -36,6 +36,9 @@ function SubscriptionFacts({ row, approvals, onDecided }: { row: SubscriptionRow
           row.browserTaskId ? { label: 'Browser task', value: <a href={`#/browser/${encodeURIComponent(row.browserTaskId)}`}>{row.browserTaskId}</a> } : null,
           { label: 'Source', value: row.sourceSubject ?? <span className="muted">no subject</span> },
           { label: 'Source message', value: <code>{row.sourceMessageId}</code> },
+          // the finder tells why a row is there: how many receipts it read, and how sure it is that the charge repeats.
+          { label: 'Receipts', value: `${row.sourceMessageIds.length} ${row.sourceMessageIds.length === 1 ? 'receipt' : 'receipts'}` },
+          { label: 'Confidence', value: percent(row.confidence) },
           { label: 'Updated', value: time(row.updatedAt) },
         ]}
       />
@@ -116,6 +119,7 @@ export function SubscriptionsPage({ query }: RouteProps) {
     },
     { key: 'last', header: 'Last charge', hideBelow: 'md', cell: (each) => <span className="inbox-nowrap">{day(each.lastChargeAt)}</span> },
     { key: 'next', header: 'Next charge', hideBelow: 'sm', cell: (each) => <span className="inbox-nowrap">{day(each.nextChargeAt)}</span> },
+    { key: 'confidence', header: 'Confidence', align: 'end', hideBelow: 'md', cell: (each) => percent(each.confidence) },
     { key: 'state', header: 'State', cell: (each) => <StateBadge value={each.state} tones={STATE_TONE} /> },
     { key: 'actions', header: <span className="sr-only">Actions</span>, hideBelow: 'sm', cell: actionsFor },
   ];

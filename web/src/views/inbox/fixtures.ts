@@ -163,6 +163,8 @@ function subscription(id: number, values: Partial<SubscriptionRow>): Subscriptio
     nextChargeAt: '2026-11-03T10:00:00.000Z',
     sourceMessageId: `r-${id}`,
     sourceSubject: 'Your receipt',
+    sourceMessageIds: [`r-${id}`],
+    confidence: 0.9,
     cancelUrl: null,
     state: 'active',
     approvalId: null,

@@ -1,10 +1,10 @@
 import { useRef } from 'react';
-import type { SandboxExecDetail, SandboxFile } from '../../../../src/dashboard/types';
+import type { SandboxEgress, SandboxExecDetail, SandboxFile, SandboxPolicyView } from '../../../../src/dashboard/types';
 import { useApi } from '../../api';
 import { bytes, ms, time } from '../../format';
 import type { RouteProps } from '../../routes';
-import { ButtonLink, CodeBlock, Facts, Page, Section, Table, type Column } from '../../ui';
-import { BlobOnDemand, ExecStatus, limitFacts, LoadRow } from './parts';
+import { ButtonLink, CodeBlock, Facts, Page, Section, Status, Table, type Column } from '../../ui';
+import { BlobOnDemand, ExecStatus, FileContent, limitFacts, LoadRow } from './parts';
 import './sandbox.css';
 
 function Output({ label, text, blob, truncated }: { label: string; text: string | null; blob: string | null; truncated: boolean }) {
@@ -20,7 +20,7 @@ const FILE_COLUMNS: Array<Column<SandboxFile>> = [
   { key: 'path', header: 'Path', wrap: true, cell: (file) => <code className="sandbox-mono">{file.path}</code> },
   { key: 'size', header: 'Size', align: 'end', cell: (file) => bytes(file.size) },
   { key: 'mime', header: 'Type', hideBelow: 'sm', cell: (file) => file.mime },
-  { key: 'blob', header: 'Content', wrap: true, cell: (file) => <BlobOnDemand hash={file.blob} label={file.path} button="Load" /> },
+  { key: 'blob', header: 'Content', wrap: true, cell: (file) => <FileContent file={file} /> },
 ];
 
 function Files({ title, files }: { title: string; files: SandboxFile[] }) {
@@ -31,12 +31,72 @@ function Files({ title, files }: { title: string; files: SandboxFile[] }) {
   );
 }
 
+// the hosts that the egress proxy let through, and the requests that it refused with the reason.
+function Egress({ egress }: { egress: SandboxEgress }) {
+  return (
+    <Section title="Network">
+      <Facts
+        layout="stacked"
+        items={[
+          { label: 'Let through', value: egress.passed.length ? egress.passed.join(', ') : <span className="muted">none</span> },
+          {
+            label: 'Refused',
+            value: egress.refused.length ? (
+              <ul className="sandbox-list">
+                {egress.refused.map((each, i) => (
+                  <li key={i}>
+                    <code className="sandbox-mono">{each.target}</code> <span className="muted">{each.reason}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <span className="muted">none</span>
+            ),
+          },
+        ]}
+      />
+    </Section>
+  );
+}
+
+// the policy decision of the tool call, the verdict of the reviewer, and the approval of a call with network access.
+function Policy({ policy }: { policy: SandboxPolicyView | null }) {
+  if (!policy) return null;
+  return (
+    <Section title="Policy">
+      <Facts
+        items={[
+          { label: 'Decision', value: <Status value={policy.decision} /> },
+          { label: 'Rule', value: <code className="sandbox-mono">{policy.rule}</code> },
+          { label: 'Reason', value: policy.reason },
+          policy.reviewerVerdict !== null && {
+            label: 'Reviewer',
+            value: (
+              <>
+                <Status value={policy.reviewerVerdict} /> {policy.reviewerReason ?? ''}
+              </>
+            ),
+          },
+          policy.approvalId !== null && {
+            label: 'Approval',
+            value: (
+              <>
+                <a href="#/approvals">#{policy.approvalId}</a> {policy.approvalStatus ? <Status value={policy.approvalStatus} /> : null}
+              </>
+            ),
+          },
+        ]}
+      />
+    </Section>
+  );
+}
+
 function ExecBody({ exec }: { exec: SandboxExecDetail }) {
   const cut = exec.truncated;
   return (
     <>
       <Section title="Command">
-        <CodeBlock label="command" text={exec.command} />
+        <CodeBlock label={`${exec.language} command`} text={exec.command} />
       </Section>
       {exec.error !== null ? <p className="error-box">{exec.error}</p> : null}
       <Section title="Output">
@@ -54,9 +114,13 @@ function ExecBody({ exec }: { exec: SandboxExecDetail }) {
             { label: 'Status', value: <ExecStatus status={exec.status} /> },
             { label: 'Exit code', value: exec.exitCode ?? '-' },
             { label: 'Duration', value: ms(exec.durationMs) },
+            { label: 'Language', value: exec.language },
             { label: 'Created', value: time(exec.createdAt) },
+            { label: 'Ended', value: exec.endedAt ? time(exec.endedAt) : '-' },
             { label: 'Directory', value: <code className="sandbox-mono">{exec.cwd}</code> },
             { label: 'Image', value: <code className="sandbox-mono">{exec.image}</code> },
+            exec.imageId !== null && { label: 'Image id', value: <code className="sandbox-mono">{exec.imageId.slice(0, 19)}</code> },
+            exec.containerId !== null && { label: 'Container', value: <code className="sandbox-mono">{exec.containerId.slice(0, 12)}</code> },
             { label: 'Network', value: exec.network === 'none' ? 'none' : `allowlist: ${exec.allowlist.join(', ') || 'empty'}` },
             ...limitFacts(exec.limits),
             exec.sessionKey !== null && { label: 'Session', value: exec.sessionKey },
@@ -73,8 +137,21 @@ function ExecBody({ exec }: { exec: SandboxExecDetail }) {
           ]}
         />
       </Section>
+      <Policy policy={exec.policy} />
+      {exec.egress ? <Egress egress={exec.egress} /> : null}
       <Files title="Files in" files={exec.files.filter((file) => file.direction === 'in')} />
       <Files title="Files out" files={exec.files.filter((file) => file.direction === 'out')} />
+      {exec.notCollected.length ? (
+        <Section title="Not collected">
+          <ul className="sandbox-list">
+            {exec.notCollected.map((each) => (
+              <li key={each.path}>
+                <code className="sandbox-mono">{each.path}</code> <span className="muted">{each.reason}</span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
     </>
   );
 }

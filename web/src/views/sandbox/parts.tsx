@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
-import type { BlobBody, SandboxExecRow, SandboxExecStatus, SandboxLimits } from '../../../../src/dashboard/types';
-import { useApi, type Loaded } from '../../api';
+import type { BlobBody, SandboxExecRow, SandboxExecStatus, SandboxFile, SandboxLimits } from '../../../../src/dashboard/types';
+import { apiUrl, useApi, type Loaded } from '../../api';
 import { bytes, ms } from '../../format';
 import { Badge, Button, CodeBlock, EmptyState, Facts, Skeleton, type Fact, type Tone } from '../../ui';
 
@@ -37,6 +37,7 @@ export function ExecSummary({ exec }: { exec: SandboxExecRow }) {
       layout="stacked"
       items={[
         { label: 'Status', value: <ExecStatus status={exec.status} /> },
+        { label: 'Language', value: exec.language },
         { label: 'Command', value: <code className="sandbox-mono">{exec.command}</code> },
         { label: 'Image', value: <code className="sandbox-mono">{exec.image}</code> },
         { label: 'Network', value: exec.network === 'none' ? 'none' : `allowlist: ${exec.allowlist.join(', ') || 'empty'}` },
@@ -87,5 +88,29 @@ export function BlobOnDemand({ hash, label, button }: { hash: string; label: str
     <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
       {button}
     </Button>
+  );
+}
+
+// the server shows these types in the page, and every other file downloads, so a file that the code made never runs
+// as a page of the dashboard.
+const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+// a file that is utf-8 text is in the text store, so its text loads like any blob. the mime of such a file says text.
+function textual(mime: string): boolean {
+  return mime.startsWith('text/') || /json|xml|javascript|yaml|csv|charset=utf-8/.test(mime);
+}
+
+// the content of a file of an exec. GET /api/sandbox/files/:hash gives its bytes: a raster image shows, and any other
+// file downloads. a text file can also show its text in the page.
+export function FileContent({ file }: { file: SandboxFile }) {
+  const url = apiUrl(`/api/sandbox/files/${encodeURIComponent(file.blob)}`);
+  if (INLINE.has(file.mime)) return <img className="sandbox-file-image" alt={file.path} src={url} />;
+  return (
+    <span className="sandbox-file">
+      {textual(file.mime) ? <BlobOnDemand hash={file.blob} label={file.path} button="Load" /> : null}
+      <a href={url} download>
+        Download
+      </a>
+    </span>
   );
 }

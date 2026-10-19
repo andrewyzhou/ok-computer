@@ -42,7 +42,13 @@ describe('the shell', () => {
     const rail = within(screen.getByRole('navigation', { name: 'sections' }));
     expect(rail.getByRole('link', { name: 'Dev' }).getAttribute('aria-current')).toBe('true');
     fireEvent.change(nav().getByRole('searchbox'), { target: { value: 'goa' } });
-    expect(nav().getAllByRole('link').map((link) => link.textContent)).toEqual(['ok computer', 'Goals']);
+    // the chats panel of the nav filters the chats of the real /api/chats too, and the main chat of the seed talks
+    // about goals, so only the links of the pages are compared here.
+    const pages = nav()
+      .getAllByRole('link')
+      .filter((link) => !(link.getAttribute('href') ?? '').startsWith('#/chats/'))
+      .map((link) => link.textContent);
+    expect(pages).toEqual(['ok computer', 'Goals']);
   });
 
   it('shows the breadcrumb of a detail page with a link to its list', async () => {
