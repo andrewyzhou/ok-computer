@@ -1,18 +1,43 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { RunRow } from '../../src/dashboard/types';
 import { seedDashboard } from '../../test/seed';
-import { FakeEventSource, installEventSource, openApp as open, stubFetch } from './testing';
+import { setPrefs } from './shell/prefs';
+import { FakeEventSource, inMain, installEventSource, json, openApp as open, stubFetch } from './testing';
 
 installEventSource();
 
 let seeded: Awaited<ReturnType<typeof seedDashboard>>;
+let calls: ReturnType<typeof stubFetch>;
 
 beforeEach(async () => {
   seeded = await seedDashboard();
-  stubFetch(seeded.dashboard);
+  calls = stubFetch(seeded.dashboard);
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  setPrefs({ devMode: false });
+});
+
+const details = () => within(screen.getByRole('complementary', { name: 'details' }));
+
+function fakeRun(index: number): RunRow {
+  const at = new Date(Date.UTC(2026, 9, 12, 12, 0, 0) - index * 60_000).toISOString();
+  return {
+    id: `r-${index}`,
+    sessionKey: 'main',
+    trigger: 'message',
+    slot: 'main',
+    status: 'completed',
+    startedAt: at,
+    endedAt: at,
+    error: null,
+    costUsd: 0,
+    modelCalls: 1,
+    toolCalls: 0,
+  };
+}
 
 describe('the developer pages load against the seeded database', () => {
   it('lists runs and filters them by status', async () => {
@@ -147,5 +172,150 @@ describe('the developer pages load against the seeded database', () => {
     expect(await screen.findByText('model request failed')).toBeTruthy();
     FakeEventSource.last!.emit({ kind: 'log', line: { ts: '2026-10-13T01:31:00.000Z', level: 'warn', msg: 'a live line' } });
     expect(await screen.findByText('a live line')).toBeTruthy();
+  });
+
+  it('reads the run filters from the hash and writes a new filter to it', async () => {
+    open('#/runs?status=failed');
+    expect(await inMain().findByText('run-3')).toBeTruthy();
+    expect(inMain().queryByText('run-5')).toBeNull();
+    expect((screen.getByLabelText('status') as HTMLSelectElement).value).toBe('failed');
+    fireEvent.change(screen.getByLabelText('trigger'), { target: { value: 'heartbeat' } });
+    expect(location.hash).toBe('#/runs?status=failed&trigger=heartbeat');
+    fireEvent.change(screen.getByLabelText('status'), { target: { value: '' } });
+    expect(location.hash).toBe('#/runs?trigger=heartbeat');
+    await expect.poll(() => calls.at(-1)?.url).toBe('/api/runs?trigger=heartbeat&limit=50');
+  });
+
+  it('keeps the runs of one session and clears that filter with its pill', async () => {
+    open('#/runs?sessionKey=heartbeat%3Arun-4');
+    expect(await inMain().findByText('run-4')).toBeTruthy();
+    expect(inMain().queryByText('run-5')).toBeNull();
+    expect(calls.some((call) => call.url === '/api/runs?sessionKey=heartbeat%3Arun-4&limit=50')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the session filter' }));
+    expect(location.hash).toBe('#/runs');
+    expect(await inMain().findByText('run-5')).toBeTruthy();
+  });
+
+  it('loads older runs with the id of the last run, and stops after a short page', async () => {
+    calls = stubFetch(seeded.dashboard, {
+      'GET /api/runs': ({ query }) => {
+        const before = query.get('before');
+        if (!before) return Array.from({ length: 50 }, (_, i) => fakeRun(i));
+        if (before === 'r-49') return [50, 51, 52].map(fakeRun);
+        return json({ error: 'unknown run' }, 400);
+      },
+    });
+    open('#/runs');
+    expect(await inMain().findByText('r-49')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Load older runs' }));
+    expect(await inMain().findByText('r-52')).toBeTruthy();
+    expect(calls.map((call) => call.url)).toContain('/api/runs?limit=50&before=r-49');
+    expect(inMain().getAllByRole('row')).toHaveLength(54);
+    expect(screen.queryByRole('button', { name: 'Load older runs' })).toBeNull();
+    expect(inMain().getByText('No older runs.')).toBeTruthy();
+  });
+
+  it('shows the error of a page of older runs', async () => {
+    stubFetch(seeded.dashboard, {
+      'GET /api/runs': ({ query }) => (query.get('before') ? json({ error: 'unknown run' }, 400) : Array.from({ length: 50 }, (_, i) => fakeRun(i))),
+    });
+    open('#/runs');
+    fireEvent.click(await screen.findByRole('button', { name: 'Load older runs' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('unknown run');
+    expect(inMain().getByText('r-49')).toBeTruthy();
+  });
+
+  it('shows the facts of a selected run in the details panel', async () => {
+    open('#/runs');
+    const cell = await inMain().findByText('run-3');
+    fireEvent.click(cell.closest('tr')!);
+    expect(await details().findByRole('heading', { name: 'Run run-3' })).toBeTruthy();
+    expect(details().getByText('failed')).toBeTruthy();
+    expect(
+      details()
+        .getByRole('link', { name: /Open the run/ })
+        .getAttribute('href'),
+    ).toBe('#/runs/run-3');
+  });
+
+  it('shows the facts of a run in the details panel, and the trace link only in developer mode', async () => {
+    open('#/runs/run-1');
+    expect(await inMain().findByText('Timeline')).toBeTruthy();
+    expect(await details().findByRole('heading', { name: 'Run' })).toBeTruthy();
+    expect(details().getByText('Session')).toBeTruthy();
+    expect(details().getByRole('link', { name: 'main' }).getAttribute('href')).toBe('#/sessions/main');
+    const header = () => within(document.querySelector<HTMLElement>('header.topbar')!);
+    expect(header().getByRole('link', { name: 'All runs' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /Trace/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Logs of this run/ })).toBeNull();
+    expect(screen.getByRole('navigation', { name: 'breadcrumb' }).textContent).toContain('Runs');
+    cleanup();
+    setPrefs({ devMode: true });
+    open('#/runs/run-1');
+    expect(await inMain().findByText('Timeline')).toBeTruthy();
+    expect(header().getByRole('link', { name: /Trace/ }).getAttribute('href')).toBe('#/trace/run-1');
+    expect(header().getByRole('link', { name: 'Logs of this run' }).getAttribute('href')).toBe('#/logs?runId=run-1');
+    // a phone shows the same link in the details panel.
+    expect(details().getByRole('link', { name: /Logs of this run/ }).getAttribute('href')).toBe('#/logs?runId=run-1');
+  });
+
+  it('filters the sessions by key and shows the selected one in the details panel', async () => {
+    open('#/sessions');
+    expect(await inMain().findByText('heartbeat:run-4')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Filter sessions'), { target: { value: 'heart' } });
+    expect(inMain().queryByRole('link', { name: 'main' })).toBeNull();
+    fireEvent.click(inMain().getByText('heartbeat:run-4').closest('tr')!);
+    expect(await details().findByRole('link', { name: /Open the session/ })).toBeTruthy();
+  });
+
+  it('shows the token estimate of the next request in the panel of a session, and the system prompt in developer mode', async () => {
+    const view = await (await fetch('/api/sessions/main/context')).json();
+    setPrefs({ devMode: true });
+    open('#/sessions/main');
+    expect(await details().findByText('next request, estimated tokens')).toBeTruthy();
+    expect(await details().findByText(String(view.estimatedTokens))).toBeTruthy();
+    expect(details().getByText('system prompt')).toBeTruthy();
+  });
+
+  it('shows the reviewer and the taint of a selected policy decision', async () => {
+    const taint = [{ source: 'gmail:work', toolName: 'mail_read', runId: 'run-1', toolCallId: 'm1', at: '2026-10-12T21:00:00.000Z' }];
+    seeded.t.db
+      .prepare(
+        `INSERT INTO policy_decisions (runId, toolCallId, toolName, decision, rule, reason, reviewerVerdict, reviewerReason, taint, createdAt)
+         VALUES ('run-1', 'call-held', 'browser_type', 'review', 'risk:write', 'browser_type changes data', 'hold', 'the owner did not ask for this', ?, '2026-10-13T01:40:00.000Z')`,
+      )
+      .run(JSON.stringify(taint));
+    open('#/policy');
+    fireEvent.click((await inMain().findByText('browser_type')).closest('tr')!);
+    expect(await details().findByRole('heading', { name: 'browser_type' })).toBeTruthy();
+    expect(details().getByText(/gmail:work, read by mail_read/)).toBeTruthy();
+    expect(details().getByRole('link', { name: 'run run-1' }).getAttribute('href')).toBe('#/runs/run-1');
+    expect(details().getByText('hold')).toBeTruthy();
+  });
+
+  it('keeps the log lines of one run, also from the stream, and clears the run filter', async () => {
+    open('#/logs?runId=run-3');
+    expect(await inMain().findByText('model request failed')).toBeTruthy();
+    expect(inMain().queryByText('run started')).toBeNull();
+    expect(calls.map((call) => call.url)).toContain('/api/logs?level=info&limit=500&runId=run-3');
+    FakeEventSource.last!.emit({ kind: 'log', line: { ts: '2026-10-13T01:31:00.000Z', level: 'warn', msg: 'a line of another run', runId: 'run-1' } });
+    FakeEventSource.last!.emit({ kind: 'log', line: { ts: '2026-10-13T01:31:01.000Z', level: 'warn', msg: 'a line of this run', runId: 'run-3' } });
+    expect(await inMain().findByText('a line of this run')).toBeTruthy();
+    expect(inMain().queryByText('a line of another run')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the run filter' }));
+    expect(location.hash).toBe('#/logs');
+    expect(await inMain().findByText('run started')).toBeTruthy();
+  });
+
+  it('shows no live lines for another day', async () => {
+    open('#/logs?day=2026-10-01');
+    expect(await inMain().findByText(/The lines of 2026-10-01/)).toBeTruthy();
+    expect(calls.map((call) => call.url)).toContain('/api/logs?level=info&limit=500&day=2026-10-01');
+    // the lines of that day come from the server. the server of this test may not know the day yet, so the test waits
+    // for the list or the empty state, whichever it gets.
+    await expect.poll(() => document.querySelector('main .skeleton')).toBeNull();
+    FakeEventSource.last!.emit({ kind: 'log', line: { ts: '2026-10-13T01:31:00.000Z', level: 'warn', msg: 'a line of today' } });
+    await new Promise((done) => setTimeout(done, 50));
+    expect(inMain().queryByText('a line of today')).toBeNull();
   });
 });
