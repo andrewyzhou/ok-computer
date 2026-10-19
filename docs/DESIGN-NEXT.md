@@ -1,4 +1,4 @@
-# OK Computer: Design for Phases 2–4
+# OK Computer: Design for Phases 2–5
 
 This document extends [DESIGN.md](DESIGN.md). Phase 1 is built and running. Everything here adds to it; nothing here replaces a Phase 1 rule unless it says so. The conventions in DESIGN.md section 21 apply to all new code.
 
@@ -912,7 +912,7 @@ Each milestone is one implementer agent, named `phase<N>_milestone<M>_<word>` in
 
 - **Phase 3 M4 history is on hold.** The owner never asked for it in this form, and it is not designed well enough. A later design should also cover ChatGPT logs, not only Claude.
 - **Phase 4 M1 sandbox is on hold.** There is no use case for it yet. Without it, the `code` sub-agent profile is not built. Phase 5 M9 built the sandbox (5.8); the `code` profile is still not built.
-- **Phase 4 M2 sweep is not a development milestone.** The owner tests it by asking the agent to do it with the Gmail integration. If that test shows a gap, the gap becomes a normal fix.
+- **Phase 4 M2 sweep is not a development milestone.** The owner tests it by asking the agent to do it with the Gmail integration. If that test shows a gap, the gap becomes a normal fix. Phase 5 M8 built the newsletter sweep and the subscription finder as inbox jobs in code, with one approval for each action (12.8).
 
 After M2, the other six milestones (google, telegram, slack, web, review, workshop) are built at the same time on separate branches, then merged one at a time. Review merges last, so that it can check its rules against the real tools.
 
@@ -939,7 +939,7 @@ After M2, the other six milestones (google, telegram, slack, web, review, worksh
 | Milestone | Scope | Done when |
 |---|---|---|
 | **M1 sandbox** (on hold; built in phase 5 M9, see 5.8) | Docker sandbox container, `sandbox_*` tools, network proxy with allowlist, optional Claude code execution per slot | With Docker available: commands run as non-root with no network, network needs review, and output goes through handles |
-| **M2 sweep** (owner test, not built) | Subscription sweep: the `inbox` sub-agent triages mail across accounts on the `batch` slot, proposes an unsubscribe list, and runs it after one approval of the whole list | With a mocked Gmail: the list is grouped by sender, one approval runs all unsubscribes, and each run is traced |
+| **M2 sweep** (owner test; built in phase 5 M8 as inbox jobs, see 12.8) | Subscription sweep: the `inbox` sub-agent triages mail across accounts on the `batch` slot, proposes an unsubscribe list, and runs it after one approval of the whole list | With a mocked Gmail: the list is grouped by sender, one approval runs all unsubscribes, and each run is traced |
 | **M3 workshop** | Skill Workshop: after long or corrected tasks, a review proposes a new or changed skill, and the owner approves it in Telegram | A fixture task produces a skill draft, and only approval writes it to `skills/` |
 
 ### 10.1 Decisions from phase 4 M3
@@ -995,3 +995,115 @@ These steps need the owner's own accounts. The implementer writes a guide in `do
 2. **Slack** (Phase 3 M1): one internal app per workspace with the user scopes in section 4.2. The owner may need admin approval in a workspace they do not own.
 3. **Browser logins** (Phase 3 M2): run `okc browser login` once and sign in to the sites the agent may use, in the agent's own Chrome profile.
 4. **Tailscale** on the PC, phone, and laptop (any time).
+
+## 12. Phase 5
+
+Phase 5 runs the agent on macOS and Linux, and adds dashboard v2 with the web chat and full-text search, the server deploy, the inbox jobs and the code sandbox. The plan of the phase was approved on 2026-10-18. Its decisions are recorded here, and the plan file is deleted, by the "fix one so they match" rule of DESIGN.md. The API contract of dashboard v2 (endpoints, errors, paging, streams, the web route registry and the file ownership of each track) stays in [PHASE5-API.md](PHASE5-API.md), and the types are in `src/dashboard/types.ts`. Where this section and the contract differ on a shape, the contract wins. Where this section differs from older text in this document or in DESIGN.md, this section wins.
+
+Each track was built on its own branch (`phase5_m<n>_<word>`), passed `npm run typecheck && npm test`, got a review and was merged one at a time with a full test run after each merge. M4 and M5 were built on the merged base. Out of scope for phase 5: iMessage, the multi-user product version, voice, the import of Claude and ChatGPT history, and the agent's own mailbox and calendar (phase 6).
+
+### 12.1 Decisions of the plan
+
+| # | Decision |
+|---|---|
+| D1 | Node 24 LTS is the supported runtime (`.nvmrc`, `engines ">=24 <27"`). The emoji regex is rewritten so it passes on Node 24 and 26. |
+| D2 | Google: two owner accounts, personal Gmail and the university Workspace account. Scopes are read, drafts, archive and labels (`gmail.readonly`, `gmail.modify`, `calendar.readonly`, `calendar.events` for proposals only). `send: false`. The consent screen is published as unverified "In production", so tokens do not expire after 7 days. |
+| D3 | macOS runs the service as a LaunchAgent in the GUI session (`RunAtLoad`, `KeepAlive.SuccessfulExit=false`). `scripts/okc.sh` gives the same commands as `okc.ps1`. |
+| D4 | Web chat: a `web` ChannelAdapter. The dashboard sends to and streams from the same `main` session as Telegram. `web` is never the proactive target. |
+| D5 | Chats: `main` is split at `session_reset`. Background sessions (`auto:`, `heartbeat:`, `sub:`, `consolidate:`, `workshop:`, `poll:`) show under Activity, grouped by kind. |
+| D6 | Search: SQLite FTS5 with the trigram tokenizer over `events`, fed by an AFTER INSERT trigger. Under 3 characters it falls back to LIKE. |
+| D7 | Developer mode shows the browser worker (live latest step, filmstrip, trace) and, after M9, the code sandbox runs. |
+| D8 | Developer mode is a global toggle (⌘. and the status bar), saved in localStorage. |
+| D9 | Web tests may be rewritten as the UI changes. The acceptance bar stays "every page loads against the seeded test database". |
+| D10 | No UI kit, router or data library. Fonts are self-hosted OFL faces from `@fontsource` (serif display + grotesk body). Icons are a small inline SVG set. |
+| D11 | Set `DASHBOARD_TOKEN` on every host, because the search endpoints return chat text. |
+| D12 | Platforms: develop on macOS and Windows, deploy on Linux. A CI matrix (ubuntu, macos, windows) runs typecheck and test. |
+| D13 | Hosting: one EC2 instance (t4g.medium, arm64) with one Docker container, SQLite on gp3 EBS, and Litestream backup to S3. No public ports. The dashboard is reached over Tailscale, and Telegram uses outbound polling. |
+| D14 | Secrets: the OS keyring on desktops. On the server, a `SecretStore` backend for AWS Secrets Manager (or a 0600 file), chosen by config. |
+| D15 | **One Telegram bot.** Only the live instance has `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID`. Any other copy (local dev while the server is live, a second machine) runs without them and uses web chat and the CLI. The runbook says how to move the live role between hosts. |
+| D16 | Model-agnostic stays a hard rule. Core abilities do not use provider-hosted tools (server-side code execution, hosted agent loops). An optional Bedrock provider may come later. |
+| D17 | The agent's own mailbox and calendar are deferred to Phase 6. |
+| D18 | The public product name and domain appear only in gitignored local config. Code, docs, commits and tests say "ok computer". |
+| D19 | New SQL migrations are numbered in advance: M1 `018_search.sql`, M8 `019_inbox.sql`, M9 `020_sandbox.sql`. |
+
+### 12.2 M0: macOS and Linux bring-up
+
+- **Instance lock.** On darwin the lock of `src/instance.ts` is a unix socket file in `os.tmpdir()` (`okc-<hash>.sock`), or in `/tmp` when that path is too long for the 104-byte `sun_path` limit. A crash leaves the file behind, so a start that finds it tries to connect. When no process answers, the start removes the file and takes the lock. A file that is not a socket is never removed. The name of a data folder that does not exist yet comes from the real path of the nearest folder above it, so a link such as `/tmp` gives one name. Windows keeps the named pipe and Linux the abstract socket (10.3).
+- **Node 26.** The emoji parts of the `skill_write` check are an alternation, so Node 24 and 26 both accept a joined emoji (D1).
+- **The decompression-bomb test** builds its body from 50 gzip members of 1 MB, so the 40 MB limit measures only the reader on macOS too. The limit of the reader did not change.
+- **Chrome** is found at the darwin and linux paths, and only at absolute paths. On POSIX the profile lock reads the `SingletonLock` link and checks the pid with `kill(pid, 0)`. A pid that is too large counts as a busy lock. `openssl` is found on `PATH`.
+- **Stdio MCP servers** run detached in their own process group on POSIX, and a stop kills the whole group.
+- **`scripts/okc.sh`** and the LaunchAgent are described in DESIGN.md §18 (D3). The service sets `OKC_SERVICE=1`, so the agent runs no cli when it runs as a service. The script finds its folder through any link.
+- **The credential store** has platform-neutral words in the texts that the owner sees. On macOS it is the login Keychain, and the setup docs use `security` where Windows uses `cmdkey`. When the agent first reads an entry that `security` made, macOS asks whether `node` may read it. The owner chooses **Always Allow**, and macOS asks again after each node update ([setup/integrations.md](setup/integrations.md)).
+
+### 12.3 M1: chats, search and spans
+
+The endpoints, their errors and their paging are in PHASE5-API.md (M1). The design of the chat list, the search index and the stream is in DESIGN.md §16.2 ("Chats and search", "Stream").
+
+- **Chat keys.** Each segment of `main` between two `session_reset` events is one chat, with the key `main@<id of its reset>` (`main@0` before the first reset). A background session is one chat. The key rules live in `src/dashboard/chat-keys.ts`, which chats, search and the stream share. The sort and the cursor of `/api/chats` are in SQL, and the numbers of a chat are read only for the chats of the page. With `q`, a page reads at most 500 background chats.
+- **Delivered text only.** A chat shows the owner messages, the guarded final reply of each run (its last `assistant_message` with no tool calls, or a turn whose call made an approval), the notes and the system events that the chat shows. The text of other tool turns was a draft, and the chat never got it. Search uses the same rule, so a `NO_REPLY` answer, a draft and a held reply give no hit.
+- **Search index.** `018_search.sql` makes `events_fts` (FTS5, trigram) with an insert trigger and a backfill, and the indexes `events_run` and `runs_started`. A payload that is not valid JSON gives no text, so the insert never fails and the event log stays append-only. A query of 3 or more characters is one quoted phrase, and a shorter one scans with `LIKE` (D6). NUL characters are dropped before the checks.
+- **Spans.** `/api/runs/:id/spans` computes the start and end of each span on the server. Child runs nest under their sub-agent span. A `sandbox` span is read from the rows of `020_sandbox.sql` only when the table has the columns that the spans use.
+- **Stream kinds.** `/api/stream` adds `model_call`, `tool_call`, `browser_step`, `approval` and `policy`, with ids and summaries only. A pending approval and a review or approve decision of a running run are read again on each poll, so a later verdict or approval goes out too.
+- **Paging and limits.** `/api/runs` gains `sessionKey` and `before`, and `/api/logs` gains `day` and `runId`. A `day` that is not a date of the calendar gives `400`. The limit and id rules are in `src/dashboard/params.ts`.
+
+### 12.4 M2: web chat
+
+The design is in DESIGN.md §10 (**web**), and the endpoints are in PHASE5-API.md (M2).
+
+- The web channel starts only when `DASHBOARD_TOKEN` is set, because it runs the main session as the owner with all its tools. Without the token every chat route answers `503`.
+- **Limits.** A message is 1 to 16,000 characters, and a text of only spaces gives `400`. Button `data` is at most 256 characters, and a `turnId` at most 200. The bodies are strict, so an unknown key gives `400`.
+- **Turns.** A `turnId` is the `messageId` of the inbound message (`web:<uuid>`, or `telegram:<message id>`). The router calls the turn hooks for every channel, so a run that Telegram started streams to the open web clients too. A stop of a turn that still waits in the queue gives `stopped: false`.
+- **Buttons** carry a mark from a key of each process, as Telegram buttons do. A press without a valid mark does nothing, so a button that the model wrote into a reply cannot resolve an approval. The marks are new after a restart.
+- **Proactive messages** never go to the web channel and never make it the saved `owner_chat`. A copy goes to the chat stream as a `reply` with `turnId: null`, so an open tab shows the approval card.
+- **Model text** is rendered as markdown with no raw HTML. No image loads without a click, and only `http(s)` links are clickable.
+
+### 12.5 M3: the shell and the design system
+
+- The shell (`web/src/shell/`) has an icon rail, a left nav with groups, a ⌘K command menu, a header with a breadcrumb, a filter bar, the main area, a details panel and a status bar (live state, running runs, pending approvals, cost today, the DEV badge). A nav group shows only when a view registers in it.
+- Routes stay in the hash. `web/src/routes.ts` is the registry, and each view folder registers its routes and its shell parts itself (PHASE5-API.md §4), so no shared file changes when a view is added.
+- The look is a warm off-white base with near-black ink, hairline rules, Instrument Serif for titles and Inter for UI text (`@fontsource`, D10), black pill primary buttons, and a matching warm dark theme. The theme, developer mode and the details panel are preferences of the browser, kept in localStorage (`web/src/shell/prefs.ts`).
+- Below 1100px the details panel is a drawer, and below 760px the rail and nav fold into a sheet. The pages work at 390px.
+- `api.ts`, `format.ts`, the event renderers, the status words and the SVG charts stayed. The pages from before phase 5 were restyled into the shell in place.
+
+### 12.6 M4 and M5: chats, activity, search and developer mode
+
+- **Chats** (`web/src/views/chats/`): the chat list under the Chats nav group, a transcript with a composer (send, stop, queued and running state), streamed text, inline approval cards, tool chips that open in developer mode, and a trace link for each turn. One shared subscriber (`web/src/chat-stream.ts`) holds the chat stream, because a browser allows six connections to one host. A reducer keeps the live turns across a failed reload or a reconnect.
+- **Activity** lists the background sessions by kind (D5). **Search** is a source of the ⌘K menu with grouped results, and it has a full page at `#/search?q=`.
+- **Developer mode** (D7, D8): the trace waterfall at `#/trace/:runId` with the cost and tokens of each span, the model-call inspector with the full input and output, the tool-call inspector with the policy decision, the reviewer verdict, the taint and the raw result, the MCP and Google request inspectors, and sub-agent nesting. The trace page is keyed by run, so a click on a span changes the page in place. The Sandbox view shows the live browser tasks, the step filmstrip, the trace zip and the code sandbox runs of M9.
+
+### 12.7 M7: deploy
+
+The runbook is [setup/aws.md](setup/aws.md), and a local trial is [setup/docker.md](setup/docker.md). The endpoints and the backends are in PHASE5-API.md (M7).
+
+- A multi-arch `Dockerfile` (Node 24 and Chrome), `deploy/compose.yaml` with a Tailscale sidecar, Litestream to S3 (`deploy/litestream.yml`), and a CI workflow (`.github/workflows/ci.yml`) that runs the ubuntu, macos and windows matrix and then builds the image for amd64 and arm64 (D12, D13).
+- **Secret stores** (D14): `secrets` in `okc.config.json` picks `keyring` (the default), `file` (mode 0600, not inside `paths.workspace` or `paths.skills`) or `aws` (one secret for each ref, named with the prefix `okc/` and an `@` escape for each character that AWS does not allow). The prefix `okc-host/` holds the env of the host and is refused as a secret name.
+- **Google on a server.** The server cannot do the sign-in, because Google answers to `127.0.0.1` of the machine that signs in. The desktop signs in, then `npm run google:push` sends the refresh token to `POST /api/google/accounts/:alias/token`. The server refreshes it once and runs the checks of a sign-in, and it revokes a token that fails them. The push never follows a redirect.
+- **One Telegram bot** (D15): the runbook (aws.md §10) moves the live role between hosts.
+- **Docker access moved to M9.** A socket proxy can create containers, so it must allow only the endpoints that the sandbox uses, and those came with the sandbox. The proxy service is not in `deploy/compose.yaml` yet, so the sandbox tool is off on the server (aws.md §12).
+
+### 12.8 M8: inbox jobs
+
+The endpoints, their `409` answers and the tools are in PHASE5-API.md (M8). The owner's guide is [setup/google.md](setup/google.md), section 4.
+
+- **The jobs are code.** Each job runs in the session `inbox:<job>:<runId>`, and each dashboard action in `inbox:action:<runId>`. The first event of each run is a `system_event` with its task, so the reviewer reads what the run may do. One run of a job goes at a time.
+- **Automations.** The payload is `{ type: 'inbox', job }`. The app installs three system automations one time: `inbox: daily digest` at 07:30 every day, `inbox: newsletter sweep` at 09:00 on Saturday and `inbox: subscription finder` at 10:00 on Sunday, in the time zone of the app. The owner changes them or turns them off on the Automations page, and the app never puts a deleted one back. A job that could read no account fails, so the scheduler backs off.
+- **The digest** reads the last two days of the inbox of each account, sorts the mail with a model on the utility slot into needs a reply, deadlines, bills and packages, stores the digest for the Inbox page and sends a short text to the owner. It asks for a draft for each mail that needs a reply, and for a calendar proposal for each course or bill deadline.
+- **Drafts** go to Gmail Drafts through `inbox_draft_reply`, which the reviewer checks. The app never sends a draft or a mail.
+- **Calendar proposals** are approvals of `inbox_create_event`, so the event is made only after the owner approves it. The event id comes from the proposal and a salt of the install, so a second run of an approved call finds the first event and makes no copy.
+- **The newsletter sweep** groups senders by `List-Id` or `From`, with read rates. An unsubscribe uses one-click (RFC 8058) or the https link, needs a DKIM signature of the From domain that covers `List-Unsubscribe`, and takes the link from the newest signed message. A `mailto` unsubscribe is only shown. An archive asks the owner and never adds a Gmail system label.
+- **The subscription finder** finds receipts and recurring charges and builds the table (merchant, amount, cadence, last charge, source mail, confidence). The monthly totals leave out cancelled and ignored rows. A later charge makes a cancelled subscription active again.
+- **Browser help.** An approved https unsubscribe or cancellation starts a browser run in `auto:inbox:<runId>` on the `main` slot, with the facts from mail in an untrusted block. Each form send asks the owner. The row stays pending while the run works, and goes back to `active` with an error when the run fails or the owner denies a step.
+- The tables are in `019_inbox.sql`. Without a `google` block the lists are empty and the `POST` routes give `503`.
+
+### 12.9 M9: code sandbox
+
+The decisions are in 5.8, the contract is in PHASE5-API.md (M9), and the owner's guide is [setup/sandbox.md](setup/sandbox.md).
+
+### 12.10 Owner setup for phase 5
+
+1. `.env`: `ANTHROPIC_API_KEY` and `DASHBOARD_TOKEN` (D11). Add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID` only on the live instance (D15).
+2. Google: the project, the APIs, the consent screen In production, a Desktop client, the `google` block and a sign-in for each account, as in [setup/google.md](setup/google.md). On macOS choose **Always Allow** for the Keychain prompt.
+3. A server, when wanted: [setup/aws.md](setup/aws.md).
+4. The code sandbox, when wanted: Docker and `npm run sandbox:image`, as in [setup/sandbox.md](setup/sandbox.md).
+5. A new Mac: the steps in order are in [setup/macos.md](setup/macos.md).
