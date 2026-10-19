@@ -12,26 +12,32 @@ import type {
 } from '../../../src/dashboard/types';
 import { useRef } from 'react';
 import { useApi } from '../api';
-import { Expand, Json, Load, Page, Panel, Status } from '../components';
+import { Expand, Load, Status } from '../components';
 import { EventView } from '../events';
 import { bytes, duration, ms, time, tokens, usd } from '../format';
+import { useDevMode } from '../shell/prefs';
+import { ButtonLink, CodeBlock, DetailsPanel, EmptyState, Facts, Page, Section } from '../ui';
 import { GoogleRequests } from './Google';
 import { McpMessages } from './Integrations';
-import { sessionHref } from './Runs';
+import { runHref, sessionHref } from './Runs';
+import './dev.css';
+
+// a body of the server as it is stored. a text stays as it is, and other json gets two spaces of indent.
+const asText = (value: unknown) => (typeof value === 'string' ? value : JSON.stringify(value, null, 2));
 
 function ModelCallBodyView({ id }: { id: number }) {
   const loaded = useApi<ModelCallBody>(`/api/model-calls/${id}`);
   return (
     <Load loaded={loaded}>
       {(body) => (
-        <div className="split">
+        <div className="run-split">
           <div>
             <h3>Request</h3>
-            <Json value={body.request} />
+            <CodeBlock text={asText(body.request)} label="request" />
           </div>
           <div>
             <h3>Response</h3>
-            <Json value={body.response} />
+            <CodeBlock text={asText(body.response)} label="response" />
           </div>
         </div>
       )}
@@ -48,7 +54,7 @@ function CatalogView({ hash }: { hash: string }) {
           <p className="muted">
             Catalog {hash.slice(0, 12)}, first offered {time(catalog.createdAt)}
           </p>
-          <Json value={catalog.tools} />
+          <CodeBlock text={asText(catalog.tools)} label="tools" />
         </>
       )}
     </Load>
@@ -59,7 +65,11 @@ function ModelCallItem({ call, tools, reviews = [] }: { call: ModelCallRow; tool
   return (
     <li className={`step step-model${call.error ? ' is-error' : ''}`}>
       <div className="step-head">
-        <strong>model call</strong> {call.provider}/{call.model} <span className="muted">slot {call.slot}</span>
+        <strong>model call</strong>{' '}
+        <span className="run-model">
+          {call.provider}/{call.model}
+        </span>{' '}
+        <span className="muted">slot {call.slot}</span>
         {call.error ? <Status value="failed" /> : <span className="muted">{call.stopReason}</span>}
       </div>
       <div className="metrics">
@@ -135,7 +145,9 @@ function ChildView({ link }: { link: SubagentLink }) {
     <div className="subagent">
       <div className="step-head">
         <strong>sub-agent</strong> {link.profile} {link.status ? <Status value={link.status} /> : <span className="muted">not started</span>}
-        <a href={`#/runs/${encodeURIComponent(link.childRunId)}`}>run {link.childRunId.slice(0, 8)}</a>
+        <a className="dev-id" href={runHref(link.childRunId)}>
+          run {link.childRunId.slice(0, 8)}
+        </a>
         <span className="muted">{usd(link.costUsd)}</span>
       </div>
       <Expand label="timeline of the sub-agent">{() => <ChildTimeline id={link.childRunId} />}</Expand>
@@ -149,10 +161,10 @@ function BlobText({ hash }: { hash: string }) {
     <Load loaded={loaded}>
       {(blob) => (
         <>
-          <p className="muted">
-            {bytes(blob.size)}, blob {hash.slice(0, 12)}
+          <p className="muted small">
+            {bytes(blob.size)}, blob <code className="dev-id">{hash.slice(0, 12)}</code>
           </p>
-          <Json value={blob.text} />
+          <CodeBlock text={blob.text} label="raw result" />
         </>
       )}
     </Load>
@@ -183,30 +195,26 @@ function ResultView({ call }: { call: ToolCallRow }) {
   ) : none ? (
     <p className="muted">The tool gave no result.</p>
   ) : (
-    <Json value={call.output.content} />
+    <CodeBlock text={call.output.content} label="raw result" />
   );
   return (
     <>
       {call.truncated ? (
         <p className="muted">
-          The model got a preview and the handle <code>{call.resultHandle}</code>. It can read the full result with
-          result_read.
+          The model got a preview and the handle <code>{call.resultHandle}</code>. It can read the full result with result_read.
         </p>
       ) : null}
-      {call.untrustedSource ? (
-        <p className="muted">The result came from {call.untrustedSource}, so the model got it inside an untrusted wrapper.</p>
-      ) : null}
+      {call.untrustedSource ? <p className="muted">The result came from {call.untrustedSource}, so the model got it inside an untrusted wrapper.</p> : null}
       {OUTCOME_NOTES[call.outcome] ? <p className="muted">{OUTCOME_NOTES[call.outcome]}</p> : null}
       {call.rawResultBlob || lost || none ? null : <p className="muted">The model saw the raw result unchanged.</p>}
-      <div className="split">
+      <div className="run-split">
         <div>
           <h3>Raw result</h3>
           {raw}
         </div>
         <div>
           <h3>What the model saw</h3>
-          <p className="muted">{bytes(new TextEncoder().encode(call.output.content).length)}</p>
-          <Json value={call.output.content} />
+          <CodeBlock text={call.output.content} label="model input" />
         </div>
       </div>
     </>
@@ -215,7 +223,7 @@ function ResultView({ call }: { call: ToolCallRow }) {
 
 function PolicyView({ policy }: { policy: PolicyDecisionRow }) {
   return (
-    <dl className="facts">
+    <dl className="facts run-policy">
       <dt>Decision</dt>
       <dd>
         <Status value={policy.decision} /> by {policy.rule}
@@ -288,10 +296,10 @@ function ToolCallItem({ call }: { call: ToolCallRow }) {
         ) : null}
         {call.riskLevel ? <span className="muted">risk {call.riskLevel}</span> : null}
         {call.tainted ? <Status value="tainted" /> : null}
-        {call.resultHandle ? <code>{call.resultHandle}</code> : null}
+        {call.resultHandle ? <code className="dev-id">{call.resultHandle}</code> : null}
         <span className="muted">{ms(call.durationMs)}</span>
       </div>
-      <Expand label="input">{() => <Json value={call.input} />}</Expand>
+      <Expand label="input">{() => <CodeBlock text={asText(call.input)} label="input" />}</Expand>
       <Expand label="result and what the model saw">{() => <ResultView call={call} />}</Expand>
       {call.policy ? <Expand label="policy decision">{() => <PolicyView policy={call.policy!} />}</Expand> : null}
       {call.source === 'google' ? (
@@ -323,7 +331,78 @@ function ChildCost({ timeline }: { timeline: TimelineItem[] }) {
   );
 }
 
-export function RunDetail({ id }: { id: string }) {
+// the facts of the run sit in the details panel, so the timeline gets the width of the main area.
+function RunPanel({ detail }: { detail: RunDetailData }) {
+  const { run, parent, timeline } = detail;
+  const devMode = useDevMode();
+  return (
+    <DetailsPanel title="Run">
+      <Facts
+        layout="stacked"
+        items={[
+          parent && {
+            label: 'Started by',
+            value: (
+              <>
+                call <code className="dev-id">{parent.toolCallId}</code> of <a href={runHref(parent.parentRunId)}>run {parent.parentRunId.slice(0, 8)}</a>, as
+                the {parent.profile} sub-agent
+              </>
+            ),
+          },
+          { label: 'Run id', value: <code className="dev-id">{run.id}</code> },
+          {
+            label: 'Status',
+            value: (
+              <>
+                <Status value={run.status} /> {run.error ? <span className="error-text">{run.error}</span> : null}
+              </>
+            ),
+          },
+          { label: 'Session', value: <a href={sessionHref(run.sessionKey)}>{run.sessionKey}</a> },
+          {
+            label: 'Trigger',
+            value: (
+              <>
+                {run.trigger}, slot {run.slot}
+              </>
+            ),
+          },
+          {
+            label: 'Time',
+            value: (
+              <>
+                {time(run.startedAt)}, {duration(run.startedAt, run.endedAt)}
+              </>
+            ),
+          },
+          {
+            label: 'Cost',
+            value: (
+              <>
+                {usd(run.costUsd)} in {run.modelCalls} model calls and {run.toolCalls} tool calls
+                <ChildCost timeline={timeline} />
+              </>
+            ),
+          },
+        ]}
+      />
+      {/* a phone has no room for these links in the header, so the panel has them too. */}
+      <div className="dev-panel-actions dev-narrow-only">
+        {devMode ? (
+          <ButtonLink href={`#/logs?runId=${encodeURIComponent(run.id)}`} size="sm" icon="log">
+            Logs of this run
+          </ButtonLink>
+        ) : null}
+        <ButtonLink href="#/runs" size="sm" icon="run">
+          All runs
+        </ButtonLink>
+      </div>
+    </DetailsPanel>
+  );
+}
+
+export function RunDetail({ id }: { id: string; query?: URLSearchParams }) {
+  const devMode = useDevMode();
   // the status and the cost of each child show on this page too, and they change while the parent waits.
   // a delegate call can wait for the reviewer before its child starts, and the parent writes no event until the child
   // ends. so a running page also loads again when a new child run of any parent starts.
@@ -336,57 +415,51 @@ export function RunDetail({ id }: { id: string }) {
   runs.current = new Set([id, ...childrenOf(loaded.data?.timeline ?? []).map((child) => child.childRunId)]);
   running.current = loaded.data?.run.status === 'running';
   return (
-    <Page title={`Run ${id.slice(0, 8)}`} actions={<a href="#/runs">All runs</a>}>
+    <Page
+      title={`Run ${id.slice(0, 8)}`}
+      crumbs={[{ label: 'Runs', href: '#/runs' }]}
+      width="full"
+      actions={
+        <>
+          {devMode ? (
+            <>
+              <a className="run-logs-link dev-wide-only" href={`#/logs?runId=${encodeURIComponent(id)}`}>
+                Logs of this run
+              </a>
+              <ButtonLink href={`#/trace/${encodeURIComponent(id)}`} size="sm" icon="trace">
+                Trace
+              </ButtonLink>
+            </>
+          ) : null}
+          <ButtonLink href="#/runs" size="sm" variant="ghost" className="dev-wide-only">
+            All runs
+          </ButtonLink>
+        </>
+      }
+    >
       <Load loaded={loaded}>
-        {({ run, parent, timeline, events }) => (
+        {(detail) => (
           <>
-            <dl className="facts wide">
-              {parent ? (
-                <>
-                  <dt>Started by</dt>
-                  <dd>
-                    call {parent.toolCallId} of <a href={`#/runs/${encodeURIComponent(parent.parentRunId)}`}>run {parent.parentRunId.slice(0, 8)}</a>, as the{' '}
-                    {parent.profile} sub-agent
-                  </dd>
-                </>
-              ) : null}
-              <dt>Status</dt>
-              <dd>
-                <Status value={run.status} /> {run.error ? <span className="error-text">{run.error}</span> : null}
-              </dd>
-              <dt>Session</dt>
-              <dd>
-                <a href={sessionHref(run.sessionKey)}>{run.sessionKey}</a>
-              </dd>
-              <dt>Trigger</dt>
-              <dd>
-                {run.trigger}, slot {run.slot}
-              </dd>
-              <dt>Time</dt>
-              <dd>
-                {time(run.startedAt)}, {duration(run.startedAt, run.endedAt)}
-              </dd>
-              <dt>Cost</dt>
-              <dd>
-                {usd(run.costUsd)} in {run.modelCalls} model calls and {run.toolCalls} tool calls
-                <ChildCost timeline={timeline} />
-              </dd>
-            </dl>
-            <Panel title="Timeline">
-              <Timeline items={timeline} />
-            </Panel>
-            {run.trigger === 'poll' ? (
-              <Panel title="Requests of this poll">
-                <GoogleRequests query={`runId=${encodeURIComponent(run.id)}`} />
-              </Panel>
+            <RunPanel detail={detail} />
+            <Section title="Timeline" description={`${detail.timeline.length} steps, oldest first.`}>
+              {detail.timeline.length ? <Timeline items={detail.timeline} /> : <EmptyState icon="run" title="This run made no model or tool call." />}
+            </Section>
+            {detail.run.trigger === 'poll' ? (
+              <Section title="Requests of this poll">
+                <GoogleRequests query={`runId=${encodeURIComponent(detail.run.id)}`} />
+              </Section>
             ) : null}
-            <Panel title="Events of this run">
-              <div className="log">
-                {events.map((event) => (
-                  <EventView key={event.id} event={event} />
-                ))}
-              </div>
-            </Panel>
+            <Section title="Events of this run">
+              {detail.events.length ? (
+                <div className="log">
+                  {detail.events.map((event) => (
+                    <EventView key={event.id} event={event} />
+                  ))}
+                </div>
+              ) : (
+                <EmptyState icon="log" title="This run wrote no events." />
+              )}
+            </Section>
           </>
         )}
       </Load>
