@@ -46,10 +46,3 @@ export interface JobRun {
 
 // the answer of an action on a sender or a subscription. the dashboard turns an error into its status and its text.
 export type ActionResult = { ok: true; response: InboxActionResponse } | { ok: false; status: 404 | 409 | 503; error: string };
-
-// the not-built error of a stub. a work package replaces each stub with the real function.
-export class NotBuilt extends Error {
-  constructor(what: string) {
-    super(`${what} is not built yet`);
-  }
-}

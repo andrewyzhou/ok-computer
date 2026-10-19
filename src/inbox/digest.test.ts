@@ -267,9 +267,9 @@ describe('runDigest', () => {
 
   it('completes when the drafts and the proposals modules throw', async () => {
     h = await createInboxHarness();
-    mocks.checkDrafts.mockRejectedValue(new Error('checkDrafts is not built yet'));
-    mocks.draftReply.mockRejectedValue(new Error('draftReply is not built yet'));
-    mocks.proposeEvent.mockRejectedValue(new Error('proposeEvent is not built yet'));
+    mocks.checkDrafts.mockRejectedValue(new Error('the drafts read failed'));
+    mocks.draftReply.mockRejectedValue(new Error('the draft write failed'));
+    mocks.proposeEvent.mockRejectedValue(new Error('the calendar read failed'));
     await deliverAll(h);
     const result = await h.run('digest');
     expect(result.status).toBe('completed');

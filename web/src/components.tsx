@@ -48,6 +48,18 @@ const STATUS_TONE: Record<string, string> = {
   seen: 'muted',
   filtered: 'muted',
   stale: 'muted',
+  active: 'info',
+  kept: 'muted',
+  unsubscribe_pending: 'warning',
+  unsubscribed: 'good',
+  cancel_pending: 'warning',
+  cancelled: 'good',
+  ignored: 'muted',
+  drafted: 'good',
+  discarded: 'muted',
+  sent_by_owner: 'muted',
+  proposed: 'warning',
+  created: 'good',
 };
 
 // a status always shows its word, so the color is never the only signal.
