@@ -1,0 +1,25 @@
+# the image is built from a clean copy of the code. nothing of a run and no secret goes into the build context.
+node_modules
+**/node_modules
+dist
+web/dist
+data
+.env
+.env.*
+okc.*.json
+*.sqlite
+*.sqlite-*
+**/*.sqlite
+**/*.sqlite-*
+.git
+.github
+.claude
+explorations
+skills
+# the profile of the owner is personal. the image holds only the example.
+workspace/USER.md
+coverage
+test-results
+playwright-report
+*.log
+**/*.log
