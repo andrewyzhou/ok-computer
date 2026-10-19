@@ -1060,7 +1060,7 @@ The design is in DESIGN.md §10 (**web**), and the endpoints are in PHASE5-API.m
 
 ### 12.5 M3: the shell and the design system
 
-- The shell (`web/src/shell/`) has an icon rail, a left nav with groups, a ⌘K command menu, a header with a breadcrumb, a filter bar, the main area, a details panel and a status bar (live state, running runs, pending approvals, cost today, the DEV badge). A nav group shows only when a view registers in it.
+- The shell (`web/src/shell/`) has an icon rail, a left nav with groups, a ⌘K command menu, a header with a breadcrumb, a filter bar, the main area, a details panel and a status bar (live state, running runs, pending approvals, cost today, the DEV badge). A nav group shows only when a view registers in it. The Dev group (Runs, Sessions, Policy, Cost, Logs, Sandbox) shows in the nav and the ⌘K menu only in developer mode, but the hash of a dev page opens it in each mode.
 - Routes stay in the hash. `web/src/routes.ts` is the registry, and each view folder registers its routes and its shell parts itself (PHASE5-API.md §4), so no shared file changes when a view is added.
 - The look is a warm off-white base with near-black ink, hairline rules, Instrument Serif for titles and Inter for UI text (`@fontsource`, D10), black pill primary buttons, and a matching warm dark theme. The theme, developer mode and the details panel are preferences of the browser, kept in localStorage (`web/src/shell/prefs.ts`).
 - Below 1100px the details panel is a drawer, and below 760px the rail and nav fold into a sheet. The pages work at 390px.
