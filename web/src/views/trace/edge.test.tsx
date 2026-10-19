@@ -6,6 +6,7 @@ import { seedDashboard } from '../../../../test/seed';
 import { setPrefs } from '../../shell/prefs';
 import { FakeEventSource, inMain, installEventSource, json, openApp, stubFetch, type StubRoutes } from '../../testing';
 import { runOneSpans } from './fixture';
+import { forgetTraces } from './TracePage';
 import { barGeometry, isErrorSpan, kindIcon, runIdsOf, traceHref, visibleRows } from './tree';
 
 // the edge cases of the trace: a span kind from a newer server, a server error that is not a 404, the keys of the
@@ -18,6 +19,18 @@ let spans: RunSpans;
 
 const spansCalls = (calls: Array<{ url: string }>) => calls.filter((call) => call.url === '/api/runs/run-1/spans');
 
+// the first load can still have a request on the way when the waterfall draws, so a count of the spans calls waits
+// until the count holds for a while.
+async function settledCount(calls: Array<{ url: string }>): Promise<number> {
+  let last = -1;
+  for (;;) {
+    const now = spansCalls(calls).length;
+    if (now === last) return now;
+    last = now;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 function open(extra: StubRoutes = {}) {
   return stubFetch(seeded.dashboard, {
     'GET /api/runs/:id/spans': ({ params }) => (params.id === 'run-1' ? spans : json({ error: 'run not found' }, 404)),
@@ -27,6 +40,7 @@ function open(extra: StubRoutes = {}) {
 
 beforeEach(async () => {
   setPrefs({ theme: 'system', devMode: true, detailsHidden: false });
+  forgetTraces();
   spans = runOneSpans();
   seeded = await seedDashboard();
 });
@@ -120,7 +134,9 @@ describe('the trace page', () => {
     const calls = open();
     openApp('#/trace/run-1');
     await inMain().findByTestId('span-model:1');
-    const before = spansCalls(calls).length;
+    // the page shows the ended trace of the server before the message comes, not an open one from before.
+    await waitFor(() => expect(inMain().queryByText(/so far/)).toBeNull());
+    const before = await settledCount(calls);
     act(() =>
       FakeEventSource.find('/api/stream')!.emit({
         kind: 'tool_call',

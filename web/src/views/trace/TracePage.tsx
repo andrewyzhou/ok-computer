@@ -17,6 +17,12 @@ import './trace.css';
 const lastSpans = new Map<string, RunSpans>();
 const collapsedOf = new Map<string, Set<string>>();
 
+// the tests start each case with an empty memory, so a trace of one test never draws in the next one.
+export function forgetTraces(): void {
+  lastSpans.clear();
+  collapsedOf.clear();
+}
+
 // a message about the run or one of its child runs. a run row does not name its parent, so a new sub-agent run that
 // is not in the trace reloads an open trace one time. when the reload does not show it, it belongs to another run, and
 // its later messages are left out.
