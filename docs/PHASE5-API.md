@@ -80,13 +80,14 @@ An approval that an inbox action asks for shows on the Approvals page, in the st
 | Method | Path | Query / body | Response | Notes |
 |---|---|---|---|---|
 | GET | `/api/sandbox` | `SandboxQuery`: `runId`, `status`, `before` (exec id), `limit` 1–200 (default 50) | `SandboxPage` | Before paging. `status.available` is false when Docker is missing. That is not an error. |
-| GET | `/api/sandbox/execs/:id` | none | `SandboxExecDetail` | `404 sandbox exec not found`. The full output and the files load through the existing `GET /api/blobs/:hash`. |
+| GET | `/api/sandbox/execs/:id` | none | `SandboxExecDetail` | `404 sandbox exec not found`. The full stdout and stderr load through the existing `GET /api/blobs/:hash`. |
+| GET | `/api/sandbox/files/:hash` | none | the bytes of the file | Only a blob that a `sandbox_files` row names, with the `mime` of that row, `x-content-type-options: nosniff` and a sandboxing CSP. A type other than png, jpeg, gif or webp gets `content-disposition: attachment`. `404 sandbox file not found`. |
 
-The tool is `sandbox_exec` (input in `src/sandbox/input.ts`) with risk `exec`, which `decide()` sends to the reviewer (rule `risk:exec`). A call with `network.allow` is `external` through `riskFor`, so the owner approves it. `SandboxExecRow.language`, `SandboxExecDetail.policy` (the decision, the reviewer verdict and the approval of the tool call), `imageId`, `containerId`, `endedAt`, and `SandboxStatus.network` with `networkReason` were added by M9.
+The tool is `sandbox_exec` (input in `src/sandbox/input.ts`) with risk `exec`, which `decide()` sends to the reviewer (rule `risk:exec`). A call with `network.allow` is `external` through `riskFor`, so the owner approves it. `SandboxExecRow.language`, `SandboxExecDetail.policy` (the decision, the reviewer verdict and the approval of the tool call), `imageId`, `containerId`, `endedAt`, `egress` (`SandboxEgress`: the hosts that the proxy let through and the requests that it refused, or null without network), `notCollected`, and `SandboxStatus.network` with `networkReason` were added by M9. `command` holds the redacted code.
 
 The waterfall (M1) gives a `sandbox` span with `ref.sandboxExecId` for each exec of a run.
 
-The default image is `okc-sandbox:1` (`SANDBOX_IMAGE` in `src/sandbox/limits.ts`), built from `sandbox/Dockerfile` by `npm run sandbox:image`. It runs as `1000:1000` with the home `/work`, has no entrypoint, and holds the relay of the network mode at `/opt/okc/relay.mjs`. A change of what the image holds changes the tag in `limits.ts` and in the `sandbox:image` script together. The decisions are in DESIGN-NEXT 5.8.
+The default image is `okc-sandbox:1` (`SANDBOX_IMAGE` in `src/sandbox/limits.ts`), built from `sandbox/Dockerfile` by `npm run sandbox:image`. It runs as `1000:1000` with the home `/work`, the create request resets the entrypoint of its base (`Entrypoint: [""]`), and it holds the relay of the network mode at `/opt/okc/relay.mjs`. A change of what the image holds changes the tag in `limits.ts` and in the `sandbox:image` script together. The decisions are in DESIGN-NEXT 5.8.
 
 ## 3. Event streams
 
@@ -136,7 +137,7 @@ Each team edits only its own files. A shared file gets only the change written h
 | M5 | `web/src/views/trace/`, `web/src/views/sandbox/` | none |
 | M7 | `Dockerfile`, `compose.yaml`, `litestream.yml`, `.github/workflows/`, `docs/setup/aws.md`, `src/dashboard/deploy.ts`, `src/secrets/` (the file and aws backends) | `types.ts` (its section), `src/config/schema.ts` (`secrets`), the store choice in `src/app.ts` |
 | M8 | `src/db/migrations/019_inbox.sql`, `src/inbox/`, `src/dashboard/inbox.ts`, `web/src/views/inbox/` | `types.ts` (its section), the tool registration in `src/app.ts`, `src/google/` for new Gmail and Calendar calls |
-| M9 | `src/db/migrations/020_sandbox.sql`, `src/sandbox/`, `src/dashboard/sandbox.ts`, `sandbox/` (the image), `docs/setup/sandbox.md` | `types.ts` (its section), the tool registration in `src/app.ts` and its policy rule |
+| M9 | `src/db/migrations/020_sandbox.sql`, `src/sandbox/`, `src/dashboard/sandbox.ts`, `sandbox/` (the image), `docs/setup/sandbox.md` | `types.ts` (its section), the tool registration in `src/app.ts` and its policy rule, `src/browser/proxy.ts` (the `EgressProxyOptions` with `allowHost` and the listen address; the browser team reviews it), `src/main.ts` (`sandbox: {}`), the `sandbox:image` script of `package.json`, `RISK_TEXT.exec` in `src/integrations/discovery.ts`, and `README.md` |
 
 - **Route modules.** Each new module `src/dashboard/<area>.ts` exports `mount<Area>(server, deps)`. The stub exists already, and `server.ts` already mounts it with one line after the sign-in check and before the `/api/*` 404. A team fills its stub and does not edit those lines. A team that needs a new part of `App` adds one key to the `app` pick in `DashboardDeps`.
 - **Types.** Each team adds fields only in its own section of `types.ts`. A new shape that another team reads goes there too, and nothing in that file imports anything.

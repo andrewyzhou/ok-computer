@@ -4,7 +4,9 @@
 # on) and the tag in the sandbox:image script of package.json. the new tag makes sure that an app never runs an old
 # image by mistake.
 #
-# the base is pinned by digest, so each build starts from the same bytes. the digest is the digest of the multi-arch
+# the base is pinned by digest, so each build starts from the same bytes. the debian packages are not pinned to versions,
+# so a build on another day can hold other package versions. each exec keeps the image id that ran it, and
+# docs/setup/sandbox.md says how to note the id of a build. the digest is the digest of the multi-arch
 # index, so the same line works on amd64 and arm64. to update it:
 #   1. run: docker buildx imagetools inspect node:24-trixie-slim
 #   2. copy the first "Digest:" line (the index, not one platform) into the FROM line below.
@@ -60,4 +62,5 @@ ENV HOME=/work \
 USER 1000:1000
 WORKDIR /work
 
-# there is no ENTRYPOINT and no CMD. the runner gives the command of each call, for example python3 -c <code>.
+# the base sets the entrypoint docker-entrypoint.sh. the runner and the relay reset it (Entrypoint [""] in the create
+# request), so the command of each call runs as it is, for example timeout -s KILL 65 python3 -c <code>. there is no CMD.

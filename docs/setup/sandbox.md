@@ -7,7 +7,7 @@ The `sandbox_exec` tool lets the agent run short programs in bash, Python or Nod
 - **macOS and Windows:** install Docker Desktop and start it once. On Windows, Docker Desktop runs through WSL2.
 - **Linux:** install the Docker engine from the packages of your distribution or of Docker. Add your user to the `docker` group, or set `DOCKER_HOST` to a socket that your user can open (section 4).
 
-The sandbox needs Docker 25 or later (engine API v1.44). Check with:
+The sandbox needs Docker 25 or later (engine API v1.44). The network mode (section 7) needs Docker 26 or later. On Docker Desktop for Windows, use Linux containers (the default), not Windows containers. Check with:
 
 ```
 docker version
@@ -22,6 +22,12 @@ npm run sandbox:image
 ```
 
 This builds `okc-sandbox:1` from [sandbox/Dockerfile](../../sandbox/Dockerfile). The image has Node 24, Python 3 with numpy, pandas, matplotlib and scipy, and the tools `jq`, `sqlite3`, csvkit, `bc`, `file` and `unzip`. The user in the image is `sandbox` (uid and gid 1000), and its home is `/work`. Build it again only when the Dockerfile changes; a new image definition always gets a new tag.
+
+The base image is pinned by its digest, but the Debian packages are not pinned to versions, so two builds of `okc-sandbox:1` on different days can hold other package versions. Each exec in the trace keeps the image id that ran it (`imageId`), so the trace always says which build ran a call. Note the id of your build:
+
+```
+docker image inspect --format '{{.Id}}' okc-sandbox:1
+```
 
 Then restart the app: `okc restart`. The app checks Docker only at the start (section 5).
 
@@ -38,7 +44,7 @@ When developer mode is on the dashboard, the page **Dev > Sandbox** shows the sa
 To check the image by hand, with the same settings that the app uses:
 
 ```
-docker run --rm --read-only --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges --network none --tmpfs /tmp:rw,noexec,nosuid,size=64m -v okc-test-work:/work okc-sandbox:1 bash -c 'id -u; python3 -c "import numpy, pandas, matplotlib; print(1)"; node -e "console.log(process.version)"; jq --version; sqlite3 --version; find / -xdev -perm /6000 -type f'
+docker run --rm --read-only --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges --network none --tmpfs /tmp:rw,noexec,nosuid,size=64m --entrypoint "" -v okc-test-work:/work okc-sandbox:1 bash -c 'id -u; python3 -c "import numpy, pandas, matplotlib; print(1)"; node -e "console.log(process.version)"; jq --version; sqlite3 --version; find / -xdev -perm /6000 -type f'
 docker volume rm okc-test-work
 ```
 
@@ -53,6 +59,7 @@ When `available` is false, `reason` says why. The tool is then off until the cau
 | `the code sandbox did not start` | The app found no Docker socket, or `DOCKER_HOST` has a form that the app does not support (for example an address that needs TLS) | Install and start Docker (section 1), or correct `DOCKER_HOST` (section 4) |
 | `docker does not answer` | The socket is there, but Docker does not reply within 3 seconds. Docker Desktop is not running, the engine is stopped, your user cannot open the socket, or the engine is older than Docker 25 | Start Docker Desktop or the engine. On Linux, check the `docker` group. Update an old engine |
 | `the image okc-sandbox:1 is missing` | Docker runs, but the image is not built | `npm run sandbox:image` |
+| `docker runs windows containers` | Docker Desktop for Windows is set to Windows containers | Switch Docker Desktop to Linux containers |
 | `the code sandbox is not set up in this process` | This process does not use the sandbox, for example a test | Nothing |
 
 `network` is false and `networkReason` says why when the network mode (section 7) cannot work on this Docker host. Calls without network access still work.
@@ -61,12 +68,13 @@ When `available` is false, `reason` says why. The tool is then off until the cau
 
 The app talks to the Docker engine API through its socket. It does not use the `docker` command. It looks in this order and uses the first one that it finds:
 
-1. `DOCKER_HOST`, as `unix:///path/to/docker.sock` or `tcp://host:port`. Put it in `.env` if your Docker is not in a usual place, for example rootless Docker on Linux: `DOCKER_HOST=unix:///run/user/1000/docker.sock`.
+1. `DOCKER_HOST`, as `unix:///path/to/docker.sock`, `npipe:////./pipe/name` (Windows) or `tcp://host:port`. Put it in `.env` if your Docker is not in a usual place.
 2. On macOS, the socket of Docker Desktop: `~/.docker/run/docker.sock`.
 3. `/var/run/docker.sock`.
-4. On Windows, the pipe `//./pipe/docker_engine`.
+4. On Linux, the socket of Docker Desktop, `~/.docker/desktop/docker.sock`, and then the socket of rootless Docker, `$XDG_RUNTIME_DIR/docker.sock`.
+5. On Windows, the pipe `//./pipe/docker_engine`.
 
-TLS is not supported. A `tcp://` address must be a plain connection to a host that only you can reach. The app does not read Docker contexts, so `docker context use` has no effect on it.
+TLS is not supported. A `tcp://` address is a plain connection, so the code and the files of each call travel unencrypted. Use it only for an engine on this machine; the app logs a warning for a `tcp://` address on another host. The app does not read Docker contexts, so `docker context use` has no effect on it. Set `DOCKER_HOST` to the socket of the context instead.
 
 ## 5. The limits
 
@@ -79,13 +87,14 @@ Each call gets a fresh container with these settings. They are fixed in `src/san
 | Root filesystem | read only |
 | `/tmp` | 64 MB in memory, programs cannot run from it |
 | Network | none, unless the call asks for the network mode (section 7) |
-| CPU | 1 CPU; a call can ask for up to 2 |
+| CPU | 1 CPU; a call can ask for up to 2 with `cpus` |
 | Memory | 512 MB with no swap; a call can ask for up to 2,048 MB |
 | Processes | 128 |
-| Time | 60 seconds; a call can ask for up to 5 minutes. Then the container is killed |
+| Time | 60 seconds; a call can ask for up to 5 minutes. Then the container is killed. The command also runs under `timeout` with this limit and 5 seconds more, so a container that a crash of the app left behind ends by itself |
 | Output | 1 MB each for stdout and stderr. The rest is counted but not kept |
 | Code | 100,000 bytes for each call. Put a longer program in a file |
-| Files | 20 files in and 20 out, 10 MB each, 20 MB for each call |
+| Files | 20 files in and 20 out, 10 MB each, 20 MB for each call. A file or folder name has at most 255 bytes |
+| Disk | `/work` is measured every 5 seconds while the code runs; a call that writes more than 256 MB is killed, and `/work` is emptied. No single file can grow over 256 MB |
 | Calls at the same time | 2. A third call gets an error at once |
 
 Docker is checked at the start only, so the list of tools stays the same while the app runs. If you start Docker or build the image after the app started, run `okc restart`.
@@ -95,9 +104,9 @@ Docker is checked at the start only, so the list of tools stays the same while t
 `/work` is a Docker volume, not a folder on your PC. All calls of one task share it, so a call can use the files of an earlier call. A task is the conversation from one `/new` to the next, so `/new` gives a fresh `/work`.
 
 - A volume that no call used for a day is removed.
-- A volume over 256 MB after a call is removed, and the result of that call tells the agent that `/work` is empty again.
+- A volume over 256 MB, during or after a call, is removed, and the result of that call tells the agent that `/work` is empty again.
 
-Files go in and out through the blob store of the app. The agent gives the files of a call as text or as the blob of an earlier result. After the code ends, only the paths that the call names in `collect` come back, each as a blob. A text file is redacted like every other text in the trace; other files are kept as they are. Python packages that `pip install` adds go into `/work/.local`, so they stay for the task.
+Files go in and out through the blob store of the app. The agent gives the files of a call as text or as the blob of an earlier sandbox result; a blob from another place (a screenshot or an attachment, for example) is refused. After the code ends, only the paths that the call names in `collect` come back, each as a blob. A text file is redacted like every other text in the trace; other files are kept as they are. So a text file with a value that looks like a key or token comes back with that value masked, and a later call that gets the file back as a blob gets the masked text, not the bytes that the code wrote. To keep exact bytes from one call to the next, leave the file in `/work`. The dashboard serves the bytes of each file at `GET /api/sandbox/files/:hash`. Python packages that `pip install` adds go into `/work/.local`, so they stay for the task.
 
 ## 7. The network mode
 
@@ -106,7 +115,9 @@ A call can ask for network access to a short list of hosts, for example `pypi.or
 - You approve each such call with a button, as for every action that leaves the PC. The card shows the code and the hosts.
 - The container reaches the internet only through the egress proxy of the app, and only the hosts of the list (and their subdomains). A direct connection to any address fails. The proxy also refuses addresses on your own machine and your local network.
 - A host that is too broad, for example `com` or `co.uk`, is refused before the call runs.
-- What the call reads from the network is outside text, so the session is tainted (see the reviewer in the README).
+- What the call reads from the network is outside text, so the session is tainted (see the reviewer in the README). A file that such a call collected stays outside text when a later call reads it.
+- The trace keeps the hosts that the proxy let through and the requests that it refused, and the dashboard shows them with the exec.
+- While a call runs, its relay container is on the default bridge of Docker, so another container on that bridge could send requests through it to the hosts of the call. Run no untrusted containers on the default bridge while the agent uses the network mode.
 
 ## 8. What the agent can do
 
@@ -138,6 +149,7 @@ To remove the image: `docker image rm okc-sandbox:1`. The tool is then off after
 |---|---|---|
 | The agent says that it cannot run code | The tool is off | Read the reason in `GET /api/sandbox` (section 3), fix it, then `okc restart` |
 | A call ends with `timeout` | The code ran longer than its time limit | Ask for a shorter task, or for a longer limit (up to 5 minutes) |
-| A call ends with `failed` and says that the memory ran out | The code used more memory than its limit | Ask for more memory (up to 2,048 MB), or use less data at a time |
+| A call ends with `killed` and says that it used more than N MB of memory | The code used more memory than its limit | Ask for more memory (up to 2,048 MB), or use less data at a time |
+| A call ends with `killed` and says that it wrote more than 256 MB to `/work` | The code wrote too much data | Write less, or delete files that the task no longer needs |
 | `/work` is empty in a later call | `/new` started a new task, the volume was idle for a day, or it grew over 256 MB | Give the files again |
 | A call with network access fails with a reason about the network | The network mode cannot work on this Docker host | Read `networkReason` in `GET /api/sandbox`. Calls without network access still work |
