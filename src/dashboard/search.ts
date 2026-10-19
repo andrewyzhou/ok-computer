@@ -5,7 +5,7 @@ import type { Db } from '../db/index.js';
 import { type SearchHit as MemoryHit, searchMemory, syncMemoryIndex } from '../memory/search.js';
 import { ftsPhrase, likePattern, searchMode, snippetOf } from '../search/fts.js';
 import { chatKeyOf, chatKindOf } from './chat-keys.js';
-import { deliveredTexts } from './chats.js';
+import { deliveredTexts, withoutWrapper } from './chats.js';
 import { limitOf } from './params.js';
 import type { DashboardDeps } from './server.js';
 import type { SearchGroup, SearchHit, SearchResults, SearchScope } from './types.js';
@@ -148,6 +148,16 @@ function toolHits({ db, q, mode, pattern, take }: Context): SearchHit[] {
        ORDER BY tc.createdAt DESC, tc.id DESC LIMIT ?`,
     )
     .all(where.param, take);
+  // a call that ran after an approval writes no tool_result. its output goes into a system event for the model, so
+  // the row of the call is matched on its own output. the output is the text that the model saw.
+  const approved = db
+    .prepare(
+      `SELECT tc.id, tc.name, tc.runId, tc.createdAt, json_extract(tc.output, '$.content') AS text, r.sessionKey FROM tool_calls tc
+       LEFT JOIN runs r ON r.id = tc.runId
+       WHERE tc.toolCallId LIKE 'approval-%' AND json_extract(tc.output, '$.content') LIKE ? ESCAPE '\\'
+       ORDER BY tc.createdAt DESC, tc.id DESC LIMIT ?`,
+    )
+    .all(pattern, take);
   const names = db
     .prepare(
       `SELECT tc.id, tc.name, tc.runId, tc.createdAt, tc.name AS text, r.sessionKey FROM tool_calls tc
@@ -157,12 +167,12 @@ function toolHits({ db, q, mode, pattern, take }: Context): SearchHit[] {
     .all(pattern, take);
   // a row found by its result and by its name is one hit, and the result gives the better snippet.
   const rows = new Map<number, Row>();
-  for (const row of [...results, ...names]) if (!rows.has(Number(row.id))) rows.set(Number(row.id), row);
+  for (const row of [...results, ...approved, ...names]) if (!rows.has(Number(row.id))) rows.set(Number(row.id), row);
   return [...rows.values()]
     .map((row) => ({ row, at: String(row.createdAt), id: Number(row.id) }))
     .sort(newestFirst)
     .map(({ row }) =>
-      hit('tools', q, String(row.text), {
+      hit('tools', q, withoutWrapper(String(row.text)), {
         id: String(row.id),
         title: String(row.name),
         sessionKey: str(row.sessionKey),

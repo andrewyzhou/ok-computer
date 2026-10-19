@@ -82,7 +82,7 @@ describe('the spans of a run', () => {
     ];
     for (const [rowId, name, toolCallId, start, end] of tools) {
       expect(timing(`tool:${rowId}`)).toEqual([start, end]);
-      expect(spans.get(`tool:${rowId}`)).toMatchObject({ parentId: turnOne, label: name, status: 'ok', ref: { kind: 'tool', toolCallRowId: rowId, toolCallId } });
+      expect(spans.get(`tool:${rowId}`)).toMatchObject({ parentId: turnOne, label: name, status: 'ran', ref: { kind: 'tool', toolCallRowId: rowId, toolCallId } });
     }
     expect([...spans.keys()].some((id) => id.startsWith('tool:pending:'))).toBe(false);
 
@@ -332,6 +332,66 @@ describe('the spans of a run', () => {
     expect(result.spans.filter((span) => span.parentId === `model:${id}`)).toEqual([]);
   });
 
+  it('gives a tool span the outcome word of the run detail, and nests an approved run inside its approval', async () => {
+    const { t } = await seedM1();
+    const db = t.db;
+    const origin = Date.parse('2026-10-12T20:00:00.000Z');
+    const at = (ms: number) => new Date(origin + ms).toISOString();
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt, endedAt) VALUES ('ask-1', 'main', 'message', 'main', 'completed', ?, ?)").run(at(0), at(9_000));
+    const asked = ['tc-ask', 'tc-deny', 'tc-hold', 'tc-bad'].map((id) => ({ id, name: 'notes__add_note', input: {} }));
+    const turn = Number(
+      db
+        .prepare(
+          `INSERT INTO model_calls (runId, slot, provider, model, latencyMs, stopReason, request, response, createdAt)
+           VALUES ('ask-1', 'main', 'fake', 'm', 1000, 'tool_use', '{}', ?, ?) RETURNING id`,
+        )
+        .get(JSON.stringify({ toolCalls: asked }), at(1_000))!.id,
+    );
+    const approvalId = Number(
+      db
+        .prepare(
+          `INSERT INTO approvals (runId, toolName, input, summary, status, requestedAt, resolvedAt)
+           VALUES ('ask-1', 'notes__add_note', '{}', 'notes__add_note {}', 'approved', ?, ?) RETURNING id`,
+        )
+        .get(at(1_500), at(5_000))!.id,
+    );
+    const decision = (toolCallId: string, kind: string, verdict: string | null, approval: number | null) =>
+      Number(
+        db
+          .prepare(
+            `INSERT INTO policy_decisions (runId, toolCallId, toolName, decision, rule, reason, reviewerVerdict, approvalId, createdAt)
+             VALUES ('ask-1', ?, 'notes__add_note', ?, 'seeded', 'seeded', ?, ?, ?) RETURNING id`,
+          )
+          .get(toolCallId, kind, verdict, approval, at(1_100))!.id,
+      );
+    const tool = (toolCallId: string, isError: number, decisionId: number | null, riskLevel: string | null, endMs: number) =>
+      Number(
+        db
+          .prepare(
+            `INSERT INTO tool_calls (runId, toolCallId, name, input, output, isError, durationMs, createdAt, riskLevel, policyDecisionId)
+             VALUES ('ask-1', ?, 'notes__add_note', '{}', '{"content":"x"}', ?, 100, ?, ?, ?) RETURNING id`,
+          )
+          .get(toolCallId, isError, at(endMs), riskLevel, decisionId)!.id,
+      );
+    const approve = decision('tc-ask', 'approve', null, approvalId);
+    const askRow = tool('tc-ask', 1, approve, 'external', 1_500);
+    const denyRow = tool('tc-deny', 1, decision('tc-deny', 'deny', null, null), 'external', 1_500);
+    const holdRow = tool('tc-hold', 1, decision('tc-hold', 'review', 'hold', null), 'write', 1_500);
+    const badRow = tool('tc-bad', 1, null, null, 1_500);
+    const ranRow = tool(`approval-${approvalId}`, 0, approve, 'external', 6_000);
+
+    const result = runSpans(db, 'ask-1')!;
+    const spans = byId(result);
+    const status = (row: number) => spans.get(`tool:${row}`)!.status;
+    expect([status(askRow), status(denyRow), status(holdRow), status(badRow), status(ranRow)]).toEqual(['approved', 'denied', 'held', 'invalid', 'ran']);
+    // the waterfall reads ask, approval, run.
+    expect(spans.get(`tool:${askRow}`)!.parentId).toBe(`model:${turn}`);
+    expect(spans.get(`approval:${approvalId}`)!.parentId).toBe(`tool:${askRow}`);
+    expect(spans.get(`tool:${ranRow}`)!.parentId).toBe(`approval:${approvalId}`);
+    expectSorted(result.spans);
+    expectParents(result.spans);
+  });
+
   it('answers 404 for a run that does not exist', async () => {
     const { dashboard } = await seedM1();
     const response = await dashboard.request('/api/runs/nosuch/spans');
@@ -350,7 +410,7 @@ describe('the spans of a run', () => {
     const tools = result.spans.filter((span) => span.kind === 'tool');
     expect(tools.map((span) => span.label).sort()).toEqual(['goal_update', 'goals_set']);
     for (const tool of tools) expect(tool.parentId).toMatch(/^model:\d+$/);
-    expect(tools.find((span) => span.label === 'goal_update')!.status).toBe('error');
+    expect(tools.find((span) => span.label === 'goal_update')!.status).toBe('failed');
     expect(result.spans.filter((span) => span.kind === 'approval')).toHaveLength(2);
     expectSorted(result.spans);
     expectParents(result.spans);

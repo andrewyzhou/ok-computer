@@ -1,6 +1,7 @@
 import type { Hono } from 'hono';
 import type { Db } from '../db/index.js';
 import { REVIEW_TOOL } from '../policy/reviewer.js';
+import { outcomeOf } from './outcome.js';
 import { toDecision, toMcpMessage } from './queries.js';
 import type { DashboardDeps } from './server.js';
 import type { RunSpans, Span, SpanKind, SpanRef } from './types.js';
@@ -218,19 +219,50 @@ function collect(walk: Walk, runId: string, parentId: string): void {
   // a tool call goes inside the latest model call that asked for it. an approved call has no such model call.
   const askedBy = (toolCallId: string) => turns.findLast((turn) => turn.asked.has(toolCallId))?.id ?? parentId;
 
+  // an approval goes inside the tool call that asked for it, and the call that ran after the approval goes inside the
+  // approval, so the waterfall reads ask, approval, run. a pending approval has no run yet. the row of the run has the
+  // call id approval-<id> and the same decision, so the query skips it, and an approval never sits inside its own run.
+  const approvals = db
+    .prepare(
+      `SELECT approvals.*, (SELECT tool_calls.id FROM tool_calls JOIN policy_decisions ON policy_decisions.id = tool_calls.policyDecisionId
+         WHERE policy_decisions.approvalId = approvals.id AND tool_calls.toolCallId NOT LIKE 'approval-%' ORDER BY tool_calls.id LIMIT 1) AS toolRowId
+       FROM approvals WHERE runId = ? ORDER BY id`,
+    )
+    .all(runId);
+  const approvalIds = new Set(approvals.map((row) => Number(row.id)));
+  const parentOfCall = (toolCallId: string) => {
+    const approved = /^approval-(\d+)$/.exec(toolCallId);
+    return approved && approvalIds.has(Number(approved[1])) ? `approval:${approved[1]}` : askedBy(toolCallId);
+  };
+
   // the tool span of each call id, so the rows that a tool call made can find it. the first row of an id wins.
   const toolByCall = new Map<string, string>();
   const toolRows = new Set<number>();
-  for (const row of db.prepare('SELECT * FROM tool_calls WHERE runId = ? ORDER BY id').all(runId)) {
+  // the status is the outcome word of the run detail, so a denied, held or invalid call reads the same in both views.
+  const toolQuery = db.prepare(
+    `SELECT tool_calls.*, d.decision AS decision, d.reviewerVerdict AS reviewerVerdict, d.approvalId AS approvalId, a.status AS approvalStatus
+     FROM tool_calls LEFT JOIN policy_decisions d ON d.id = tool_calls.policyDecisionId LEFT JOIN approvals a ON a.id = d.approvalId
+     WHERE tool_calls.runId = ? ORDER BY tool_calls.id`,
+  );
+  for (const row of toolQuery.all(runId)) {
     const toolCallId = String(row.toolCallId);
     const made = span(walk, {
       id: `tool:${Number(row.id)}`,
-      parentId: askedBy(toolCallId),
+      parentId: parentOfCall(toolCallId),
       kind: 'tool',
       label: String(row.name),
       startAt: minus(String(row.createdAt), Number(row.durationMs)),
       endAt: String(row.createdAt),
-      status: str(row.outcome) ?? (row.isError === 1 ? 'error' : 'ok'),
+      status: outcomeOf({
+        toolCallId,
+        isError: row.isError === 1,
+        stored: str(row.outcome),
+        riskLevel: str(row.riskLevel),
+        decision:
+          row.policyDecisionId === null || row.decision === null
+            ? null
+            : { decision: String(row.decision), reviewerVerdict: str(row.reviewerVerdict), approvalId: num(row.approvalId), approvalStatus: str(row.approvalStatus) },
+      }),
       ref: { kind: 'tool', toolCallRowId: Number(row.id), toolCallId },
     });
     toolRows.add(Number(row.id));
@@ -281,14 +313,6 @@ function collect(walk: Walk, runId: string, parentId: string): void {
     });
   }
 
-  // an approval goes inside the tool call that ran under its decision. a pending one has no tool call yet.
-  const approvals = db
-    .prepare(
-      `SELECT approvals.*, (SELECT tool_calls.id FROM tool_calls JOIN policy_decisions ON policy_decisions.id = tool_calls.policyDecisionId
-         WHERE policy_decisions.approvalId = approvals.id ORDER BY tool_calls.id LIMIT 1) AS toolRowId
-       FROM approvals WHERE runId = ? ORDER BY id`,
-    )
-    .all(runId);
   for (const row of approvals) {
     const toolRowId = num(row.toolRowId);
     span(walk, {
