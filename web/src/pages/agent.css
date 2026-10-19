@@ -1,0 +1,187 @@
+/* the classes of the agent pages: approvals, goals, memory, automations and signals. each class has the prefix of its
+   page, and each color and size comes from the tokens of styles.css. */
+
+/* approvals */
+
+.approvals-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 760px;
+}
+.approvals-input {
+  margin-top: var(--space-2);
+  padding-left: 2px;
+  font-size: var(--text-sm);
+}
+.approvals-summary {
+  white-space: pre-wrap;
+}
+
+/* goals */
+
+.goals-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.goals-list li {
+  border-bottom: 1px solid var(--rule);
+}
+.goals-item {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  width: 100%;
+  padding: 10px 8px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.goals-item:hover {
+  background: var(--bg-hover);
+}
+.goals-item.is-selected {
+  background: var(--bg-active);
+  box-shadow: inset 2px 0 0 var(--ink);
+}
+.goals-id {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.goals-title {
+  flex: 1 1 12em;
+  min-width: 0;
+}
+.goals-meta {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.goals-note {
+  flex-basis: 100%;
+  padding-left: 0;
+}
+.goals-day + .goals-day {
+  margin-top: var(--space-5);
+}
+.goals-day-title {
+  margin: 0 0 var(--space-1);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* memory */
+
+.memory-path {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+.memory-text {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+/* automations */
+
+.automations-name {
+  display: block;
+  font-weight: 500;
+}
+.automations-failures {
+  display: block;
+  margin-top: 2px;
+}
+.automations-actions {
+  display: inline-flex;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+.automations-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 760px;
+}
+.automations-checklist textarea {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  padding: var(--space-3);
+  resize: vertical;
+}
+.automations-checklist p {
+  margin: 0;
+}
+.automations-checklist-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.automations-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.automations-history li {
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--rule);
+}
+.automations-history-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+}
+.automations-history-run {
+  margin-left: auto;
+}
+
+/* signals */
+
+.signals-id {
+  display: block;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.signals-seen {
+  display: block;
+  white-space: nowrap;
+}
+.signals-call {
+  margin-left: var(--space-2);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.signals-detectors {
+  list-style: none;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  font-size: var(--text-sm);
+}
+.signals-quote {
+  margin-top: var(--space-1);
+  color: var(--ink-2);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  line-height: 1.35;
+}
