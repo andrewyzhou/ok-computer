@@ -63,6 +63,25 @@ describe('the keys of the shell', () => {
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     expect(JSON.parse(localStorage.getItem('okc.prefs')!).devMode).toBe(false);
   });
+
+  it('leaves Ctrl+K to the text fields on a mac, and names the key of the platform', async () => {
+    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    try {
+      openApp('#/cost');
+      await inMain().findByText('Cost by day');
+      expect(screen.getByRole('button', { name: 'Developer mode' }).getAttribute('title')).toBe('Developer mode (⌘.)');
+      expect(fireEvent.keyDown(window, { key: 'k', ctrlKey: true })).toBe(true);
+      expect(screen.queryByRole('dialog', { name: 'Command menu' })).toBeNull();
+      fireEvent.keyDown(window, { key: 'k', metaKey: true });
+      expect(screen.getByRole('dialog', { name: 'Command menu' })).toBeTruthy();
+    } finally {
+      platform.mockRestore();
+    }
+    cleanup();
+    openApp('#/cost');
+    await inMain().findByText('Cost by day');
+    expect(screen.getByRole('button', { name: 'Developer mode' }).getAttribute('title')).toBe('Developer mode (Ctrl+.)');
+  });
 });
 
 describe('the command menu', () => {
@@ -181,5 +200,39 @@ describe('the stored preferences', () => {
     expect(document.documentElement.dataset.theme).toBe('light');
     setPrefs({ theme: 'system' });
     expect(document.documentElement.dataset.theme).toBeUndefined();
+  });
+});
+
+describe('the layout of the shell', () => {
+  it('drops the dialog role of the nav sheet when the window gets wide', async () => {
+    let width = 500;
+    const queries = new Set<{ max: number; listeners: Set<() => void> }>();
+    vi.stubGlobal('matchMedia', (text: string) => {
+      const max = Number(/max-width: ([\d.]+)px/.exec(text)![1]);
+      const query = { max, listeners: new Set<() => void>() };
+      queries.add(query);
+      return {
+        get matches() {
+          return width <= max;
+        },
+        addEventListener: (_: string, listener: () => void) => query.listeners.add(listener),
+        removeEventListener: (_: string, listener: () => void) => query.listeners.delete(listener),
+      };
+    });
+    try {
+      openApp('#/cost');
+      await inMain().findByText('Cost by day');
+      fireEvent.click(screen.getByRole('button', { name: 'Open the navigation' }));
+      expect(screen.getByRole('dialog', { name: 'navigation' })).toBeTruthy();
+      width = 1400;
+      act(() => {
+        for (const query of queries) for (const listener of query.listeners) listener();
+      });
+      expect(screen.queryByRole('dialog', { name: 'navigation' })).toBeNull();
+      expect(document.querySelector('.app')!.getAttribute('data-sheet')).toBe('closed');
+    } finally {
+      vi.unstubAllGlobals();
+      installEventSource();
+    }
   });
 });

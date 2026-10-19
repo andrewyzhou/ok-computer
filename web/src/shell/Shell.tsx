@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { navSections, pageKeyOf, type RouteDef, type RouteMatch } from '../routes';
 import { hasMod, IconButton, useDialogFocus } from '../ui';
 import { CommandMenu } from './CommandMenu';
@@ -14,6 +14,21 @@ const SHEET_BELOW = 760;
 
 function narrowerThan(width: number): boolean {
   return typeof globalThis.matchMedia === 'function' && globalThis.matchMedia(`(max-width: ${width - 0.02}px)`).matches;
+}
+
+// the same test as narrowerThan, as state that follows a resize, so the dialog roles leave a panel that is inline
+// again.
+function useNarrowerThan(width: number): boolean {
+  return useSyncExternalStore(
+    (listener) => {
+      if (typeof globalThis.matchMedia !== 'function') return () => {};
+      const query = globalThis.matchMedia(`(max-width: ${width - 0.02}px)`);
+      query.addEventListener?.('change', listener);
+      return () => query.removeEventListener?.('change', listener);
+    },
+    () => narrowerThan(width),
+    () => false,
+  );
 }
 
 function typing(target: EventTarget | null): boolean {
@@ -108,8 +123,17 @@ export function Shell({ match, routes, children }: { match: RouteMatch | undefin
     return () => removeEventListener('keydown', onKey);
   }, []);
 
-  const sheetActive = sheetOpen && narrowerThan(SHEET_BELOW);
-  const drawerActive = detailsOpen && narrowerThan(DRAWER_BELOW);
+  const sheetNarrow = useNarrowerThan(SHEET_BELOW);
+  const drawerNarrow = useNarrowerThan(DRAWER_BELOW);
+  // a sheet or a drawer that the owner opened on a narrow screen closes when the screen gets wide.
+  useEffect(() => {
+    if (!sheetNarrow) setSheetOpen(false);
+  }, [sheetNarrow]);
+  useEffect(() => {
+    if (!drawerNarrow) setDetailsOpen(false);
+  }, [drawerNarrow]);
+  const sheetActive = sheetOpen && sheetNarrow;
+  const drawerActive = detailsOpen && drawerNarrow;
   useDialogFocus(sheet, sheetActive, () => setSheetOpen(false));
   useDialogFocus(drawer, drawerActive, () => setDetailsOpen(false));
 

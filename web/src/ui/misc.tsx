@@ -20,9 +20,11 @@ export function isMac(): boolean {
   return /mac|iphone|ipad/i.test(globalThis.navigator?.platform ?? '');
 }
 
-// the command key on a mac and the control key on other systems. the shell takes both on each system.
+// the command key on a mac and the control key on other systems. a mac takes only the command key, because control
+// with a letter is an editing key in its text fields, for example Ctrl+K deletes to the end of the line. the other
+// systems take both.
 export function hasMod(event: { metaKey: boolean; ctrlKey: boolean }): boolean {
-  return event.metaKey || event.ctrlKey;
+  return isMac() ? event.metaKey : event.metaKey || event.ctrlKey;
 }
 
 const KEY_TEXT: Record<string, () => string> = {

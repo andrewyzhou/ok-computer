@@ -113,7 +113,20 @@ export function RunLink({ runId, children }: { runId: string | null; children?: 
   return <a href={`#/runs/${encodeURIComponent(runId)}`}>{children ?? `run ${runId.slice(0, 8)}`}</a>;
 }
 
+// the links come from mail that anyone can send, so only a web or mail link is a link. any other scheme, for example
+// data: or file:, shows as text that the owner can read but not click.
+const SAFE_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
+
+export function safeHref(href: string): boolean {
+  try {
+    return SAFE_SCHEMES.has(new URL(href).protocol);
+  } catch {
+    return false;
+  }
+}
+
 export function ExternalLink({ href, children }: { href: string; children?: ReactNode }) {
+  if (!safeHref(href)) return <code className="inbox-external">{children ?? href}</code>;
   return (
     <a href={href} target="_blank" rel="noreferrer" className="inbox-external">
       {children ?? href}

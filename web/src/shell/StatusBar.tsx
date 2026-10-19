@@ -2,7 +2,7 @@ import type { ApprovalRow, Overview, RunRow } from '../../../src/dashboard/types
 import { useApi, useConnection, type Connection } from '../api';
 import { usd } from '../format';
 import { Icon } from '../icons';
-import { KeyHint } from '../ui';
+import { isMac, KeyHint } from '../ui';
 import { cycleTheme, toggleDevMode, usePrefs, type ThemePref } from './prefs';
 
 const CONNECTION_TONE: Record<Connection, string> = { live: 'good', connecting: 'warning', offline: 'critical' };
@@ -50,7 +50,7 @@ export function StatusBar({ onSearch }: { onSearch: () => void }) {
         className={devMode ? 'sb-item dev-toggle is-on' : 'sb-item dev-toggle'}
         aria-pressed={devMode}
         aria-label="Developer mode"
-        title="Developer mode (⌘.)"
+        title={`Developer mode (${isMac() ? '⌘' : 'Ctrl+'}.)`}
         onClick={toggleDevMode}
       >
         {devMode ? 'DEV' : 'dev off'}

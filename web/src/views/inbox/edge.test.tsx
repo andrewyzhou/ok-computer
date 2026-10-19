@@ -6,7 +6,8 @@ import { setPrefs } from '../../shell/prefs';
 import { inMain, installEventSource, json, openApp, stubFetch, type StubRoutes } from '../../testing';
 import { sendersPage, sendersPage2 } from './fixtures';
 import { unsubscribeBlock } from './Newsletters';
-import { money, withQuery } from './shared';
+import { render } from '@testing-library/react';
+import { ExternalLink, money, safeHref, withQuery } from './shared';
 
 // the edge cases of the inbox views: the bounds of the archive form, an action that the server refuses, a list that
 // fails to load, and the helpers of the shared file.
@@ -118,5 +119,22 @@ describe('the helpers of the inbox', () => {
     expect(unsubscribeBlock({ ...base, state: 'unsubscribe_pending' })).toMatch(/approval/);
     expect(unsubscribeBlock({ ...base, state: 'active', unsubscribe: { ...base.unsubscribe, method: 'none' } })).toMatch(/no unsubscribe/);
     expect(unsubscribeBlock({ ...base, state: 'active', unsubscribe: { ...base.unsubscribe, method: 'one_click' } })).toBeNull();
+  });
+});
+
+describe('the links from mail', () => {
+  it('links only a web or mail address, and shows any other scheme as text', () => {
+    for (const good of ['https://example.com/cancel', 'http://example.com', 'mailto:stop@example.com']) expect(safeHref(good), good).toBe(true);
+    for (const bad of ['data:text/html,hi', 'file:///etc/passwd', 'javascript:alert(1)', 'myapp://do', 'not a url']) expect(safeHref(bad), bad).toBe(false);
+    const { container } = render(
+      <>
+        <ExternalLink href="https://example.com/cancel" />
+        <ExternalLink href="data:text/html,hi" />
+      </>,
+    );
+    const links = container.querySelectorAll('a');
+    expect(links).toHaveLength(1);
+    expect(links[0]!.getAttribute('rel')).toBe('noreferrer');
+    expect(container.querySelector('code')!.textContent).toBe('data:text/html,hi');
   });
 });
