@@ -15,8 +15,3 @@ export function idOf(value: string | undefined): number | undefined {
 }
 
 export const isDay = (value: string | undefined): value is string => value !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(value);
-
-// a stub of a part that a work package of phase 5 m1 builds. a route that reaches it answers 500 until then.
-export function notBuilt(what: string): never {
-  throw new Error(`${what} is not built yet`);
-}
