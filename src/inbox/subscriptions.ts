@@ -267,8 +267,14 @@ interface ReceiptRow {
   cancelUrl: string | null;
 }
 
+// a cancelled row keeps the time of its cancellation in updatedAt, so a later charge can be compared with it. a charge
+// after the cancellation shows that the merchant still bills the owner, so the cancellation did not work.
+const chargedAgain = "inbox_subscriptions.state = 'cancelled' AND excluded.lastChargeAt > inbox_subscriptions.updatedAt";
+
 // buildSubscriptions writes one row for each merchant of the account whose charges repeat. the owner's choices on a
-// row (its state, its approval and its help run) are never written here.
+// row (its state, its approval and its help run) are never written here, with one exception: a cancelled row that a
+// later charge proves wrong is active again, with the error text, so it counts in the totals and the owner can ask
+// again. the help run ends well when it completes, also when it could not cancel, so this check is what catches that.
 function buildSubscriptions(ctx: InboxContext, run: JobRun, alias: string): number {
   const receipts = ctx.db
     .prepare(
@@ -288,11 +294,12 @@ function buildSubscriptions(ctx: InboxContext, run: JobRun, alias: string): numb
        lastChargeAt = excluded.lastChargeAt, nextChargeAt = excluded.nextChargeAt, sourceMessageId = excluded.sourceMessageId,
        sourceSubject = excluded.sourceSubject, sourceMessageIds = excluded.sourceMessageIds, confidence = excluded.confidence,
        cancelUrl = excluded.cancelUrl, runId = excluded.runId,
-       error = CASE WHEN inbox_subscriptions.state = 'cancelled' AND excluded.lastChargeAt > inbox_subscriptions.updatedAt
-         THEN 'a charge came after the cancellation' ELSE inbox_subscriptions.error END,
-       updatedAt = CASE WHEN inbox_subscriptions.state = 'cancelled' THEN inbox_subscriptions.updatedAt ELSE excluded.updatedAt END`,
+       state = CASE WHEN ${chargedAgain} THEN 'active' ELSE inbox_subscriptions.state END,
+       approvalId = CASE WHEN ${chargedAgain} THEN NULL ELSE inbox_subscriptions.approvalId END,
+       helpSessionKey = CASE WHEN ${chargedAgain} THEN NULL ELSE inbox_subscriptions.helpSessionKey END,
+       error = CASE WHEN ${chargedAgain} THEN 'a charge came after the cancellation' ELSE inbox_subscriptions.error END,
+       updatedAt = CASE WHEN inbox_subscriptions.state = 'cancelled' AND NOT (${chargedAgain}) THEN inbox_subscriptions.updatedAt ELSE excluded.updatedAt END`,
   );
-  // a cancelled row keeps the time of its cancellation in updatedAt, so a later charge can be compared with it.
   const at = ctx.clock().toISOString();
   let count = 0;
   for (const [key, group] of groups) {

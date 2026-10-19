@@ -97,8 +97,9 @@ export function settleApprovals(db: Db, now: Date): void {
 
 // settleHelpRow writes the outcome of an ended help run to its row. a run that did not complete, or whose every
 // approval the owner denied or let expire, gives the row back, so the owner can ask again. a run that still has an
-// approval that waits leaves the row pending. a completed run marks the row done. the later sweep or scan checks it
-// again: mail that still comes, or a charge after the cancellation, shows on the row.
+// approval that waits leaves the row pending. a completed run marks the row done, also when the run told the owner
+// that it could not finish, so the later sweep or scan checks it again: mail that still comes marks the sender failed,
+// and a charge after the cancellation makes the subscription active again. either way the owner can ask again.
 export function settleHelpRow(db: Db, kind: HelpKind, id: number, sessionKey: string, run: { status: string; error: string | null }, at: string): void {
   const { table, pending, done } = HELP[kind];
   const back = (error: string) =>

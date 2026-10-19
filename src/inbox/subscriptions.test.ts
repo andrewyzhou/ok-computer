@@ -240,7 +240,7 @@ describe('scanSubscriptions', () => {
     expect(JSON.stringify(h.modelCalls[0]!.messages)).not.toContain('2025-08-01');
   });
 
-  it('notes a charge that came after a cancellation and keeps the state', async () => {
+  it('makes a cancelled row active again when a charge came after the cancellation', async () => {
     await setup();
     deliverMonthly();
     h.script.push(step([charge(1), charge(2), charge(3)]));
@@ -251,8 +251,21 @@ describe('scanSubscriptions', () => {
     h.script.push(step([charge(1)]));
     await h.run('subscriptions');
     expect(h.rows('SELECT state, error, lastChargeAt, updatedAt FROM inbox_subscriptions')).toEqual([
-      { state: 'cancelled', error: 'a charge came after the cancellation', lastChargeAt: '2026-11-10T12:00:00.000Z', updatedAt: '2026-10-12T00:00:00.000Z' },
+      { state: 'active', error: 'a charge came after the cancellation', lastChargeAt: '2026-11-10T12:00:00.000Z', updatedAt: '2026-11-11T00:00:00.000Z' },
     ]);
+  });
+
+  it('keeps a cancelled row cancelled when no charge came after the cancellation', async () => {
+    await setup();
+    deliverMonthly();
+    h.script.push(step([charge(1), charge(2), charge(3)]));
+    await h.run('subscriptions');
+    h.google.db.prepare("UPDATE inbox_subscriptions SET state = 'cancelled', updatedAt = '2026-11-12T00:00:00.000Z'").run();
+    h.google.fake.deliver('personal', receipt('r4', '2026-11-10T12:00:00Z'));
+    h.google.now.value = new Date('2026-11-13T00:00:00Z');
+    h.script.push(step([charge(1)]));
+    await h.run('subscriptions');
+    expect(h.rows('SELECT state, error, updatedAt FROM inbox_subscriptions')).toEqual([{ state: 'cancelled', error: null, updatedAt: '2026-11-12T00:00:00.000Z' }]);
   });
 
   // the mail tries to make the model and the app act. the charge that the model gives is only data: the link to
@@ -315,6 +328,26 @@ describe('the cancel and ignore actions', () => {
     expect(row).toEqual({ state: 'cancelled', helpSessionKey: h.agentRuns[0]!.sessionKey });
     expect(await requestCancel(h.ctx, id)).toEqual({ ok: false, status: 409, error: 'this subscription is cancelled' });
     expect(h.google.fake.sent).toEqual([]);
+  });
+
+  // a help run that reached a login wall tells the owner with message_owner and completes with no approval. the row is
+  // cancelled then, and the next charge shows that it was not, so the owner can ask again.
+  it('lets the owner ask again when a charge came after a help run that could not cancel', async () => {
+    const id = await withSubscription();
+    await requestCancel(h.ctx, id);
+    await h.approve(1);
+    await h.ctx.queue.drain();
+    expect(h.agentRuns).toHaveLength(1);
+    expect(h.rows('SELECT state FROM inbox_subscriptions')).toEqual([{ state: 'cancelled' }]);
+    expect(await requestCancel(h.ctx, id)).toEqual({ ok: false, status: 409, error: 'this subscription is cancelled' });
+    h.google.fake.deliver('personal', receipt('r3', '2026-11-10T12:00:00Z'));
+    h.google.now.value = new Date('2026-11-11T00:00:00Z');
+    h.script.push(step([charge(1)]));
+    await h.run('subscriptions');
+    expect(h.rows('SELECT state, error, approvalId, helpSessionKey FROM inbox_subscriptions')).toEqual([
+      { state: 'active', error: 'a charge came after the cancellation', approvalId: null, helpSessionKey: null },
+    ]);
+    expect(await requestCancel(h.ctx, id)).toMatchObject({ ok: true, response: { status: 'pending_approval', approvalId: 2 } });
   });
 
   it('gives the row back when the owner denies the cancellation', async () => {
