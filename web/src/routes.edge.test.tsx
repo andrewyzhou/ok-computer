@@ -61,7 +61,7 @@ describe('the routes of the contract', () => {
 
   it('marks the developer routes of the contract devOnly, and leaves the rest open in each mode', () => {
     const devOnly = ROUTES.filter((route) => route.devOnly).map((route) => route.path).sort();
-    expect(devOnly).toEqual(['sandbox', 'sandbox/browser/:taskId', 'sandbox/code/:execId', 'trace/:runId', 'trace/:runId/:spanId'].sort());
+    expect(devOnly).toEqual(['runs', 'sessions', 'policy', 'cost', 'logs', 'sandbox', 'sandbox/browser/:taskId', 'sandbox/code/:execId', 'trace/:runId', 'trace/:runId/:spanId'].sort());
   });
 
   it('has one route for each path, and a known nav group for each route', () => {

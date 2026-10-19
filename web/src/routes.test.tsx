@@ -55,8 +55,9 @@ describe('the route registry', () => {
     const routes = ROUTES;
     const dev = (on: boolean) => navSections(on, routes).find((s) => s.group === 'dev')?.items.map((r) => r.label);
     expect(dev(true)).toEqual(['Runs', 'Sessions', 'Policy', 'Cost', 'Logs', 'Sandbox']);
-    expect(dev(false)).toEqual(['Runs', 'Sessions', 'Policy', 'Cost', 'Logs']);
-    expect(navSections(false).map((s) => s.group)).toEqual(['today', 'inbox', 'chats', 'activity', 'agent', 'connections', 'dev']);
+    expect(dev(false)).toBeUndefined();
+    expect(navSections(false).map((s) => s.group)).toEqual(['today', 'inbox', 'chats', 'activity', 'agent', 'connections']);
+    expect(navSections(true).map((s) => s.group)).toEqual(['today', 'inbox', 'chats', 'activity', 'agent', 'connections', 'dev']);
   });
 
   it('renders a core detail page with its param', async () => {
