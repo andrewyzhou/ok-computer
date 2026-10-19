@@ -15,6 +15,17 @@ import { failed, sendDraft } from './send.js';
 import { requestContext } from './trace.js';
 import { oneClick as realOneClick, planUnsubscribe, unsubscribeTargets, type OneClickResult } from './unsubscribe.js';
 
+
+// the time of an event for its line: the start, then the end. the start comes first, because the merged list sorts by
+// it. google gives an all-day event the next day as its end, so the line names the last day of the event.
+function whenOf(event: { start?: { dateTime?: string | null; date?: string | null }; end?: { dateTime?: string | null; date?: string | null } }): string {
+  const start = event.start?.dateTime ?? event.start?.date ?? 'unknown start';
+  if (event.start?.dateTime) return event.end?.dateTime ? `${start} to ${event.end.dateTime}` : start;
+  const end = event.end?.date;
+  if (!end) return `${start} all day`;
+  const last = new Date(Date.parse(`${end}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+  return last > start ? `${start} to ${last} all day` : `${start} all day`;
+}
 export const GOOGLE = 'google';
 const name = (tool: string) => `${GOOGLE}__${tool}`;
 
@@ -251,7 +262,7 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
     }),
     googleTool({
       name: name('calendar_list_events'),
-      description: 'List calendar events between two times (ISO 8601 with an offset). account all merges every account.',
+      description: 'List calendar events between two times (ISO 8601 with an offset). Each line gives the start and the end. account all merges every account.',
       input: z.object({ account: anyAccount, from: time, to: time }),
       risk: 'read',
       untrustedOutput: 'calendar',
@@ -259,7 +270,7 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
         const output = await eachAccount(name('calendar_list_events'), which, 'calendar', async (apis, alias) => {
           const { data } = await apis.calendar.events.list({ calendarId: 'primary', timeMin: from, timeMax: to, singleEvents: true, orderBy: 'startTime', maxResults: 100 });
           return (data.items ?? []).map((event) =>
-            cleanLine(`${event.start?.dateTime ?? event.start?.date} [${alias}] id=${event.id} ${event.summary ?? '(no title)'}${event.organizer?.self ? '' : ` (from ${event.organizer?.email ?? 'someone'})`}`, 400),
+            cleanLine(`${whenOf(event)} [${alias}] id=${event.id} ${event.summary ?? '(no title)'}${event.organizer?.self ? '' : ` (from ${event.organizer?.email ?? 'someone'})`}`, 400),
           );
         });
         // the lines of all accounts sort by time, so a merged list reads as one day. google writes each start in the

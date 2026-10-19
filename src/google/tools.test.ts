@@ -401,6 +401,20 @@ describe('read tools', () => {
     expect(out.untrustedSource).toBe('gmail:personal, gmail:school');
   });
 
+  // the agent could not say when an event ends, because each line had only its start.
+  it('gives the start and the end of each event, and the last day of an all-day event', async () => {
+    const call = await setup();
+    const own = { organizer: { self: true } };
+    h.fake.upsertEvent('personal', { id: 't1', summary: 'office hours', start: { dateTime: '2026-10-14T14:00:00-07:00' }, end: { dateTime: '2026-10-14T15:30:00-07:00' }, ...own });
+    h.fake.upsertEvent('personal', { id: 'd1', summary: 'holiday', start: { date: '2026-10-14' }, end: { date: '2026-10-15' }, ...own });
+    h.fake.upsertEvent('personal', { id: 'd2', summary: 'trip', start: { date: '2026-10-14' }, end: { date: '2026-10-17' }, ...own });
+    const out = (await call('calendar_list_events', { account: 'personal', from: '2026-10-14T00:00:00-07:00', to: '2026-10-15T00:00:00-07:00' })).content;
+    const line = (id: string) => out.split('\n').find((each) => each.includes(`id=${id} `));
+    expect(line('t1')).toMatch(/^2026-10-14T14:00:00-07:00 to 2026-10-14T15:30:00-07:00 \[personal\] id=t1 office hours$/);
+    expect(line('d1')).toMatch(/^2026-10-14 all day \[personal\] id=d1 holiday$/);
+    expect(line('d2')).toMatch(/^2026-10-14 to 2026-10-16 all day \[personal\] id=d2 trip$/);
+  });
+
   // google writes each start in the zone of its calendar, so the text of two starts does not sort by time.
   it('merges the events of all accounts by their time, with the lines without a time at the end', async () => {
     const call = await setup();
