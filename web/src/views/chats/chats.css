@@ -358,4 +358,8 @@
   .chat-owner {
     max-width: 92%;
   }
+  /* the transcript keeps the same gap under the page head as a section of the other pages. */
+  .chat-view {
+    padding-top: 14px;
+  }
 }

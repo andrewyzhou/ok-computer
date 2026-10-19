@@ -356,7 +356,7 @@ function SubagentInspector({ childRunId }: { childRunId: string }) {
   const loaded = useApi<RunDetail>(`/api/runs/${encodeURIComponent(childRunId)}`);
   return (
     <>
-      <LoadRow loaded={loaded} missing="The sub-agent run did not start, or it is gone.">
+      <LoadRow loaded={loaded} what="sub-agent run" missing="The sub-agent run did not start, or it is gone.">
         {({ run, parent }) => (
           <Facts
             items={[
@@ -387,7 +387,7 @@ export function RunInspector({ runId }: { runId: string }) {
   const loaded = useApi<RunDetail>(`/api/runs/${encodeURIComponent(runId)}`);
   return (
     <>
-      <LoadRow loaded={loaded}>
+      <LoadRow loaded={loaded} what="run">
         {({ run, parent }) => (
           <Facts
             items={[
@@ -427,7 +427,7 @@ export function RunInspector({ runId }: { runId: string }) {
 function McpInspector({ id }: { id: number }) {
   const loaded = useApi<McpMessageRow>(`/api/mcp-messages/${id}`);
   return (
-    <LoadRow loaded={loaded}>
+    <LoadRow loaded={loaded} what="message">
       {(message) => (
         <>
           <Facts
@@ -490,7 +490,7 @@ function BrowserInspector({ taskId, stepId }: { taskId: string; stepId: number }
   const loaded = useApi<BrowserTaskDetail>(`/api/browser/tasks/${encodeURIComponent(taskId)}`);
   return (
     <>
-      <LoadRow loaded={loaded}>
+      <LoadRow loaded={loaded} what="browser task">
         {({ steps }) => {
           const index = steps.findIndex((step) => step.id === stepId);
           const step = steps[index];
@@ -572,7 +572,7 @@ function SandboxInspector({ id }: { id: number }) {
   const loaded = useApi<SandboxExecDetail>(`/api/sandbox/execs/${id}`);
   return (
     <>
-      <LoadRow loaded={loaded}>{(exec) => <ExecSummary exec={exec} />}</LoadRow>
+      <LoadRow loaded={loaded} what="code run">{(exec) => <ExecSummary exec={exec} />}</LoadRow>
       <div className="trace-actions">
         <ButtonLink size="sm" icon="sandbox" href={`#/sandbox/code/${id}`}>
           Open the code run

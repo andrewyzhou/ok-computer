@@ -151,8 +151,9 @@ export function LastRun({ label, last }: { label: string; last: { runId: string 
 }
 
 // a button that runs the automation of a job now. the answer is 202, and the page loads again when the run ends,
-// because a run sends a stream message.
-export function RunJob({ job, label, variant = 'secondary', note }: { job: InboxJob; label: string; variant?: 'primary' | 'secondary'; note?: string }) {
+// because a run sends a stream message. it is the main action of an inbox page, and every page gives it the same
+// outline style.
+export function RunJob({ job, label, note }: { job: InboxJob; label: string; note?: string }) {
   const [state, setState] = useState<{ busy: boolean; done?: boolean; error?: string }>({ busy: false });
   const run = () => {
     setState({ busy: true });
@@ -163,7 +164,7 @@ export function RunJob({ job, label, variant = 'secondary', note }: { job: Inbox
   };
   return (
     <span className="inbox-run">
-      <Button variant={variant} size={variant === 'primary' ? 'md' : 'sm'} icon="refresh" busy={state.busy} onClick={run}>
+      <Button variant="secondary" size="sm" icon="refresh" busy={state.busy} onClick={run}>
         {label}
       </Button>
       {state.done ? (

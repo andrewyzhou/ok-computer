@@ -108,7 +108,7 @@ describe('the sandbox edge cases', () => {
 
   it('says when a code run id is not a number', async () => {
     const calls = open({ 'GET /api/sandbox/execs/:id': () => json({ error: 'sandbox exec not found' }, 404) }, '#/sandbox/code/not%2Fa%20number');
-    expect(await inMain().findByText('Not found: sandbox exec not found')).toBeTruthy();
+    expect(await inMain().findByText('This code run does not exist.')).toBeTruthy();
     expect(calls.some((call) => call.url === '/api/sandbox/execs/not%2Fa%20number')).toBe(true);
   });
 

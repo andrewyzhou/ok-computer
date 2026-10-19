@@ -69,7 +69,11 @@ function LiveCard({ task }: { task: BrowserLiveTask }) {
 }
 
 function BrowserTab() {
-  const loaded = useApi<BrowserLive>('/api/browser/live', (message) => message.kind === 'browser_step');
+  // the feed sends nothing when a task ends, so the list also reloads on runs and tool calls, and an ended task leaves.
+  const loaded = useApi<BrowserLive>(
+    '/api/browser/live',
+    (message) => message.kind === 'browser_step' || message.kind === 'run' || message.kind === 'tool_call',
+  );
   return (
     <Load loaded={loaded}>
       {({ tasks }) =>

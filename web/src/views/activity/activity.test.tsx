@@ -31,7 +31,7 @@ function stubs() {
       return { chats: rows, nextCursor: kind === 'activity' && !query.get('cursor') && !q ? 'page-2' : null };
     },
     'GET /api/chats/:key/messages': ({ params }) => {
-      const chat = ROWS.find((row) => row.key === params.key);
+      const chat = [...ROWS, chatRow()].find((row) => row.key === params.key);
       if (!chat) return json({ error: 'chat not found' }, 404);
       return { chat, messages: [message({ id: 1, role: 'agent', text: 'checked the goals, nothing to say' })], before: null };
     },
@@ -82,5 +82,21 @@ describe('the activity views', () => {
     cleanup();
     openApp('#/activity/auto%3Agone');
     expect(await inMain().findByText('This chat does not exist.')).toBeTruthy();
+  });
+
+  it('names the list once in the breadcrumb, not as the group and the page', async () => {
+    stubs();
+    openApp('#/activity');
+    await inMain().findByText('goals: ask');
+    const crumbs = screen.getByRole('navigation', { name: 'breadcrumb' });
+    expect(within(crumbs).getAllByText('Activity')).toHaveLength(1);
+  });
+
+  it('opens the owner chat in the chats area, not as a background session', async () => {
+    stubs();
+    openApp('#/activity/main%400');
+    await waitFor(() => expect(location.hash).toBe('#/chats/main%400'));
+    expect(await inMain().findByRole('textbox', { name: 'Message' })).toBeTruthy();
+    expect(inMain().queryByText('A background session is read-only.')).toBeNull();
   });
 });

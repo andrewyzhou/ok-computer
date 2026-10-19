@@ -52,7 +52,8 @@ const DECISION_COLUMNS: Array<Column<PolicyListRow>> = [
 
 const RULE_COLUMNS: Array<Column<PolicyRuleRow>> = [
   { key: 'id', header: 'Rule', cell: (rule) => <code className="dev-id">{rule.id}</code> },
-  { key: 'tool', header: 'Tool', cell: (rule) => rule.tool },
+  // the rule id already holds the tool name, so a phone leaves the tool column out.
+  { key: 'tool', header: 'Tool', cell: (rule) => rule.tool, hideBelow: 'sm' },
   { key: 'session', header: 'Session', cell: (rule) => rule.session ?? '', hideBelow: 'md' },
   { key: 'args', header: 'Args', cell: (rule) => (rule.args ? <code className="dev-id">{JSON.stringify(rule.args)}</code> : ''), wrap: true, hideBelow: 'md' },
   { key: 'effect', header: 'Effect', cell: (rule) => <Status value={rule.effect} /> },

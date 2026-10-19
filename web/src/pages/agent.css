@@ -105,6 +105,36 @@
   display: block;
   font-weight: 500;
 }
+/* a name or a schedule keeps its words whole. the column grows to the longest word, and the schedule breaks after a
+   slash. */
+.automations-table td.wrap {
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+/* below 760px each row is a card: the name on its own line, then the state and the actions under it. */
+@media (max-width: 759px) {
+  .automations-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .automations-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: var(--space-2);
+    border-bottom: 1px solid var(--rule);
+  }
+  .automations-table tbody td {
+    border-bottom: 0;
+  }
+  .automations-table tbody td:first-child {
+    grid-column: 1 / -1;
+    padding-bottom: 0;
+  }
+}
 .automations-failures {
   display: block;
   margin-top: 2px;

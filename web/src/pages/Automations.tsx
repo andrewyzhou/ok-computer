@@ -6,6 +6,25 @@ import { duration, time } from '../format';
 import { Button, DetailsPanel, EmptyState, Facts, Page, Section, Status, Table, type Column } from '../ui';
 import './agent.css';
 
+// a schedule can end in a long time zone such as America/Los_Angeles. it may break after a slash, and a word stays whole.
+function Schedule({ text }: { text: string }) {
+  const parts = text.split('/');
+  return (
+    <span className="automations-schedule">
+      {parts.map((part, index) => (
+        <span key={index}>
+          {part}
+          {index < parts.length - 1 ? (
+            <>
+              /<wbr />
+            </>
+          ) : null}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function History({ id }: { id: string }) {
   const loaded = useApi<AutomationRunRow[]>(`/api/automations/${encodeURIComponent(id)}/runs`, (message) => message.kind === 'run');
   return (
@@ -104,7 +123,7 @@ function AutomationDetails({ automation, onClose }: { automation: AutomationRow;
             label: 'State',
             value: <Status value={automation.enabled ? 'on' : 'off'} />,
           },
-          { label: 'Schedule', value: automation.schedule },
+          { label: 'Schedule', value: <Schedule text={automation.schedule} /> },
           { label: 'Next run', value: time(automation.nextRunAt) },
           { label: 'Last run', value: time(automation.lastRunAt) },
           { label: 'Id', value: <code>{automation.id}</code> },
@@ -155,7 +174,7 @@ export function Automations() {
     {
       key: 'schedule',
       header: 'Schedule',
-      cell: (automation) => automation.schedule,
+      cell: (automation) => <Schedule text={automation.schedule} />,
       wrap: true,
       width: '28%',
       hideBelow: 'sm',
@@ -238,15 +257,17 @@ export function Automations() {
     >
       <Load loaded={loaded}>
         {(automations) => (
-          <Table
-            label="automations"
-            columns={columns}
-            rows={automations}
-            rowKey={(each) => each.id}
-            selected={selected}
-            onSelect={(each) => setSelected(each.id === selected ? null : each.id)}
-            empty={<EmptyState icon="automation" title="No automations yet." />}
-          />
+          <div className="automations-table">
+            <Table
+              label="automations"
+              columns={columns}
+              rows={automations}
+              rowKey={(each) => each.id}
+              selected={selected}
+              onSelect={(each) => setSelected(each.id === selected ? null : each.id)}
+              empty={<EmptyState icon="automation" title="No automations yet." />}
+            />
+          </div>
         )}
       </Load>
       <Checklist />

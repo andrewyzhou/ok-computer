@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { AutomationRow, HeartbeatStatus, Overview as OverviewData } from '../../../src/dashboard/types';
 import { useApi } from '../api';
 import { Load, Status } from '../components';
-import { bytes, clock, longDay, time, usd } from '../format';
+import { bytes, clock, longDay, plural, time, usd } from '../format';
 import { ButtonLink, DetailsPanel, EmptyState, Facts, Page, Section, Stat, Stats, Table, type Column } from '../ui';
 import './Overview.css';
 
@@ -82,9 +82,9 @@ function OverviewBody({ data }: { data: OverviewData }) {
       <Stats label="today">
         <Stat label="Cost today" value={usd(data.costUsd)} note={data.day} />
         <Stat label="Runs today" value={data.runs} />
-        <Stat label="Errors today" value={data.failedRuns + data.modelErrors} note={`${data.failedRuns} failed runs, ${data.modelErrors} failed model calls`} />
+        <Stat label="Errors today" value={data.failedRuns + data.modelErrors} note={`${plural(data.failedRuns, 'failed run')}, ${plural(data.modelErrors, 'failed model call')}`} />
         <Stat label="Open goals" value={data.openGoals.length} />
-        <Stat label="Blob store" value={bytes(data.blobs.bytes)} note={`${data.blobs.count} blobs`} />
+        <Stat label="Blob store" value={bytes(data.blobs.bytes)} note={plural(data.blobs.count, 'blob')} />
       </Stats>
       <div className="columns">
         <Section title="Open goals today" actions={<a href="#/goals">All goals</a>}>

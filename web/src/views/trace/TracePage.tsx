@@ -4,11 +4,11 @@ import { useApi } from '../../api';
 import { ms, tokens, usd } from '../../format';
 import { Icon } from '../../icons';
 import type { RouteProps } from '../../routes';
+import { groupLabel } from '../../shell/model';
 import { setPrefs, useDevMode } from '../../shell/prefs';
-import { Button, ButtonLink, DetailsPanel, EmptyState, Page, Skeleton, Stat, Stats, Status, Table, type Column } from '../../ui';
-import { isNotFound } from '../sandbox/parts';
+import { Button, ButtonLink, DetailsPanel, EmptyState, isNotFound, NotFound, Page, Skeleton, Stat, Stats, Status, Table, type Column } from '../../ui';
 import { SpanInspector } from './inspectors';
-import { axisTicks, barGeometry, isErrorSpan, kindIcon, runIdsOf, totalMs, traceHref, visibleRows, type SpanRow } from './tree';
+import { axisTicks, barGeometry, fittingTicks, isErrorSpan, kindIcon, runIdsOf, tickLabel, totalMs, traceHref, visibleRows, type SpanRow } from './tree';
 import './trace.css';
 
 // a new span in the hash keeps the page, but a visit to another page and back mounts it again, so the last spans of
@@ -61,6 +61,41 @@ function DevModeNote() {
       <Button size="sm" onClick={() => setPrefs({ devMode: true })}>
         Turn on developer mode
       </Button>
+    </div>
+  );
+}
+
+// the time axis over the bars. it measures its own width, so a tick label that would overlap the label before it is
+// left out, for example when the details panel makes the table narrow.
+function Axis({ total }: { total: number }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    setWidth(element.clientWidth);
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => setWidth(element.clientWidth));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const ticks = axisTicks(total);
+  const shown = fittingTicks(ticks, width);
+  return (
+    <div className="trace-axis" ref={box}>
+      <span className="sr-only">Timeline</span>
+      {ticks.map((tick, index) =>
+        shown[index] ? (
+          <span
+            key={index}
+            className={['trace-tick', index === 0 ? 'is-first' : '', index === ticks.length - 1 ? 'is-last' : ''].filter(Boolean).join(' ')}
+            style={{ left: `${tick.at}%` }}
+            aria-hidden="true"
+          >
+            {tickLabel(tick.ms)}
+          </span>
+        ) : null,
+      )}
     </div>
   );
 }
@@ -153,27 +188,20 @@ function Waterfall({ trace, spanId }: { trace: RunSpans; spanId: string | null }
     },
     {
       key: 'bar',
-      header: (
-        <div className="trace-axis">
-          <span className="sr-only">Timeline</span>
-          {axisTicks(total).map((tick, index) => (
-            <span key={index} className="trace-tick" style={{ left: `${tick.at}%` }} aria-hidden="true">
-              {ms(tick.ms)}
-            </span>
-          ))}
-        </div>
-      ),
+      header: <Axis total={total} />,
       hideBelow: 'sm',
       width: '36%',
       cell: ({ span }) => {
         const bar = barGeometry(span, total, nowMs);
         const error = isErrorSpan(span);
+        // a short cut bar keeps its point inside the track, even when the span starts at the end of the axis.
+        const left = bar.cut && bar.width < 5 ? `min(${bar.left}%, calc(100% - 8px))` : `${bar.left}%`;
         return (
           <div className="trace-track">
             <span
-              className={['trace-bar', error ? 'is-error' : '', span.endMs === null ? 'is-open' : ''].filter(Boolean).join(' ')}
-              style={{ left: `${bar.left}%`, width: `${bar.width}%` }}
-              title={`${span.label}: ${ms(span.startMs)} to ${span.endMs === null ? 'now' : ms(span.endMs)}`}
+              className={['trace-bar', error ? 'is-error' : '', span.endMs === null ? 'is-open' : '', bar.cut ? 'is-cut' : ''].filter(Boolean).join(' ')}
+              style={{ left, width: `${bar.width}%` }}
+              title={`${span.label}: ${ms(span.startMs)} to ${span.endMs === null ? 'now' : ms(span.endMs)}${bar.cut ? ', past the end of the axis' : ''}`}
             />
           </div>
         );
@@ -235,6 +263,7 @@ export function TracePage({ params }: RouteProps) {
   if (loaded.data) lastSpans.set(runId, loaded.data);
   const trace = loaded.error ? undefined : (loaded.data ?? lastSpans.get(runId));
   if (trace) watch.current = { ids: runIdsOf(trace), open: trace.endedAt === null };
+  // the crumbs follow the same trail as the run page, with the run page as the last step.
   const runHref = `#/runs/${encodeURIComponent(runId)}`;
   return (
     <Page
@@ -242,8 +271,9 @@ export function TracePage({ params }: RouteProps) {
       width="full"
       subtitle={<>run {runId}</>}
       crumbs={[
+        { label: groupLabel('dev'), href: '#/runs' },
         { label: 'Runs', href: '#/runs' },
-        { label: runId, href: runHref },
+        { label: `Run ${runId.slice(0, 8)}`, href: runHref },
       ]}
       actions={
         <>
@@ -259,7 +289,9 @@ export function TracePage({ params }: RouteProps) {
       {devMode ? null : <DevModeNote />}
       {loaded.error ? (
         isNotFound(loaded.error) ? (
-          <EmptyState icon="trace" title={`No trace: ${loaded.error}`} action={<ButtonLink href="#/runs">All runs</ButtonLink>} />
+          <NotFound icon="trace" what="trace">
+            <a href="#/runs">Go to all runs</a>
+          </NotFound>
         ) : (
           <p className="error-box">Could not load: {loaded.error}</p>
         )

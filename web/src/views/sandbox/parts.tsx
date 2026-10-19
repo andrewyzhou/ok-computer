@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import type { BlobBody, SandboxExecRow, SandboxExecStatus, SandboxFile, SandboxLimits } from '../../../../src/dashboard/types';
 import { apiUrl, useApi, type Loaded } from '../../api';
 import { bytes, ms } from '../../format';
-import { Badge, Button, CodeBlock, EmptyState, Facts, Skeleton, type Fact, type Tone } from '../../ui';
+import { Badge, Button, CodeBlock, Facts, isNotFound, NotFound, Skeleton, type Fact, type Tone } from '../../ui';
 
 // the parts that the sandbox views and the trace inspectors share.
 
@@ -54,19 +54,27 @@ export function ExecSummary({ exec }: { exec: SandboxExecRow }) {
   );
 }
 
-// a 404 is a missing row, not a failure of the page. the server words it as "... not found".
-export function isNotFound(error: string): boolean {
-  return /not found/i.test(error) || /^404\b/.test(error);
-}
+export { isNotFound };
 
-// like Load, but a missing row shows as an empty state with the words of the server.
-export function LoadRow<T>({ loaded, children, missing }: { loaded: Loaded<T>; children: (data: T) => ReactNode; missing?: ReactNode }) {
+// like Load, but a missing row shows as the shared not-found state, which names the row and not the words of the
+// server. missing is the text or the link under it.
+export function LoadRow<T>({
+  loaded,
+  children,
+  what = 'item',
+  missing,
+}: {
+  loaded: Loaded<T>;
+  children: (data: T) => ReactNode;
+  what?: string;
+  missing?: ReactNode;
+}) {
   if (loaded.error) {
     if (isNotFound(loaded.error))
       return (
-        <EmptyState icon="sandbox" title={`Not found: ${loaded.error}`}>
+        <NotFound icon="sandbox" what={what}>
           {missing}
-        </EmptyState>
+        </NotFound>
       );
     return <p className="error-box">Could not load: {loaded.error}</p>;
   }
@@ -77,7 +85,7 @@ export function LoadRow<T>({ loaded, children, missing }: { loaded: Loaded<T>; c
 // the text of a blob, exactly as stored.
 export function BlobCode({ hash, label }: { hash: string; label: string }) {
   const loaded = useApi<BlobBody>(`/api/blobs/${encodeURIComponent(hash)}`);
-  return <LoadRow loaded={loaded}>{(blob) => <CodeBlock label={`${label}, blob ${hash.slice(0, 12)}, ${blob.mime}`} text={blob.text} />}</LoadRow>;
+  return <LoadRow loaded={loaded} what="stored text">{(blob) => <CodeBlock label={`${label}, blob ${hash.slice(0, 12)}, ${blob.mime}`} text={blob.text} />}</LoadRow>;
 }
 
 // a blob loads only when the owner asks, because the full output can be large.

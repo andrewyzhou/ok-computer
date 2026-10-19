@@ -48,6 +48,11 @@ export function ms(value: number): string {
   return `${Math.floor(total / 60)} min ${total % 60} s`;
 }
 
+// a count with its noun: 1 blob, 2 blobs. a noun with an irregular plural passes it as the third value.
+export function plural(count: number, one: string, many = `${one}s`): string {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
 export function bytes(value: number): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;

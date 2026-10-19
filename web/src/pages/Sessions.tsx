@@ -152,7 +152,7 @@ function SessionPanel({ sessionKey, events, context }: { sessionKey: string; eve
           events && { label: 'First event', value: time(events[0]?.createdAt) },
           events && { label: 'Last event', value: time(events.at(-1)?.createdAt) },
           {
-            label: 'next request, estimated tokens',
+            label: 'Next request, estimated tokens',
             value: view ? tokens(view.estimatedTokens) : context.error ? <span className="error-text">{context.error}</span> : '…',
           },
           view && { label: 'Messages in the next request', value: view.messages.length },

@@ -8,7 +8,7 @@ import type { Crumb } from '../../shell/context';
 import { useDevMode } from '../../shell/prefs';
 import { ApprovalCard, Badge, Button, ButtonLink, DetailsPanel, EmptyState, Facts, Page, Skeleton, Status } from '../../ui';
 import { Composer } from './Composer';
-import { scrollParent, useTranscript } from './data';
+import { chatHref, scrollParent, useTranscript } from './data';
 
 // the ended turns of the list that the transcript shows now. a turn with a reply waits until the transcript holds a
 // message of its run, so a reply never leaves the page before the stored copy is there.
@@ -281,6 +281,14 @@ export function ChatView({ chatKey, mode = 'chat', crumbs }: ChatViewProps) {
   const anchor = useRef<{ height: number; top: number } | null>(null);
   const started = useRef(false);
   const open = mode === 'chat' && chat?.kind === 'main' && chat.toEventId === null;
+  // the activity area is for the background sessions. a link there to the owner's chat opens it in the chats area,
+  // where it has its composer and the right words. the hash is replaced, so the back button skips the activity link.
+  const mainInActivity = mode === 'activity' && chat?.kind === 'main';
+  useEffect(() => {
+    if (!mainInActivity) return;
+    history.replaceState(history.state, '', chatHref(chatKey, 'chats'));
+    dispatchEvent(new Event('hashchange'));
+  }, [mainInActivity, chatKey]);
 
   const needsApprovals = messages.some((message) => message.approvalId !== null);
   const approvalsLoaded = useApi<ApprovalRow[]>(needsApprovals ? '/api/approvals' : null, (message) => message.kind === 'approval');

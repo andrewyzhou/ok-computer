@@ -167,14 +167,7 @@ export function CodeRunPage({ params }: RouteProps) {
   running.current = loaded.data?.status === 'running' ? loaded.data.runId : null;
   return (
     <Page title="Code run" subtitle={`#${execId}`} width="full" crumbs={[{ label: 'Sandbox', href: '#/sandbox?tab=code' }]}>
-      <LoadRow
-        loaded={loaded}
-        missing={
-          <ButtonLink size="sm" href="#/sandbox?tab=code">
-            All code runs
-          </ButtonLink>
-        }
-      >
+      <LoadRow loaded={loaded} what="code run" missing={<a href="#/sandbox?tab=code">Go to all code runs</a>}>
         {(exec) => <ExecBody exec={exec} />}
       </LoadRow>
     </Page>

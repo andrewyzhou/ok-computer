@@ -83,6 +83,7 @@
   position: relative;
   height: 14px;
   min-width: 160px;
+  margin-left: 12px;
 }
 .trace-tick {
   position: absolute;
@@ -92,16 +93,20 @@
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
-.trace-tick:first-of-type {
+.trace-tick {
+  white-space: nowrap;
+}
+.trace-tick.is-first {
   transform: none;
 }
-.trace-tick:last-of-type {
+.trace-tick.is-last {
   transform: translateX(-100%);
 }
 .trace-track {
   position: relative;
   height: 12px;
   min-width: 160px;
+  margin-left: 12px;
   background-image: linear-gradient(to right, var(--grid) 1px, transparent 1px);
   background-size: calc(100% / 3) 100%;
   box-shadow: inset -1px 0 0 var(--grid);
@@ -110,9 +115,15 @@
   position: absolute;
   top: 2px;
   bottom: 2px;
-  min-width: 2px;
+  min-width: 3px;
   border-radius: 2px;
   background: var(--series-1);
+}
+/* a span that goes on past the end of the axis, such as an approval that waits for the owner, ends in a point. */
+.trace-bar.is-cut {
+  min-width: 8px;
+  border-radius: 2px 0 0 2px;
+  clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 50%, calc(100% - 6px) 100%, 0 100%);
 }
 .trace-bar.is-error {
   background: var(--critical);

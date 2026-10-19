@@ -63,23 +63,27 @@ export function visibleRows(spans: Span[], collapsed: ReadonlySet<string>): Span
   return rows;
 }
 
-// the length of the axis in ms. an open run grows to now. a span that the server ends after the run end still fits.
+// the length of the axis in ms. an open run grows to now. a span that the server ends after the run end still fits,
+// except an approval: it waits for the owner and can end long after the run, so it would squeeze every model and tool
+// bar into a sliver. an approval past the axis is drawn to the edge as a cut bar.
 export function totalMs(trace: RunSpans, now: number): number {
   const sinceStart = Math.max(0, now - Date.parse(trace.startedAt));
   const base = trace.durationMs ?? sinceStart;
-  const latest = trace.spans.reduce((max, span) => Math.max(max, span.endMs ?? 0), 0);
+  const latest = trace.spans.reduce((max, span) => (span.kind === 'approval' ? max : Math.max(max, span.endMs ?? 0)), 0);
   return Math.max(base, latest, 0);
 }
 
 // the bar of a span in percent of the axis. an open span is drawn to now. a run of zero length puts each bar at the
-// start, and the css gives each bar a width of at least 2px, so it never divides by zero and no bar vanishes.
-export function barGeometry(span: Span, total: number, nowMs: number): { left: number; width: number } {
+// start, and the css gives each bar a minimum width, so it never divides by zero and no bar vanishes. a span that goes
+// on past the end of the axis is cut, and the css marks its end with an arrow.
+export function barGeometry(span: Span, total: number, nowMs: number): { left: number; width: number; cut?: true } {
   if (total <= 0) return { left: 0, width: 0 };
   const start = Math.min(Math.max(span.startMs, 0), total);
   const end = Math.min(Math.max(span.endMs ?? nowMs, start), total);
   const left = (start / total) * 100;
   const width = ((end - start) / total) * 100;
-  return { left: round(left), width: round(Math.min(width, 100 - left)) };
+  const cut = (span.endMs ?? nowMs) > total;
+  return { left: round(left), width: round(Math.min(width, 100 - left)), ...(cut ? { cut: true as const } : {}) };
 }
 
 const round = (value: number) => Math.round(value * 1000) / 1000;
@@ -87,6 +91,43 @@ const round = (value: number) => Math.round(value * 1000) / 1000;
 // the ticks of the time axis: the start, two marks between, and the end.
 export function axisTicks(total: number): Array<{ at: number; ms: number }> {
   return [0, 1 / 3, 2 / 3, 1].map((share) => ({ at: round(share * 100), ms: Math.round(share * total) }));
+}
+
+// a short label for a tick: 10 min, not 10 min 0 s. it keeps one decimal where the value needs it.
+export function tickLabel(value: number): string {
+  const short = (amount: number) => String(Math.round(amount * 10) / 10);
+  if (value < 1000) return `${value} ms`;
+  if (value < 59_950) return `${short(value / 1000)} s`;
+  if (value < 3_597_000) return `${short(value / 60_000)} min`;
+  return `${short(value / 3_600_000)} h`;
+}
+
+// the ticks whose labels fit on an axis of the given width in px. the last tick always shows, the first shows unless it
+// would touch the last, and a tick between them shows only when its label keeps a gap from the labels next to it. the
+// width of a label is a guess from its length, so the gap is wide. a width of 0 is an axis that was not measured yet,
+// and it shows every tick.
+export function fittingTicks(ticks: Array<{ at: number; ms: number }>, width: number, charPx = 7, gapPx = 12): boolean[] {
+  const last = ticks.length - 1;
+  const boxes = ticks.map((tick, index) => {
+    const size = tickLabel(tick.ms).length * charPx;
+    const x = (tick.at / 100) * width;
+    // the first label starts at its tick, the last ends at its tick, and the others are centered on it.
+    const from = index === 0 ? x : index === last ? x - size : x - size / 2;
+    return { from, to: from + size };
+  });
+  if (width <= 0) return ticks.map(() => true);
+  const shown = ticks.map((_, index) => index === 0 || index === last);
+  let before = boxes[0]!.to;
+  for (let index = 1; index < last; index++) {
+    const box = boxes[index]!;
+    if (box.from >= before + gapPx && box.to + gapPx <= boxes[last]!.from) {
+      shown[index] = true;
+      before = box.to;
+    }
+  }
+  // two end labels that overlap leave the last one only, which says the length of the axis.
+  if (last > 0 && boxes[0]!.to + gapPx > boxes[last]!.from) shown[0] = false;
+  return shown;
 }
 
 export const KIND_ICON: Record<SpanKind, IconName> = {

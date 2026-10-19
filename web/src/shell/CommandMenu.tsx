@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Icon } from '../icons';
-import type { RouteDef } from '../routes';
+import { navSections, type RouteDef } from '../routes';
 import { Highlight, KeyHint, useDialogFocus } from '../ui';
 import { EXTENSIONS, type CommandGroup, type CommandItem, type CommandSource } from './extensions';
 import { groupLabel } from './model';
@@ -94,8 +94,9 @@ function MenuBody({
   const list = useRef<HTMLDivElement>(null);
 
   const local = useMemo<CommandGroup[]>(() => {
-    const pages: CommandItem[] = routes
-      .filter((route) => route.group !== null && (devMode || !route.devOnly))
+    // the pages keep the order of the nav.
+    const pages: CommandItem[] = navSections(devMode, routes)
+      .flatMap((section) => section.items)
       .map((route) => ({ id: `page:${route.path}`, label: route.label, detail: groupLabel(route.group!), icon: route.icon, href: route.path }));
     const actions: CommandItem[] = [
       { id: 'dev', label: devMode ? 'Turn developer mode off' : 'Turn developer mode on', icon: 'dev', keywords: 'dev developer debug', run: toggleDevMode },

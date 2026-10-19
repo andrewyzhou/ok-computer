@@ -55,6 +55,14 @@ describe('the trace waterfall', () => {
     expect(within(screen.getByTestId('span-tool:2').closest('tr')!).getByText('failed')).toBeTruthy();
   });
 
+  it('follows the crumbs of the run page', async () => {
+    openApp('#/trace/run-1');
+    await inMain().findByTestId('span-model:1');
+    const crumbs = within(screen.getByRole('navigation', { name: 'breadcrumb' }));
+    expect(crumbs.getByRole('link', { name: 'Dev' }).getAttribute('href')).toBe('#/runs');
+    expect(crumbs.getByRole('link', { name: 'Run run-1' }).getAttribute('href')).toBe('#/runs/run-1');
+  });
+
   it('places each bar by its start and length, and draws an open span to the end', async () => {
     openApp('#/trace/run-1');
     await inMain().findByTestId('span-model:1');
@@ -145,7 +153,7 @@ describe('the trace waterfall', () => {
     openApp('#/trace/run-1/subagent%3Acall-sub');
     const link = await (await panel()).findByRole('link', { name: 'Trace of the sub-agent' });
     expect(link.getAttribute('href')).toBe('#/trace/run-child');
-    expect(await (await panel()).findByText(/Not found/)).toBeTruthy();
+    expect(await (await panel()).findByText('This sub-agent run does not exist.')).toBeTruthy();
   });
 
   it('keeps the waterfall when an inspector fails, and shows the error in the panel', async () => {
@@ -160,7 +168,7 @@ describe('the trace waterfall', () => {
     expect(await screen.findByText('This span is not in the trace.')).toBeTruthy();
     cleanup();
     openApp('#/trace/nope');
-    expect(await inMain().findByText('No trace: run not found')).toBeTruthy();
+    expect(await inMain().findByText('This trace does not exist.')).toBeTruthy();
   });
 
   it('offers developer mode when it is off, and still shows the trace', async () => {
