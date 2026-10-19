@@ -38,7 +38,7 @@ A small supervisor restarts the agent if it stops. The logon task means it runs 
 
 ### On macOS
 
-`scripts/okc.sh install` adds an `okc` command in `~/.local/bin` and a LaunchAgent (`~/Library/LaunchAgents/com.okcomputer.agent.plist`) that starts the agent in the background when you sign in. Put `~/.local/bin` on your `PATH` if it is not there yet. The same script is the `okc` command on Linux.
+`scripts/okc.sh install` adds an `okc` command in `~/.local/bin` and a LaunchAgent (`~/Library/LaunchAgents/com.okcomputer.agent.plist`) that starts the agent in the background when you sign in. Put `~/.local/bin` on your `PATH` if it is not there yet. The same script is the `okc` command on Linux. For a new Mac, [docs/setup/macos.md](docs/setup/macos.md) lists every step in order: Node 24, `scripts/okc.sh install`, the `PATH`, the Keychain prompt and Chrome.
 
 | Command | What it does |
 |---|---|
@@ -64,21 +64,22 @@ A part that needs setup stays off until the setup is done, and the rest of the a
 |---|---|---|
 | Chat, goals, heartbeat, memory, automations | Running | `.env`: `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_ID` |
 | Telegram v2: rich replies, streaming, reactions, approval cards, commands menu | Built | Nothing. Check it once: `node --env-file=.env scripts/smoke-telegram.mjs` sends a few test messages to you |
-| Trace and dashboard (runs, what the model saw, Policy page) | Built | Nothing. `okc open` |
+| Trace and dashboard v2 (runs, what the model saw, Policy page, in the new shell with a light and a dark theme) | Built | Nothing. `okc open` |
+| Web chat: the main chat in the dashboard, with streaming, stop and approval cards | Built | `DASHBOARD_TOKEN` in `.env`. Without it the web chat stays off |
+| Chats, activity and ⌘K full-text search | Built | `DASHBOARD_TOKEN` in `.env` on every host, because search shows chat text |
+| Developer mode: the trace waterfall, the model, tool, MCP and Google inspectors, and the sandbox view | Built | ⌘. (Ctrl+. on Windows and Linux) or the dev switch in the status bar |
 | Gmail (all accounts) and Calendar | Built, not yet checked against real Google | A `google` block and one sign-in for each account: [docs/setup/google.md](docs/setup/google.md). New mail and calendar changes become signals for the heartbeat; sending, unsubscribing and invitations always ask you |
+| Inbox jobs: daily digest, newsletter sweep, subscription finder, draft replies, calendar proposals | Built, not yet checked against real Google | Gmail must work first. The jobs run as automations and have their own Inbox pages: [docs/setup/google.md, section 4](docs/setup/google.md#4-what-happens-next). Drafts are never sent, and each unsubscribe, archive, cancellation and event asks you |
 | Slack, one integration for each workspace: search, read, send with approval | Built, not yet checked against real Slack. The DM poll stores new DMs, but nothing shows them yet | [docs/setup/slack.md](docs/setup/slack.md). Other MCP servers: [docs/setup/integrations.md](docs/setup/integrations.md) |
 | Web search, `web_fetch` and the agent browser | On (needs Chrome) | Optional sign-ins: `okc browser login`, see [docs/setup/browser.md](docs/setup/browser.md). Each form submit asks you |
 | Reviewer model, taint and sub-agents (`delegate`) | On | Nothing. `npm run smoke:reviewer` (about 30 calls of the `utility` slot) shows how well the reviewer holds injected actions |
 | Skill Workshop | On | Nothing. A review at 09:00 can propose a skill; only Approve writes it to `skills/` |
 | Dashboard on the phone and laptop | Optional | `DASHBOARD_TOKEN` and Tailscale Serve: [docs/setup/tailscale.md](docs/setup/tailscale.md) |
 | Running on a server (Docker, Tailscale, Litestream backups, AWS Secrets Manager) | Built, not yet checked on a real host | Try the image locally with [docs/setup/docker.md](docs/setup/docker.md), then follow the runbook in [docs/setup/aws.md](docs/setup/aws.md). Google accounts move with `npm run google:push` |
-| Subscription sweep | Owner test, not a separate feature | After Gmail works, ask the agent for it (see below) |
 | Code sandbox (`sandbox_exec`): bash, Python and Node in a fresh Docker container for each call | Optional (needs Docker) | Docker Desktop or the Docker engine, then `npm run sandbox:image` and `okc restart`: [docs/setup/sandbox.md](docs/setup/sandbox.md). Without Docker the tool is off and the rest of the app runs. The reviewer checks each call, and you approve each call with network access |
 | Claude history | On hold | Nothing to do |
 
 A call that changes data (risk `write`, for example an archive) goes to the reviewer model on the `utility` slot, not to you. The reviewer holds a call that you did not ask for, a failed review comes to you, and you still approve everything that leaves this computer.
-
-To test the subscription sweep, ask the agent in Telegram, for example: "Look through my newsletters in all accounts from the last month, group them by sender, and unsubscribe me from the ones that I leave unread." It should search with the Gmail tools (or a `delegate` to the `inbox` profile), show you the list, and send one approval card for each unsubscribe. If the test shows a gap, the gap becomes a normal fix.
 
 ## Phases
 
@@ -86,13 +87,14 @@ To test the subscription sweep, ask the agent in Telegram, for example: "Look th
 2. **Foundation and core accounts (built; manual checks against the real services pending):** full tracing v2, MCP client and integration registry, Gmail (all accounts) + Calendar, Telegram v2. See [docs/DESIGN-NEXT.md](docs/DESIGN-NEXT.md).
 3. **More reach (built; manual checks against the real services pending):** Slack, web search + browser worker, reviewer model + taint + sub-agents.
 4. **Power tools (built; manual checks against the real services pending):** Skill Workshop.
+5. **macOS, dashboard v2, deploy, inbox jobs, sandbox (built; manual checks against the real services pending):** the agent on macOS and Linux, dashboard v2 with the web chat, chats, activity, full-text search and developer mode, the server deploy, the inbox jobs (digest, newsletter sweep, subscription finder, drafts, calendar proposals) and the code sandbox. See [DESIGN-NEXT §12](docs/DESIGN-NEXT.md#12-phase-5).
 
-On hold: Claude history (a later design should cover ChatGPT logs too). The Docker sandbox, on hold in phase 4, comes with phase 5 (optional, see [docs/setup/sandbox.md](docs/setup/sandbox.md)). The subscription sweep is an owner test of the agent with Gmail, not a separate feature.
+On hold: Claude history (a later design should cover ChatGPT logs too).
 
 ## TODO (later)
 
 - [ ] iMessage channel (needs a Mac) and/or SMS
-- [ ] Web dashboard features beyond observability (goals board, approvals inbox)
+- [ ] A goals board in the dashboard (the web chat, the approval cards and the inbox pages are built)
 - [ ] Agent-built widgets/dashboards (on hold; Telegram can't display them)
 - [ ] Mid-reply steering (new texts adjust a reply in progress)
 - [ ] Event triggers (script detects a condition → wake the agent)
@@ -101,5 +103,5 @@ On hold: Claude history (a later design should cover ChatGPT logs too). The Dock
 - [ ] Voice replies / voice notes, PDF and image understanding
 - [ ] Spending alerts
 - [ ] Move more work to a local model as hardware allows
-- [ ] iOS app / web app front end
+- [ ] Native iOS app (the web chat in the dashboard is the web front end)
 - [ ] Product version (multi-user, Google CASA audit, per-user isolation)
