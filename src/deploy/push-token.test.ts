@@ -78,6 +78,18 @@ describe('parsePushArgs', () => {
     expect(parsePushArgs(['personal', '--to', TO, '--to', TO])).toHaveProperty('error');
     expect(parsePushArgs(['personal', '--force', '--to', TO])).toHaveProperty('error');
   });
+
+  // the route is joined to --to as text, so a query or a fragment moves the path out of the url.
+  it('refuses an address with a query, a fragment or a user name', () => {
+    for (const to of ['https://okc.example.ts.net/?x=1', 'https://okc.example.ts.net/#top', 'https://me:pw@okc.example.ts.net']) {
+      expect(parsePushArgs(['personal', '--to', to]), to).toHaveProperty('error');
+    }
+  });
+
+  it('keeps a path of the server and drops each trailing slash', () => {
+    expect(parsePushArgs(['personal', '--to', `${TO}//`])).toEqual({ alias: 'personal', to: TO });
+    expect(parsePushArgs(['personal', '--to', `${TO}/okc/`])).toEqual({ alias: 'personal', to: `${TO}/okc` });
+  });
 });
 
 describe('pushToken', () => {

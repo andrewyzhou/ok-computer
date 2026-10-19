@@ -60,7 +60,9 @@ export function parsePushArgs(argv: string[]): PushOptions | { error: string } {
   return { alias, to: url };
 }
 
-// the token goes in an authorization header, so the url must be https unless the server is on this machine.
+// the token goes in an authorization header, so the url must be https unless the server is on this machine. the
+// route is joined to the address, so a query, a fragment or a user name would move it out of the path. the answer is
+// the origin and the path of the address without a trailing slash.
 function checkUrl(text: string): string | undefined {
   let url: URL;
   try {
@@ -69,7 +71,8 @@ function checkUrl(text: string): string | undefined {
     return undefined;
   }
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && LOOPBACK.has(url.hostname))) return undefined;
-  return text.endsWith('/') ? text.slice(0, -1) : text;
+  if (url.search || url.hash || text.includes('?') || text.includes('#') || url.username || url.password) return undefined;
+  return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
 }
 
 export async function pushToken(options: PushOptions, deps: PushDeps): Promise<GoogleTokenImportResponse> {
@@ -95,11 +98,17 @@ async function send(options: PushOptions, deps: PushDeps): Promise<GoogleTokenIm
       method: 'POST',
       headers: { authorization: `Bearer ${deps.token}`, 'content-type': 'application/json' },
       body: JSON.stringify(body),
+      // fetch would send the same body, with the refresh token, to the address of a 307 or 308. that address can be
+      // plain http or another host, so a redirect is an error.
+      redirect: 'manual',
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch {
     // the error of fetch can quote the request, so the message only names the address.
     throw new Error(`could not reach ${options.to}`);
+  }
+  if (response.status >= 300 && response.status < 400) {
+    throw new Error(`the server answered ${response.status}, a redirect. Give the address of the dashboard itself in --to.`);
   }
   if (response.status === 401) throw new Error('the server refused OKC_REMOTE_TOKEN. Use the DASHBOARD_TOKEN of the server.');
   if (!response.ok) throw new Error(`the server answered ${response.status}: ${await errorText(response)}`);
