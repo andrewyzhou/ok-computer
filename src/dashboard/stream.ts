@@ -1,6 +1,6 @@
 import type { Db } from '../db/index.js';
 import { outcomeOf } from './outcome.js';
-import type { LogLine, PolicyDecisionRow, StreamApproval, StreamMessage } from './types.js';
+import type { LogLine, PolicyDecisionRow, StreamApproval, StreamMessage, StreamPolicy } from './types.js';
 import { getRun, toDecision, toEventRow } from './queries.js';
 
 // the feed reads the database and the log file again on each poll. it needs no hooks in the code that writes them,
@@ -68,11 +68,35 @@ function toStreamApproval(row: Row): StreamApproval {
   };
 }
 
+const DECISION_COLUMNS = `policy_decisions.id, policy_decisions.runId, policy_decisions.toolCallId, policy_decisions.toolName,
+  policy_decisions.decision, policy_decisions.rule, policy_decisions.reviewerVerdict, policy_decisions.approvalId, policy_decisions.createdAt`;
+
+function toStreamPolicy(row: Row): StreamPolicy {
+  return {
+    id: Number(row.id),
+    runId: String(row.runId),
+    toolCallId: String(row.toolCallId),
+    toolName: String(row.toolName),
+    decision: String(row.decision),
+    rule: String(row.rule),
+    reviewerVerdict: str(row.reviewerVerdict),
+    approvalId: num(row.approvalId),
+    createdAt: String(row.createdAt),
+  };
+}
+
+// a review decision gets its verdict and an approve or review decision gets its approval after the row is written,
+// so the feed watches these decisions while their run runs.
+const WATCHED_DECISIONS = ['review', 'approve'];
+const decisionState = (decision: StreamPolicy) => `${decision.reviewerVerdict ?? ''}|${decision.approvalId ?? ''}`;
+
 // the feed of the trace rows. it gives the new model calls, tool calls, policy decisions, approvals and browser steps
 // since the last call as the stream kinds model_call, tool_call, policy, approval and browser_step, with ids and
 // summaries only. each table has its own id cursor, which starts at the newest row when the feed is made, so the rows
 // that exist then are never sent. an approval goes out when it is asked for and again when it is resolved. approvals
-// are not append-only, so the feed keeps the ids of the pending ones and reads them again on each call.
+// are not append-only, so the feed keeps the ids of the pending ones and reads them again on each call. a review or
+// approve decision goes out when it is written and again when its verdict or its approval id changes, until its run
+// ends.
 export function createTraceFeed(db: Db): () => StreamMessage[] {
   const newest = (table: string) => Number(db.prepare(`SELECT COALESCE(MAX(id), 0) AS id FROM ${table}`).get()!.id);
   const cursor = {
@@ -88,6 +112,16 @@ export function createTraceFeed(db: Db): () => StreamMessage[] {
       .all()
       .map((row) => Number(row.id)),
   );
+  // the state that was last sent of each watched decision, by id.
+  const watched = new Map<number, string>(
+    db
+      .prepare(
+        `SELECT ${DECISION_COLUMNS} FROM policy_decisions JOIN runs ON runs.id = policy_decisions.runId
+         WHERE runs.status = 'running' AND policy_decisions.decision IN (${WATCHED_DECISIONS.map(() => '?').join(', ')})`,
+      )
+      .all(...WATCHED_DECISIONS)
+      .map((row) => [Number(row.id), decisionState(toStreamPolicy(row))]),
+  );
   // the queries select the summary columns only, so a request, a response, an input, an output or a payload never
   // leaves the database.
   const modelCalls = db.prepare(
@@ -97,9 +131,7 @@ export function createTraceFeed(db: Db): () => StreamMessage[] {
     `SELECT id, runId, toolCallId, name, isError, durationMs, createdAt, outcome, riskLevel, policyDecisionId
      FROM tool_calls WHERE id > ? ORDER BY id LIMIT ?`,
   );
-  const decisions = db.prepare(
-    'SELECT id, runId, toolCallId, toolName, decision, rule, approvalId, createdAt FROM policy_decisions WHERE id > ? ORDER BY id LIMIT ?',
-  );
+  const decisions = db.prepare(`SELECT ${DECISION_COLUMNS} FROM policy_decisions WHERE id > ? ORDER BY id LIMIT ?`);
   const approvals = db.prepare(`SELECT ${APPROVAL_COLUMNS} WHERE approvals.id > ? ORDER BY approvals.id LIMIT ?`);
   const steps = db.prepare(
     'SELECT id, taskId, runId, action, urlAfter, screenshotBlob, error, createdAt FROM browser_steps WHERE id > ? ORDER BY id LIMIT ?',
@@ -167,21 +199,34 @@ export function createTraceFeed(db: Db): () => StreamMessage[] {
       });
     }
 
+    const freshDecisions = new Set<number>();
     for (const row of decisions.all(cursor.policy_decisions, TRACE_BATCH)) {
-      cursor.policy_decisions = Number(row.id);
-      messages.push({
-        kind: 'policy',
-        decision: {
-          id: Number(row.id),
-          runId: String(row.runId),
-          toolCallId: String(row.toolCallId),
-          toolName: String(row.toolName),
-          decision: String(row.decision),
-          rule: String(row.rule),
-          approvalId: num(row.approvalId),
-          createdAt: String(row.createdAt),
-        },
-      });
+      const decision = toStreamPolicy(row);
+      cursor.policy_decisions = decision.id;
+      if (WATCHED_DECISIONS.includes(decision.decision)) {
+        watched.set(decision.id, decisionState(decision));
+        freshDecisions.add(decision.id);
+      }
+      messages.push({ kind: 'policy', decision });
+    }
+    const followed = [...watched.keys()].filter((id) => !freshDecisions.has(id));
+    if (followed.length > 0) {
+      const rows = db
+        .prepare(
+          `SELECT ${DECISION_COLUMNS}, runs.status AS runStatus FROM policy_decisions LEFT JOIN runs ON runs.id = policy_decisions.runId
+           WHERE policy_decisions.id IN (${followed.map(() => '?').join(', ')}) ORDER BY policy_decisions.id`,
+        )
+        .all(...followed);
+      const found = new Set(rows.map((row) => Number(row.id)));
+      for (const id of followed) if (!found.has(id)) watched.delete(id);
+      for (const row of rows) {
+        const decision = toStreamPolicy(row);
+        const state = decisionState(decision);
+        if (state !== watched.get(decision.id)) messages.push({ kind: 'policy', decision });
+        // a decision of a run that ended does not change again, so it leaves the map after its last state went out.
+        if (row.runStatus !== 'running') watched.delete(decision.id);
+        else watched.set(decision.id, state);
+      }
     }
 
     // a new approval that is already resolved goes out one time, with its final status, and is not kept.

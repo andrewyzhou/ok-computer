@@ -103,7 +103,17 @@ describe('the trace kinds of the stream feed', () => {
       },
       {
         kind: 'policy',
-        decision: { id: decisionId, runId: 'r1', toolCallId: 'tc1', toolName: 'browser_submit', decision: 'ask', rule: 'rule-1', approvalId, createdAt: 't4' },
+        decision: {
+          id: decisionId,
+          runId: 'r1',
+          toolCallId: 'tc1',
+          toolName: 'browser_submit',
+          decision: 'ask',
+          rule: 'rule-1',
+          reviewerVerdict: null,
+          approvalId,
+          createdAt: 't4',
+        },
       },
       {
         kind: 'approval',
@@ -124,6 +134,45 @@ describe('the trace kinds of the stream feed', () => {
       },
     ]);
     expect(poll()).toEqual([]);
+  });
+
+  it('sends a review decision again when its verdict or its approval comes, until its run ends', () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r1', 'main', 'message', 'main', 'running', 't0')").run();
+    const poll = createFeed(db, () => []);
+    poll();
+    const policies = () => poll().flatMap((message) => (message.kind === 'policy' ? [message.decision] : []));
+    const reviewId = decision(db, 'review', null);
+    const allowId = decision(db, 'allow', null);
+    expect(policies().map((each) => [each.id, each.reviewerVerdict, each.approvalId])).toEqual([
+      [reviewId, null, null],
+      [allowId, null, null],
+    ]);
+    expect(policies()).toEqual([]);
+
+    db.prepare("UPDATE policy_decisions SET reviewerVerdict = 'ask' WHERE id = ?").run(reviewId);
+    expect(policies()).toMatchObject([{ id: reviewId, decision: 'review', reviewerVerdict: 'ask', approvalId: null }]);
+    expect(policies()).toEqual([]);
+
+    const approvalId = approval(db);
+    db.prepare('UPDATE policy_decisions SET approvalId = ? WHERE id = ?').run(approvalId, reviewId);
+    expect(policies()).toMatchObject([{ id: reviewId, reviewerVerdict: 'ask', approvalId }]);
+
+    // after the run ends, the decision is read one last time and then no more.
+    db.prepare("UPDATE runs SET status = 'completed' WHERE id = 'r1'").run();
+    expect(policies()).toEqual([]);
+    db.prepare("UPDATE policy_decisions SET reviewerVerdict = 'hold' WHERE id = ?").run(reviewId);
+    expect(policies()).toEqual([]);
+  });
+
+  it('watches the review decisions of a run that was running when the feed was made', () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r1', 'main', 'message', 'main', 'running', 't0')").run();
+    const reviewId = decision(db, 'review', null);
+    const poll = createFeed(db, () => []);
+    expect(poll()).toEqual([]);
+    db.prepare("UPDATE policy_decisions SET reviewerVerdict = 'allow' WHERE id = ?").run(reviewId);
+    expect(poll()).toMatchObject([{ kind: 'policy', decision: { id: reviewId, reviewerVerdict: 'allow' } }]);
   });
 
   it('sends a pending approval again when it is resolved, and one time when it is resolved between polls', () => {
