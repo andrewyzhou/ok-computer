@@ -3,9 +3,10 @@
 
 export const TRIGRAM_MIN = 3;
 
-export const searchMode = (q: string): 'fts' | 'like' => ([...q.trim()].length >= TRIGRAM_MIN ? 'fts' : 'like');
-
 const withoutNul = (q: string) => q.replaceAll('\u0000', '');
+
+// the mode counts the characters of the text that the phrase is built from, so a nul character does not count.
+export const searchMode = (q: string): 'fts' | 'like' => ([...withoutNul(q).trim()].length >= TRIGRAM_MIN ? 'fts' : 'like');
 
 // the fts5 match expression for the text of the owner. the whole text is one quoted phrase, so no character of it is
 // fts5 syntax: a double quote is doubled, and AND, OR, NOT, NEAR, *, ^, :, (, ) and - lose their meaning. the caller

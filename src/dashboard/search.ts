@@ -5,6 +5,7 @@ import type { Db } from '../db/index.js';
 import { type SearchHit as MemoryHit, searchMemory, syncMemoryIndex } from '../memory/search.js';
 import { ftsPhrase, likePattern, searchMode, snippetOf } from '../search/fts.js';
 import { chatKeyOf, chatKindOf } from './chat-keys.js';
+import { deliveredTexts } from './chats.js';
 import { limitOf } from './params.js';
 import type { DashboardDeps } from './server.js';
 import type { SearchGroup, SearchHit, SearchResults, SearchScope } from './types.js';
@@ -67,29 +68,46 @@ function hit(scope: SearchScope, q: string, text: string, fields: Omit<SearchHit
   return { scope, ...fields, ...snippetOf(text, q) };
 }
 
+// a message hit shows the text that its chat got: a NO_REPLY answer, the draft of a tool turn and a reply that the guard
+// held are left out, and a reply that the guard changed shows its changed text. a hit whose match is only in a part
+// that the chat did not get is left out too. so the rows are read in batches until the group is full.
+const MESSAGE_BATCH = 100;
+const MESSAGE_SCAN = 2_000;
+
 function messageHits({ db, q, mode, take }: Context): SearchHit[] {
   const where = textClause(mode, q);
-  return db
-    .prepare(
-      `SELECT rowid AS id, text, sessionKey, runId, type, createdAt FROM events_fts
-       WHERE ${where.sql} AND type IN ('user_message', 'assistant_message', 'note', 'system_event')
-       ORDER BY createdAt DESC, rowid DESC LIMIT ?`,
-    )
-    .all(where.param, take)
-    .map((row) => {
+  const read = db.prepare(
+    `SELECT rowid AS id, sessionKey, runId, type, createdAt FROM events_fts
+     WHERE ${where.sql} AND type IN ('user_message', 'assistant_message', 'note', 'system_event')
+     ORDER BY createdAt DESC, rowid DESC LIMIT ? OFFSET ?`,
+  );
+  const needle = q.replace(/\s+/g, ' ').toLowerCase();
+  const hits: SearchHit[] = [];
+  for (let offset = 0; hits.length < take && offset < MESSAGE_SCAN; offset += MESSAGE_BATCH) {
+    const rows = read.all(where.param, MESSAGE_BATCH, offset);
+    const texts = deliveredTexts(db, rows.map((row) => Number(row.id)));
+    for (const row of rows) {
+      const text = texts.get(Number(row.id));
+      if (text === undefined || !text.replace(/\s+/g, ' ').toLowerCase().includes(needle)) continue;
       const sessionKey = String(row.sessionKey);
       const chatKey = chatKeyOf(db, sessionKey, Number(row.id));
       const route = chatKindOf(sessionKey) === 'main' ? 'chats' : 'activity';
-      return hit('messages', q, String(row.text), {
-        id: String(row.id),
-        title: MESSAGE_TITLES[String(row.type)] ?? String(row.type),
-        sessionKey,
-        runId: str(row.runId),
-        chatKey,
-        at: str(row.createdAt),
-        href: `${route}/${encodeURIComponent(chatKey)}`,
-      });
-    });
+      hits.push(
+        hit('messages', q, text, {
+          id: String(row.id),
+          title: MESSAGE_TITLES[String(row.type)] ?? String(row.type),
+          sessionKey,
+          runId: str(row.runId),
+          chatKey,
+          at: str(row.createdAt),
+          href: `${route}/${encodeURIComponent(chatKey)}`,
+        }),
+      );
+      if (hits.length >= take) break;
+    }
+    if (rows.length < MESSAGE_BATCH) break;
+  }
+  return hits;
 }
 
 function runHits({ db, q, pattern, take }: Context): SearchHit[] {
@@ -178,12 +196,23 @@ function automationHits({ db, q, pattern, take }: Context): SearchHit[] {
 }
 
 // the memory files have their own word index, so this scope ignores the mode.
+const MEMORY_SCAN = 5_000;
+
 function memoryHits({ db, q, take, memoryDir, now }: Context): SearchHit[] {
   if (!existsSync(memoryDir)) return [];
   syncMemoryIndex(db, memoryDir, now);
-  // the chunks come best first, so the first chunk of each path is its best.
+  // the chunks come best first, so the first chunk of each path is its best. one file can hold many of the best chunks,
+  // so the read grows until it has take paths or no more chunks.
   const best = new Map<string, MemoryHit>();
-  for (const chunk of searchMemory(db, q, take)) if (!best.has(chunk.path)) best.set(chunk.path, chunk);
+  for (let size = take * 4; ; size *= 4) {
+    const chunks = searchMemory(db, q, size);
+    best.clear();
+    for (const chunk of chunks) {
+      if (best.size >= take) break;
+      if (!best.has(chunk.path)) best.set(chunk.path, chunk);
+    }
+    if (best.size >= take || chunks.length < size || size >= MEMORY_SCAN) break;
+  }
   return [...best.values()].map((chunk) =>
     hit('memory', q, chunk.text, {
       id: chunk.path,
@@ -246,7 +275,8 @@ export function mountSearch(server: Hono, deps: DashboardDeps): void {
   const { db, config, clock } = deps;
   const memoryDir = join(config.paths.data, 'memory');
   server.get('/api/search', (c) => {
-    const q = c.req.query('q') ?? '';
+    // sqlite ends a bound text at a nul character, so each nul is dropped once here, before the checks and the mode.
+    const q = (c.req.query('q') ?? '').replaceAll('\u0000', '');
     if (!q.trim() || q.length > 200) return c.json({ error: 'give q as 1 to 200 characters' }, 400);
     const scope = c.req.query('scope') as SearchScope | undefined;
     if (scope !== undefined && !SEARCH_SCOPES.includes(scope)) return c.json({ error: `give scope as one of ${SEARCH_SCOPES.join(', ')}` }, 400);
