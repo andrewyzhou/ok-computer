@@ -340,7 +340,7 @@ describe('the desk instructions', () => {
     expect(DESK_INSTRUCTIONS).toContain('delegation_list first');
     expect(DESK_INSTRUCTIONS).toContain('delegation_wait_on');
     expect(DESK_INSTRUCTIONS).toContain('delegation_done');
-    expect(DESK_INSTRUCTIONS).toContain('On your desk as #12 "Book the Denver flights"');
+    expect(DESK_INSTRUCTIONS).toContain('On the desk as #12 "Book the Denver flights"');
     expect(DESK_INSTRUCTIONS).toContain('never tell the owner that a mail was sent');
   });
 });
