@@ -13,6 +13,8 @@ export interface Fixture {
   hitsOn(host: string): Array<{ method: string; path: string; body: string; agent: string }>;
   // the search pages answer with this mode. ok gives results, captcha and consent give a wall, empty gives no result.
   google: 'ok' | 'captcha' | 'consent' | 'layout' | 'hang';
+  // the flood page starts its posts only once this is true, so they all fall after the step that opened it.
+  flood: boolean;
   close(): Promise<void>;
 }
 
@@ -40,7 +42,7 @@ function readBody(req: IncomingMessage): Promise<string> {
 }
 
 export async function startFixture(): Promise<Fixture> {
-  const fixture = { google: 'ok' } as Fixture;
+  const fixture = { google: 'ok', flood: false } as Fixture;
   fixture.hits = [];
   let port = 0;
   const at = (host: string, path = '/') => `http://${host}:${port}${path}`;
@@ -364,9 +366,28 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
           ),
         );
       case 'shop.test/flood':
-        // the gate blocks each post, and the page never stops. about 250 posts a second is more than the list keeps in
-        // 2 s, and a busy pc can still answer the snapshot.
-        return send(200, html(`<h1>Flood</h1><script>setInterval(() => { for (let i = 0; i < 5; i++) fetch('/api/x?' + Math.random(), { method: 'POST', body: 'x' }).catch(() => {}); }, 20)</script>`, 'Flood'));
+        // the page asks the fixture when to start. it then sends 450 posts that the gate blocks, and after the last one
+        // failed it loads /flood-done, so the test knows that the step list holds every block.
+        return send(
+          200,
+          html(
+            `<h1>Flood</h1><script>
+              let started = false;
+              const wait = setInterval(async () => {
+                const answer = await (await fetch('/flood-go?' + Math.random())).text();
+                if (answer !== 'go' || started) return;
+                started = true;
+                clearInterval(wait);
+                const posts = Array.from({ length: 450 }, () => fetch('/api/x?' + Math.random(), { method: 'POST', body: 'x' }));
+                await Promise.allSettled(posts);
+                fetch('/flood-done').catch(() => {});
+              }, 50);
+            </script>`,
+            'Flood',
+          ),
+        );
+      case 'shop.test/flood-go':
+        return send(200, fixture.flood ? 'go' : 'wait', 'text/plain');
       case 'shop.test/pw-space': {
         // the snapshot changes the white space of a value: it trims it, and it shows a tab or a line separator as a space.
         const values = [` ${FIXTURE_PASSWORD}A `, `${FIXTURE_PASSWORD}B x`, `${FIXTURE_PASSWORD}C\tx`, `-${FIXTURE_PASSWORD}D"x: y`];

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -240,7 +240,10 @@ describe('skill workshop', () => {
     t.skill('edited', `${weekly.replace('weekly-review', 'edited-skill')}\nmy hand edit`);
     const resolve = (id: number) => t.app.resolveApproval(id, 'approve', 'button');
     expect(await resolve(1)).toContain('a skill or a folder with the name calendar-booking exists now, so the new skill was not written');
-    expect(existsSync(t.skillFile) && readFileSync(t.skillFile, 'utf8')).toContain('my steps');
+    // the owner folder keeps its text, and no second folder appears beside it. macos and windows ignore the case of
+    // a name, but linux does not, so the test reads the folder by the name the owner gave it.
+    expect(readFileSync(join(t.skillsDir, 'Calendar-Booking', 'SKILL.md'), 'utf8')).toContain('my steps');
+    expect(readdirSync(t.skillsDir)).not.toContain('calendar-booking');
     expect(await resolve(2)).toContain(`changed the skill weekly-review. The old text was:\n${weekly}`);
     expect(readFileSync(join(t.skillsDir, 'weekly', 'SKILL.md'), 'utf8')).toBe(
       '---\nname: weekly-review\ndescription: Book an event on the owner calendar.\nowner-note: keep it short\n---\n\nnew steps\n',

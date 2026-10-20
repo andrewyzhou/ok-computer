@@ -620,13 +620,26 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
   it('keeps the first 200 blocked requests of a step and counts the others', async () => {
     const h = harness();
     await h.run('browser_open', { url: site.url('shop.test', '/flood') });
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    // the page sends its 450 posts only after the open step ended, and loads /flood-done after the last one failed.
+    // so every block goes into the record of the snapshot, and a slow runner gets the same count as a fast one.
+    site.flood = true;
+    try {
+      await vi.waitFor(() => expect(site.hitsOn('shop.test').some((hit) => hit.path === '/flood-done')).toBe(true), { timeout: 30_000, interval: 100 });
+    } finally {
+      site.flood = false;
+    }
     const out = await h.run('browser_snapshot', {});
     const blocked = JSON.parse(String(h.steps().at(-1)!.blockedRequests)) as Array<{ url: string; reason: string }>;
     expect(blocked).toHaveLength(201);
     const [, more] = /^(\d+) more blocked requests were not kept$/.exec(blocked.at(-1)!.reason)!;
-    expect(Number(more)).toBeGreaterThan(200);
-    expect(out.content).toContain(`Blocked ${200 + Number(more)} requests:`);
+    const total = 200 + Number(more);
+    expect(out.content).toContain(`Blocked ${total} requests:`);
+    // chrome itself calls a google host a moment after it starts, and the proxy records that block in every open tab.
+    // so a few blocks of other hosts can join the 450 posts of the page, but no post of the page is lost.
+    const others = blocked.slice(0, 200).filter((each) => !each.url.includes('/api/x?'));
+    expect(others.every((each) => !each.url.includes('shop.test'))).toBe(true);
+    expect(total - 450).toBeGreaterThanOrEqual(others.length);
+    expect(total - 450).toBeLessThanOrEqual(5);
   });
 
   it('lets an image button send one click position, and refuses a field of that name that a script adds', async () => {
