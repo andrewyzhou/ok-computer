@@ -72,19 +72,21 @@ describe.skipIf(!hasChrome())('the idle close of chrome', { timeout: 60_000 }, (
   });
 
   it('waits for a slow trace stop of the last task before the limit of a new tab starts', async () => {
-    const h = createBrowserHarness({ idleMs: IDLE_MS });
+    // the trace stop and the start of a tab share the navigation limit, 9 s here. the page close and the trace stop
+    // together take longer than it, and the stop alone stays 3 s under it, so a slow disk that writes the trace on a
+    // windows runner does not use up the margin.
+    const h = createBrowserHarness({ idleMs: IDLE_MS, timeouts: { action: 3000, navigation: 9000, capture: 2000 } });
     open.push(h);
     await h.run('browser_open', { url: url() });
-    let delay = 1_900;
+    let delay = 4_000;
     await slow(h, 'page', 'close', () => delay);
-    // the trace stop of the first task is slow, as on a busy windows machine. with the page close it takes longer than
-    // the limit of a tab start, 5 s here, but each part stays within its own limit.
+    // the trace stop of the first task is slow, as on a busy windows machine.
     await h.worker.act({ sessionKey: 'main', runId: 'run-1', action: 'patch' }, async (page) => {
       const proto = Object.getPrototypeOf(page.context().tracing) as Record<string, (...args: unknown[]) => Promise<unknown>>;
       const original = proto.stop!;
       let first = true;
       proto.stop = async function (this: unknown, ...args: unknown[]) {
-        if (first) await sleep(4_000);
+        if (first) await sleep(6_000);
         first = false;
         return original.apply(this, args);
       };
