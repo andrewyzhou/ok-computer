@@ -250,6 +250,9 @@ function Meetings({ meetings, empty }: { meetings: PersonMeetingView[]; empty: s
   );
 }
 
+// the words of the docs reader for the same mark, so the two pages mean the same thing by it.
+const NOTE_TAINT_TITLE = 'The agent wrote this note after it had read untrusted content, such as a web page or a mail, so its text can repeat outside text.';
+
 function Notes({ notes, empty, devMode }: { notes: PersonNoteView[]; empty: string; devMode: boolean }) {
   if (!notes.length) return <p className="muted people-none">{empty}</p>;
   return (
@@ -270,6 +273,14 @@ function Notes({ notes, empty, devMode }: { notes: PersonNoteView[]; empty: stri
               )}
             </span>{' '}
             · <time dateTime={note.createdAt}>{day(note.createdAt)}</time>
+            {note.author === 'agent' && note.tainted ? (
+              <>
+                {' '}
+                <Badge tone="warning" title={NOTE_TAINT_TITLE}>
+                  outside text
+                </Badge>
+              </>
+            ) : null}
           </span>
         </li>
       ))}
@@ -599,9 +610,9 @@ export function PeoplePage({ params, query }: RouteProps) {
   // the failed accounts show above the list, and in place of the "next poll" text when there is no one yet.
   const failedBox = failed.length && !noGoogle ? <BackfillFailed accounts={failed} /> : null;
   const statusNote = status.error ? (
-    <p className="muted small people-status-note" role="status">
-      Could not read the state of the first read of your accounts: {status.error}
-    </p>
+    <div className="people-status-note">
+      <ErrorWithRetry text={`Could not read the state of the first read of your accounts: ${status.error}`} onRetry={status.reload} />
+    </div>
   ) : null;
   let body;
   if (noGoogle) {
@@ -647,6 +658,12 @@ export function PeoplePage({ params, query }: RouteProps) {
         </ul>
       </EmptyState>
     );
+  } else if (!list.people.length && status.error) {
+    // the state of the first read is unknown, so the page cannot say that there is no one yet. the error box above
+    // says what failed.
+    body = null;
+  } else if (!list.people.length && !status.data) {
+    body = <Skeleton lines={6} label="Loading people…" />;
   } else if (!list.people.length) {
     body = failedBox ?? (
       <EmptyState icon="people" title="No people yet.">
@@ -706,7 +723,7 @@ export function PeoplePage({ params, query }: RouteProps) {
       ) : (
         <DetailsPanel title="People">
           <p className="muted">
-            {list.people.length
+            {list.people.length || list.error || status.error
               ? 'Select a person to see their emails, meetings, open threads and notes.'
               : 'A profile shows here once People has someone in it.'}
           </p>

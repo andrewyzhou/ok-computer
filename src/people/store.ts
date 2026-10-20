@@ -13,6 +13,7 @@ import type {
   PersonThreadView,
 } from '../dashboard/people-types.js';
 import { listWaitingOn } from '../desk/index.js';
+import type { TaintSource } from '../policy/policy.js';
 import { likePattern } from '../search/fts.js';
 import { inTransaction } from '../signals/store.js';
 import { isPersonalDomain, normalizeEmail, organizationOf } from './address.js';
@@ -66,6 +67,8 @@ export interface NoteInput {
   supersedes?: number;
   runId?: string | null;
   toolCallId?: string | null;
+  // the taint of the writing session (sessionTaint of src/policy/store.ts). the owner's own note has none.
+  taint?: readonly TaintSource[];
 }
 
 export interface BackfillState {
@@ -409,8 +412,20 @@ function noteOf(row: Row): PersonNoteView {
     text: text(row.text),
     author: text(row.author) as PersonNoteAuthor,
     runId: textOrNull(row.runId),
+    tainted: noteTainted(row.taint),
     createdAt: text(row.createdAt),
   };
+}
+
+// a note is tainted when its list of sources is not empty. a list that cannot be read still marks the note, so its
+// text is never shown as clean.
+function noteTainted(value: unknown): boolean {
+  try {
+    const parsed: unknown = JSON.parse(String(value ?? '[]'));
+    return !Array.isArray(parsed) || parsed.length > 0;
+  } catch {
+    return true;
+  }
 }
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
@@ -489,7 +504,7 @@ export function getPerson(db: Db, requested: number, now: Date): PersonProfile |
   // changes, so the profile reads them through mergedInto.
   const notes = db
     .prepare(
-      `SELECT id, kind, text, author, runId, createdAt FROM person_notes n
+      `SELECT id, kind, text, author, runId, taint, createdAt FROM person_notes n
        WHERE personId IN (SELECT id FROM people WHERE id = :id OR mergedInto = :id)
          AND NOT EXISTS (SELECT 1 FROM person_notes later WHERE later.supersedes = n.id)
        ORDER BY createdAt DESC, id DESC`,
@@ -538,10 +553,20 @@ export function addNote(db: Db, input: NoteInput, now: Date): PersonNoteView {
   if (body.length > NOTE_LIMIT) throw new Error(`the note is longer than ${NOTE_LIMIT} characters`);
   const row = db
     .prepare(
-      `INSERT INTO person_notes (personId, kind, text, author, supersedes, runId, toolCallId, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, kind, text, author, runId, createdAt`,
+      `INSERT INTO person_notes (personId, kind, text, author, supersedes, runId, toolCallId, taint, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, kind, text, author, runId, taint, createdAt`,
     )
-    .get(personId, input.kind, body, input.author, input.supersedes ?? null, input.runId ?? null, input.toolCallId ?? null, now.toISOString());
+    .get(
+      personId,
+      input.kind,
+      body,
+      input.author,
+      input.supersedes ?? null,
+      input.runId ?? null,
+      input.toolCallId ?? null,
+      JSON.stringify(input.taint ?? []),
+      now.toISOString(),
+    );
   return noteOf(row as Row);
 }
 

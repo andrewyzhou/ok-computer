@@ -58,9 +58,11 @@ describe('the states of the people page', () => {
     expect((inMain().getByRole('searchbox', { name: 'Search people' }) as HTMLInputElement).value).toBe('');
   });
 
-  it('shows the sentence of the server when the list fails', async () => {
+  it('shows the sentence of the server when the list fails, and no empty text in the panel', async () => {
     open({ 'GET /api/people': () => json({ error: 'the people store is busy' }, 500), 'GET /api/people/status': () => statusDone });
     expect((await inMain().findByRole('alert')).textContent).toBe('Could not load people: the people store is busy');
+    expect(screen.getByText('Select a person to see their emails, meetings, open threads and notes.')).toBeTruthy();
+    expect(screen.queryByText('A profile shows here once People has someone in it.')).toBeNull();
   });
 
   it('tries the list again with the button under the error', async () => {
@@ -88,10 +90,25 @@ describe('the states of the people page', () => {
     expect(inMain().queryByText('People show up here after the next mail or calendar poll.')).toBeNull();
   });
 
-  it('says so in a short line when the status cannot be read', async () => {
+  it('shows an error box with a retry when the status cannot be read, above the list', async () => {
     open({ 'GET /api/people': () => peoplePage, 'GET /api/people/status': () => json({ error: 'the status is busy' }, 500) });
-    expect(await inMain().findByText('Could not read the state of the first read of your accounts: the status is busy')).toBeTruthy();
+    const alert = await inMain().findByRole('alert');
+    expect(alert.textContent).toBe('Could not read the state of the first read of your accounts: the status is busy');
+    expect(inMain().getByRole('button', { name: 'Try again' })).toBeTruthy();
     expect(inMain().getByRole('table', { name: 'people' })).toBeTruthy();
+  });
+
+  it('leaves out the empty text while the status is unknown, and the retry reads the status again', async () => {
+    let fail = true;
+    const done = { ...statusDone, people: 0, accounts: [statusDone.accounts[0]!] };
+    open({ 'GET /api/people': () => emptyPage, 'GET /api/people/status': () => (fail ? json({ error: 'the status is busy' }, 500) : done) });
+    expect((await inMain().findByRole('alert')).textContent).toBe('Could not read the state of the first read of your accounts: the status is busy');
+    expect(inMain().queryByText('No people yet.')).toBeNull();
+    expect(screen.queryByText('A profile shows here once People has someone in it.')).toBeNull();
+    fail = false;
+    fireEvent.click(inMain().getByRole('button', { name: 'Try again' }));
+    expect(await inMain().findByText('No people yet.')).toBeTruthy();
+    expect(inMain().queryByRole('alert')).toBeNull();
   });
 
   it('merges a duplicate that the owner names by an address, after a confirm', async () => {

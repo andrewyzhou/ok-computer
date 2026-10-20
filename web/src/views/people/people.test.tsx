@@ -95,6 +95,16 @@ describe('the people list', () => {
     await waitFor(() => expect(location.hash).toBe('#/people?q=a'));
   });
 
+  it('marks an agent note that a tainted session wrote, and no other note', async () => {
+    await open({}, '#/people/2');
+    const note = (await screen.findByText('waiting on the signed lease from Tomas')).closest('li')!;
+    const badge = within(note).getByText('outside text');
+    expect(badge.getAttribute('title')).toMatch(/untrusted content/);
+    location.hash = '#/people/1';
+    await screen.findByText('met at the design offsite');
+    expect(screen.queryByText('outside text')).toBeNull();
+  });
+
   it('shows the open thread of a profile as text with no link to the mail', async () => {
     await open({}, '#/people/2');
     const subject = await screen.findByText('Re: Lease for the new place');
@@ -132,7 +142,7 @@ describe('the note form', () => {
         'GET /api/people/:id': () => profile,
         'POST /api/people/:id/notes': ({ body }) => {
           const input = body as { kind: 'note' | 'preference'; text: string };
-          const note: PersonNoteView = { id: 10, kind: input.kind, text: input.text, author: 'owner', runId: null, createdAt: '2026-10-18T16:00:00.000Z' };
+          const note: PersonNoteView = { id: 10, kind: input.kind, text: input.text, author: 'owner', runId: null, tainted: false, createdAt: '2026-10-18T16:00:00.000Z' };
           profile = { ...profile, preferences: [note, ...profile.preferences] };
           return note;
         },

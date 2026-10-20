@@ -6,6 +6,9 @@ import { silentLogger } from '../observability/logger.js';
 import { createRunQueue } from '../sessions/queue.js';
 import type { BriefContext } from './context.js';
 import { gatherBriefInput } from './sources.js';
+import { seedPeople } from '../../test/seed-people.js';
+import { TODAY_EVENTS } from '../../test/fixtures/today-data.js';
+import type { CalendarEvent } from '../dashboard/calendar-types.js';
 
 // the calendar of a test answers from calendarAnswer, so these tests do not need google.
 let calendarAnswer: (range: { startAt: Date; endAt: Date }) => Promise<CalendarRead>;
@@ -118,6 +121,27 @@ describe('brief sources', () => {
     expect(await state(['personal', 'school'], ['school'])).toMatchObject({ calendar: 'partial', skipped: [{ account: 'school', reason: 'school is signed out.' }] });
     expect((await state(['personal', 'school'], ['school', 'personal'])).calendar).toBe('failed');
     expect((await state([], [])).calendar).toBe('ok');
+  });
+
+  it('gives the names of the people memory for organizers that the calendar gave as an address', async () => {
+    const db = openDb(':memory:');
+    seedPeople(db);
+    const event = (key: string, organizer: string | null, organizerSelf = false): CalendarEvent => ({ ...TODAY_EVENTS[0]!, key, organizer, organizerSelf });
+    calendarAnswer = async () => ({
+      ...read([]),
+      events: [
+        event('a', 'Maya@Northwind.example'),
+        event('b', 'maya@northwind.example'),
+        event('c', 'k.osei@fabrikam.example'),
+        event('d', 'Tomas Okafor'),
+        event('e', 'stranger@nowhere.example'),
+        event('f', 'praman@berkeley.edu', true),
+        event('g', null),
+      ],
+    });
+    const input = await gatherBriefInput(context(db, ['personal']), DAY);
+    // k.osei has no name, a display name is no address, and the owner's own events need no name.
+    expect(input.organizerNames).toEqual({ 'maya@northwind.example': 'Maya Lindqvist' });
   });
 
   it('keeps the brief going when a source throws', async () => {

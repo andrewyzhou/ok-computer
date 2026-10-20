@@ -225,7 +225,7 @@ describe('the notes of a person', () => {
     const response = await post(dashboard, '/api/people/2/notes', { kind: 'note', text: '  lease signed on friday  ' });
     expect(response.status).toBe(201);
     const note = (await response.json()) as PersonNoteView;
-    expect(note).toEqual({ id: 5, kind: 'note', text: 'lease signed on friday', author: 'owner', runId: null, createdAt: PEOPLE_NOW.toISOString() });
+    expect(note).toEqual({ id: 5, kind: 'note', text: 'lease signed on friday', author: 'owner', runId: null, tainted: false, createdAt: PEOPLE_NOW.toISOString() });
     expect(store.notesAdded).toEqual([{ personId: 2, kind: 'note', text: 'lease signed on friday', author: 'owner', runId: null, toolCallId: null }]);
     expect(store.nows).toEqual([PEOPLE_NOW]);
 

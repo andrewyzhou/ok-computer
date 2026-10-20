@@ -87,6 +87,21 @@ describe('addressNoise', () => {
     ['jane@emory.example', null, null],
     ['jane@newsroom.example', null, null],
     ['contactless@acme.com', null, null],
+    // mailing lists that a calendar event lists as attendees.
+    ['cs101-staff@lists.school.example', null, 'mailing_list'],
+    ['eng@list.acme.com', null, 'mailing_list'],
+    ['cs101@lists.cs.school.example', null, 'mailing_list'],
+    ['dept@listserv.school.example', null, 'mailing_list'],
+    ['eng@groups.acme.com', null, 'mailing_list'],
+    ['club@googlegroups.com', null, 'mailing_list'],
+    ['cs101-fa26@school.example', 'cs101-fa26', 'mailing_list'],
+    ['cs101-staff2@school.example', 'CS101-Staff2', 'mailing_list'],
+    ['cs101-fa26@school.example', null, null],
+    ['jane@lists.example', null, null],
+    ['jane@listening.acme.com', null, null],
+    ['jane@mygroups.example', null, null],
+    ['jane.doe@acme.com', 'jane.doe', null],
+    ['jdoe2@acme.com', 'jdoe2', null],
   ];
   for (const [email, name, reason, options] of cases) {
     it(`gives ${String(reason)} for ${email}${name ? ` named ${name}` : ''}${options ? ` with ${JSON.stringify(options)}` : ''}`, () => {

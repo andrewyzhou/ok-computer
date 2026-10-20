@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { PersonProfile, PersonSummary } from '../dashboard/people-types.js';
 import type { Db } from '../db/index.js';
 import type { GoogleConfig } from '../google/config.js';
+import { sessionTaint } from '../policy/store.js';
 import { cleanLine } from '../signals/store.js';
 import { headOf } from '../text.js';
 import { localDay, localTime } from '../time.js';
@@ -89,7 +90,9 @@ function profileText(person: PersonProfile, timeZone: string): string {
       ...person.delegations.map((each) => `- ${line(each.title)} (${each.status}${each.dueAt ? `, due ${whenOf(each.dueAt, timeZone)}` : ''})`),
     );
   }
-  const noteLine = (note: PersonProfile['notes'][number]) => `- note ${note.id} by ${note.author}, ${localDay(new Date(note.createdAt), timeZone)}: ${line(note.text, 2000)}`;
+  // an agent note that a tainted session wrote can repeat outside text, so the line says so.
+  const noteLine = (note: PersonProfile['notes'][number]) =>
+    `- note ${note.id} by ${note.author}${note.tainted ? ' after reading outside text' : ''}, ${localDay(new Date(note.createdAt), timeZone)}: ${line(note.text, 2000)}`;
   if (person.preferences.length) lines.push('preferences:', ...person.preferences.map(noteLine));
   if (person.notes.length) lines.push('notes:', ...person.notes.map(noteLine));
   const text = lines.join('\n');
@@ -199,6 +202,7 @@ export function createPeopleTools(deps: PeopleToolDeps): Tool[] {
             ...(input.supersedes !== undefined ? { supersedes: input.supersedes } : {}),
             runId: ctx.runId,
             toolCallId: ctx.toolCallId ?? null,
+            taint: sessionTaint(db, ctx.sessionKey),
           },
           now,
         );
