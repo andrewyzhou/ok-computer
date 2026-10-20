@@ -4,6 +4,8 @@ import { percent, time } from '../../format';
 import type { RouteProps } from '../../routes';
 import { Button, DetailsPanel, Drawer, EmptyState, Facts, FilterBar, IconButton, Page, Select, Skeleton, Table, type Column, type Tone } from '../../ui';
 import {
+  accountColumn,
+  AccountBelowMd,
   day,
   LastRun,
   LoadMore,
@@ -262,9 +264,11 @@ export function NewslettersPage({ query }: RouteProps) {
         <div className="inbox-name">
           <span>{senderName(row)}</span>
           {row.listId ? <span className="muted small">{row.listId}</span> : null}
+          <AccountBelowMd account={row.account} />
         </div>
       ),
     },
+    accountColumn<NewsletterSenderRow>(),
     { key: 'messages', header: 'Messages', align: 'end', cell: (row) => row.messages },
     { key: 'read', header: 'Read', align: 'end', hideBelow: 'sm', cell: (row) => percent(row.readRate) },
     { key: 'last', header: 'Last', hideBelow: 'md', cell: (row) => <span className="inbox-nowrap">{day(row.lastAt)}</span> },

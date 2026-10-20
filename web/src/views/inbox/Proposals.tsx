@@ -4,7 +4,7 @@ import { useApi } from '../../api';
 import { clock, longDay, time } from '../../format';
 import type { RouteProps } from '../../routes';
 import { Badge, DetailsPanel, EmptyState, Facts, FilterBar, Page, Skeleton, Tabs, type Tone } from '../../ui';
-import { ApprovalFor, LoadMore, RunLink, StateBadge, setHashQuery, useApprovals, usePaged, withQuery } from './shared';
+import { AccountBadge, ApprovalFor, LoadMore, RunLink, StateBadge, setHashQuery, useApprovals, usePaged, withQuery } from './shared';
 import './inbox.css';
 
 // the calendar events that the digest job proposes, for example a course deadline or a bill. the owner approves each
@@ -65,6 +65,7 @@ function ProposalItem({
         </button>
         <Badge tone={KIND_TONE[proposal.kind]}>{proposal.kind}</Badge>
         <StateBadge value={proposal.state} tones={STATE_TONE} />
+        <AccountBadge account={proposal.account} />
       </div>
       <p className="inbox-proposal-when">{when(proposal)}</p>
       {proposal.sourceSubject ? <p className="muted small">from the mail “{proposal.sourceSubject}”</p> : null}
@@ -81,25 +82,29 @@ function ProposalItem({
 
 function ProposalFacts({ proposal }: { proposal: CalendarProposalView }) {
   return (
-    <Facts
-      layout="stacked"
-      items={[
-        { label: 'State', value: <StateBadge value={proposal.state} tones={STATE_TONE} /> },
-        { label: 'When', value: when(proposal) },
-        { label: 'Kind', value: proposal.kind },
-        { label: 'Account', value: proposal.account },
-        { label: 'Calendar', value: proposal.calendarId },
-        proposal.description ? { label: 'Description', value: <div className="inbox-body">{proposal.description}</div> } : null,
-        { label: 'Source', value: proposal.sourceSubject ?? <span className="muted">none</span> },
-        proposal.sourceMessageId ? { label: 'Source message', value: <code>{proposal.sourceMessageId}</code> } : null,
-        proposal.approvalId !== null ? { label: 'Approval', value: <a href="#/approvals">#{proposal.approvalId}</a> } : null,
-        proposal.eventId ? { label: 'Event', value: <code>{proposal.eventId}</code> } : null,
-        proposal.error ? { label: 'Error', value: <span className="error-text">{proposal.error}</span> } : null,
-        { label: 'Created', value: time(proposal.createdAt) },
-        { label: 'Resolved', value: time(proposal.resolvedAt) },
-        { label: 'Run', value: <RunLink runId={proposal.runId} /> },
-      ]}
-    />
+    <>
+      {/* the words of the mail that give the date, so the owner can check that the date is not made up. */}
+      {proposal.dueText ? <p className="inbox-due-text">The mail says: “{proposal.dueText}”</p> : null}
+      <Facts
+        layout="stacked"
+        items={[
+          { label: 'State', value: <StateBadge value={proposal.state} tones={STATE_TONE} /> },
+          { label: 'When', value: when(proposal) },
+          { label: 'Kind', value: proposal.kind },
+          { label: 'Account', value: proposal.account },
+          { label: 'Calendar', value: proposal.calendarId },
+          proposal.description ? { label: 'Description', value: <div className="inbox-body">{proposal.description}</div> } : null,
+          { label: 'Source', value: proposal.sourceSubject ?? <span className="muted">none</span> },
+          proposal.sourceMessageId ? { label: 'Source message', value: <code>{proposal.sourceMessageId}</code> } : null,
+          proposal.approvalId !== null ? { label: 'Approval', value: <a href="#/approvals">#{proposal.approvalId}</a> } : null,
+          proposal.eventId ? { label: 'Event', value: <code>{proposal.eventId}</code> } : null,
+          proposal.error ? { label: 'Error', value: <span className="error-text">{proposal.error}</span> } : null,
+          { label: 'Created', value: time(proposal.createdAt) },
+          { label: 'Resolved', value: time(proposal.resolvedAt) },
+          { label: 'Run', value: <RunLink runId={proposal.runId} /> },
+        ]}
+      />
+    </>
   );
 }
 

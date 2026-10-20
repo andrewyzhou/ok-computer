@@ -3,7 +3,7 @@ import { useApi } from '../../api';
 import { time } from '../../format';
 import type { RouteProps } from '../../routes';
 import { DetailsPanel, EmptyState, Facts, FilterBar, Page, Skeleton, Table, Tabs, type Column, type Tone } from '../../ui';
-import { LoadMore, RunLink, StateBadge, setHashQuery, usePaged, withQuery } from './shared';
+import { accountColumn, AccountBelowMd, LoadMore, RunLink, StateBadge, setHashQuery, usePaged, withQuery } from './shared';
 import './inbox.css';
 
 // the draft replies that the digest job wrote into the mail drafts of an account. the app never sends a draft: the
@@ -23,8 +23,19 @@ const STATE_LABEL: Record<DraftState, string> = { drafted: 'drafted', discarded:
 
 const COLUMNS: Array<Column<DraftView>> = [
   { key: 'to', header: 'To', wrap: true, cell: (draft) => draft.to.join(', ') || <span className="muted">no one</span> },
-  { key: 'subject', header: 'Subject', wrap: true, cell: (draft) => draft.subject },
-  { key: 'account', header: 'Account', hideBelow: 'md', cell: (draft) => draft.account },
+  // below md the account column is hidden, so the account shows under the subject.
+  {
+    key: 'subject',
+    header: 'Subject',
+    wrap: true,
+    cell: (draft) => (
+      <div className="inbox-name">
+        <span>{draft.subject}</span>
+        <AccountBelowMd account={draft.account} />
+      </div>
+    ),
+  },
+  accountColumn<DraftView>(),
   { key: 'created', header: 'Created', align: 'end', hideBelow: 'sm', cell: (draft) => time(draft.createdAt) },
 ];
 
