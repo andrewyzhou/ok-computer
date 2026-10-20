@@ -19,7 +19,7 @@ export default defineRoutes([
     path: 'overview',
     group: 'agent',
     label: 'Overview',
-    icon: 'today',
+    icon: 'overview',
     order: 5,
     load: page(() => import('../../pages/Overview').then((m) => m.Overview)),
   },

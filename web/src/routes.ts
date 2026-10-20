@@ -26,6 +26,7 @@ export const NAV_GROUPS: ReadonlyArray<{ id: NavGroup; label: string }> = [
 // the names after draft are for the shell and the shared parts of web/src/ui.
 export type IconName =
   | 'today'
+  | 'overview'
   | 'desk'
   | 'inbox'
   | 'calendar'
