@@ -13,8 +13,8 @@ import type { StreamMessage } from '../../../../src/dashboard/types';
 import { api, send, useApi } from '../../api';
 import type { RouteProps } from '../../routes';
 import { useDevMode } from '../../shell/prefs';
-import { Button, EmptyState, Page, Section, Skeleton, Table, type Column } from '../../ui';
-import { changeError, LevelChoice, LevelPill, Legend, RaiseConfirm, rank, TaintNote, When, who } from './parts';
+import { Button, EmptyState, Page, Pill, Section, Skeleton, Table, type Column } from '../../ui';
+import { changeError, LevelChoice, LevelPill, Legend, RaiseConfirm, rank, readError, TaintNote, When, who } from './parts';
 import './autonomy.css';
 
 // the trust ladder (docs/DESIGN-NEXT.md 13.6). each domain shows its level, and the post of this page is the only
@@ -70,10 +70,18 @@ function DomainCard({
         <div className="autonomy-card-now">
           {/* the radios show the level of a domain that can change, so only a fixed domain shows it as a pill. */}
           {domain.fixed ? <LevelPill level={domain.level} /> : null}
+          {/* a domain that can change always names its default the same way, and a tag marks the level when it is the
+              default. */}
           {domain.fixed ? null : (
-            <span className="autonomy-default small">{domain.level === domain.defaultLevel ? 'Default level' : `Default: ${domain.defaultLevel}`}</span>
+            <>
+              <span className="autonomy-default small">Default {domain.defaultLevel}</span>
+              <span className="small muted" aria-hidden="true">
+                ·
+              </span>
+            </>
           )}
           <span className="small muted">{domain.updatedAt ? <>Changed <When iso={domain.updatedAt} /></> : 'Never changed'}</span>
+          {!domain.fixed && domain.level === domain.defaultLevel ? <Pill className="autonomy-at-default">Default</Pill> : null}
         </div>
         {domain.fixed ? (
           <div className="autonomy-fixed">
@@ -104,6 +112,14 @@ function DomainCard({
       </div>
     </li>
   );
+}
+
+// the text when an older page of the history fails. a known database error has plain words, and other text is shown
+// as the server wrote it.
+function olderError(message: string, devMode: boolean): string {
+  const read = readError(message, devMode);
+  if (read.plain) return `Could not load older changes. ${read.text}`;
+  return `Could not load older changes. Try again. The server said: ${read.text}`;
 }
 
 function History({ data, devMode }: { data: AutonomyData; devMode: boolean }) {
@@ -205,7 +221,7 @@ function History({ data, devMode }: { data: AutonomyData; devMode: boolean }) {
           ) : null}
           {current.error ? (
             <span role="alert" className="error-text autonomy-more-error">
-              Could not load older changes. Try again. The server said: {current.error}
+              {olderError(current.error, devMode)}
             </span>
           ) : null}
         </div>
@@ -233,7 +249,7 @@ function Ladder({ data, reload }: { data: AutonomyData; reload: () => void }) {
         reload();
       },
       (err: Error) => {
-        setCard(domain.id, { error: changeError(err.message) });
+        setCard(domain.id, { error: changeError(err.message, devMode) });
         // another tab may have changed the level, so the page shows the levels of the server again.
         reload();
       },
@@ -273,6 +289,21 @@ function Ladder({ data, reload }: { data: AutonomyData; reload: () => void }) {
   );
 }
 
+// the box of a failed load. a damaged database cannot get better with a new try, so it has no Try again button.
+function LoadError({ message, reload }: { message: string; reload: () => void }) {
+  const read = readError(message, useDevMode());
+  return (
+    <div className="error-box autonomy-load-error">
+      <p>{read.plain ? `Could not load. ${read.text}` : `Could not load: ${read.text}`}</p>
+      {read.retry ? (
+        <Button size="sm" onClick={reload}>
+          Try again
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 export function AutonomyPage(_props: RouteProps) {
   const loaded = useApi<AutonomyData>('/api/autonomy', refreshOn);
   return (
@@ -281,12 +312,7 @@ export function AutonomyPage(_props: RouteProps) {
       subtitle="What the agent may do on its own. Only you can give it more freedom, here. The agent can take freedom away when you ask in chat."
     >
       {loaded.error ? (
-        <div className="error-box autonomy-load-error">
-          <p>Could not load: {loaded.error}</p>
-          <Button size="sm" onClick={loaded.reload}>
-            Try again
-          </Button>
-        </div>
+        <LoadError message={loaded.error} reload={loaded.reload} />
       ) : loaded.data === undefined ? (
         <Skeleton lines={4} />
       ) : (

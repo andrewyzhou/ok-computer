@@ -60,6 +60,39 @@ describe('the edges of the autonomy page', () => {
     expect(inMain().queryByRole('radiogroup')).toBeNull();
   });
 
+  it('says in plain words that the database is busy, and keeps Try again', async () => {
+    stubFetch(seeded.dashboard, { 'GET /api/autonomy': () => json({ error: 'SQLITE_BUSY: database is locked' }, 500) });
+    openApp('#/autonomy');
+    expect(await inMain().findByText('Could not load. The database is busy. Try again in a moment.')).toBeTruthy();
+    expect(inMain().queryByText(/SQLITE/)).toBeNull();
+    expect(inMain().getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+
+  it('points to the logs and a backup for a damaged database, with no Try again', async () => {
+    stubFetch(seeded.dashboard, { 'GET /api/autonomy': () => json({ error: 'SQLITE_CORRUPT: database disk image is malformed' }, 500) });
+    openApp('#/autonomy');
+    const text = 'Could not load. The database file is damaged, so it cannot be read. Check the logs in data/logs, or restore the database from a backup.';
+    expect(await inMain().findByText(text)).toBeTruthy();
+    expect(inMain().queryByText(/SQLITE/)).toBeNull();
+    expect(inMain().queryByRole('button', { name: 'Try again' })).toBeNull();
+  });
+
+  it('adds the raw text of a database error in developer mode', async () => {
+    setPrefs({ devMode: true });
+    stubFetch(seeded.dashboard, { 'GET /api/autonomy': () => json({ error: 'SQLITE_BUSY: database is locked' }, 500) });
+    openApp('#/autonomy');
+    expect(await inMain().findByText('Could not load. The database is busy. Try again in a moment. The server said: SQLITE_BUSY: database is locked')).toBeTruthy();
+  });
+
+  it('says in plain words that the database is busy when an older page fails', async () => {
+    await open({
+      'GET /api/autonomy': () => ({ ...full, before: 1 }),
+      'GET /api/autonomy/history': () => json({ error: 'SQLITE_BUSY: database is locked' }, 500),
+    });
+    fireEvent.click(inMain().getByRole('button', { name: 'Show older' }));
+    expect((await inMain().findByText(/Could not load older changes/)).textContent).toBe('Could not load older changes. The database is busy. Try again in a moment.');
+  });
+
   it('loads the page again with Try again after a failed load', async () => {
     let fail = true;
     const calls = stubFetch(seeded.dashboard, { 'GET /api/autonomy': () => (fail ? json({ error: 'a row could not be read' }, 500) : firstRun) });
