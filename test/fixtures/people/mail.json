@@ -1,0 +1,94 @@
+{
+  "inbound": {
+    "id": "m-in",
+    "threadId": "t-1",
+    "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+    "internalDate": "1760900000000",
+    "payload": {
+      "headers": [
+        { "name": "From", "value": "\"Doe, Jane\" <Jane.Doe@mail.eu.acme.com>" },
+        { "name": "To", "value": "Owner <owner@example.com>, Bob Stone <bob@berkeley.edu>" },
+        { "name": "Cc", "value": "carol@gmail.com (Carol Diaz), Jane.Doe@mail.eu.acme.com" },
+        { "name": "Subject", "value": "  Lunch\n next   week? " },
+        { "name": "Date", "value": "Sun, 19 Oct 2025 18:53:20 +0000" }
+      ]
+    }
+  },
+  "outbound": {
+    "id": "m-out",
+    "threadId": "t-1",
+    "labelIds": ["SENT"],
+    "internalDate": "1760903600000",
+    "payload": {
+      "headers": [
+        { "name": "from", "value": "Owner <OWNER@example.com>" },
+        { "name": "to", "value": "Jane Doe <jane.doe@mail.eu.acme.com>" },
+        { "name": "cc", "value": "bob@berkeley.edu, noreply@acme.com" },
+        { "name": "subject", "value": "Re: Lunch next week?" }
+      ]
+    }
+  },
+  "wide": {
+    "id": "m-wide",
+    "threadId": "t-2",
+    "labelIds": ["INBOX"],
+    "internalDate": "1760900000000",
+    "payload": {
+      "headers": [
+        { "name": "From", "value": "Dana Lee <dana@acme.com>" },
+        {
+          "name": "To",
+          "value": "p01@acme.com, p02@acme.com, p03@acme.com, p04@acme.com, p05@acme.com, p06@acme.com, p07@acme.com, p08@acme.com, p09@acme.com, p10@acme.com, p11@acme.com, p12@acme.com, p13@acme.com, p14@acme.com, p15@acme.com, p16@acme.com, p17@acme.com, p18@acme.com, p19@acme.com, p20@acme.com"
+        },
+        { "name": "Cc", "value": "p21@acme.com, p22@acme.com, p23@acme.com, p24@acme.com, owner@example.com" },
+        { "name": "Subject", "value": "All hands notes" }
+      ]
+    }
+  },
+  "list": {
+    "id": "m-list",
+    "threadId": "t-3",
+    "labelIds": ["INBOX"],
+    "internalDate": "1760900000000",
+    "payload": {
+      "headers": [
+        { "name": "From", "value": "Erin <erin@acme.com>" },
+        { "name": "To", "value": "eng@lists.acme.com" },
+        { "name": "List-Id", "value": "<eng.lists.acme.com>" },
+        { "name": "Subject", "value": "[eng] build is red" }
+      ]
+    }
+  },
+  "spam": {
+    "id": "m-spam",
+    "threadId": "t-4",
+    "labelIds": ["SPAM"],
+    "internalDate": "1760900000000",
+    "payload": { "headers": [{ "name": "From", "value": "Prize <winner@prize.example>" }, { "name": "To", "value": "owner@example.com" }] }
+  },
+  "draft": {
+    "id": "m-draft",
+    "threadId": "t-5",
+    "labelIds": ["DRAFT"],
+    "internalDate": "1760900000000",
+    "payload": { "headers": [{ "name": "From", "value": "owner@example.com" }, { "name": "To", "value": "bob@berkeley.edu" }] }
+  },
+  "noDate": {
+    "id": "m-nodate",
+    "threadId": "t-6",
+    "labelIds": ["INBOX"],
+    "payload": { "headers": [{ "name": "From", "value": "Frank <frank@acme.com>" }, { "name": "To", "value": "owner@example.com" }] }
+  },
+  "headerDate": {
+    "id": "m-headerdate",
+    "threadId": "t-7",
+    "labelIds": ["INBOX"],
+    "payload": {
+      "headers": [
+        { "name": "From", "value": "Frank <frank@acme.com>" },
+        { "name": "To", "value": "owner@example.com" },
+        { "name": "Date", "value": "Sun, 19 Oct 2025 18:53:20 +0000" }
+      ]
+    }
+  }
+}

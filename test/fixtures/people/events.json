@@ -1,0 +1,68 @@
+{
+  "meeting": {
+    "id": "e-meet",
+    "status": "confirmed",
+    "summary": "Project   sync",
+    "start": { "dateTime": "2026-10-21T10:00:00-07:00" },
+    "end": { "dateTime": "2026-10-21T10:30:00-07:00" },
+    "organizer": { "email": "Jane.Doe@acme.com", "displayName": "Jane Doe" },
+    "attendees": [
+      { "email": "jane.doe@acme.com", "displayName": "Jane Doe", "organizer": true, "responseStatus": "accepted" },
+      { "email": "owner@example.com", "self": true, "responseStatus": "accepted" },
+      { "email": "bob@berkeley.edu", "responseStatus": "declined" },
+      { "email": "room-4@resource.calendar.google.com", "displayName": "Room 4", "resource": true, "responseStatus": "accepted" },
+      { "email": "Carol@gmail.com", "displayName": "'Carol Diaz'", "responseStatus": "needsAction" }
+    ]
+  },
+  "allDay": {
+    "id": "e-allday",
+    "status": "confirmed",
+    "summary": "Offsite",
+    "start": { "date": "2026-11-02" },
+    "end": { "date": "2026-11-03" },
+    "organizer": { "email": "owner@example.com", "self": true },
+    "attendees": [
+      { "email": "owner@example.com", "self": true, "organizer": true, "responseStatus": "accepted" },
+      { "email": "dana@acme.com", "displayName": "Dana Lee", "responseStatus": "accepted" }
+    ]
+  },
+  "hold": {
+    "id": "e-hold",
+    "status": "confirmed",
+    "summary": "Focus time",
+    "start": { "dateTime": "2026-10-22T09:00:00-07:00" },
+    "end": { "dateTime": "2026-10-22T11:00:00-07:00" },
+    "organizer": { "email": "owner@example.com", "self": true }
+  },
+  "groupHold": {
+    "id": "e-grouphold",
+    "status": "confirmed",
+    "summary": "Team day off",
+    "start": { "date": "2026-10-23" },
+    "end": { "date": "2026-10-24" },
+    "organizer": { "email": "abc123@group.calendar.google.com", "displayName": "Team" },
+    "attendees": [{ "email": "owner@example.com", "self": true, "responseStatus": "accepted" }]
+  },
+  "cancelled": {
+    "id": "e-cancelled",
+    "status": "cancelled"
+  },
+  "cancelledFull": {
+    "id": "e-cancelled-full",
+    "status": "cancelled",
+    "summary": "Moved",
+    "start": { "dateTime": "2026-10-24T10:00:00Z" },
+    "end": { "dateTime": "2026-10-24T11:00:00Z" },
+    "organizer": { "email": "dana@acme.com" },
+    "attendees": [
+      { "email": "dana@acme.com", "organizer": true, "responseStatus": "accepted" },
+      { "email": "owner@example.com", "self": true, "responseStatus": "accepted" }
+    ]
+  },
+  "noStart": {
+    "id": "e-nostart",
+    "status": "confirmed",
+    "summary": "Broken",
+    "attendees": [{ "email": "dana@acme.com" }]
+  }
+}

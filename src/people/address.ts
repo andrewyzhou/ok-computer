@@ -1,4 +1,3 @@
-import { notBuilt } from './not-built.js';
 import type { ObservedAddress, Organization } from './types.js';
 
 // the address rules of the people memory. the store, the tools and the builder all use normalizeEmail, so one address
@@ -27,24 +26,185 @@ export function domainOf(email: string): string {
 // address, or that is empty after the quotes are taken off, becomes null. the order of the header is kept, and an
 // address that comes twice is kept once, with the first name that it had.
 export function parseAddressList(header: string): ObservedAddress[] {
-  void header;
-  return notBuilt('parseAddressList');
+  const out: ObservedAddress[] = [];
+  const seen = new Set<string>();
+  for (const part of splitParts(header)) {
+    const parsed = parsePart(part);
+    if (!parsed || seen.has(parsed.email)) continue;
+    seen.add(parsed.email);
+    out.push(parsed);
+  }
+  return out;
 }
 
-// true for a domain where anyone can have an address, so the domain names no organization: gmail.com,
-// googlemail.com, outlook.com, hotmail.com, live.com, msn.com, yahoo.com (and its country domains), icloud.com,
-// me.com, mac.com, aol.com, proton.me, protonmail.com, pm.me, gmx.*, mail.com, yandex.*, qq.com, 163.com, fastmail.com,
-// hey.com, zoho.com and the like.
+// splitParts cuts a header at each comma or semicolon that is outside double quotes, angle brackets and comments.
+// the name of a group ("team:") is dropped at its colon, and the semicolon at the end of a group ends a part.
+function splitParts(header: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let quoted = false;
+  let angle = false;
+  let depth = 0;
+  for (let i = 0; i < header.length; i++) {
+    const char = header[i]!;
+    if (char === '\\' && (quoted || depth > 0) && i + 1 < header.length) {
+      current += char + header[++i];
+      continue;
+    }
+    if (quoted) {
+      if (char === '"') quoted = false;
+      current += char;
+    } else if (depth > 0) {
+      if (char === '(') depth++;
+      else if (char === ')') depth--;
+      current += char;
+    } else if (angle) {
+      if (char === '>') angle = false;
+      current += char;
+    } else if (char === '"') {
+      quoted = true;
+      current += char;
+    } else if (char === '(') {
+      depth = 1;
+      current += char;
+    } else if (char === '<') {
+      angle = true;
+      current += char;
+    } else if (char === ',' || char === ';') {
+      parts.push(current);
+      current = '';
+    } else if (char === ':') {
+      // the text before the colon is the name of a group, never an address.
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  parts.push(current);
+  return parts;
+}
+
+// parsePart reads one address: "Name <a@b.c>", "\"Last, First\" <a@b.c>", "a@b.c", "<a@b.c>" or "a@b.c (Name)".
+function parsePart(part: string): ObservedAddress | null {
+  let display = '';
+  let plain = '';
+  let quoted = '';
+  let comment = '';
+  let angleAddress: string | null = null;
+  for (let i = 0; i < part.length; i++) {
+    const char = part[i]!;
+    if (char === '"') {
+      // a quoted name. a backslash keeps the next character as it is.
+      let text = '';
+      for (i++; i < part.length && part[i] !== '"'; i++) {
+        if (part[i] === '\\' && i + 1 < part.length) i++;
+        text += part[i];
+      }
+      display += ` ${text} `;
+      quoted += ` ${text} `;
+    } else if (char === '(') {
+      let text = '';
+      let depth = 1;
+      for (i++; i < part.length; i++) {
+        const inner = part[i]!;
+        if (inner === '\\' && i + 1 < part.length) {
+          text += part[++i];
+          continue;
+        }
+        if (inner === '(') depth++;
+        else if (inner === ')' && --depth === 0) break;
+        text += inner;
+      }
+      comment += ` ${text} `;
+    } else if (char === '<') {
+      const end = part.indexOf('>', i);
+      angleAddress = part.slice(i + 1, end === -1 ? part.length : end);
+      i = end === -1 ? part.length : end;
+    } else {
+      display += char;
+      plain += char;
+    }
+  }
+  let email: string | null;
+  let name: string;
+  if (angleAddress !== null) {
+    email = normalizeEmail(angleAddress);
+    name = display;
+  } else {
+    // without angle brackets the word with a valid address is the address, and the quoted text and the other words
+    // are the name.
+    const words = plain.trim().split(/\s+/);
+    const index = words.findIndex((word) => normalizeEmail(word) !== null);
+    if (index === -1) return null;
+    email = normalizeEmail(words[index]!);
+    name = [quoted, ...words.slice(0, index), ...words.slice(index + 1)].join(' ');
+  }
+  if (!email) return null;
+  return { email, name: cleanName(name, email) ?? cleanName(comment, email) };
+}
+
+// cleanName takes the quotes off a display name and folds its spaces. it gives null for an empty name and for a
+// name that is only the address again. the builder uses it for the names of calendar attendees too.
+export function cleanName(raw: string | null | undefined, email: string): string | null {
+  let name = (raw ?? '').replace(/\s+/g, ' ').trim();
+  for (;;) {
+    const stripped = name.replace(/^"(.*)"$/s, '$1').replace(/^'(.*)'$/s, '$1').trim();
+    if (stripped === name) break;
+    name = stripped;
+  }
+  if (!name || name.toLowerCase() === email.toLowerCase()) return null;
+  return name;
+}
+
+// the domains where anyone can have an address. the families of country domains are matched by their first label.
+const PERSONAL_DOMAINS = new Set([
+  'gmail.com',
+  'googlemail.com',
+  'icloud.com',
+  'me.com',
+  'mac.com',
+  'aol.com',
+  'proton.me',
+  'protonmail.com',
+  'protonmail.ch',
+  'pm.me',
+  'mail.com',
+  'qq.com',
+  '163.com',
+  '126.com',
+  'fastmail.com',
+  'hey.com',
+  'zoho.com',
+  'msn.com',
+  'ymail.com',
+  'rocketmail.com',
+  'mail.ru',
+  'web.de',
+  'tutanota.com',
+  'naver.com',
+  'comcast.net',
+  'att.net',
+  'verizon.net',
+  'sbcglobal.net',
+]);
+const PERSONAL_FAMILIES = /^(yahoo|gmx|yandex|outlook|hotmail|live)(\.[a-z]{2,3}){1,2}$/;
+
 export function isPersonalDomain(domain: string): boolean {
-  void domain;
-  return notBuilt('isPersonalDomain');
+  const lower = domain.trim().toLowerCase();
+  return PERSONAL_DOMAINS.has(lower) || PERSONAL_FAMILIES.test(lower);
 }
 
-// organizationOf gives the organization of an address domain, or null for a personal domain. the domain is cut to its
-// registrable part (mail.eu.acme.com gives acme.com, and the two-part suffixes such as co.uk, ac.uk, com.au and
-// co.jp keep three labels), and the name is the first label of it in title case (acme.com gives "Acme",
-// berkeley.edu gives "Berkeley").
+// the public suffixes of two labels that the registrable part of a domain keeps under a third label.
+const TWO_PART_SUFFIXES = new Set(['co.uk', 'ac.uk', 'org.uk', 'gov.uk', 'com.au', 'edu.au', 'co.jp', 'ac.jp', 'co.nz', 'com.br', 'co.in', 'com.cn', 'com.sg', 'co.kr']);
+
 export function organizationOf(domain: string): Organization | null {
-  void domain;
-  return notBuilt('organizationOf');
+  const lower = domain.trim().toLowerCase();
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(lower) || isPersonalDomain(lower)) return null;
+  const labels = lower.split('.');
+  const keep = TWO_PART_SUFFIXES.has(labels.slice(-2).join('.')) ? 3 : 2;
+  if (labels.length < keep) return null;
+  const registrable = labels.slice(-keep).join('.');
+  if (isPersonalDomain(registrable)) return null;
+  const first = labels[labels.length - keep]!;
+  return { name: first.charAt(0).toUpperCase() + first.slice(1), domain: registrable };
 }
