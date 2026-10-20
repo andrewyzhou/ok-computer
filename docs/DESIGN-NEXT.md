@@ -1108,3 +1108,21 @@ The decisions are in 5.8, the contract is in API.md (M9), and the owner's guide 
 3. A server, when wanted: [setup/aws.md](setup/aws.md).
 4. The code sandbox, when wanted: Docker and `npm run sandbox:image`, as in [setup/sandbox.md](setup/sandbox.md).
 5. A new Mac: the steps in order are in [setup/macos.md](setup/macos.md).
+
+## 13. Phase 6
+
+Phase 6 makes the assistant useful each day and gives it its own desk. The plan is in [PHASE6-PLAN.md](PHASE6-PLAN.md) until the phase is done. The API contract of each track stays in [API.md](API.md). Where this section and the contract differ on a shape, the contract wins.
+
+### 13.1 T1: today
+
+The morning brief, the Today page and the Calendar page. The routes, the rules and the file ownership are in API.md (Phase 6 T1).
+
+- **The brief is code.** The automation `brief: morning brief` runs at 07:30 in the time zone of the app, in the session `brief:<runId>`, without a model call. It reads, stores and sends, and changes nothing. A run that the owner starts on the dashboard has the trigger `dashboard`.
+- **One read of the calendar.** The brief, the Calendar page and `calendar_list_events` read through `src/google/calendar-events.ts`: every calendar the owner shows, page by page up to 4 pages of 250 events each, with a note when a calendar has more or fails. Copies of one invitation on the primary and a shared calendar of one account keep the primary copy, matched by the uid and the instant of the start.
+- **The owner on a calendar.** Google's `self` names the calendar that holds a copy, so the owner's answer and authorship come from `self` only on the primary and owned calendars, and from the owned addresses elsewhere. On the owner's real calendars a colleague's shared calendar otherwise gave false conflicts and invitations, and an event that the owner made on his own health calendar showed as an invitation.
+- **The checks** (`src/brief/analyze.ts`) are pure and shared by the brief and the Calendar page. Two time blocks of the owner alone never conflict: on real data that rule took the conflicts of two weeks from 190 to 46, and the conflicts of one day from 17 to 3 real double bookings. A travel gap is only between events that follow each other, one place written two ways is one place, and a placeholder is no place. Copies of one invitation on two accounts (the same uid and start) count once in every check.
+- **The digest comes first.** The digest and the brief are both due at 07:30. The scheduler starts every due job of a tick in no fixed order, so the brief waits while the digest runs and also while the digest is due with no run and no digest of the day yet, at most 10 minutes. A digest that takes longer is not waited for, and the brief then uses the digest of the day before and says so.
+- **Storage.** `briefs` and `brief_deliveries` (`025_brief.sql`) are append-only. The newest brief of a day is the brief of the day, and each try to send it is a row.
+- **The message** is plain text of at most 700 characters, with the link `<dashboard>/#/today/<day>` on its last line. The dashboard address falls back to `http://127.0.0.1:<port>` without a public address, and never ends in a slash. The main session gets a wrapped copy with the taint of the calendars, the mail and the desk that the brief read, and the copy says whether the message reached the owner.
+- **The desk.** The brief reads delegations through `../desk/store.js#listDelegations` at run time, so the build passes with and without the desk track. A missing or broken module gives no section and no claim that nothing waits. A test reads a real delegation when the module is there.
+- **The pages.** Today (`#/today`) is the home page, and the old Overview moves to `#/overview` under Agent. A section other than the schedule shows its first 5 items. Missing calendars and a message that did not arrive show at the top with their reason and the page that fixes them. The page takes what it promises from the next run of the automation. The Calendar page is read-only: a week and day grid, an agenda on a phone and when the details panel leaves less than 100 pixels for each day, proposals as dashed blocks, and a key for its marks.
