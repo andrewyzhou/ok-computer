@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { domainOf, isPurchase, type AutonomyDomain, type AutonomyLevel } from './autonomy.js';
+import { domainOf, formIsPurchase, isPurchase, type AutonomyDomain, type AutonomyLevel } from './autonomy.js';
 import { BUILTIN_RULES, decide, type PolicyInput } from './policy.js';
 
 // the gaps that the review of the trust ladder found: a purchase through a browser form, a raise that reached a
@@ -55,6 +55,42 @@ describe('purchases', () => {
       ['no field: a button outside a form', { fields: {} }],
     ];
     for (const [name, change] of cases) expect(isPurchase({ ...base, ...change }), name).toBe(true);
+  });
+
+  // the probe of the review: with browser submits raised to review in an untainted automation, each of these paid
+  // flows went to the reviewer alone.
+  const PAID_FLOWS: Array<[string, { url: string; button: string; fields: Record<string, string> }]> = [
+    ['a room booking', { url: 'https://hotel.example/rooms/12/booking', button: 'Book now', fields: { guests: '2', name: 'Ana', email: 'ana@example.com' } }],
+    ['a reservation', { url: 'https://inn.example/reserve', button: 'Reserve', fields: { nights: '3', note: 'late arrival' } }],
+    ['a shop checkout with a plural path', { url: 'https://shop.example/checkouts/c/abc', button: 'Complete', fields: { note: 'x' } }],
+    ['a last step that only confirms', { url: 'https://shop.example/step/3', button: 'Confirm', fields: { delivery: 'standard', gift_message: 'happy birthday' } }],
+    ['a flight', { url: 'https://air.example/flights/confirm', button: 'Book flight', fields: { passenger: 'Ana' } }],
+    ['event tickets', { url: 'https://events.example/event/9', button: 'Get tickets', fields: { quantity: '2' } }],
+  ];
+
+  it('takes each paid flow of the review probe for a purchase, which asks the owner at a raised browser submits level', () => {
+    for (const [name, input] of PAID_FLOWS) {
+      expect(domainOf('browser_submit', input), name).toBe('purchases');
+      // the helper hands the raised level of browser submits to the call, and purchases counts any level as ask.
+      expect(decide(submit(input, 'automation:a1', 'review'), BUILTIN_RULES), name).toMatchObject({ decision: 'approve', autonomy: { domain: 'purchases' } });
+    }
+  });
+
+  it('takes a call that the agent marks as a purchase for one', () => {
+    const input = { url: 'https://example.com/signup', button: 'Sign up', fields: { email: 'owner@example.com' }, purchase: true };
+    expect(domainOf('browser_submit', input)).toBe('purchases');
+    expect(domainOf('browser_submit', { ...input, purchase: false })).toBe('browser_submits');
+  });
+
+  it('reads the hidden fields, the address and the script of the whole form', () => {
+    const base = { url: 'https://example.com/signup', button: 'Sign up', action: 'https://example.com/signup', script: false };
+    const plain: Array<[string, string]> = [['email', 'owner@example.com'], ['csrf', 'a1b2']];
+    expect(formIsPurchase({ ...base, pairs: plain })).toBe(false);
+    expect(formIsPurchase({ ...base, pairs: [...plain, ['payment_method_id', 'pm_1']] }), 'a hidden payment token').toBe(true);
+    expect(formIsPurchase({ ...base, pairs: [...plain, ['saved', 'card_on_file']] }), 'a hidden value').toBe(true);
+    expect(formIsPurchase({ ...base, pairs: plain, action: 'https://example.com/orders/new' }), 'the address of the form').toBe(true);
+    expect(formIsPurchase({ ...base, pairs: plain, script: true }), 'a script control').toBe(true);
+    expect(formIsPurchase({ ...base, pairs: [] }), 'no field').toBe(true);
   });
 
   it('leaves a plain sign-up and a search in browser submits', () => {

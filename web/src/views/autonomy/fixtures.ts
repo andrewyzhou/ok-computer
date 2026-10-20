@@ -99,7 +99,7 @@ export const DEFAULT_DOMAINS: AutonomyDomainView[] = [
   domain(
     'purchases',
     'Purchases',
-    'Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.',
+    'Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.',
     ['browser_submit'],
     'ask',
     'ask',

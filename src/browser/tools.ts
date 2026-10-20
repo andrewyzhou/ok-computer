@@ -1,5 +1,6 @@
 import type { ElementHandle, Frame, Locator, Page } from 'playwright-core';
 import { z } from 'zod';
+import { formIsPurchase, isPurchase } from '../policy/autonomy.js';
 import { defineTool, type Tool, type ToolContext, type ToolOutput } from '../tools/registry.js';
 import { extractIsolated } from '../web/extract-run.js';
 import { NotDone, untraced, untracedIfSecret, type ActTab, type BrowserRefusal, type BrowserWorker, type StepInput, type StepResult, type SubmitOutcome } from './worker.js';
@@ -76,6 +77,8 @@ interface PageControl {
   // the method of the submit as the browser reads it: get, post or dialog. a formmethod that is empty or not valid
   // gives get, and no formmethod gives an empty text.
   formMethod?: string;
+  // the address of the submit as the browser reads it, which is the address of the page without a formaction.
+  formAction?: string;
   form?: PageForm | null;
 }
 interface PageForm {
@@ -124,6 +127,8 @@ interface FormState {
   skip: string[];
   password: boolean;
   method: string;
+  // the address that the form goes to, or '' for a control outside a form.
+  action: string;
   // the control is not a submit button, so a script of the page decides what it sends.
   script: boolean;
   // with script, the names of the hidden fields of the form, whose values the script may set before it sends.
@@ -155,7 +160,7 @@ async function formOf(page: Page, control: ElementHandle): Promise<FormState> {
       // a script can read each field of the page, so a password field with a value anywhere on the page refuses the send.
       const { document } = globalThis as unknown as { document: { querySelectorAll(selector: string): ArrayLike<PageField> } };
       const password = Array.from(document.querySelectorAll('input[type=password]')).some((item) => item.value !== '');
-      return { fields: {}, pairs: [], skip: [], password, method: 'post', script: true, hidden: [], charset: 'utf-8' };
+      return { fields: {}, pairs: [], skip: [], password, method: 'post', action: '', script: true, hidden: [], charset: 'utf-8' };
     }
     const pairs: Array<[string, string]> = [...(submit ? new FormData(form, button) : new FormData(form))].map(([name, value]) => [name, typeof value === 'string' ? value : value.name]);
     // an image button adds its click position, as name.x and name.y, or as x and y without a name. FormData gives 0
@@ -183,6 +188,8 @@ async function formOf(page: Page, control: ElementHandle): Promise<FormState> {
     }
     const password = Array.from(form.elements).some((item) => item.type === 'password');
     const method = (submit && button.formMethod) || form.method;
+    // formAction gives the address of the page, not of the form, for a button without the attribute.
+    const action = (submit && button.getAttribute('formaction') !== null && button.formAction) || form.action;
     // an asp.net postback link puts the name of the control into a hidden field and then sends the form (r7 probe).
     // the script of the page chooses what it sends, and the gate lets its data go only to the sites of the task.
     const hidden = submit ? [] : Array.from(form.elements).filter((item) => item.type === 'hidden' && item.name).map((item) => item.name);
@@ -198,7 +205,7 @@ async function formOf(page: Page, control: ElementHandle): Promise<FormState> {
     };
     const chosen = form.acceptCharset.split(/[\s,]+/).map(known).find(Boolean) ?? known(document.characterSet) ?? 'utf-8';
     const charset = chosen.startsWith('utf-16') ? 'utf-8' : chosen;
-    return { fields, pairs, skip: image, password, method, script: !submit, hidden, charset };
+    return { fields, pairs, skip: image, password, method, action, script: !submit, hidden, charset };
   }, SUBMIT_CONTROL));
 }
 
@@ -359,6 +366,8 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
         'Each call waits for a check before it runs: the owner approves it, or a reviewer checks it when the owner raised the level of browser form submits, and a purchase always waits for the owner. ' +
         'The check reads the address, the button and the fields that you give, so give them exactly as the page shows them now: ' +
         'every named field of the form of the button that a person sees, with its value, or {} for a button outside a form. ' +
+        'Give purchase: true when the submit pays for anything, books, reserves or orders, also with a saved card. ' +
+        'The tool also reads the hidden fields and the address of the form, and a call without purchase: true whose form looks like a purchase sends nothing. ' +
         'If the page differs when the check is done, nothing is sent. The result lists each request that the page sent.',
       input: z.object({
         url: z.string().min(1).max(2000).describe('the address of the page with the form, or of its frame'),
@@ -367,14 +376,15 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
         fields: z
           .record(z.string(), z.union([z.string().max(5000), z.array(z.string().max(5000)).max(50)]))
           .describe('each named field of the form and its value, or a list of values for a name that the form has more than once'),
+        purchase: z.boolean().optional().describe('true when the submit pays for anything, books, reserves or orders. It then always waits for the owner'),
       }),
       risk: 'external',
       // a submit acts on the open task of any session, so the caller can be a session with no taint, such as an
       // automation, where a broad allow rule of the owner holds. the owner approves each send, unless the owner raised
       // the level of browser submits on the autonomy page. a submit that looks like a purchase always asks the owner
-      // (src/policy/autonomy.ts).
+      // (src/policy/autonomy.ts). the policy reads only the input, so the run checks the whole form again.
       needsApproval: true,
-      async run({ url, button, ref: id, fields }, ctx) {
+      async run({ url, button, ref: id, fields, purchase }, ctx) {
         const result = await act(ctx, 'submit', { url, button, ...(id ? { ref: id } : {}), fields }, async (page, tab) => {
           const nowAt = () => new Error(`the page is now ${page.url()}, not ${url}. Nothing was sent`);
           if (!page.frames().some((frame) => sameAddress(frame.url(), url))) throw nowAt();
@@ -388,6 +398,13 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
           const form = await formOf(page, control);
           if (form.password) throw new Error('the form or the page has a password field. The agent never sends a password. Nothing was sent. The owner signs in with okc browser login');
           if (sortedPairs(fields) !== sortedPairs(form.fields)) throw new Error(`the form now has these fields: ${JSON.stringify(form.fields)}. Nothing was sent. Ask again with these values`);
+          // the policy took the call for a purchase from its input, or it did not, and then the reviewer may have been
+          // the only check. a hidden field, such as the token of a saved card, the address of the form or a script
+          // control can make a purchase of a submit whose visible part looks like a sign-up, so such a call sends
+          // nothing, and the call again with purchase: true waits for the owner. the check fails closed.
+          if (!isPurchase({ url, button, fields, purchase }) && formIsPurchase({ url, button, action: form.action, pairs: form.pairs, script: form.script })) {
+            throw new Error('the whole form, with its hidden fields, its address or its script, looks like a purchase, and a purchase always waits for the owner. Nothing was sent. Ask again with the same input and purchase: true');
+          }
           // the gate compares the request with this set, so a page script that changes a field at the click sends nothing.
           tab.setSubmit({ pairs: form.pairs, skip: form.skip, hidden: form.hidden, charset: form.charset });
           let outcome: SubmitOutcome = { form: true, refused: false, blocked: 0, any: true };

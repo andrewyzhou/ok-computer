@@ -113,7 +113,7 @@ export const DOMAINS: readonly DomainSpec[] = [
     id: 'purchases',
     label: 'Purchases',
     explanation:
-      'Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.',
+      'Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.',
     tools: ['browser_submit'],
     defaultLevel: 'ask',
     maxLevel: 'ask',
@@ -149,11 +149,22 @@ const FIXED_DOMAINS: Readonly<Record<string, AutonomyDomain>> = {
 };
 
 // the words that make a browser submit a purchase. the text of the page address, the button and each field name and
-// value is split into words first, so "cardNumber", "cc-exp" and "/checkout/pay" match too. the list is broad on
+// value is split into words first, so "cardNumber", "cc-exp" and "/checkout/pay" match too. each stem also matches
+// with the endings s, es, d, ed and ing, so "checkouts", "booking" and "reserved" match. the list is broad on
 // purpose: a submit that it takes for a purchase by mistake asks the owner, which is the default of browser submits
-// anyway, and a purchase that it misses could go out with only the reviewer's check.
-const PURCHASE_WORDS =
-  /\b(buy|buying|pay|paying|payment|payments|purchase|purchases|checkout|check out|order|orders|cart|basket|bag|billing|card|cards|credit|debit|cc|cvc|cvv|csc|cid|exp|expiry|expiration|iban|bic|swift|routing|subscribe|subscription|donate|donation|tip|wallet|invoice|price|total|amount|sum|coupon|promo)\b/i;
+// anyway, and a purchase that it misses could go out with only the reviewer's check. a booking, a reservation and a
+// ticket order are purchases too, and so is a last step that only says "confirm" or "complete", because a site that
+// keeps a saved card pays at that step.
+const PURCHASE_STEMS = [
+  'buy', 'bought', 'pay', 'paid', 'payment', 'purchase', 'checkout', 'check out', 'order', 'cart', 'basket', 'bag',
+  'billing', 'bill', 'card', 'credit', 'debit', 'cc', 'cvc', 'cvv', 'csc', 'cid', 'exp', 'expiry', 'expiration', 'iban',
+  'bic', 'swift', 'routing', 'subscribe', 'subscription', 'donate', 'donation', 'pledge', 'tip', 'wallet', 'invoice',
+  'price', 'total', 'amount', 'sum', 'coupon', 'promo', 'voucher', 'book', 'booking', 'reserve', 'reservation',
+  'ticket', 'seat', 'fare', 'flight', 'night', 'rent', 'rental', 'hire', 'deposit', 'fee', 'charge', 'confirm',
+  'confirmation', 'complete', 'finish', 'finalize', 'finalise', 'quantity', 'qty', 'delivery', 'deliver', 'shipping',
+  'ship', 'gift', 'upgrade', 'renew', 'renewal', 'premium', 'bid', 'auction', 'transfer', 'transaction',
+];
+const PURCHASE_WORDS = new RegExp(`\\b(?:${PURCHASE_STEMS.join('|')})(?:s|es|d|ed|ing)?\\b`, 'i');
 
 // a value with 13 to 19 digits, with or without spaces or dashes, can be a card number.
 const CARD_NUMBER = /(?:\d[ -]?){12,18}\d/;
@@ -166,16 +177,42 @@ const wordsOf = (text: string): string =>
     .replace(/([a-zA-Z])(\d)|(\d)([a-zA-Z])/g, '$1$3 $2$4')
     .replace(/[^a-zA-Z0-9]+/g, ' ');
 
+const looksPaid = (texts: readonly string[]): boolean => texts.some((text) => PURCHASE_WORDS.test(wordsOf(text)));
+
 // isPurchase tells whether a browser submit looks like a payment. a button outside a form sends what its script
 // chooses, and the call names no field of it, so the owner approves it, the same as an "Add to cart" or a "Pay now".
+// the agent can mark a call as a purchase with purchase: true. the input names only the visible fields, so the tool
+// checks the whole form again before the click (formIsPurchase), and a call without the mark whose form looks like a
+// purchase sends nothing.
 export function isPurchase(fields: Record<string, unknown>): boolean {
+  if (fields.purchase === true) return true;
   const formFields = fields.fields !== null && typeof fields.fields === 'object' ? (fields.fields as Record<string, unknown>) : {};
   const names = Object.keys(formFields);
   if (!names.length) return true;
   const values = Object.values(formFields).flatMap((value) => (Array.isArray(value) ? value : [value])).map(String);
   if (values.some((value) => CARD_NUMBER.test(value))) return true;
-  const texts = [String(fields.url ?? ''), String(fields.button ?? ''), ...names, ...values];
-  return texts.some((text) => PURCHASE_WORDS.test(wordsOf(text)));
+  return looksPaid([String(fields.url ?? ''), String(fields.button ?? ''), ...names, ...values]);
+}
+
+// the form that a browser submit would send, as the page has it at the click.
+export interface SentForm {
+  url: string;
+  button: string;
+  // the address that the form goes to.
+  action: string;
+  // the whole form data set, also the hidden fields, where a site with a saved card keeps the token of the payment.
+  pairs: ReadonlyArray<readonly [string, string]>;
+  // the control is not a submit button, so a script of the page decides what it sends.
+  script: boolean;
+}
+
+// formIsPurchase tells whether the whole form of a submit looks like a payment: its page, its button, its action and
+// the name and value of each field, also of the hidden ones. a script control sends what its script chooses, so it
+// counts as a purchase, and so does a form that sends no field. the check fails closed: a mistake asks the owner.
+export function formIsPurchase(form: SentForm): boolean {
+  if (form.script || !form.pairs.length) return true;
+  if (form.pairs.some(([, value]) => CARD_NUMBER.test(value))) return true;
+  return looksPaid([form.url, form.button, form.action, ...form.pairs.flatMap(([name, value]) => [name, value])]);
 }
 
 // domainOf gives the domain of one call, or undefined for a call outside the ladder. the policy engine then decides

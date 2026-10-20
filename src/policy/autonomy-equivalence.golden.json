@@ -1199,6 +1199,706 @@
     "rule": "tool",
     "reason": "browser_submit always needs the owner's approval"
   },
+  "a room booking | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a room booking | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a room booking | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a room booking | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a room booking | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a room booking | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a room booking | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a room booking | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a room booking | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a reservation | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a reservation | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a reservation | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a reservation | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a reservation | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a reservation | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a reservation | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a reservation | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a checkout with a plural path | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a checkout with a plural path | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a checkout with a plural path | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a checkout with a plural path | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a checkout with a plural path | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a checkout with a plural path | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a checkout with a plural path | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a checkout with a plural path | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a last step that confirms | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a last step that confirms | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a last step that confirms | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a last step that confirms | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a last step that confirms | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a last step that confirms | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a last step that confirms | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a last step that confirms | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a flight booking | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a flight booking | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a flight booking | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a flight booking | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a flight booking | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a flight booking | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a flight booking | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a flight booking | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "event tickets | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "event tickets | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "event tickets | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "event tickets | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "event tickets | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "event tickets | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "event tickets | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "event tickets | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a submit that the agent marks as a purchase | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a submit that the agent marks as a purchase | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a submit that the agent marks as a purchase | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a submit that the agent marks as a purchase | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a submit that the agent marks as a purchase | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a submit that the agent marks as a purchase | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a submit that the agent marks as a purchase | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a submit that the agent marks as a purchase | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
   "a gmail unsubscribe | owner chat | builtin": {
     "decision": "approve",
     "rule": "tool",

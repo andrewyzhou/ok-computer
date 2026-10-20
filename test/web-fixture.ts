@@ -206,6 +206,16 @@ line two</textarea></label><label>File <input type="file" name="doc"></label><bu
             'Forms',
           ),
         );
+      case 'shop.test/welcome':
+        // a last step of a shop with a saved card: the visible part looks like a sign-up, and the hidden field pays.
+        return send(
+          200,
+          html(
+            `<form action="/send" method="post"><label>Email <input name="email" value="ana@example.com"></label>
+              <input type="hidden" name="payment_method_id" value="pm_1"><button type="submit">Sign up</button></form>`,
+            'Welcome',
+          ),
+        );
       case 'shop.test/postback':
         // an asp.net form: a link puts its name into a hidden field and sends the form. a second link also changes a
         // field that the owner reads.

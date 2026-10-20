@@ -86,6 +86,18 @@ export const LADDER_CALLS: readonly LadderCall[] = [
     domain: 'purchases',
   },
   { name: 'a script button outside a form', tool: 'browser_submit', risk: 'external', alwaysApprove: true, input: { url: 'https://shop.example/p/1', button: 'Add', fields: {} }, domain: 'purchases' },
+  // the paid flows that the review probe found outside purchases.
+  ...(
+    [
+      ['a room booking', { url: 'https://hotel.example/rooms/12/booking', button: 'Book now', fields: { guests: '2', name: 'Ana', email: 'ana@example.com' } }],
+      ['a reservation', { url: 'https://inn.example/reserve', button: 'Reserve', fields: { nights: '3', note: 'late arrival' } }],
+      ['a checkout with a plural path', { url: 'https://shop.example/checkouts/c/abc', button: 'Complete', fields: { note: 'x' } }],
+      ['a last step that confirms', { url: 'https://shop.example/step/3', button: 'Confirm', fields: { delivery: 'standard', gift_message: 'hi' } }],
+      ['a flight booking', { url: 'https://air.example/flights/confirm', button: 'Book flight', fields: { passenger: 'Ana' } }],
+      ['event tickets', { url: 'https://events.example/event/9', button: 'Get tickets', fields: { quantity: '2' } }],
+      ['a submit that the agent marks as a purchase', { url: 'https://example.com/signup', button: 'Sign up', fields: { email: 'owner@example.com' }, purchase: true }],
+    ] as const
+  ).map(([name, input]): LadderCall => ({ name, tool: 'browser_submit', risk: 'external', alwaysApprove: true, input, domain: 'purchases' })),
   {
     name: 'a gmail unsubscribe',
     tool: 'google__gmail_unsubscribe',
