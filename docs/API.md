@@ -112,6 +112,20 @@ The waterfall (M1) gives a `sandbox` span with `ref.sandboxExecId` for each exec
 
 The default image is `okc-sandbox:1` (`SANDBOX_IMAGE` in `src/sandbox/limits.ts`), built from `sandbox/Dockerfile` by `npm run sandbox:image`. It runs as `1000:1000` with the home `/work`, the create request resets the entrypoint of its base (`Entrypoint: [""]`), and it holds the relay of the network mode at `/opt/okc/relay.mjs`. A change of what the image holds changes the tag in `limits.ts` and in the `sandbox:image` script together. The decisions are in DESIGN-NEXT 5.8.
 
+### T6: autonomy (`src/dashboard/autonomy.ts`, `src/policy/autonomy*.ts`)
+
+The types are in `src/dashboard/autonomy-types.ts`, an import-free file of phase 6 (PHASE6-PLAN section 0). The domains, their default levels and their most are `DOMAINS` in `src/policy/autonomy.ts`, and `src/policy/autonomy-store.ts` reads and writes `024_autonomy.sql`.
+
+| Method | Path | Query / body | Response | Notes |
+|---|---|---|---|---|
+| GET | `/api/autonomy` | none | `AutonomyPage` | `domains` in the order of `DOMAINS`, each an `AutonomyDomainView`. `levels` is the list from `ask` up to `maxLevel`, and only `['ask']` for a fixed domain (`fixed: true`, with `fixedReason`). `updatedAt` and `changeId` are null while a domain has its default level. `levelText` explains each level. `history` is the newest 50 changes, and `before` is the id to send for the next older page, or null. |
+| GET | `/api/autonomy/history` | `domain`, `before` (change id), `limit` 1–200 (default 50) | `AutonomyHistoryPage` | Before paging, newest first. `before: number \| null`, where null means the last page. `400 domain must be one of ...`, and `400` for a `before` that is not a positive whole number. |
+| POST | `/api/autonomy/:domain` | `AutonomySetRequest`: `{level, from, note?}`, strict, `note` at most 500 characters | `AutonomySetResponse` | `from` is the level that the page showed. `404 autonomy domain not found`. `400 send {level, from}` for a bad body. `409` when the level changed in the meantime (stale), for a fixed domain, for a level above `maxLevel`, or for a raise that the store refuses. The same level gives `200` with `change: null`, and writes nothing. |
+
+The post is the only way to raise a level. It writes the change with `actor: 'owner'` and `via: 'dashboard'`, and the store refuses a raise from any other actor or place. No tool can raise a level: the chat tool of T6 only lowers one, when the owner asks. `autonomy_changes` is append-only (its triggers refuse an update and a delete), and `autonomy_levels` holds the current level of each domain that was ever changed.
+
+The policy engine reads the level of the domain of each call. Each `policy_decisions` row, and so each `PolicyDecisionRow` and `PolicyListRow`, carries `autonomyDomain` and `autonomyLevel`: the domain of the call and the level that applied. Both are null for a call outside the ladder and for the decisions from before `024_autonomy.sql`. The default levels give the same decisions as before the ladder.
+
 ## 3. Event streams
 
 Both streams are SSE. With `DASHBOARD_TOKEN` set, they take `?token=` because `EventSource` sends no headers. The cookie also works. A stream sends `event: ready` with `{}` first. Then each message is an unnamed event whose data is one JSON value.
@@ -163,6 +177,7 @@ Each team edits only its own files. A shared file gets only the change written h
 | M7 | `Dockerfile`, `compose.yaml`, `litestream.yml`, `.github/workflows/`, `docs/setup/aws.md`, `src/dashboard/deploy.ts`, `src/secrets/` (the file and aws backends) | `types.ts` (its section), `src/config/schema.ts` (`secrets`), the store choice in `src/app.ts` |
 | M8 | `src/db/migrations/019_inbox.sql`, `src/inbox/`, `src/dashboard/inbox.ts`, `web/src/views/inbox/` | `types.ts` (its section), the tool registration in `src/app.ts`, `src/google/` for new Gmail and Calendar calls |
 | M9 | `src/db/migrations/020_sandbox.sql`, `src/sandbox/`, `src/dashboard/sandbox.ts`, `sandbox/` (the image), `docs/setup/sandbox.md` | `types.ts` (its section), the tool registration in `src/app.ts` and its policy rule, `src/browser/proxy.ts` (the `EgressProxyOptions` with `allowHost` and the listen address; the browser team reviews it), `src/main.ts` (`sandbox: {}`), the `sandbox:image` script of `package.json`, `RISK_TEXT.exec` in `src/integrations/discovery.ts`, and `README.md` |
+| T6 | `src/db/migrations/024_autonomy.sql`, `src/policy/autonomy.ts`, `src/policy/autonomy-store.ts`, `src/autonomy/`, `src/dashboard/autonomy.ts`, `src/dashboard/autonomy-types.ts`, `web/src/views/autonomy/` | the `mountAutonomy` line in `server.ts`, the tool line in `src/app.ts`, `MAIN_TOOLS` in `src/sessions/router.ts`, `LOCAL_WRITE_TOOLS` in `src/policy/policy.ts`, `autonomyDomain` and `autonomyLevel` of `PolicyDecisionRow` in `types.ts`, and `check()` in `src/tools/caller.ts` |
 
 - **Route modules.** Each new module `src/dashboard/<area>.ts` exports `mount<Area>(server, deps)`. The stub exists already, and `server.ts` already mounts it with one line after the sign-in check and before the `/api/*` 404. A team fills its stub and does not edit those lines. A team that needs a new part of `App` adds one key to the `app` pick in `DashboardDeps`.
 - **Types.** Each team adds fields only in its own section of `types.ts`. A new shape that another team reads goes there too, and nothing in that file imports anything.
