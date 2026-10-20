@@ -14,7 +14,8 @@ import { CORPUS, OWNER, TIME_ZONE } from '../testdata/corpus.js';
 import { mailMessage } from '../testdata/build.js';
 import { formatReport } from './metrics.js';
 import { MAX as DIGEST_MAX } from '../digest.js';
-import { runInboxEval, setSleepForTests, type EvalJob } from './run.js';
+import { setGmailPaceForTests } from '../gmail.js';
+import { runInboxEval, type EvalJob } from './run.js';
 
 // the check of the quality check: the corpus delivered to the five accounts of a fake google, read through the dry
 // context on a copy of a database. no request leaves the machine.
@@ -114,6 +115,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  setGmailPaceForTests();
   await harness.close();
   copy.close();
   live.close();
@@ -230,9 +232,10 @@ describe('runInboxEval', () => {
     const before = snapshot(live);
     const report = await run(['digest', 'subscriptions', 'deadlines'], { models: true, slots });
     expect(snapshot(live)).toEqual(before);
-    // the professor wrote one mail to the owner and one to the course list. the fake model puts both in needs_reply, and
-    // the digest drops the list mail, so the bar holds.
-    expect(report.digest).toMatchObject({ models: true, needsReply: 1, items: 1, automatedInNeedsReply: 0, needsReplyFirst: true });
+    // the professor wrote one mail to the owner and one to the course list. the fake model puts both in needs_reply. a
+    // person wrote the list mail to a discussion list, so it stays, after the mail to the owner, and it gets no draft.
+    // no machine wrote either, so the bar holds.
+    expect(report.digest).toMatchObject({ models: true, needsReply: 2, items: 2, automatedInNeedsReply: 0, needsReplyFirst: true });
     expect(report.failures.filter((each) => each.includes('needs-reply items come from mail that no person wrote'))).toEqual([]);
     expect(report.deadlines).toMatchObject({ models: true, given: 2 });
     expect(report.subscriptions?.models).toBe(true);
@@ -257,7 +260,8 @@ describe('runInboxEval', () => {
       }),
     );
     const report = await run(['digest', 'deadlines'], { models: true, slots: fakeModel(), labelsPath });
-    expect(report.digest).toMatchObject({ labelled: 2, needsReplyRecall: 1, needsReplyPrecision: 1, kindAccuracy: 1 });
+    // the label says that the course list mail needs no reply, and the fake model put it in needs_reply anyway.
+    expect(report.digest).toMatchObject({ labelled: 2, needsReplyRecall: 1, needsReplyPrecision: 0.5, kindAccuracy: 1, labels: true });
     expect(report.deadlines?.dueAccuracy).not.toBeNull();
 
     const inside = join(root, 'repo', 'labels.json');
@@ -270,7 +274,7 @@ describe('runInboxEval', () => {
 
   it('waits and reads again when google limits the rate', async () => {
     const waits: number[] = [];
-    setSleepForTests(async (ms) => void waits.push(ms));
+    setGmailPaceForTests({ burst: 1e9, sleep: async (ms) => void waits.push(ms) });
     harness.fake.fault({ route: 'GET /gmail/v1/users/me/messages', status: 429, body: { error: { code: 429, message: 'Too many requests', errors: [{ reason: 'rateLimitExceeded' }] } }, times: 2 });
     const report = await run(['newsletters']);
     expect(waits).toEqual([30_000, 60_000]);

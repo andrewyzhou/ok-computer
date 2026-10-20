@@ -17,6 +17,9 @@ import { browserTaskOf } from './actions.js';
 import { monthlyTotals } from './cadence.js';
 import { lastJobRun } from './run.js';
 
+// the lowest confidence of a row that the monthly totals count.
+const CONFIDENT = 0.5;
+
 // the reads of the inbox pages. each function maps the rows of 019_inbox.sql to the shapes of src/dashboard/types.ts.
 // the route checks the queries, so these functions get valid values. only a cursor can still be wrong, because the
 // page sends it back as it got it, and a wrong one throws InvalidCursor.
@@ -177,8 +180,9 @@ export function listSubscriptions(db: Db, query: { account?: string; state?: Sub
     .prepare(`SELECT * FROM inbox_subscriptions ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY lastChargeAt IS NULL, lastChargeAt DESC, id DESC`)
     .all(...params)
     .map((row) => toSubscription(db, row));
-  // a cancelled or ignored subscription costs nothing more, so the totals leave it out.
-  const paying = subscriptions.filter((each) => each.state === 'active' || each.state === 'cancel_pending');
+  // a cancelled or ignored subscription costs nothing more, so the totals leave it out. a doubtful row (confidence
+  // below 0.5, such as two purchases or a plan that may have ended) stays on the page, but the totals leave it out too.
+  const paying = subscriptions.filter((each) => (each.state === 'active' || each.state === 'cancel_pending') && each.confidence >= CONFIDENT);
   return { subscriptions, monthlyTotals: monthlyTotals(paying), lastScan: lastJobRun(db, 'subscriptions') };
 }
 

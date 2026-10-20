@@ -37,7 +37,7 @@ export function merchantKeyOf(merchant: string): string {
     .toLowerCase()
     .trim()
     .replace(/[\s,.]+(inc|llc|ltd|pbc|corp|corporation|plc|gmbh)\.?$/, '')
-    .replace(/[^a-z0-9]/g, '');
+    .replace(/[^\p{L}\p{N}]/gu, '');
 }
 
 const median = (sorted: readonly number[]) => {
@@ -72,15 +72,24 @@ export function nextChargeAfter(at: number, cadence: SubscriptionCadence): strin
   return months ? addMonths(new Date(at), months).toISOString() : null;
 }
 
-// the cadence of a list of charge times (iso, any order), the next charge after the last one, and the confidence
-// that the charge repeats (0 to 1). the charges of one day count as one, because an order mail and its payment mail
-// are one charge. a cadence that fits no range stays below 0.5, so two charges at a random gap are not a subscription.
-export function cadenceOf(charges: readonly string[]): { cadence: SubscriptionCadence; nextChargeAt: string | null; confidence: number } {
+// chargeTimes gives the times (milliseconds, oldest first) of the charges in a list of iso times, where the charges
+// less than a day after the first of a run count as one. an order mail and its payment mail are one charge, also when
+// utc midnight falls between them, as it does in the afternoon of the owner's zone.
+export function chargeTimes(charges: readonly string[]): number[] {
   const sorted = charges
     .map((each) => Date.parse(each))
     .filter((each) => Number.isFinite(each))
     .sort((a, b) => a - b);
-  const times = sorted.filter((each, index) => index === 0 || Math.floor(each / DAY_MS) !== Math.floor(sorted[index - 1]! / DAY_MS));
+  const times: number[] = [];
+  for (const each of sorted) if (!times.length || each - times.at(-1)! >= DAY_MS) times.push(each);
+  return times;
+}
+
+// the cadence of a list of charge times (iso, any order), the next charge after the last one, and the confidence
+// that the charge repeats (0 to 1). the charges of one day count as one (chargeTimes). a cadence that fits no range
+// stays below 0.5, so two charges at a random gap are not a subscription.
+export function cadenceOf(charges: readonly string[]): { cadence: SubscriptionCadence; nextChargeAt: string | null; confidence: number } {
+  const times = chargeTimes(charges);
   if (times.length < 2) return { cadence: 'unknown', nextChargeAt: null, confidence: 0.3 };
   const gaps = times.slice(1).map((each, index) => (each - times[index]!) / DAY_MS);
   const middle = median([...gaps].sort((a, b) => a - b));

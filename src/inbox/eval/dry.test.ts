@@ -51,7 +51,7 @@ afterEach(async () => {
 });
 
 describe('the live database', () => {
-  it('is refused at data/okc.sqlite, by path, by a relative path and through a symlink or a hard link', () => {
+  it('is refused at data/okc.sqlite, by path and by a relative path', () => {
     const { root, live } = fakeRepo();
     const config = configOf();
     const check = { config, configPath: join(root, 'okc.config.json'), roots: [root] };
@@ -61,14 +61,27 @@ describe('the live database', () => {
     expect(liveDatabaseReason('data/okc.sqlite', { ...check, cwd: root })).toMatch(/data folder/);
     // a path in the data folder that does not exist yet is refused too, because opening it would write there.
     expect(liveDatabaseReason(join(root, 'data', 'other.sqlite'), check)).toMatch(/data folder/);
+  });
 
+  // a junction and a hard link need no rights on windows, so this test runs on every system.
+  it('is refused through a folder link or a hard link', () => {
+    const { root, live } = fakeRepo();
+    const config = configOf();
+    const check = { config, configPath: join(root, 'okc.config.json'), roots: [root] };
     const elsewhere = mkdtempSync(join(tmpdir(), 'okc-eval-link-'));
-    symlinkSync(live, join(elsewhere, 'okc.sqlite'));
-    expect(() => dryContext({ dbPath: join(elsewhere, 'okc.sqlite'), config, configPath: check.configPath, models: false, roots: [root], google: offline })).toThrow(/refuses/);
-    symlinkSync(join(root, 'data'), join(elsewhere, 'data-link'));
+    symlinkSync(join(root, 'data'), join(elsewhere, 'data-link'), 'junction');
     expect(liveDatabaseReason(join(elsewhere, 'data-link', 'okc.sqlite'), check)).toMatch(/data folder/);
     linkSync(live, join(elsewhere, 'hard.sqlite'));
     expect(liveDatabaseReason(join(elsewhere, 'hard.sqlite'), check)).toMatch(/link to the live database/);
+  });
+
+  // a symlink to a file needs rights that a windows user often lacks.
+  it.runIf(process.platform !== 'win32')('is refused through a symlink to the file', () => {
+    const { root, live } = fakeRepo();
+    const config = configOf();
+    const elsewhere = mkdtempSync(join(tmpdir(), 'okc-eval-link-'));
+    symlinkSync(live, join(elsewhere, 'okc.sqlite'));
+    expect(() => dryContext({ dbPath: join(elsewhere, 'okc.sqlite'), config, configPath: join(root, 'okc.config.json'), models: false, roots: [root], google: offline })).toThrow(/refuses/);
   });
 
   it('is refused at the data path of the config', () => {

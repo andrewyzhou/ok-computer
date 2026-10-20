@@ -8,11 +8,9 @@ import type { MailKind } from '../../dashboard/inbox-types.js';
 import type { DigestItem, SubscriptionCadence } from '../../dashboard/types.js';
 import type { Db } from '../../db/index.js';
 import type { GoogleAccounts, GoogleApis } from '../../google/accounts.js';
-import { fromSdk, toGoogleError } from '../../google/errors.js';
 import { bodyText, header } from '../../google/mime.js';
 import { unsubscribeTargets, verifyUnsubscribeHeaders } from '../../google/unsubscribe.js';
-import type { ModelRequest } from '../../models/types.js';
-import type { SlotResult, SlotRunner } from '../../models/slots.js';
+import type { SlotRunner } from '../../models/slots.js';
 import { redact } from '../../observability/redact.js';
 import { cleanLine } from '../../signals/store.js';
 import { headOf } from '../../text.js';
@@ -21,14 +19,16 @@ import { errorText } from '../../tools/registry.js';
 import { ownerAddresses } from '../accounts.js';
 import { classifyMail } from '../classify.js';
 import { checkDue, findDates } from '../deadlines.js';
-import { BODY_LIMIT as DIGEST_BODY, DIGEST_QUERY, DIGEST_TOOL, MAX as DIGEST_MAX, runDigest } from '../digest.js';
-import { getMessages, listMessages, receivedAt, type MessageRef } from '../gmail.js';
+import type { DigestBatch } from '../context.js';
+import { BODY_LIMIT as DIGEST_BODY, DIGEST_QUERY, MAX as DIGEST_MAX, runDigest } from '../digest.js';
+import { getMessages, listMessages, readError, receivedAt } from '../gmail.js';
 import { MAX as SWEEP_MAX, SIGNED, SWEEP_HEADERS, SWEEP_QUERY } from '../newsletters.js';
 import { amountsIn, judgeSubscription, merchantOf, receiptKindOf, statedCadenceOf, type ChargeFact, type Merchant, type ReceiptKind, type StatedCadence } from '../receipts.js';
 import { runJob } from '../run.js';
 import { senderIdentityOf, unsubscribeChoiceOf } from '../senders.js';
 import { cadenceOf, MAX as RECEIPT_MAX, MAX_AGE_DAYS as RECEIPT_DAYS, RECEIPT_QUERY, scanSubscriptions } from '../subscriptions.js';
 import { dryContext, repoRoots } from './dry.js';
+import { contactsOf, independentKindOf, statesDay } from './independent.js';
 import { labelKey, loadLabels, type Labels } from './labels.js';
 import {
   failuresOf,
@@ -84,10 +84,16 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 type JobState = { ok: true } | { ok: false; error: string };
 
-// the facts of one mail of the digest, from classifyMail.
+// the facts of one mail of the digest: the kind from classifyMail, and the kind from the plain rules of
+// independent.ts, or null when they have no opinion.
 interface MailFact {
   kind: MailKind;
+  check: MailKind | null;
 }
+
+// the sent mail of the last half year that the check reads for the people the owner wrote to.
+const SENT_QUERY = 'in:sent newer_than:180d';
+const SENT_MAX = 500;
 
 // the facts of one receipt, from the functions of receipts.ts. amounts holds the numbers only, never the words.
 interface ReceiptFact {
@@ -107,10 +113,11 @@ interface SenderGroup {
   members: Array<{ message: gmail_v1.Schema$Message; at: string; fromAddress: string }>;
 }
 
-// one call of the digest model: the account, the text of each input and the items that the model gave.
+// one call of the digest model: the account, the text and the time of each input as the digest built them, and the
+// items that the model gave.
 interface DigestCall {
   account: string | null;
-  inputs: Map<number, string>;
+  inputs: Map<number, { text: string; sentAt: string }>;
   items: unknown[];
 }
 
@@ -140,75 +147,6 @@ function commitOf(): string | null {
   } catch {
     return null;
   }
-}
-
-// gmail limits the reads of one user per minute, and the app and the check share that limit. the check reads in parts
-// and waits when google limits the rate, so a long read of a big account ends instead of failing half way.
-const PART = 200;
-const RATE_WAITS_MS = [30_000, 60_000, 60_000, 90_000, 120_000];
-let sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-// the tests of the check never wait.
-export function setSleepForTests(fn: (ms: number) => Promise<void>): void {
-  sleep = fn;
-}
-
-// paced runs a read again after a wait when google limits the rate. any other error stops it.
-async function paced<T>(work: () => Promise<T>): Promise<T> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await work();
-    } catch (err) {
-      const wait = RATE_WAITS_MS[attempt];
-      if (!fromSdk(err) || toGoogleError(err).kind !== 'rate' || wait === undefined) throw err;
-      await sleep(wait);
-    }
-  }
-}
-
-// readMessages reads the messages in parts, each part paced.
-async function readMessages(apis: GoogleApis, refs: readonly MessageRef[], options: Parameters<typeof getMessages>[2]): Promise<gmail_v1.Schema$Message[]> {
-  const out: gmail_v1.Schema$Message[] = [];
-  for (let start = 0; start < refs.length; start += PART) {
-    const ids = refs.slice(start, start + PART).map((each) => each.id);
-    out.push(...(await paced(() => getMessages(apis, ids, options))));
-  }
-  return out;
-}
-
-// the reason a read failed, in words without the text of google, which can name the project of the oauth client.
-function readError(err: unknown): string {
-  if (!fromSdk(err)) return short(err);
-  const error = toGoogleError(err);
-  const words: Record<string, string> = {
-    auth: 'the account needs a new sign-in',
-    client: 'google refused the oauth client',
-    scope: 'the sign-in lacks a permission',
-    rate: 'google limited the rate of reads',
-    transient: 'google did not answer',
-  };
-  return `${words[error.kind] ?? `google refused a read (${error.kind})`}${error.status ? `, status ${error.status}` : ''}`;
-}
-
-// the inputs of one batch of the digest model, from the text of its request: the wrapper names the account, and each
-// input starts with "item <id>:".
-function digestCallOf(request: ModelRequest, result: SlotResult): DigestCall | undefined {
-  if (!result.ok || !request.tools.some((tool) => tool.name === DIGEST_TOOL)) return undefined;
-  const message = request.messages[0];
-  const first = message?.role === 'user' ? message.content[0] : undefined;
-  const text = first?.type === 'text' ? first.text : '';
-  const source = /^<untrusted source="([^"]*)">/.exec(text)?.[1] ?? '';
-  const body = text.replace(/^<untrusted[^>]*>\n/, '').replace(/\n<\/untrusted>$/, '');
-  const parts = body.split(/^item (\d+):\n/m);
-  const inputs = new Map<number, string>();
-  for (let index = 1; index + 1 < parts.length; index += 2) inputs.set(Number(parts[index]), parts[index + 1]!);
-  const items = result.response.toolCalls
-    .filter((call) => call.name === DIGEST_TOOL)
-    .flatMap((call) => {
-      const list = (call.input as { items?: unknown } | null)?.items;
-      return Array.isArray(list) ? list : [];
-    });
-  return { account: source.startsWith('gmail:') ? source.slice('gmail:'.length) : null, inputs, items };
 }
 
 export async function runInboxEval(options: EvalOptions, seams: EvalSeams = {}): Promise<EvalReport> {
@@ -280,6 +218,7 @@ async function evaluate(options: EvalOptions, config: Config, dry: ReturnType<ty
       newsletters: { listed: 0, limit: SWEEP_MAX, capped: false },
       htmlOnly: null,
     };
+    let contacts = new Set<string>();
     accounts.push(cover);
     const why = google.accounts.unavailable(alias);
     if (why) {
@@ -305,15 +244,21 @@ async function evaluate(options: EvalOptions, config: Config, dry: ReturnType<ty
     if (jobs.has('digest') || jobs.has('deadlines')) {
       await read('digest', async (apis) => {
         // one more id than the limit tells whether the account has more mail than the job reads.
-        const refs = await paced(() => listMessages(apis, DIGEST_QUERY, DIGEST_MAX + 1));
+        // the people the owner wrote to are persons for the plain view of the kinds. the sent mail is read for its To
+        // and Cc headers only.
+        if (jobs.has('digest')) {
+          const sent = await listMessages(apis, SENT_QUERY, SENT_MAX);
+          contacts = contactsOf(await getMessages(apis, sent.map((each) => each.id), { format: 'metadata', headers: ['To', 'Cc'] }));
+        }
+        const refs = await listMessages(apis, DIGEST_QUERY, DIGEST_MAX + 1);
         cover.digest = coverage(refs.length, DIGEST_MAX);
-        const messages = await readMessages(apis, refs.slice(0, DIGEST_MAX), { format: 'full' });
+        const messages = await getMessages(apis, refs.slice(0, DIGEST_MAX).map((each) => each.id), { format: 'full' });
         tally(messages);
         mailCount += messages.length;
         for (const message of messages) {
           const id = message.id ?? '';
           digestKeys.add(labelKey(alias, id));
-          if (jobs.has('digest')) guard('digest', () => mails.set(labelKey(alias, id), { kind: classifyMail(message, owner).kind }));
+          if (jobs.has('digest')) guard('digest', () => mails.set(labelKey(alias, id), { kind: classifyMail(message, owner).kind, check: independentKindOf(message, contacts, owner) }));
           if (jobs.has('deadlines')) {
             guard('deadlines', () => {
               const text = `${header(message, 'Subject')}\n${headOf(bodyText(message.payload), DIGEST_BODY)}`;
@@ -328,18 +273,18 @@ async function evaluate(options: EvalOptions, config: Config, dry: ReturnType<ty
     }
     if (jobs.has('subscriptions')) {
       await read('subscriptions', async (apis) => {
-        const refs = await paced(() => listMessages(apis, RECEIPT_QUERY, RECEIPT_MAX + 1));
+        const refs = await listMessages(apis, RECEIPT_QUERY, RECEIPT_MAX + 1);
         cover.subscriptions = coverage(refs.length, RECEIPT_MAX);
-        const messages = (await readMessages(apis, refs.slice(0, RECEIPT_MAX), { format: 'full' })).filter((each) => each.id && Date.parse(receivedAt(each)) >= oldest);
+        const messages = (await getMessages(apis, refs.slice(0, RECEIPT_MAX).map((each) => each.id), { format: 'full' })).filter((each) => each.id && Date.parse(receivedAt(each)) >= oldest);
         tally(messages);
         for (const message of messages) guard('subscriptions', () => receiptOf(alias, message));
       });
     }
     if (jobs.has('newsletters')) {
       await read('newsletters', async (apis) => {
-        const refs = await paced(() => listMessages(apis, SWEEP_QUERY, SWEEP_MAX + 1));
+        const refs = await listMessages(apis, SWEEP_QUERY, SWEEP_MAX + 1);
         cover.newsletters = coverage(refs.length, SWEEP_MAX);
-        const messages = await readMessages(apis, refs.slice(0, SWEEP_MAX), { format: 'metadata', headers: SWEEP_HEADERS });
+        const messages = await getMessages(apis, refs.slice(0, SWEEP_MAX).map((each) => each.id), { format: 'metadata', headers: SWEEP_HEADERS });
         for (const message of messages) guard('newsletters', () => senderOf(alias, message));
       });
     }
@@ -385,14 +330,10 @@ async function evaluate(options: EvalOptions, config: Config, dry: ReturnType<ty
   let digestItems: DigestItem[] | null = null;
   let scanRun: string | null = null;
   if (options.models) {
-    const inner = ctx.slots;
-    ctx.slots = {
-      async call(slot, request, context) {
-        const result = await inner.call(slot, request, context);
-        const call = digestCallOf(request, result);
-        if (call) calls.push(call);
-        return result;
-      },
+    // the digest gives each batch as it built it, so the check never has to read the inputs back out of the text of
+    // the prompt, which a mail could forge.
+    ctx.observeDigest = (batch: DigestBatch) => {
+      calls.push({ account: batch.account, inputs: new Map(batch.inputs.map((each) => [each.id, { text: each.text, sentAt: each.sentAt }])), items: batch.items });
     };
     if (jobs.has('digest') || jobs.has('deadlines')) {
       const result = await runJob(ctx, 'digest', 'utility', (run) => runDigest(ctx, run));
@@ -428,6 +369,9 @@ async function evaluate(options: EvalOptions, config: Config, dry: ReturnType<ty
   const subscriptions = metric('subscriptions', () => subscriptionMetrics(ctx.db, receipts, receiptById, scanRun, labels, options.names === true, aliases));
   const newsletters = metric('newsletters', () => newsletterMetrics(senders, listMail));
   const deadlines = metric('deadlines', () => deadlineMetrics(dates, calls, digestItems, digestKeys, labels, tz, options.models));
+  // without labels the recall and the precision of needs_reply are not measured, so a run with models says that its
+  // pass is no pass of the quality.
+  if (digest?.models && !labels) failures.push('digest: needs-reply recall and precision were not measured, because no labels file was given, so this run is no quality pass.');
 
   for (const each of accounts) if (!each.read) failures.push(`${each.alias}: the account could not be read`);
 
@@ -453,7 +397,15 @@ function digestMetrics(mails: Map<string, MailFact>, messages: number, items: Di
   const counts = { person: 0, list: 0, automated: 0 };
   for (const each of mails.values()) counts[each.kind]++;
   const list = items ?? [];
-  const kindOf = (item: DigestItem): MailKind | undefined => item.mail ?? mails.get(labelKey(item.account, item.messageId))?.kind;
+  // the plain view of independent.ts decides the bars, so a fault of classifyMail cannot hide itself.
+  const checkOf = (item: DigestItem): MailKind | null => mails.get(labelKey(item.account, item.messageId))?.check ?? null;
+  let checked = 0;
+  let disagreements = 0;
+  for (const each of mails.values()) {
+    if (each.check === null) continue;
+    checked++;
+    if ((each.check === 'person') !== (each.kind === 'person')) disagreements++;
+  }
   const replies = list.filter((each) => each.section === 'needs_reply');
   const lastReply = list.map((each) => each.section).lastIndexOf('needs_reply');
   const firstOther = list.findIndex((each) => each.section !== 'needs_reply');
@@ -494,12 +446,12 @@ function digestMetrics(mails: Map<string, MailFact>, messages: number, items: Di
     ...counts,
     items: list.length,
     needsReply: replies.length,
-    automatedInNeedsReply: replies.filter((each) => {
-      const kind = kindOf(each);
-      return kind !== undefined && kind !== 'person';
-    }).length,
+    automatedInNeedsReply: replies.filter((each) => checkOf(each) === 'automated').length,
     needsReplyFirst: lastReply < 0 || firstOther < 0 || lastReply < firstOther,
-    automatedShown: list.filter((each) => kindOf(each) === 'automated' && !shownSections.has(each.section)).length,
+    automatedShown: list.filter((each) => checkOf(each) === 'automated' && !shownSections.has(each.section)).length,
+    checked,
+    disagreements,
+    labels: labels !== null,
     needsReplyRecall: items && labels ? rate(recallHits, recallBase) : null,
     needsReplyPrecision: items && labels ? rate(precisionHits, precisionBase) : null,
     kindAccuracy: labels ? rate(kindHits, kindBase) : null,
@@ -708,10 +660,10 @@ function deadlineMetrics(
     for (const raw of call.items) {
       const item = raw as { id?: unknown; dueAt?: unknown; dueText?: unknown } | null;
       if (!item || typeof item.dueAt !== 'string' || !item.dueAt.trim()) continue;
-      const text = typeof item.id === 'number' ? call.inputs.get(item.id) : undefined;
-      if (text === undefined) continue;
+      const input = typeof item.id === 'number' ? call.inputs.get(item.id) : undefined;
+      if (input === undefined) continue;
       given++;
-      const sentAt = /^Date: (\S+)$/m.exec(text)?.[1] ?? '';
+      const { text, sentAt } = input;
       const dueText = typeof item.dueText === 'string' ? item.dueText : null;
       const checked = checkDue({ dueAt: item.dueAt, dueText, text, sentAt, timeZone: tz });
       if (!checked.ok) {
@@ -719,10 +671,11 @@ function deadlineMetrics(
         continue;
       }
       kept++;
-      // the check of the check: the words of a kept date must be in the mail and name the day of the date.
+      // the check of the check, without the parser of deadlines.ts: the words of a kept date must be in the mail, and a
+      // plain search of the forms of its day must find the day in them.
       const words = checked.due.dueText;
       const day = localDay(new Date(checked.due.at), tz);
-      const stated = words !== null && normalized(text).includes(normalized(words)) && findDates(words, sentAt, tz).some((each) => each.day === day);
+      const stated = words !== null && normalized(text).includes(normalized(words)) && statesDay(words, day, sentAt, tz);
       if (!stated) unsupported++;
       const sent = Date.parse(sentAt);
       if (Number.isFinite(sent)) {

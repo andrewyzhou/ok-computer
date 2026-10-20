@@ -2,7 +2,8 @@ import type { CadenceSource } from '../dashboard/inbox-types.js';
 import type { SubscriptionCadence } from '../dashboard/types.js';
 import { fromAddress } from '../google/mime.js';
 import { cleanLine } from '../signals/store.js';
-import { cadenceOf, merchantKeyOf, nextChargeAfter } from './cadence.js';
+import { cadenceOf, chargeTimes, merchantKeyOf, nextChargeAfter } from './cadence.js';
+import { ownedDomain } from './domains.js';
 
 // the facts of a receipt that the code checks, so the subscription table does not rest on the model alone: the
 // amounts that the text states, the cadence that it states, the kind of the mail, and the merchant from the sender.
@@ -11,7 +12,7 @@ import { cadenceOf, merchantKeyOf, nextChargeAfter } from './cadence.js';
 
 // the version of the receipt reading. a scan reads a receipt again when its row has an older version (the parser column
 // of 026_inbox_live.sql). raise it with each change that changes what a receipt row holds.
-export const PARSER_VERSION = 1;
+export const PARSER_VERSION = 2;
 
 // charge: a payment that was made. refund: money back. order: an order, a shipment or a bill that is still due, with no
 // payment yet. other: anything else (an offer, a trial start without a charge, a price change notice).
@@ -30,8 +31,8 @@ export interface AmountMention {
 }
 
 // amountsIn gives each amount of a text, in the order of the text. it reads "$12.99", "USD 12.99", "12.99 USD",
-// "US$12.99", "€9,99", "9,99 €", "£4.50", "¥1,200", "1.234,56 €" and "$1,234.56", and skips numbers without a currency.
-// a negative amount such as "-$5.00" is a credit, so it is skipped too. total is true when a label stands before the
+// "US$12.99", "€9,99", "9,99 €", "£4.50", "¥1,200", "1.234,56 €", "1 234,56 €" and "$1,234.56", and skips numbers
+// without a currency. a negative amount such as "-$5.00" or "($5.00)" is a credit, so it is skipped too. total is true when a label stands before the
 // amount on its line, or alone on the line before it.
 export function amountsIn(text: string): AmountMention[] {
   const mentions: AmountMention[] = [];
@@ -46,6 +47,8 @@ export function amountsIn(text: string): AmountMention[] {
     const sign = groups.sign ?? (post && SIGNS[post] ? post : undefined);
     if (!sign && !code) continue;
     if (groups.minus || MINUS.has(text[match.index - 1] ?? '')) continue;
+    // an amount in parentheses is a credit in the way accounts write it, as in "Credit ($5.00)".
+    if (/\(\s*$/.test(text.slice(Math.max(0, match.index - 3), match.index)) && /^\s*\)/.test(text.slice(match.index + match[0].length))) continue;
     const currency = currencyOf(code, sign, groups.dollar);
     const amount = numberOf(groups.number ?? '');
     if (amount === null || !currency) continue;
@@ -78,6 +81,8 @@ export function statedCadenceOf(text: string): StatedCadence | null {
 export function receiptKindOf(subject: string, text: string): ReceiptKind {
   const all = `${subject}\n${text}`;
   if (REFUND_SUBJECT.test(subject) || REFUND_TEXT.test(all)) return 'refund';
+  // a payment that failed or was declined moved no money, and its retry a few days later is the real charge.
+  if (FAILED.test(all)) return 'other';
   const mentions = amountsIn(all);
   const totals = mentions.filter((each) => each.total);
   const counted = totals.length ? totals : mentions;
@@ -147,18 +152,9 @@ export function payeeOf(subject: string): string | null {
   return merchantKeyOf(name) ? name : null;
 }
 
-// the two-label suffixes under which a registrable domain has three labels, such as shop.co.uk.
-const TWO_LABEL_SUFFIXES = new Set(['co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au', 'co.nz', 'co.jp', 'co.kr', 'co.in', 'co.za', 'com.br', 'com.mx', 'com.sg', 'com.hk', 'com.cn', 'com.tr', 'com.ar']);
-
-// registrableDomain gives the domain that one organisation registered, in lower case: the last two labels of the host,
-// or three under a suffix such as co.uk. a host with fewer labels gives null.
-export function registrableDomain(host: string): string | null {
-  const labels = host.toLowerCase().replace(/\.$/, '').split('.').filter(Boolean);
-  if (labels.length < 2) return null;
-  const two = labels.slice(-2).join('.');
-  if (!TWO_LABEL_SUFFIXES.has(two)) return two;
-  return labels.length >= 3 ? labels.slice(-3).join('.') : null;
-}
+// registrableDomain gives the domain that one organisation registered, in lower case, with the same suffixes as the
+// newsletter keys (domains.ts), so a sender has one domain in both. a host of one label or a suffix alone gives null.
+export const registrableDomain = (host: string): string | null => ownedDomain(host);
 
 // one charge of a merchant, as the subscription row reads it from inbox_receipts.
 export interface ChargeFact {
@@ -188,10 +184,10 @@ export interface SubscriptionJudgement {
 //
 // the charges of one day count as one, as in cadenceOf. the reasons hold only counts, amounts and cadences, never
 // the text of a mail.
-export function judgeSubscription(charges: readonly ChargeFact[]): SubscriptionJudgement {
+export function judgeSubscription(charges: readonly ChargeFact[], now?: Date): SubscriptionJudgement {
   const sorted = charges.filter((each) => Number.isFinite(Date.parse(each.chargedAt))).sort((a, b) => Date.parse(a.chargedAt) - Date.parse(b.chargedAt));
   const gaps = cadenceOf(sorted.map((each) => each.chargedAt));
-  const days = new Set(sorted.map((each) => Math.floor(Date.parse(each.chargedAt) / DAY_MS))).size;
+  const days = chargeTimes(sorted.map((each) => each.chargedAt)).length;
   const stated = statedOf(sorted);
   const recurring = sorted.some((each) => each.recurring);
   const reasons: string[] = [];
@@ -222,6 +218,12 @@ export function judgeSubscription(charges: readonly ChargeFact[]): SubscriptionJ
     confidence = Math.min(0.6, confidence);
   } else if (gaps.cadence !== 'unknown') {
     source = 'gaps';
+    // on the owner's real mail, two coffees of the same price a week apart looked like a weekly plan. one gap alone,
+    // with no receipt that states a plan or says that it renews, can be two purchases.
+    if (!recurring && days < 3) {
+      confidence = Math.min(confidence, 0.4);
+      reasons.push('only 2 charges, which can be two purchases');
+    }
   } else {
     source = 'none';
     if (recurring && days < 2) confidence = UNCONFIRMED;
@@ -258,11 +260,26 @@ export function judgeSubscription(charges: readonly ChargeFact[]): SubscriptionJ
     confidence -= 0.2;
     reasons.push(`the charges are in ${currencies} currencies`);
   }
-  confidence = Math.round(Math.min(1, Math.max(0, confidence)) * 100) / 100;
   const last = sorted.at(-1);
   const nextChargeAt = cadence === gaps.cadence ? gaps.nextChargeAt : last ? nextChargeAfter(Date.parse(last.chargedAt), cadence) : null;
-  return { cadence, cadenceSource: source, nextChargeAt, confidence, reasons, subscription: confidence >= 0.5 || stated !== null || recurring };
+  // a plan whose next charge is well past with no new receipt may have ended. the owner's real rows held plans whose
+  // last charge was months old, and they made the monthly total many times too high.
+  if (now && last && nextChargeAt && cadence !== 'unknown' && Date.parse(nextChargeAt) + GRACE_DAYS[cadence] * DAY_MS < now.getTime()) {
+    confidence = Math.min(confidence, 0.3);
+    reasons.push(`no charge since ${last.chargedAt.slice(0, 10)}, so it may have ended`);
+  }
+  confidence = Math.round(Math.min(1, Math.max(0, confidence)) * 100) / 100;
+  const subscription = confidence >= 0.5 || stated !== null || recurring;
+  // a row that the finder keeps never has confidence 0. that value marks a row that the receipts no longer support,
+  // which the page hides, so a kept row with many doubts stays in view.
+  if (subscription) confidence = Math.max(MIN_KEPT, confidence);
+  return { cadence, cadenceSource: source, nextChargeAt, confidence, reasons, subscription };
 }
+
+// the lowest confidence of a row that the finder keeps.
+const MIN_KEPT = 0.05;
+// the days after the expected next charge before a plan counts as possibly ended.
+const GRACE_DAYS: Record<StatedCadence, number> = { weekly: 7, monthly: 10, quarterly: 20, yearly: 30 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 // the confidence of a plan that the receipts state or that renews, which the gaps do not confirm yet.
@@ -298,7 +315,7 @@ const MINUS = new Set(['-', '−']);
 // one amount: an optional code and an optional sign before the number, and an optional sign or code after it. a
 // number inside a longer number, or a code inside a word, does not start one.
 const AMOUNT = new RegExp(
-  String.raw`(?<![\d.,])(?:(?<!\p{L})(?<code>${CODE})(?!\p{L})\s?)?(?<sign>(?:(?<!\p{L})(?<dollar>US|CA|AU|NZ|HK|C|A|S))?\$|[€£¥₹₩])?\s?(?<minus>[-−]\s?)?(?<number>\d[\d.,]*\d|\d)(?!\d)(?<post>\s?(?:[€£¥₹₩]|(?<!\p{L})(?:${CODE})(?!\p{L})))?`,
+  String.raw`(?<![\d.,])(?:(?<!\p{L})(?<code>${CODE})(?!\p{L})\s?)?(?<sign>(?:(?<!\p{L})(?<dollar>US|CA|AU|NZ|HK|C|A|S))?\$|[€£¥₹₩])?\s?(?<minus>[-−]\s?)?(?<number>\d{1,3}(?:[   ]\d{3})+(?:,\d{1,2})?(?![\d.,])|\d[\d.,]*\d|\d)(?!\d)(?<post>\s?(?:[€£¥₹₩]|(?<!\p{L})(?:${CODE})(?!\p{L})))?`,
   'gu',
 );
 // the labels of the amount that was paid. "subtotal" is not one, because the word boundary keeps it out.
@@ -314,7 +331,9 @@ function currencyOf(code: string | undefined, sign: string | undefined, dollar: 
 // the value of a number with its separators. the last of two kinds of separator is the decimal one, so "1.234,56" and
 // "1,234.56" are the same. a single separator with three digits after it groups thousands, so "¥1,200" is 1200, and
 // with one or two digits after it, it is the decimal one, so "9,99" is 9.99. any other shape is not an amount.
-function numberOf(raw: string): number | null {
+function numberOf(spaced: string): number | null {
+  // a space, a no-break space or a thin space between groups of three digits groups thousands, as in "1 234,56 €".
+  const raw = spaced.replace(/[   ]/g, '');
   const dot = raw.lastIndexOf('.');
   const comma = raw.lastIndexOf(',');
   let decimal: string | null = null;
@@ -389,6 +408,10 @@ const PAID_SUBJECT = /\b(?:receipt|payment received|paid)\b/i;
 const NOTICE = /\b(?:free trial|your trial|trial (?:ends|will end|is ending|ending|expires)|price (?:change|increase|update|is changing|will change|goes up)|new price|prices? (?:are|is) (?:going up|changing))\b/i;
 // an offer, which a real receipt can also carry in its footer.
 const OFFER = /\b(?:special offer|limited time|upgrade (?:now|today)|subscribe (?:now|today))\b|\d% off\b/i;
+// a payment that did not go through. "update your payment method" alone is not one, because a real receipt often
+// has it in its footer.
+const FAILED =
+  /\b(?:payment (?:has |was )?(?:failed|declined|unsuccessful)|(?:was|were|been) declined|could not (?:be )?(?:charged?|processed?)|couldn't (?:charge|process)|unable to (?:charge|process)|was not (?:processed|successful)|unsuccessful (?:payment|charge))\b/i;
 // the words that a receipt or an invoice uses without saying that a payment was made.
 const WEAK_PAID = /\b(?:receipt|invoice|payment)\b/i;
 const ORDER =

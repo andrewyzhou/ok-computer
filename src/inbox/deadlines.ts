@@ -85,6 +85,22 @@ function bareOf(text: string): { bare: string; from: number[]; to: number[] } {
   return { bare, from, to };
 }
 
+// true when the text holds the words, and the words start and end on a word edge of the text. "due oct 2" is inside
+// "due oct 24", but it does not end on a word edge there, so a model cannot cut a date out of a longer one.
+function atWordEdges(text: string, words: string): boolean {
+  if (!words) return false;
+  const opensWord = WORD_CHAR.test(words[0]!);
+  const closesWord = WORD_CHAR.test(words.at(-1)!);
+  for (let at = text.indexOf(words); at >= 0; at = text.indexOf(words, at + 1)) {
+    const before = text[at - 1];
+    const after = text[at + words.length];
+    if (opensWord && before !== undefined && WORD_CHAR.test(before)) continue;
+    if (closesWord && after !== undefined && WORD_CHAR.test(after)) continue;
+    return true;
+  }
+  return false;
+}
+
 // wordsOfMail gives the words of the mail that the model copied, or null when the mail does not hold them. the first
 // compare is without case and with each run of white space as one space. real mail turns html into text with marks
 // that a model leaves out or changes when it copies the words, as in "Today!" for "Today," or a zone in brackets, so
@@ -92,7 +108,7 @@ function bareOf(text: string): { bare: string; from: number[]; to: number[] } {
 // order, and two numbers never join. the second compare gives the words as the mail writes them, so a mark that only
 // the model wrote, as in "10/24" for "10 24", can never make a date.
 function wordsOfMail(words: string, mail: string): string | null {
-  if (normal(mail).includes(normal(words))) return words;
+  if (atWordEdges(normal(mail), normal(words))) return words;
   const core = bareOf(words).bare;
   if (!core.trim()) return null;
   const text = bareOf(mail);
@@ -193,8 +209,8 @@ const SCAN = new RegExp(
     `(?:(?<rel>${REL})\\s{1,3})?\\b(?<wd>${WEEKDAY})`,
     `\\b(?<word>(?:the\\s)?day\\safter\\stomorrow|today|tonight|tomorrow|tmrw)(?![a-z])`,
     `\\b(?<eod>end\\sof\\s(?:the\\s)?(?:business\\s)?day|close\\sof\\sbusiness|eod|cob)(?![a-z])`,
-    // 11:59 PM PT, 5pm, 23:59, noon, midnight.
-    `(?<![\\d:.])(?:(?<th>\\d{1,2})(?::(?<tm>\\d{2}))?\\s{0,2}(?<ap>[ap]\\.?m)\\.?(?![a-z])|(?<hh>\\d{1,2}):(?<hm>\\d{2})(?![\\d])|\\b(?<noon>noon|midday)|\\b(?<mid>midnight))${ZONE}`,
+    // 11:59 PM PT, 5pm, 23:59, 7:03:23 PM UTC, 19:03:23, noon, midnight. the seconds are read and left out.
+    `(?<![\\d:.])(?:(?<th>\\d{1,2})(?::(?<tm>\\d{2})(?::\\d{2})?)?\\s{0,2}(?<ap>[ap]\\.?m)\\.?(?![a-z])|(?<hh>\\d{1,2}):(?<hm>\\d{2})(?::\\d{2})?(?![\\d:])|\\b(?<noon>noon|midday)|\\b(?<mid>midnight))${ZONE}`,
   ].join('|'),
   'gi',
 );
@@ -244,6 +260,12 @@ interface Token {
   weekday?: boolean;
   used?: boolean;
 }
+
+// the words before and after "n/n" that make it a fraction, a score, a page or a room, and not a date.
+const NOT_DATE_BEFORE =
+  /\b(?:scored?|scores|grade|graded|rating|rated|points?|pts|page|pages|pg|pp|p|room|rm|ste|suite|unit|apt|step|steps|question|q|problem|prob|exercise|ex|chapter|ch|section|sec|part|slide|item|number|ratio|odds|record|cups?)\.?\s{0,2}[:#]?\s{0,2}$|#\s{0,2}$/i;
+const NOT_DATE_AFTER =
+  /^\s{0,2}(?:cups?|c\.|tbsp|tsp|teaspoons?|tablespoons?|oz|ounces?|lbs?|pounds?|kg|g|grams?|ml|l|liters?|litres?|inch(?:es)?|in\.|ft|feet|miles?|mi|km|points?|pts|marks|stars?|correct|of\s{1,2}(?:the|a|an)\b)(?![a-z])/i;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -335,6 +357,9 @@ function tokenOf(match: RegExpExecArray, base: string | null, cache: Map<string,
     return { kind: 'date', index, end, day, relative: false, time, zone: time ? zone : null };
   }
   if (g.na !== undefined) {
+    // "1/2 cup", "page 3/4", "Room 4/5" and "Score: 20/12" are no dates. a slash date without a year is read only
+    // when no such word stands next to it.
+    if (g.ny === undefined && (NOT_DATE_BEFORE.test(match.input.slice(Math.max(0, index - 24), index)) || NOT_DATE_AFTER.test(match.input.slice(end, end + 16)))) return null;
     let month = Number(g.na);
     let day = Number(g.nb);
     // the order is month/day, as in the united states, unless the first number cannot be a month.
@@ -392,6 +417,8 @@ const GAP_BEFORE = /^\s{0,3}(?:,\s{0,2})?(?:on\s{1,3})?$/i;
 const GAP_EOD = /^[\s,]{0,4}(?:(?:on|at|by)\s{1,3})?$/i;
 const GAP_WEEKDAY = /^,?\s{1,4}(?:the\s{1,3})?$/i;
 const GAP_LIMIT = 16;
+// the words between the two times of a range.
+const RANGE_GAP = /^\s{0,3}(?:-|–|—|to)\s{0,3}$/i;
 
 const gapOf = (text: string, from: number, to: number) => (to - from > GAP_LIMIT ? null : text.slice(from, to));
 
@@ -464,6 +491,16 @@ function scan(text: string, sentAt: string, timeZone: string): DateMention[] {
         before!.used = true;
         ({ time = null, zone = null } = before!);
         index = before!.index;
+        // a range before the date, as in "8:00pm - 10:00pm on Tuesday, 10/27", starts at its first time. the zone of
+        // the end counts for the start when the start names none.
+        const start = tokens[at - 2];
+        const range = start?.kind === 'time' && !start.used ? gapOf(text, start.end, before!.index) : null;
+        if (range !== null && RANGE_GAP.test(range)) {
+          start!.used = true;
+          time = start!.time ?? null;
+          zone = start!.zone ?? zone;
+          index = start!.index;
+        }
       }
     }
     // "end of day Friday" and "Friday EOD" are the day itself, and the time stays open.

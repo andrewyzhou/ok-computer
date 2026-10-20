@@ -29,6 +29,11 @@ export interface DigestStats {
   accounts: DigestAccountStats[];
   // the deadlines that the model gave and the code dropped, because the mail does not state the date.
   droppedDates: number;
+  // the deadlines and bills that the digest left out because their due time had passed. absent in an older digest.
+  pastDue?: number;
+  // the deadlines that the digest left out because the mail is a calendar invitation, which the calendar shows, or
+  // confirms a thing that the owner already did, such as a submitted form. absent in an older digest.
+  notDeadlines?: number;
 }
 
 // where the cadence of a subscription comes from. stated: the receipts say it. gaps: the time between the charges.

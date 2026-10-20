@@ -3,8 +3,8 @@ import type { MailKind } from '../dashboard/inbox-types.js';
 import { fromAddress, header } from '../google/mime.js';
 
 // who wrote a mail, decided in code from its headers before any model reads it. the digest shows a mail in
-// needs_reply only when a person wrote it, so a notification, a receipt or a security alert never asks the owner for a
-// reply, whatever the model says about it. the check reads the headers and the labels only, never the body, so the
+// needs_reply only when a person wrote it, to the owner or to a discussion list, so a notification, a receipt, a
+// newsletter or a security alert never asks the owner for a reply, whatever the model says about it. the check reads the headers and the labels only, never the body, so the
 // text of a mail cannot change its kind.
 
 export interface MailClass {
@@ -13,6 +13,11 @@ export interface MailClass {
   direct: boolean;
   // true when the mail is from an owner address.
   fromOwner: boolean;
+  // true for a list mail that a person wrote to a discussion list, such as a group of a course staff or a club: a
+  // person's address in From and no mark of bulk mail (List-Unsubscribe-Post, a bulk header, a shared mailbox sender or
+  // the promotions or updates tab). such a mail can wait for the owner's answer, so the digest can put it in
+  // needs_reply after the mail to the owner. it never gets a draft.
+  discussion: boolean;
   // short reasons in plain words, for example "no-reply sender" or "List-Id header", for the quality check. they
   // never hold text of the mail.
   reasons: string[];
@@ -22,9 +27,10 @@ export interface MailClass {
 // the local part is left out before the check.
 const MACHINE_LOCAL = new Set(['noreply', 'donotreply', 'notifications', 'notification', 'mailerdaemon', 'postmaster', 'bounce', 'bounces', 'alerts']);
 
-// the local parts of the shared mailboxes that receipts, statements, shipping news and account mail come from. a
-// person seldom writes from one, so a mail from one without list headers counts as automated. a mail from one with
-// list headers stays a list mail, because a newsletter is often sent from such a box.
+// the local parts of the shared mailboxes that receipts, statements, shipping news and account mail come from. a person seldom
+// writes from one, so a mail from one without list headers counts as automated. a mail from one with list headers stays
+// a list mail, because a newsletter is often sent from such a box. a box such as info@ or hello@ is not in the list: a
+// person of a small club or a shop answers from it, and a machine that sends from it adds other marks.
 const ROLE_LOCAL = new Set([
   'account',
   'accounts',
@@ -33,8 +39,6 @@ const ROLE_LOCAL = new Set([
   'bills',
   'ebill',
   'ebills',
-  'hello',
-  'info',
   'invoice',
   'invoices',
   'news',
@@ -58,6 +62,25 @@ const ROLE_LOCAL = new Set([
   'statements',
   'updates',
 ]);
+
+// the gmail domains, where dots in the local part do not count and googlemail.com is gmail.com.
+const GMAIL = new Set(['gmail.com', 'googlemail.com']);
+
+// mailboxOf gives the form of an address that names its mailbox: lower case, without a "+tag", and for gmail without
+// the dots of the local part. owner+school@example.com and o.w.n.e.r@gmail.com reach the owner's own mailbox, so they
+// are the owner.
+export function mailboxOf(address: string): string {
+  const lower = address.trim().toLowerCase();
+  const at = lower.lastIndexOf('@');
+  if (at <= 0) return lower;
+  let local = lower.slice(0, at).replace(/\+.*$/, '');
+  let domain = lower.slice(at + 1);
+  if (GMAIL.has(domain)) {
+    local = local.replace(/\./g, '');
+    domain = 'gmail.com';
+  }
+  return `${local}@${domain}`;
+}
 
 // the x- headers that bulk senders add to each mail they send: an id of a campaign, of a mailing or of a batch, the
 // variables or the tag of the sending service, and its abuse and complaint addresses. a mail client of a person adds
@@ -143,15 +166,23 @@ function listReasons(message: gmail_v1.Schema$Message): string[] {
 // the owner's addresses in lower case, from ownerAddresses of accounts.ts. a signal of a machine wins over a signal of
 // a list, and a list wins over the shared mailbox of a sender.
 export function classifyMail(message: gmail_v1.Schema$Message, owner: ReadonlySet<string>): MailClass {
+  const mailboxes = new Set([...owner].map(mailboxOf));
+  const isOwner = (address: string) => mailboxes.has(mailboxOf(address));
   const from = fromAddress(header(message, 'From'));
-  const fromOwner = from !== undefined && owner.has(from);
+  const fromOwner = from !== undefined && isOwner(from);
   const machine = machineReasons(message, from);
   const list = listReasons(message);
-  const toOwner = addressesOf(header(message, 'To')).some((each) => owner.has(each));
+  const toOwner = addressesOf(header(message, 'To')).some(isOwner);
   // a mail that came through a list is not to the owner, also when the list puts the owner's address in To.
   const direct = toOwner && !list.length;
-  if (machine.length) return { kind: 'automated', direct, fromOwner, reasons: [...machine, ...list] };
-  if (list.length) return { kind: 'list', direct, fromOwner, reasons: list };
-  if (from && !fromOwner && ROLE_LOCAL.has(plainLocal(from))) return { kind: 'automated', direct, fromOwner, reasons: ['shared mailbox sender'] };
-  return { kind: 'person', direct, fromOwner, reasons: from ? [] : ['no plain sender address'] };
+  const role = from !== undefined && !fromOwner && ROLE_LOCAL.has(plainLocal(from));
+  if (machine.length) return { kind: 'automated', direct, fromOwner, discussion: false, reasons: [...machine, ...list] };
+  if (list.length) {
+    const labels = message.labelIds ?? [];
+    const bulk = role || header(message, 'List-Unsubscribe-Post').trim() !== '' || labels.includes('CATEGORY_PROMOTIONS') || labels.includes('CATEGORY_UPDATES');
+    const discussion = from !== undefined && !fromOwner && !bulk;
+    return { kind: 'list', direct, fromOwner, discussion, reasons: list };
+  }
+  if (role) return { kind: 'automated', direct, fromOwner, discussion: false, reasons: ['shared mailbox sender'] };
+  return { kind: 'person', direct, fromOwner, discussion: false, reasons: from ? [] : ['no plain sender address'] };
 }

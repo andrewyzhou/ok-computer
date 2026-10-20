@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
-import { isIP } from 'node:net';
 import type { gmail_v1 } from '@googleapis/gmail';
 import type { UnsubscribeMethod } from '../dashboard/types.js';
 import { fromAddress as parseFrom, header } from '../google/mime.js';
 import { unsubscribeTargets } from '../google/unsubscribe.js';
 import { cleanLine } from '../signals/store.js';
 import { httpsLink } from './actions.js';
+import { registrableDomain } from './domains.js';
 
 // the grouping of the newsletter sweep on real mail. a group must never hold two senders: a List-Id that a platform
 // shares between its customers, a no-reply address that sends for many organisers, and a sender that changes its
@@ -25,41 +25,8 @@ export interface SenderIdentity {
 // the longest list id and sender key that a row keeps. the sender writes the List-Id header.
 export const KEY_LIMIT = 200;
 
-// the public suffixes of two labels that real mail uses. a domain under one of them is registered one label lower,
-// so "mail.shop.co.uk" belongs to "shop.co.uk" and not to "co.uk". the list is short on purpose: a suffix that is not
-// in it only makes two senders of one such suffix share a domain, and the List-Id or the address still keeps them
-// apart.
-const TWO_LABEL_SUFFIXES = new Set(
-  [
-    'co.uk', 'ac.uk', 'org.uk', 'gov.uk', 'me.uk', 'ltd.uk', 'plc.uk', 'net.uk', 'sch.uk', 'nhs.uk',
-    'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au', 'id.au',
-    'co.jp', 'ac.jp', 'ne.jp', 'or.jp', 'go.jp',
-    'co.nz', 'org.nz', 'net.nz', 'ac.nz', 'govt.nz',
-    'com.br', 'net.br', 'org.br', 'gov.br', 'edu.br',
-    'co.in', 'net.in', 'org.in', 'ac.in', 'gov.in', 'edu.in',
-    'co.kr', 'ac.kr', 'or.kr', 'go.kr',
-    'com.cn', 'net.cn', 'org.cn', 'edu.cn', 'gov.cn',
-    'com.hk', 'edu.hk', 'org.hk', 'gov.hk',
-    'com.sg', 'edu.sg', 'gov.sg',
-    'com.tw', 'edu.tw', 'org.tw',
-    'com.mx', 'org.mx', 'edu.mx',
-    'co.za', 'ac.za', 'org.za',
-    'co.il', 'ac.il', 'org.il',
-    'com.ar', 'com.tr', 'co.id', 'com.my', 'com.ph', 'com.vn', 'com.ua', 'co.th', 'ac.th', 'com.pk', 'com.ng', 'com.eg', 'com.sa',
-  ],
-);
-
-// registrableDomain gives the domain under the public suffix of a host name, in lower case, from a short list of the
-// common suffixes of two labels (co.uk, com.au, ac.uk, edu.au and the like). an ip address or a host with one label
-// is given back as it is.
-export function registrableDomain(host: string): string {
-  const name = host.trim().toLowerCase().replace(/\.$/, '');
-  if (isIP(name.replace(/^\[|\]$/g, ''))) return name;
-  const labels = name.split('.');
-  if (labels.length <= 2) return name;
-  const two = labels.slice(-2).join('.');
-  return TWO_LABEL_SUFFIXES.has(two) ? labels.slice(-3).join('.') : two;
-}
+// the registrable domain lives in domains.ts, which the receipts share. the tests and the sweep import it from here.
+export { registrableDomain } from './domains.js';
 
 // the quotes of a quoted name are not part of the name.
 const unquoted = (text: string) => cleanLine(text.replace(/"/g, ''), 200);
@@ -103,13 +70,16 @@ export function senderIdentityOf(message: gmail_v1.Schema$Message): SenderIdenti
   // the name of the from header is the text before its address. the list phrase is the text before the list id.
   const fromName = unquoted(/^(.*)<[^<>]*>\s*$/.exec(from)?.[1] ?? '');
   const listName = bracket ? unquoted(listHeader.slice(0, bracket.index)) : '';
-  const displayName = fromName || listName || null;
+  const owned = listId !== null && !listId.includes('#') && listOwnsUnsubscribe(listId, header(message, 'List-Unsubscribe'));
+  // the mail of a discussion list carries the name of a poster ("Sam via staff"). the list phrase names the list.
+  const displayName = (owned ? listName || fromName : fromName || listName) || null;
   let senderKey: string;
   if (listId) {
     // a list id is a dotted name, so its last labels name the domain of the list. a platform that puts one list id on
     // the mail of many customers sends it from the domain of each customer, so the from domain keeps them apart. a
-    // list of the sender's own domain keeps the key of phase 5.
-    senderKey = registrableDomain(listId) === fromDomain && !listId.includes('#') ? listId : fitKey(`${escaped(listId)}#${escaped(fromDomain)}`);
+    // list of the sender's own domain keeps the key of phase 5. a list whose own address takes the unsubscribe, such
+    // as a group of a school or a club, is one sender whoever posts to it, so it keeps the plain list id too.
+    senderKey = (registrableDomain(listId) === fromDomain || owned) && !listId.includes('#') ? listId : fitKey(`${escaped(listId)}#${escaped(fromDomain)}`);
   } else {
     // a shared address that sends for many organisers names each one as "X via Y".
     const organiser = VIA.exec(fromName)?.[1];
@@ -117,6 +87,32 @@ export function senderIdentityOf(message: gmail_v1.Schema$Message): SenderIdenti
     senderKey = fitKey(part ? `${escaped(fromAddress)}#${part}` : escaped(fromAddress));
   }
   return { senderKey, listId, fromAddress, fromDomain, displayName };
+}
+
+// the local parts with which a list takes an unsubscribe by mail: "<list>+unsubscribe" of a group, and "<list>-leave",
+// "<list>-request" and "<list>-unsubscribe" of mailman and its kind.
+const LIST_LEAVE = /^(.+?)[+-](?:unsubscribe|leave|request)$/;
+
+// true when the mailto unsubscribe of a mail goes to the list itself: its local part is the first label of the list id
+// with a leave suffix, and its host has the registrable domain of the list id. a bulk platform unsubscribes through an
+// address of its own that names no list, so its customers stay apart.
+export function listOwnsUnsubscribe(listId: string, unsubscribe: string): boolean {
+  const name = listId.split('.')[0] ?? '';
+  if (!name) return false;
+  return unsubscribeTargets(unsubscribe).some((target) => {
+    if (!/^mailto:/i.test(target)) return false;
+    let address: string;
+    try {
+      address = decodeURIComponent(target.slice('mailto:'.length).split('?')[0] ?? '');
+    } catch {
+      return false;
+    }
+    address = address.trim().toLowerCase();
+    const at = address.lastIndexOf('@');
+    if (at <= 0) return false;
+    const leave = LIST_LEAVE.exec(address.slice(0, at));
+    return leave?.[1] === name && registrableDomain(address.slice(at + 1)) === registrableDomain(listId);
+  });
 }
 
 // the key that phase 5 gave the same mail: the list id, else the from address. a row of phase 5 has this key.

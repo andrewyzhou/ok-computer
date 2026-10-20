@@ -42,6 +42,9 @@ function report(): EvalReport {
       needsReplyPrecision: 0.5,
       kindAccuracy: null,
       labelled: 3,
+      checked: 20,
+      disagreements: 1,
+      labels: true,
     },
     subscriptions: {
       models: false,
@@ -102,6 +105,7 @@ describe('failuresOf', () => {
   const cases: Array<[string, (each: EvalReport) => EvalReport, RegExp]> = [
     ['automatedInNeedsReply', (each) => ({ ...each, digest: { ...each.digest!, automatedInNeedsReply: 2 } }), /^digest: 2 needs-reply items come from mail that no person wrote/],
     ['automatedShown', (each) => ({ ...each, digest: { ...each.digest!, automatedShown: 1 } }), /^digest: 1 automated mails/],
+    ['disagreements', (each) => ({ ...each, digest: { ...each.digest!, disagreements: 3 } }), /^digest: classifyMail and the plain view disagree on 3 of 20 mails/],
     ['needsReplyFirst', (each) => ({ ...each, digest: { ...each.digest!, needsReplyFirst: false } }), /^digest: a needs-reply item comes after/],
     ['amountInText', (each) => ({ ...each, subscriptions: { ...each.subscriptions!, amountInText: 0.9 } }), /^subscriptions: 90% of the receipt amounts/],
     ['mixedDomains', (each) => ({ ...each, newsletters: { ...each.newsletters!, mixedDomains: 1 } }), /^newsletters: 1 sender groups hold more than one from domain/],
@@ -137,20 +141,22 @@ describe('formatReport', () => {
         school  digest 0 of 100, subscriptions 0 of 500, newsletters 0 of 2000, html only n/a, not read: the account needs a new sign-in
 
       digest
-        models                       on
-        messages                     34
-        person                       5
-        list                         12
-        automated                    17
-        items                        6
-        needs reply                  2
-        not a person in needs reply  0
-        needs reply first            yes
-        automated shown              0
-        labelled                     3
-        needs reply recall           100%
-        needs reply precision        50%
-        kind accuracy                n/a
+        models                    on
+        messages                  34
+        person                    5
+        list                      12
+        automated                 17
+        items                     6
+        needs reply               2
+        automated in needs reply  0
+        needs reply first         yes
+        automated shown           0
+        kind checked              20
+        kind disagreements        1
+        labelled                  3
+        needs reply recall        100%
+        needs reply precision     50%
+        kind accuracy             n/a
 
       subscriptions
         failed, see the failures
@@ -187,6 +193,13 @@ describe('formatReport', () => {
         subscriptions: the check failed: a receipt broke it
         school: the account could not be read"
     `);
+  });
+
+  it('says that the rates were not measured without labels', () => {
+    const base = report();
+    const text = formatReport({ ...base, digest: { ...base.digest!, labels: false, needsReplyRecall: null, needsReplyPrecision: null } });
+    expect(text).toMatch(/needs reply recall +not measured \(no labels\)/);
+    expect(text).toMatch(/kind accuracy +not measured \(no labels\)/);
   });
 
   it('prints the merchants only when the report holds them', () => {

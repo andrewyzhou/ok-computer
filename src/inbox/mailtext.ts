@@ -136,6 +136,14 @@ export function htmlToText(html: string): { text: string; links: string[] } {
       at = close + 3;
       continue;
     }
+    // a '<' that no letter, '/', '!' or '?' follows is text, as an html parser reads it: "Orders < $50" keeps its words.
+    if (!/[a-z/!?]/i.test(html[open + 1] ?? '')) {
+      out += '<';
+      lineStart = false;
+      if (href !== undefined) label += '<';
+      at = open + 1;
+      continue;
+    }
     const close = closeAfter(open + 1);
     if (close < 0) break;
     // a second '<' before the '>' means that the first one was text.

@@ -33,13 +33,13 @@ describe('classifyMail on the corpus', () => {
 
   it("marks the owner's own mail to self as from the owner", () => {
     const self = CORPUS.find((each) => each.name === "the owner's own mail to self")!;
-    expect(classifyMail(mailMessage(self.spec), OWNER_ADDRESSES)).toEqual({ kind: 'person', direct: true, fromOwner: true, reasons: [] });
+    expect(classifyMail(mailMessage(self.spec), OWNER_ADDRESSES)).toEqual({ kind: 'person', direct: true, fromOwner: true, discussion: false, reasons: [] });
   });
 });
 
 describe('classifyMail signals one at a time', () => {
   it('gives a person for a plain mail to the owner', () => {
-    expect(kindOf({})).toEqual({ kind: 'person', direct: true, fromOwner: false, reasons: [] });
+    expect(kindOf({})).toEqual({ kind: 'person', direct: true, fromOwner: false, discussion: false, reasons: [] });
   });
 
   it.each([
@@ -111,9 +111,9 @@ describe('classifyMail signals one at a time', () => {
   });
 
   it('treats List-Id, List-Unsubscribe and Precedence: list as a list, never to the owner', () => {
-    expect(kindOf({ 'List-Id': '<team.lists.example>' })).toEqual({ kind: 'list', direct: false, fromOwner: false, reasons: ['List-Id header'] });
-    expect(kindOf({ 'List-Unsubscribe': '<https://shop.example/u>' })).toEqual({ kind: 'list', direct: false, fromOwner: false, reasons: ['List-Unsubscribe header'] });
-    expect(kindOf({ Precedence: 'list' })).toEqual({ kind: 'list', direct: false, fromOwner: false, reasons: ['list precedence'] });
+    expect(kindOf({ 'List-Id': '<team.lists.example>' })).toEqual({ kind: 'list', direct: false, fromOwner: false, discussion: true, reasons: ['List-Id header'] });
+    expect(kindOf({ 'List-Unsubscribe': '<https://shop.example/u>' })).toEqual({ kind: 'list', direct: false, fromOwner: false, discussion: true, reasons: ['List-Unsubscribe header'] });
+    expect(kindOf({ Precedence: 'list' })).toEqual({ kind: 'list', direct: false, fromOwner: false, discussion: true, reasons: ['list precedence'] });
     expect(kindOf({}, { labels: ['INBOX', 'CATEGORY_FORUMS'] })).toMatchObject({ kind: 'list', direct: false, reasons: ['forums label'] });
   });
 
@@ -146,7 +146,7 @@ describe('classifyMail signals one at a time', () => {
   });
 
   it('gives a person with no reason for a sender with a name only, and the owner set may be empty', () => {
-    expect(classifyMail(base({ From: 'Someone' }), new Set())).toEqual({ kind: 'person', direct: false, fromOwner: false, reasons: ['no plain sender address'] });
+    expect(classifyMail(base({ From: 'Someone' }), new Set())).toEqual({ kind: 'person', direct: false, fromOwner: false, discussion: false, reasons: ['no plain sender address'] });
   });
 });
 

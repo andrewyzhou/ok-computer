@@ -374,8 +374,9 @@ describe('judgeSubscription', () => {
 
   it('clamps the confidence at 0 and rounds it', () => {
     const facts = [fact('2026-08-10', { currency: 'EUR', amountInText: false, amount: 1 }), fact('2026-09-10', { amount: 50 })];
+    // two charges with no stated plan start at 0.4, and the doubts take off more than that.
     const judged = judgeSubscription(facts);
-    expect(judged.confidence).toBe(0.1);
+    expect(judged.confidence).toBe(0);
     const worse = judgeSubscription([fact('2026-08-10', { currency: 'EUR', amountInText: false, amount: 1 }), fact('2026-08-12', { amount: 50, amountInText: false }), fact('2026-08-13', { amount: 5 })]);
     expect(worse.confidence).toBeGreaterThanOrEqual(0);
     expect(Number.isInteger(worse.confidence * 100)).toBe(true);

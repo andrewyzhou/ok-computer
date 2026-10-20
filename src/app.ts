@@ -535,7 +535,7 @@ export function createApp(deps: AppDeps): App {
       syncHeartbeat(db, config, clock());
       syncPolls(db, entries, clock(), config.timeZone);
       syncGooglePoll(db, config, clock());
-      if (inbox && installInboxJobs(db, config, clock())) logger.info('inbox jobs installed');
+      if (inbox && installInboxJobs(db, config, clock(), logger)) logger.info('inbox jobs installed');
       // missed jobs can take minutes, so the start does not wait for them.
       if (deps.background !== false) void scheduler.start().catch((err: unknown) => logger.error('scheduler start failed', { err }));
       // a server can need many seconds to start, so the start does not wait. tool_search reads the stored catalog.

@@ -176,6 +176,8 @@ describe('runDigest', () => {
       ],
       // the date of the quiz is before the mail.
       droppedDates: 1,
+      pastDue: 0,
+      notDeadlines: 0,
     });
 
     // the model got the mail of each account in its own call, with the right source.
@@ -252,6 +254,8 @@ describe('runDigest', () => {
     expect(rows[0]!.stats).toEqual({
       accounts: ['personal', 'school'].map((alias) => ({ alias, listed: 0, read: 0, capped: false, person: 0, list: 0, automated: 0, hidden: 0, error: null })),
       droppedDates: 0,
+      pastDue: 0,
+      notDeadlines: 0,
     });
     expect(h.sent).toEqual([]);
     expect(h.modelCalls).toEqual([]);

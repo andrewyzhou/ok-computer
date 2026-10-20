@@ -7,11 +7,10 @@ import { fromAddress as parseFrom, header } from '../google/mime.js';
 import { failed } from '../google/failed.js';
 import { requestContext } from '../google/trace.js';
 import { planUnsubscribe, unsubscribeTargets, verifyUnsubscribeHeaders } from '../google/unsubscribe.js';
-import { redact } from '../observability/redact.js';
-import { defineTool, errorText, type Tool, type ToolOutput } from '../tools/registry.js';
+import { defineTool, type Tool, type ToolOutput } from '../tools/registry.js';
 import { httpsLink, requestAction, settleApprovals, startBrowserHelp } from './actions.js';
 import type { ActionResult, InboxContext, JobRun } from './context.js';
-import { getMessages, inInbox, isUnread, listMessages, receivedAt } from './gmail.js';
+import { getMessages, inInbox, isUnread, listMessages, readError, receivedAt } from './gmail.js';
 import { mailSource, markRead } from './run.js';
 import { phase5KeyOf, registrableDomain, senderIdentityOf, unsubscribeChoiceOf, type SenderIdentity } from './senders.js';
 
@@ -135,23 +134,28 @@ export async function sweepNewsletters(ctx: InboxContext, run: JobRun): Promise<
   markRead(ctx, run, checked.map(mailSource), 'inbox_newsletters');
   let senders = 0;
   let failures = 0;
+  const capped: string[] = [];
   for (const alias of checked) {
     try {
       const messages = await ctx.google.accounts.run(alias, async (apis) => {
-        const refs = await listMessages(apis, SWEEP_QUERY, MAX);
+        // one more id than the limit tells whether the account has more mail than the sweep reads.
+        const refs = await listMessages(apis, SWEEP_QUERY, MAX + 1, ctx.signal);
+        if (refs.length > MAX) capped.push(alias);
         return getMessages(
           apis,
-          refs.map((each) => each.id),
-          { format: 'metadata', headers: SWEEP_HEADERS },
+          refs.slice(0, MAX).map((each) => each.id),
+          { format: 'metadata', headers: SWEEP_HEADERS, signal: ctx.signal },
         );
       });
       senders += saveSweep(ctx, run, alias, messages);
     } catch (err) {
       failures++;
-      notes.push(`${alias}: ${redact(errorText(err))}`);
+      notes.push(`${alias}: ${readError(err)}`);
     }
   }
   if (checked.length && failures === checked.length) throw new Error(notes.join('; '));
+  // the counts of an account with more mail than the limit are a lower bound, and the note says so.
+  if (capped.length) notes.push(`${capped.join(', ')}: more than ${MAX} mails in 90 days, so the counts are a lower bound`);
   return { note: notes.length ? notes.join('; ') : `${senders} senders in ${checked.join(', ')}` };
 }
 
@@ -222,6 +226,9 @@ function saveSweep(ctx: InboxContext, run: JobRun, account: string, messages: gm
         for (const each of group) if (each.sender.fromDomain === domain) each.sender = { ...each.sender, senderKey: oldKey };
         continue;
       }
+      // a row whose key some mail of this sweep still has stays where it is: that mail is the sender of the row, and
+      // the mail with a new key is another sender that gets a row of its own.
+      if (seen.some((each) => each.sender.senderKey === oldKey)) continue;
       const keys = new Set(group.map((each) => each.sender.senderKey));
       const [newKey] = keys;
       if (keys.size === 1 && newKey !== undefined && !existing.get(account, newKey)) rename.run(newKey, now, Number(row.id));

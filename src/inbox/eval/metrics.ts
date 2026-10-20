@@ -29,12 +29,21 @@ export interface DigestMetrics {
   automated: number;
   items: number;
   needsReply: number;
-  // needs_reply items whose mail is not a person mail. the bar is 0.
+  // needs_reply items whose mail the plain view of independent.ts calls automated (a known notifier, or a machine tab of
+  // gmail without a sender the owner wrote to). the view does not use classifyMail, so a fault of it shows here. the
+  // bar is 0.
   automatedInNeedsReply: number;
   // true when every needs_reply item comes before every other item.
   needsReplyFirst: boolean;
-  // automated mail with no deadline, bill or package that the digest still shows. the bar is 0.
+  // mail that the plain view calls automated and that the digest still shows without a deadline, a bill or a package.
+  // the bar is 0.
   automatedShown: number;
+  // the read mail that the plain view gives a kind, and the mail of those where it and classifyMail disagree about
+  // whether a person wrote it.
+  checked: number;
+  disagreements: number;
+  // true when the check had a labels file. without one the recall and the precision are not measured.
+  labels: boolean;
   // with a labels file: the share of the labelled needs_reply mail that the digest put in needs_reply, and the share of
   // the needs_reply items that the labels agree with.
   needsReplyRecall: Rate;
@@ -158,6 +167,7 @@ export function failuresOf(report: Omit<EvalReport, 'failures'>): string[] {
   const { digest, subscriptions, newsletters, deadlines } = report;
   if (digest) {
     if (digest.automatedInNeedsReply > 0) out.push(`digest: ${digest.automatedInNeedsReply} needs-reply items come from mail that no person wrote (the bar is 0).`);
+    if (digest.checked > 0 && digest.disagreements / digest.checked > 0.1) out.push(`digest: classifyMail and the plain view disagree on ${digest.disagreements} of ${digest.checked} mails (the bar is 10%).`);
     if (digest.automatedShown > 0) out.push(`digest: ${digest.automatedShown} automated mails without a deadline, a bill or a package are shown (the bar is 0).`);
     if (!digest.needsReplyFirst) out.push('digest: a needs-reply item comes after an item of another section.');
   }
@@ -196,6 +206,9 @@ function missing(report: EvalReport, job: string): string {
   return 'not run';
 }
 
+// a rate that needs labels, or the words that say it was not measured.
+const labelled = (metrics: DigestMetrics, rate: Rate) => (metrics.labels ? percent(rate) : 'not measured (no labels)');
+
 function digestBlock(metrics: DigestMetrics): string {
   return block('digest', [
     ['models', metrics.models ? 'on' : 'off'],
@@ -205,13 +218,15 @@ function digestBlock(metrics: DigestMetrics): string {
     ['automated', metrics.automated],
     ['items', metrics.items],
     ['needs reply', metrics.needsReply],
-    ['not a person in needs reply', metrics.automatedInNeedsReply],
+    ['automated in needs reply', metrics.automatedInNeedsReply],
     ['needs reply first', metrics.needsReplyFirst],
     ['automated shown', metrics.automatedShown],
+    ['kind checked', metrics.checked],
+    ['kind disagreements', metrics.disagreements],
     ['labelled', metrics.labelled],
-    ['needs reply recall', percent(metrics.needsReplyRecall)],
-    ['needs reply precision', percent(metrics.needsReplyPrecision)],
-    ['kind accuracy', percent(metrics.kindAccuracy)],
+    ['needs reply recall', labelled(metrics, metrics.needsReplyRecall)],
+    ['needs reply precision', labelled(metrics, metrics.needsReplyPrecision)],
+    ['kind accuracy', labelled(metrics, metrics.kindAccuracy)],
   ]);
 }
 

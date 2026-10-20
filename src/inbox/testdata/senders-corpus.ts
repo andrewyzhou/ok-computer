@@ -22,6 +22,26 @@ const LONG_ID = `${'very-long-list-name-'.repeat(12)}.lists.platform.example`;
 
 export const GROUP_CASES: GroupCase[] = [
   {
+    name: 'two posters from other domains on one group of a club, which takes its own unsubscribe',
+    a: {
+      From: "'Sam Lee' via current <sam.lee@mail.example>",
+      'List-Id': 'current <current.club.school.example.edu>',
+      'List-Unsubscribe': '<mailto:current+unsubscribe@club.school.example.edu>, <https://groups.example/a/club.school.example.edu/group/current/subscribe>',
+    },
+    b: {
+      From: "'Ari Kim' via current <ari@startup.example>",
+      'List-Id': 'current <current.club.school.example.edu>',
+      'List-Unsubscribe': '<mailto:current+unsubscribe@club.school.example.edu>',
+    },
+    same: true,
+  },
+  {
+    name: 'two customers of a platform that unsubscribes through an address of its own',
+    a: { From: 'Shop <news@shop.example>', 'List-Id': '<a9.list-id.mailplatform.example>', 'List-Unsubscribe': '<mailto:unsub-a9-1@mailplatform.example>' },
+    b: { From: 'Cafe <news@cafe.example>', 'List-Id': '<a9.list-id.mailplatform.example>', 'List-Unsubscribe': '<mailto:unsub-a9-2@mailplatform.example>' },
+    same: false,
+  },
+  {
     name: 'a list whose from domain is a subdomain of the list domain',
     a: { From: 'Shop <news@mail.shop.example>', 'List-Id': 'Shop News <news.shop.example>' },
     b: { From: 'Shop <offers@shop.example>', 'List-Id': 'Shop News <news.shop.example>' },

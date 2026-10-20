@@ -6,6 +6,7 @@ import { createGoogleAccounts, type GoogleAccounts } from '../src/google/account
 import { googleConfigSchema, SCOPES, type GoogleConfig } from '../src/google/config.js';
 import { createSync, type Sync } from '../src/google/sync.js';
 import { createRequestTrace } from '../src/google/trace.js';
+import { setGmailPaceForTests } from '../src/inbox/gmail.js';
 import { createMemorySecretStore } from '../src/integrations/secrets.js';
 import { createBlobStore, type BlobStore } from '../src/observability/blobs.js';
 import { createLogger, type Logger } from '../src/observability/logger.js';
@@ -37,6 +38,9 @@ export interface GoogleHarness {
 
 export async function createGoogleHarness(options: { accounts?: string[]; config?: Partial<GoogleConfig>; db?: Db; requestTimeoutMs?: number } = {}): Promise<GoogleHarness> {
   const aliases = options.accounts ?? ['personal', 'school'];
+  // the inbox reads keep to the per-minute limit of gmail and wait when google limits them. a test never waits for
+  // that: each wait ends at once, and a test of the pace sets its own.
+  setGmailPaceForTests({ sleep: async () => {} });
   const fake = await startFakeGoogle();
   fake.grant = [SCOPES.readonly, SCOPES.modify, SCOPES.events, SCOPES.calendarRead, SCOPES.send];
   const dir = mkdtempSync(join(tmpdir(), 'okc-google-'));

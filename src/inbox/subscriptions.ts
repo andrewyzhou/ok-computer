@@ -3,14 +3,13 @@ import { z } from 'zod';
 import type { SubscriptionState } from '../dashboard/types.js';
 import { fromAddress, header } from '../google/mime.js';
 import { requestContext } from '../google/trace.js';
-import { redact } from '../observability/redact.js';
 import { cleanLine } from '../signals/store.js';
-import { defineTool, errorText, type Tool, type ToolOutput } from '../tools/registry.js';
+import { defineTool, type Tool, type ToolOutput } from '../tools/registry.js';
 import { requestAction, settleApprovals, startBrowserHelp } from './actions.js';
 import { merchantKeyOf } from './cadence.js';
 import type { ActionResult, InboxContext, JobRun } from './context.js';
 import { extractItems, itemsTool, type ExtractInput } from './extract.js';
-import { getMessages, listMessages, receivedAt } from './gmail.js';
+import { getMessages, listMessages, readError, receivedAt } from './gmail.js';
 import { mailText } from './mailtext.js';
 import {
   amountsIn,
@@ -199,7 +198,7 @@ async function newReceipts(ctx: InboxContext, alias: string): Promise<string[]> 
   const known = new Set(
     (ctx.db.prepare('SELECT messageId FROM inbox_receipts WHERE account = ? AND parser >= ?').all(alias, PARSER_VERSION) as Array<{ messageId: string }>).map((row) => row.messageId),
   );
-  return ctx.google.accounts.run(alias, async (apis) => (await listMessages(apis, RECEIPT_QUERY, MAX)).map((each) => each.id).filter((id) => !known.has(id)));
+  return ctx.google.accounts.run(alias, async (apis) => (await listMessages(apis, RECEIPT_QUERY, MAX, ctx.signal)).map((each) => each.id).filter((id) => !known.has(id)));
 }
 
 // readReceipts reads the new receipts of one account in batches: it gets the messages of a batch in full, without a
@@ -235,10 +234,10 @@ async function readReceipts(
   for (let start = 0; start < ids.length; start += BATCH) {
     let batch: Receipt[];
     try {
-      const messages = await ctx.google.accounts.run(alias, (apis) => getMessages(apis, ids.slice(start, start + BATCH), { format: 'full' }));
+      const messages = await ctx.google.accounts.run(alias, (apis) => getMessages(apis, ids.slice(start, start + BATCH), { format: 'full', signal: ctx.signal }));
       batch = messages.map(receiptOf).filter((each) => each.messageId && Date.parse(each.receivedAt) >= oldest);
     } catch (err) {
-      return { saved, ...(error !== undefined ? { error } : {}), unread: redact(errorText(err)) };
+      return { saved, ...(error !== undefined ? { error } : {}), unread: readError(err) };
     }
     if (!batch.length) continue;
     const inputs: ExtractInput[] = batch.map((each, index) => ({ id: index + 1, text: each.text }));
@@ -359,15 +358,18 @@ function buildSubscriptions(ctx: InboxContext, run: JobRun, alias: string): numb
         recurring: each.recurring === 1,
         amountInText: each.amountInText === 1,
       })),
+      ctx.clock(),
     );
     if (!judged.subscription) continue;
     const newest = group[0]!;
+    // the newest receipt can lack an amount, so the row shows the amount of the newest receipt that states one.
+    const priced = group.find((each) => each.amount !== null) ?? newest;
     upsert.run(
       alias,
       key,
       newest.merchant,
-      newest.amount,
-      newest.currency,
+      priced.amount,
+      priced.currency,
       judged.cadence,
       newest.chargedAt,
       judged.nextChargeAt,
@@ -413,7 +415,7 @@ export async function scanSubscriptions(ctx: InboxContext, run: JobRun): Promise
       ids = await newReceipts(ctx, alias);
     } catch (err) {
       failures++;
-      notes.push(`${alias}: the receipts could not be read: ${redact(errorText(err))}`);
+      notes.push(`${alias}: the receipts could not be read: ${readError(err)}`);
       // a scan that could read no account failed, as the sweep does, so the scheduler counts it and backs off.
       if (failures === aliases.length) throw new Error(notes.join('; '));
       continue;

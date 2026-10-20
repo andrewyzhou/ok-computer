@@ -34,6 +34,34 @@ export const CORPUS_INVENTED: Record<string, { dueAt: string; dueText: string | 
 
 export const DUE_CASES: DueCase[] = [
   {
+    name: 'a shutdown notice gives a time with seconds, pm and utc',
+    text: 'Subject: project shutdown\n\nYour project will be shut down. Act before November 18, 2026 7:03:23 PM UTC to keep it.',
+    dueAt: '2026-11-18T19:03:23+00:00',
+    dueText: 'before November 18, 2026 7:03:23 PM UTC',
+    expect: { at: '2026-11-18T19:03:00.000Z', allDay: false },
+  },
+  {
+    name: 'a time with seconds, am and a pacific zone',
+    text: 'Subject: renewal\n\nRenew by October 30, 2026 11:03:23 AM PST.',
+    dueAt: '2026-10-30T11:03:23-08:00',
+    dueText: 'by October 30, 2026 11:03:23 AM PST',
+    expect: { at: '2026-10-30T18:03:00.000Z', allDay: false },
+  },
+  {
+    name: 'a 24-hour time with seconds keeps its utc zone',
+    text: 'Subject: maintenance\n\nThe form closes on 2026-11-18 at 19:03:23 UTC.',
+    dueAt: '2026-11-18T19:03:23Z',
+    dueText: '2026-11-18 at 19:03:23 UTC',
+    expect: { at: '2026-11-18T19:03:00.000Z', allDay: false },
+  },
+  {
+    name: 'a time range before the date starts at its first time',
+    text: 'Subject: Midterm 3\n\nMidterm 3 will be held 8:00pm - 10:00pm on Tuesday, 10/27 in the main hall.',
+    dueAt: '2026-10-27T20:00:00-07:00',
+    dueText: '8:00pm - 10:00pm on Tuesday, 10/27',
+    expect: { at: '2026-10-28T03:00:00.000Z', allDay: false },
+  },
+  {
     name: 'the model picks the dinner date, but its words name the reply date',
     text: 'We are doing dinner on Friday, October 30. Can you let me know by Oct 27 if you can make it?',
     dueAt: '2026-10-30',
