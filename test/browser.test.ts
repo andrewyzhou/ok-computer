@@ -223,9 +223,10 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000, r
 
   it('lets a click send a get form, such as a search box', async () => {
     const h = harness();
+    site.hits.length = 0;
     const first = await h.run('browser_open', { url: site.url('shop.test', '/search') });
-    const out = await h.run('browser_click', { ref: refOf(first.content, /button "Search"/) });
-    expect(out.isError).toBe(false);
+    const out = await h.run('browser_click', { ref: refOf(first.content, /button "Search"/), element: 'Search' });
+    expect(out.isError, out.content).toBe(false);
     expect(out.content).toContain('Found shirts');
     expect(site.hitsOn('shop.test').filter((hit) => hit.path.startsWith('/find'))).toEqual([expect.objectContaining({ method: 'GET', path: '/find?q=shirts' })]);
   });
