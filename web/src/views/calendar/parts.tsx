@@ -11,6 +11,7 @@ import type {
 import { plural } from '../../format';
 import { Badge, ButtonLink, Facts } from '../../ui';
 import { ApprovalFor, useApprovals } from '../inbox/shared';
+import { PersonChip } from '../people/PersonChip';
 import {
   addDays,
   allDayRow,
@@ -619,7 +620,8 @@ function Guests({ guests }: { guests: CalendarGuest[] }) {
       {guests.map((guest, index) => (
         <li key={`${guest.email ?? guest.name ?? ''}-${index}`}>
           <span className="cal-guest-name">
-            {guest.name ?? guest.email ?? 'a guest'}
+            {/* a guest with an address opens the people profile through the person chip of the people view. */}
+            {guest.email && !guest.self ? <PersonChip email={guest.email} name={guest.name} /> : (guest.name ?? guest.email ?? 'a guest')}
             {guest.self ? ' (you)' : ''}
             {guest.organizer ? ' · organizer' : ''}
             {guest.optional ? ' · optional' : ''}

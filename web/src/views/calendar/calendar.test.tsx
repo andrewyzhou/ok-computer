@@ -7,6 +7,7 @@ import { seedDashboard } from '../../../../test/seed';
 import { setPrefs } from '../../shell/prefs';
 import { inMain, installEventSource, json, openApp, stubFetch, type StubRequest } from '../../testing';
 import { addDays, daysFrom, zonedMidnight } from './grid';
+import { clearPersonLookups } from '../people/PersonChip';
 import { HIDDEN_KEY } from './parts';
 
 // the calendar page on the fixture week of test/fixtures/today-data.ts. GET /api/calendar is stubbed with the
@@ -130,8 +131,24 @@ describe('the calendar week', () => {
     expect(video.getAttribute('target')).toBe('_blank');
     expect(video.getAttribute('rel')).toContain('noopener');
     expect(panel.getByRole('link', { name: /Open in Google Calendar/ }).getAttribute('href')).toBe('https://www.google.com/calendar/event?eid=advisor');
-    expect(panel.getByText('advisor@school.example.edu · organizer')).toBeTruthy();
+    // a guest with an address shows as a person chip, and the organizer mark follows it.
+    const guest = panel.getAllByText('advisor@school.example.edu').find((each) => each.closest('.cal-guests'))!.closest('li')!;
+    expect(guest.querySelector('.person-chip')).toBeTruthy();
+    expect(guest.textContent).toContain('advisor@school.example.edu · organizer');
     expect(block('school/primary/advisor')!.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('links a guest that the people memory knows to the profile through the person chip', async () => {
+    clearPersonLookups();
+    stubFetch(seeded.dashboard, {
+      'GET /api/calendar': (request) => pageFor(request),
+      'GET /api/people/lookup': ({ query }) =>
+        query.get('email') === 'advisor@school.example.edu' ? { id: 7, name: 'Dana Advisor', displayName: 'Dana Advisor', primaryEmail: 'advisor@school.example.edu', organization: 'School' } : json({ error: 'person not found' }, 404),
+    });
+    openApp(`${WEEK}&event=${encodeURIComponent('school/primary/advisor')}`);
+    const chip = await details().findByRole('link', { name: 'Open Dana Advisor' });
+    expect(chip.getAttribute('href')).toBe('#/people/7');
+    clearPersonLookups();
   });
 
   it('shows the travel note, the repeat and the notes of the lecture', async () => {
