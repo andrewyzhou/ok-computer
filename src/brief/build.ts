@@ -30,6 +30,9 @@ export interface BriefInput {
   proposals: CalendarProposalView[];
   delegations: BriefDelegation[] | null;
   goals: GoalRow[];
+  // the names that the people memory has for the organizers of the events, by the email address in lower case. an
+  // invitation names its organizer by it when the calendar gave only an address.
+  organizerNames?: Readonly<Record<string, string>>;
 }
 
 const SECTION_TITLES: Record<BriefSectionKind, string> = {
@@ -81,7 +84,7 @@ export function buildBrief(input: BriefInput): BriefContent {
     daySection(events, input.sources, clock),
     section('conflicts', conflictItems(events, byKey, clock)),
     section('travel', travelItems(events, byKey, clock)),
-    section('invites', inviteItems(events, input.now, clock)),
+    section('invites', inviteItems(events, input.now, clock, input.organizerNames ?? {})),
     section('deadlines', deadlines),
     inbox ? section('inbox', inbox.items, inbox.note) : section('inbox', [], input.sources.calendar !== 'off' ? NO_DIGEST : null),
     section('delegations', delegationItems(input.delegations ?? [], clock)),
@@ -174,10 +177,11 @@ function travelItems(events: CalendarEvent[], byKey: Map<string, CalendarEvent>,
   return items;
 }
 
-function inviteItems(events: CalendarEvent[], now: Date, clock: BriefClock): BriefItem[] {
+function inviteItems(events: CalendarEvent[], now: Date, clock: BriefClock, names: Readonly<Record<string, string>>): BriefItem[] {
   return unansweredInvites(events, now).map((event) => {
     const when = event.allDay ? dayWord(event.startDay, clock) : `${dayWord(localDay(new Date(event.startAt), clock.timeZone), clock)} ${hhmm(event.startAt, clock)}`;
-    const detail = event.organizer ? `${when} · from ${event.organizer}` : when;
+    const organizer = event.organizer ? (Object.hasOwn(names, event.organizer.toLowerCase()) ? names[event.organizer.toLowerCase()] : event.organizer) : null;
+    const detail = organizer ? `${when} · from ${organizer}` : when;
     return eventItem(event, event.title, detail, 'warning');
   });
 }

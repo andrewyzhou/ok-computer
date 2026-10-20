@@ -95,8 +95,8 @@ export const mayaProfile: PersonProfile = {
   upcoming: [{ account: 'personal', eventId: 'e-202', title: 'Design review', startAt: '2026-10-21T17:00:00.000Z', endAt: '2026-10-21T18:00:00.000Z', role: 'attendee' }],
   recentMeetings: [{ account: 'personal', eventId: 'e-201', title: 'Roadmap sync', startAt: '2026-10-17T17:00:00.000Z', endAt: '2026-10-17T17:30:00.000Z', role: 'organizer' }],
   openThreads: [],
-  notes: [{ id: 2, kind: 'note', text: 'met at the design offsite', author: 'owner', runId: null, createdAt: '2026-10-05T16:00:00.000Z' }],
-  preferences: [{ id: 3, kind: 'preference', text: 'prefers meetings before 11:00', author: 'agent', runId: 'run-people-2', createdAt: '2026-10-10T16:00:00.000Z' }],
+  notes: [{ id: 2, kind: 'note', text: 'met at the design offsite', author: 'owner', runId: null, tainted: false, createdAt: '2026-10-05T16:00:00.000Z' }],
+  preferences: [{ id: 3, kind: 'preference', text: 'prefers meetings before 11:00', author: 'agent', runId: 'run-people-2', tainted: false, createdAt: '2026-10-10T16:00:00.000Z' }],
   delegations: [],
 };
 
@@ -107,7 +107,7 @@ export const tomasProfile: PersonProfile = {
   upcoming: [],
   recentMeetings: [],
   openThreads: [{ account: 'personal', threadId: 't-3', subject: 'Re: Lease for the new place', lastAt: '2026-10-16T16:00:00.000Z', messages: 2 }],
-  notes: [{ id: 4, kind: 'note', text: 'waiting on the signed lease from Tomas', author: 'agent', runId: 'run-people-3', createdAt: '2026-10-16T16:00:00.000Z' }],
+  notes: [{ id: 4, kind: 'note', text: 'waiting on the signed lease from Tomas', author: 'agent', runId: 'run-people-3', tainted: true, createdAt: '2026-10-16T16:00:00.000Z' }],
   preferences: [],
   delegations: [],
 };

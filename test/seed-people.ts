@@ -84,11 +84,15 @@ export function seedPeople(db: Db): void {
   // person 5: only an upcoming meeting.
   contact.run(5, 'meeting', 'personal', 'e-601', null, null, 'attendee', 'Intro call', at('10-25', '15:00'), at('10-25', '15:30'), 0, now);
 
-  const note = db.prepare('INSERT INTO person_notes (id, personId, kind, text, author, supersedes, runId, toolCallId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-  note.run(1, 1, 'preference', 'prefers morning meetings', 'agent', null, 'run-people-1', 'call-note-1', at('10-01'));
-  note.run(2, 1, 'note', 'met at the design offsite', 'owner', null, null, null, at('10-05'));
-  note.run(3, 1, 'preference', 'prefers meetings before 11:00', 'agent', 1, 'run-people-2', 'call-note-3', at('10-10'));
-  note.run(4, 2, 'note', 'waiting on the signed lease from Tomas', 'agent', null, 'run-people-3', 'call-note-4', at('10-16'));
+  const note = db.prepare(
+    'INSERT INTO person_notes (id, personId, kind, text, author, supersedes, runId, toolCallId, taint, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  );
+  note.run(1, 1, 'preference', 'prefers morning meetings', 'agent', null, 'run-people-1', 'call-note-1', '[]', at('10-01'));
+  note.run(2, 1, 'note', 'met at the design offsite', 'owner', null, null, null, '[]', at('10-05'));
+  note.run(3, 1, 'preference', 'prefers meetings before 11:00', 'agent', 1, 'run-people-2', 'call-note-3', '[]', at('10-10'));
+  // the run that wrote note 4 had read a mail, so the note keeps that taint.
+  const mailTaint = [{ source: 'gmail_read', toolName: 'gmail_read', runId: 'run-people-3', toolCallId: 'call-read-4', at: at('10-16') }];
+  note.run(4, 2, 'note', 'waiting on the signed lease from Tomas', 'agent', null, 'run-people-3', 'call-note-4', JSON.stringify(mailTaint), at('10-16'));
 
   const account = db.prepare(
     'INSERT INTO people_accounts (account, backfill, backfillPage, backfillMessages, backfillEvents, backfilledAt, sentAfter, error, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',

@@ -19,6 +19,7 @@ export const READ_CALLS: ReadonlySet<string> = new Set([
   'gmail.users.drafts.list',
   'gmail.users.drafts.get',
   'gmail.users.history.list',
+  'gmail.users.settings.sendAs.list',
   'calendar.events.list',
   'calendar.events.get',
   'calendar.calendarList.list',

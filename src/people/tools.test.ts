@@ -3,6 +3,7 @@ import { createTestCaller } from '../../test/harness.js';
 import { PEOPLE_NOW, seedPeople } from '../../test/seed-people.js';
 import type { PeoplePage, PersonNoteView } from '../dashboard/people-types.js';
 import { openDb, type Db } from '../db/index.js';
+import { appendEvent } from '../events/log.js';
 import type { GoogleConfig } from '../google/config.js';
 import { createToolRegistry, type Tool, type ToolContext } from '../tools/registry.js';
 import { peopleStore, type PeopleStore, type SearchInput } from './store.js';
@@ -11,7 +12,7 @@ import { createPeopleTools, PEOPLE_READ_TOOLS, PEOPLE_TOOLS, peopleToolsFor } fr
 // the tools run on the real store over the seeded database of test/seed-people.ts, with the clock at PEOPLE_NOW (the
 // web fixtures hold the same values). the store is wrapped so a test can see each search that a tool sends.
 
-interface StoredNote extends PersonNoteView {
+interface StoredNote extends Omit<PersonNoteView, 'tainted'> {
   personId: number;
   supersedes: number | null;
   toolCallId: string | null;
@@ -232,6 +233,27 @@ describe('the people tools', () => {
     expect(notes().at(-1)).toMatchObject({ personId: 2, runId: 'r1', toolCallId: 'note-call' });
     const decision = db.prepare("SELECT decision, rule FROM policy_decisions WHERE toolCallId = 'note-call'").get();
     expect(decision).toEqual({ decision: 'allow', rule: 'builtin:person_note' });
+  });
+
+  it('keeps the taint of the session with an agent note, and the lookup marks the note', async () => {
+    const { db, run } = setup();
+    // a gmail_read result of the session, as the tool caller writes it.
+    appendEvent(
+      db,
+      { sessionKey: 'main', runId: 'r1', type: 'tool_result', payload: { toolCallId: 'read-1', name: 'gmail_read', content: 'x', isError: false, untrustedSource: 'gmail' } },
+      PEOPLE_NOW,
+    );
+    expect(await run('person_note', { person: 2, text: 'lease signed' })).toEqual({ content: 'saved note 5 for Tomas Okafor' });
+    const taint = JSON.parse(String(db.prepare('SELECT taint FROM person_notes WHERE id = 5').get()!.taint)) as Array<{ source: string }>;
+    expect(taint.map((each) => each.source)).toEqual(['gmail']);
+    const profile = peopleStore.getPerson(db, 2, PEOPLE_NOW)!;
+    expect(profile.notes.find((note) => note.id === 5)).toMatchObject({ author: 'agent', tainted: true });
+    // the seeded note 4 was written by a run that had read a mail, and the owner's note 2 has no taint.
+    expect(profile.notes.find((note) => note.id === 4)).toMatchObject({ tainted: true });
+    expect(peopleStore.getPerson(db, 1, PEOPLE_NOW)!.notes.find((note) => note.id === 2)).toMatchObject({ author: 'owner', tainted: false });
+    const lookup = await run('person_lookup', { id: 2 });
+    expect(lookup.content).toMatch(/- note 5 by agent after reading outside text, \S+: lease signed/);
+    expect((await run('person_lookup', { id: 1 })).content).toMatch(/- note 2 by owner, \S+: met at the design offsite/);
   });
 });
 

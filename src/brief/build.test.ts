@@ -147,6 +147,11 @@ describe('buildBrief', () => {
     ]);
   });
 
+  it('names the organizer of an invitation by the people memory when the calendar gave only an address', () => {
+    const content = buildBrief(input({ organizerNames: { 'lee@school.example.edu': 'Lee Park' } }));
+    expect(sectionOf(content, 'invites')!.items.map((item) => item.detail)).toEqual(['Today 16:00 · from Lee Park', 'Thu 19:00 · from jo@example.com']);
+  });
+
   it('gives the deadlines of the week from mail, the calendar and proposals', () => {
     const items = sectionOf(buildBrief(input()), 'deadlines')!.items;
     expect(items).toMatchObject([

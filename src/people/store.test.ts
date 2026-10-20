@@ -210,6 +210,15 @@ describe('recordObservation', () => {
     expect(getPerson(db, id, PEOPLE_NOW)?.name).toBe('Janie');
   });
 
+  it('gives a person that only meetings made the name of a later mail', () => {
+    empty();
+    const meeting = { kind: 'meeting' as const, externalId: 'e-1', threadId: null, direction: null, role: 'attendee' as const, at: at('10-01') };
+    const id = recordObservation(db, observation('jane@acme.example', null, meeting), PEOPLE_NOW)!.personId;
+    expect(getPerson(db, id, PEOPLE_NOW)?.name).toBeNull();
+    recordObservation(db, observation('jane@acme.example', 'Jane Doe', { externalId: 'm-1', at: at('10-02') }), PEOPLE_NOW);
+    expect(getPerson(db, id, PEOPLE_NOW)?.name).toBe('Jane Doe');
+  });
+
   it('moves the organization to the newest contact, and never clears it with null', () => {
     empty();
     const id = recordObservation(db, observation('jane@acme.example', null, { externalId: 'm-1', at: at('10-05') }, acme), PEOPLE_NOW)!.personId;
@@ -358,7 +367,7 @@ describe('addNote', () => {
   it('appends a trimmed note that supersedes an earlier one', () => {
     seeded();
     const note = addNote(db, { personId: 2, kind: 'preference', text: '  prefers calls  ', author: 'agent' }, PEOPLE_NOW);
-    expect(note).toEqual({ id: 5, kind: 'preference', text: 'prefers calls', author: 'agent', runId: null, createdAt: PEOPLE_NOW.toISOString() });
+    expect(note).toEqual({ id: 5, kind: 'preference', text: 'prefers calls', author: 'agent', runId: null, tainted: false, createdAt: PEOPLE_NOW.toISOString() });
     const later = addNote(db, { personId: 2, kind: 'preference', text: 'prefers mail', author: 'agent', supersedes: 5, runId: 'run-1', toolCallId: 'call-1' }, PEOPLE_NOW);
     expect(later.runId).toBe('run-1');
     expect(getPerson(db, 2, PEOPLE_NOW)?.preferences.map((n) => n.text)).toEqual(['prefers mail']);

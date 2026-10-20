@@ -5,6 +5,7 @@ import type { CalendarProposalView, GoalRow } from '../dashboard/types.js';
 import { listGoals } from '../goals/store.js';
 import { inboxForBrief } from '../inbox/brief.js';
 import { listProposals } from '../inbox/views.js';
+import { findPersonByEmail } from '../people/index.js';
 import { addDays, zonedToUtc } from '../time.js';
 import { LOOKAHEAD_DAYS, type BriefInput } from './build.js';
 import { readCalendar, type CalendarRead } from './calendar.js';
@@ -26,6 +27,21 @@ function calendarState(ctx: Pick<BriefContext, 'google'>, read: CalendarRead): B
   const skipped = new Set(read.skipped.filter((each) => each.calendarId === undefined).map((each) => each.account));
   if (aliases.length && aliases.every((alias) => skipped.has(alias))) return 'failed';
   return read.skipped.length ? 'partial' : 'ok';
+}
+
+// the names that the people memory has for the organizers of the events that the calendar gave only as an address. a
+// meeting-only person has no name either, so a miss is normal and the brief then shows the address.
+function namesOfOrganizers(db: BriefContext['db'], events: CalendarEvent[], now: Date): Record<string, string> {
+  const names: Record<string, string> = {};
+  const seen = new Set<string>();
+  for (const event of events) {
+    const address = event.organizer?.toLowerCase();
+    if (event.organizerSelf || !address || !address.includes('@') || seen.has(address)) continue;
+    seen.add(address);
+    const name = findPersonByEmail(db, address, now)?.name;
+    if (name) names[address] = name;
+  }
+  return names;
 }
 
 const toGoalRow = (goal: ReturnType<typeof listGoals>[number]): GoalRow => ({
@@ -93,11 +109,19 @@ export async function gatherBriefInput(ctx: BriefContext, day: string): Promise<
     failed('goals', err);
   }
 
+  let organizerNames: Record<string, string> = {};
+  try {
+    organizerNames = namesOfOrganizers(db, events, ctx.clock());
+  } catch (err) {
+    failed('people', err);
+  }
+
   return {
     day,
     timeZone,
     now: ctx.clock(),
     events,
+    organizerNames,
     sources: { calendar, skipped, digest: inbox ? { id: inbox.digestId, day: inbox.day } : null, desk: delegations !== null },
     inbox,
     proposals,

@@ -80,6 +80,9 @@ export interface PersonNoteView {
   author: PersonNoteAuthor;
   // the run of the agent that wrote it, or null for the owner.
   runId: string | null;
+  // true when the agent session that wrote it had read outside text, such as a mail. the owner's notes are never
+  // tainted.
+  tainted: boolean;
   createdAt: string;
 }
 

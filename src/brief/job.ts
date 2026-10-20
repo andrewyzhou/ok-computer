@@ -29,6 +29,8 @@ export const briefLink = (dashboardUrl: string, day: string) => `${dashboardUrl.
 // the source of the taint for the text that the brief repeats from the desk: the titles, next steps and names of the
 // delegations, which often come from mail or from people outside.
 export const DESK_SOURCE = 'desk';
+// the source of the names that the people memory gives the brief.
+export const PEOPLE_SOURCE = 'people';
 
 // who started a brief run: the scheduler, or the owner on the dashboard ("make a brief now").
 export type BriefTrigger = 'automation' | 'dashboard';
@@ -122,7 +124,9 @@ export async function runBriefJob(ctx: BriefContext, options: BriefJobOptions = 
     const skipped = new Set(input.sources.skipped.filter((each) => each.calendarId === undefined).map((each) => each.account));
     const calendars = input.sources.calendar === 'off' ? [] : calendarAliases(ctx).filter((alias) => !skipped.has(alias));
     const desk = input.delegations && input.delegations.length > 0 ? [DESK_SOURCE] : [];
-    const sources = [...new Set([...calendars.map(calendarSource), ...(input.inbox?.accounts ?? []).map(mailSource), ...desk])];
+    // the names of the organizers come from the headers of other people's mail.
+    const people = Object.keys(input.organizerNames ?? {}).length > 0 ? [PEOPLE_SOURCE] : [];
+    const sources = [...new Set([...calendars.map(calendarSource), ...(input.inbox?.accounts ?? []).map(mailSource), ...desk, ...people])];
     const at = clock().toISOString();
     const taint: TaintSource[] = sources.map((source) => ({ source, toolName: 'brief', runId, toolCallId: `brief-${runId}`, at }));
     if (taint.length) event(`The brief read ${sources.join(', ')}.`, taint);

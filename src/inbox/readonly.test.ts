@@ -16,6 +16,7 @@ function fakeApis(calls: string[]): GoogleApis {
       messages: { list: method('list'), get: method('get'), modify: method('modify'), batchModify: method('batchModify'), trash: method('trash'), send: method('send') },
       drafts: { create: method('drafts.create'), list: method('drafts.list'), send: method('drafts.send') },
       labels: { list: method('labels.list'), create: method('labels.create') },
+      settings: { sendAs: { list: method('sendAs.list'), create: method('sendAs.create'), update: method('sendAs.update') } },
     },
   };
   const calendar = { events: { list: method('events.list'), insert: method('events.insert'), delete: method('events.delete') } };
@@ -32,7 +33,9 @@ describe('readOnlyApis', () => {
     await apis.gmail.users.labels.list({ userId: 'me' });
     await apis.gmail.users.drafts.list({ userId: 'me' });
     await apis.calendar.events.list({ calendarId: 'primary' });
-    expect(calls).toEqual(['list', 'get', 'labels.list', 'drafts.list', 'events.list']);
+    // the people backfill reads the send-as addresses, so a check of the people code knows the owner's aliases.
+    await apis.gmail.users.settings.sendAs.list({ userId: 'me' });
+    expect(calls).toEqual(['list', 'get', 'labels.list', 'drafts.list', 'events.list', 'sendAs.list']);
   });
 
   it('refuses every call that could change an account before it runs', () => {
@@ -47,6 +50,8 @@ describe('readOnlyApis', () => {
       () => apis.gmail!.users!.drafts!.create!({}),
       () => apis.gmail!.users!.drafts!.send!({}),
       () => apis.gmail!.users!.labels!.create!({}),
+      () => (apis.gmail!.users!.settings as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>).sendAs!.create!({}),
+      () => (apis.gmail!.users!.settings as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>).sendAs!.update!({}),
       () => (apis.calendar as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>).events!.insert!({}),
       () => (apis.calendar as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>).events!.delete!({}),
     ];
@@ -60,6 +65,8 @@ describe('readOnlyApis', () => {
       'gmail.users.drafts.create',
       'gmail.users.drafts.send',
       'gmail.users.labels.create',
+      'gmail.users.settings.sendAs.create',
+      'gmail.users.settings.sendAs.update',
       'calendar.events.insert',
       'calendar.events.delete',
     ]);

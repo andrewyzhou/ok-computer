@@ -32,7 +32,8 @@ export interface MailNoiseHeaders {
 // the github and drive notification senders), role addresses that no one person reads (info@, support@, billing@,
 // team@, hello@, sales@, admin@, help@, receipts@, orders@, security@), the calendar resources and groups
 // (resource.calendar.google.com, group.calendar.google.com, group.v.calendar.google.com, an attendee with resource
-// set) and addresses with a long random tag (bounces+abc123...@). a name such as "Jane via Google Docs" or
+// set), addresses with a long random tag (bounces+abc123...@) and mailing lists (an address on a list subdomain or
+// googlegroups.com, or one whose name is its list-style mailbox name, see isListName). a name such as "Jane via Google Docs" or
 // "Jane (via Slack)" is a notification too. comment is the text in parentheses of the header, which parseAddressList
 // gives apart from the name, so "Jane (via Slack) <jane@x.com>" is caught as well.
 export function addressNoise(address: ObservedAddress, options: { resource?: boolean; comment?: string | null } = {}): NoiseReason | null {
@@ -52,7 +53,20 @@ export function addressNoise(address: ObservedAddress, options: { resource?: boo
   const shown = `${address.name ?? ''} ${options.comment ? `(${options.comment})` : ''}`.trim();
   if (shown && (VIA_PAREN.test(shown) || VIA_WORD.test(shown))) return 'notification';
   if (ROLE_BOXES.has(box) || ROLE_PARTS.test(box)) return 'role_address';
+  if (LIST_DOMAIN.test(domain) || isListName(address.name, box)) return 'mailing_list';
   return null;
+}
+
+// the domains of mailing lists: a list subdomain of a school or company (lists.acme.edu, listserv.acme.edu) and the
+// google groups domain. the list label needs a domain with a dot after it, so lists.example itself is not a list.
+// google calendar does not mark a group in the attendees of an event, so the domain is the sign.
+const LIST_DOMAIN = /(^|\.)(lists?|listserv|groups?)\.[^.]+(\.[^.]+)+$|(^|\.)googlegroups\.com$/;
+
+// a group on a school or company domain (cs101-fa26@acme.edu) has its own mailbox name as its display name, while a
+// person has a name. a name that is the mailbox name and holds a digit and a dash, dot or underscore is a list name.
+function isListName(name: string | null | undefined, box: string): boolean {
+  const shown = (name ?? '').trim().toLowerCase();
+  return shown === box && /\d/.test(box) && /[.\-_]/.test(box);
 }
 
 // a word of the mailbox name: the whole name, or a part of it between dots, dashes and underscores.

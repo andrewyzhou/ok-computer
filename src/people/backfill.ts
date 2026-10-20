@@ -4,7 +4,8 @@ import type { GoogleAccounts } from '../google/accounts.js';
 import { fromSdk, GoogleError, toGoogleError } from '../google/errors.js';
 import { getMessages, listMessages } from '../inbox/gmail.js';
 import type { Logger } from '../observability/logger.js';
-import { headOf } from '../text.js';
+import { redact } from '../observability/redact.js';
+import { cleanLine } from '../signals/store.js';
 import { normalizeEmail } from './address.js';
 import type { Clock } from '../time.js';
 import { PEOPLE_HEADERS, type PeopleBuilder } from './builder.js';
@@ -282,12 +283,13 @@ function newestSent(messages: readonly gmail_v1.Schema$Message[], before: string
   return Number.isFinite(newest) ? new Date(newest).toISOString() : before;
 }
 
-// the text of an error for the people_accounts row: the short and redacted message of a google error, or the first
-// part of any other message.
+// the text of an error for the people_accounts row: the kind and message of a google error, or the message of any
+// other error. GET /api/people/status serves the row to the page, so the text is redacted and made one short line.
 function errorText(err: unknown): string {
+  let text = err instanceof Error ? err.message : String(err);
   if (fromSdk(err)) {
     const error = toGoogleError(err);
-    return headOf(`${error.kind}: ${error.message}`, 300);
+    text = `${error.kind}: ${error.message}`;
   }
-  return headOf(err instanceof Error ? err.message : String(err), 300);
+  return cleanLine(redact(text), 300);
 }

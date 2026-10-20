@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Db } from '../db/index.js';
 import type { GoogleApis } from '../google/accounts.js';
 import { GoogleError } from '../google/errors.js';
+import { registerSecret } from '../observability/redact.js';
 import type { Logger } from '../observability/logger.js';
 import { BACKFILL_DAYS, BACKFILL_MAX_MESSAGES, backfillStep, MAIL_QUERY, sweepSent, type BackfillDeps } from './backfill.js';
 import type { PeopleBuilder } from './builder.js';
@@ -175,6 +176,17 @@ describe('backfillStep', () => {
     expect(next).toMatchObject({ state: 'running', messages: 10 });
     expect(google.calls.list[0]).toMatchObject({ pageToken: '10' });
     expect(store.state.error).toBeNull();
+  });
+
+  it('saves the error redacted and on one line, because the status route serves it to the page', async () => {
+    registerSecret('people-backfill-secret-value');
+    const store = fakeStore({ backfill: 'running', backfillMessages: 10, backfillPage: JSON.stringify({ phase: 'mail', pageToken: '10' }) });
+    const { deps } = setup(fakeGoogle({ messages: 25, events: 0 }), store, async () => {
+      throw new Error('the request with people-backfill-secret-value\nfailed');
+    });
+    const result = await backfillStep(deps, 'personal', 10);
+    expect(result.error).toBe('the request with [redacted] failed');
+    expect(store.state.error).toBe('the request with [redacted] failed');
   });
 
   it('ends the step as running at the gmail rate limit, and the next step reads the same page', async () => {
