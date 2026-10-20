@@ -46,6 +46,7 @@ import { mountBrowser } from './browser.js';
 import { mountChat } from './chat.js';
 import { mountChats } from './chats.js';
 import { mountDeploy } from './deploy.js';
+import { mountDesk } from './desk.js';
 import { readBody } from './http.js';
 import { mountInbox } from './inbox.js';
 import { mountSandbox } from './sandbox.js';
@@ -371,6 +372,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
   mountDeploy(server, deps);
   mountInbox(server, deps);
   mountSandbox(server, deps);
+  mountDesk(server, deps);
 
   server.all('/api/*', (c) => notFound(c, 'api route'));
   if (existsSync(join(webDir, 'index.html'))) {
