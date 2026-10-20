@@ -3,7 +3,21 @@ import type { DraftState, DraftView } from '../../../../src/dashboard/types';
 import { useApi } from '../../api';
 import type { RouteProps } from '../../routes';
 import { DetailsPanel, EmptyState, Facts, FilterBar, Page, Skeleton, Table, Tabs, type Column, type Tone } from '../../ui';
-import { accountColumn, AccountBelowMd, Breakable, ErrorBox, LoadMore, minuteTime, RunLink, StateBadge, setHashQuery, usePaged, withQuery } from './shared';
+import {
+  accountColumn,
+  AccountBelowMd,
+  Breakable,
+  ConnectGoogle,
+  ErrorBox,
+  LoadMore,
+  minuteTime,
+  RunLink,
+  StateBadge,
+  setHashQuery,
+  useInboxSetup,
+  usePaged,
+  withQuery,
+} from './shared';
 import './inbox.css';
 
 // the draft replies that the digest job wrote into the mail drafts of an account. the app never sends a draft: the
@@ -82,6 +96,7 @@ export function DraftsPage({ query }: RouteProps) {
     last.length < LIMIT ? null : withQuery('/api/inbox/drafts', { ...filters, before: last.at(-1)!.id }),
   );
   const drafts = paged.pages.flat();
+  const setup = useInboxSetup();
   const listed = selectedId ? drafts.find((each) => String(each.id) === selectedId) : undefined;
   // a link from the digest names a draft that may be in another tab or older than the loaded rows, so the page asks
   // for that one draft by its id when the list does not have it.
@@ -122,9 +137,13 @@ export function DraftsPage({ query }: RouteProps) {
               selected={selectedId}
               onSelect={(each) => select(String(each.id) === selectedId ? null : String(each.id))}
               empty={
-                <EmptyState icon="draft" title={tab === 'drafted' ? 'No drafts yet.' : `No drafts are ${STATE_LABEL[tab]}.`}>
-                  {tab === 'drafted' ? 'The digest writes a draft reply for mail that needs one.' : null}
-                </EmptyState>
+                tab === 'drafted' && !account && setup.state === 'missing' ? (
+                  <ConnectGoogle what="The digest writes a draft reply for mail that needs one." />
+                ) : (
+                  <EmptyState icon="draft" title={tab === 'drafted' ? 'No drafts yet.' : `No drafts are ${STATE_LABEL[tab]}.`}>
+                    {tab === 'drafted' ? 'The digest writes a draft reply for mail that needs one.' : null}
+                  </EmptyState>
+                )
               }
             />
           </div>

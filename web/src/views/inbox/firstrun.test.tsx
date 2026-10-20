@@ -37,6 +37,20 @@ describe('the first run', () => {
     expect(main.queryByRole('button', { name: 'Make the digest now' })).toBeNull();
   });
 
+  it('asks to connect google on the drafts and the proposals that have nothing yet', async () => {
+    stubFetch(seeded.dashboard, { 'GET /api/inbox/drafts': () => [], 'GET /api/inbox/proposals': () => [] });
+    openApp('#/inbox/drafts');
+    expect(await inMain().findByText('Connect a Google account to read your mail.')).toBeTruthy();
+    expect(inMain().queryByText('No drafts yet.')).toBeNull();
+    location.hash = '#/inbox/proposals';
+    expect(await inMain().findByText(/The digest proposes a calendar event/)).toBeTruthy();
+    expect(inMain().getByRole('link', { name: 'Connect Google' }).getAttribute('href')).toBe('#/google');
+    expect(inMain().queryByText('No proposals wait for you.')).toBeNull();
+    // another tab is a plain empty list, because it says nothing about the setup.
+    location.hash = '#/inbox/proposals?state=declined';
+    expect(await inMain().findByText('No declined proposals.')).toBeTruthy();
+  });
+
   it('shows no totals and turns off the scan before the first scan', async () => {
     stubFetch(seeded.dashboard, { 'GET /api/inbox/subscriptions': () => ({ subscriptions: [], monthlyTotals: [], lastScan: null }) });
     openApp('#/inbox/subscriptions');

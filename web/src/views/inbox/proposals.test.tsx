@@ -36,6 +36,9 @@ describe('the calendar proposals', () => {
     const bill = within(inMain().getByTestId('proposal-13'));
     expect(bill.getByText('Wednesday, October 28')).toBeTruthy();
     expect(bill.queryByRole('article')).toBeNull();
+    // the bill has no approval yet, so it says why no buttons show and what comes next.
+    expect(bill.getByText(/approval of this event is not asked yet.*buttons show here once the digest asks for it/)).toBeTruthy();
+    expect(item.queryByText(/not asked yet/)).toBeNull();
     const tabs = within(screen.getByRole('tablist', { name: 'proposal state' }));
     expect(tabs.getAllByRole('tab')[0]!.textContent).toBe('Proposed');
     expect(tabs.getByRole('tab', { name: 'Proposed' }).getAttribute('aria-selected')).toBe('true');

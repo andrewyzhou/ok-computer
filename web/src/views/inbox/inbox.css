@@ -34,12 +34,15 @@
   margin: 2px 0 0;
   color: var(--ink);
   overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 .inbox-item-summary {
   margin: 4px 0 0;
   color: var(--ink-2);
   max-width: 68ch;
   overflow-wrap: anywhere;
+  /* the browser balances the last lines, so a break after a hyphen, as in "check-in", leaves no word alone. */
+  text-wrap: pretty;
 }
 /* the kind of a mail next to its sender: plain small text, so it never reads as the badge of an account. */
 .inbox-item-kind {
@@ -317,6 +320,22 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* a full badge shows the whole alias and breaks it after its marks when it is longer than its row. the badge then
+   grows to the lines of its text, with rounded corners in place of the pill. */
+.inbox-account.is-full {
+  max-width: 100%;
+}
+.inbox-account.is-full .badge {
+  height: auto;
+  min-height: 20px;
+  line-height: 18px;
+  border-radius: 10px;
+  white-space: normal;
+}
+.inbox-account.is-full .inbox-account-text {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .inbox-name .inbox-below-md,
 .inbox-cell-badges {
   margin-top: 4px;
@@ -374,8 +393,18 @@
     grid-template-columns: 12ch minmax(0, 1fr);
   }
 }
+/* a long alias takes the whole row, and its facts start in the column of the facts on the next line. */
+.inbox-coverage-item.is-long > .inbox-account {
+  grid-column: 1 / -1;
+}
+.inbox-coverage-item.is-long > .inbox-coverage-facts {
+  grid-column: 2;
+}
+/* the row uses tabular figures for the counts. the font then gives a hyphen the width of a figure, so an error text,
+   which holds words such as "sign-in", goes back to the normal figures. */
 .inbox-coverage-item .error-text {
   overflow-wrap: anywhere;
+  font-variant-numeric: normal;
 }
 .inbox-coverage-hidden {
   margin: var(--space-3) 0 0;

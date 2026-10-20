@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { header } from '../google/mime.js';
 import { localDay } from '../time.js';
-import { checkDue, findDates, parseDue, type DueInput } from './deadlines.js';
+import { checkDue, findDates, parseDue, statesDue, type DueInput } from './deadlines.js';
 import { receivedAt } from './gmail.js';
 import { mailText } from './mailtext.js';
 import { CORPUS, corpusMessages, TIME_ZONE } from './testdata/corpus.js';
@@ -354,5 +354,22 @@ describe('checkDue on the corpus', () => {
     expect(checkDue({ dueAt: '2026-10-24', dueText: 'Homework 6 released', text, sentAt, timeZone: TIME_ZONE })).toEqual({ ok: false, why: 'words_name_no_date' });
     const subject = `Subject: Quiz 2 is due 10/22\n\n${text}`;
     expect(checkDue({ dueAt: '2026-10-22', dueText: 'due 10/22', text: subject, sentAt, timeZone: TIME_ZONE })).toMatchObject({ ok: true, due: { allDay: true } });
+  });
+});
+
+describe('statesDue', () => {
+  it('finds a due word in the words, near them in the mail, or a limit right before them', () => {
+    expect(statesDue('Subject: x\n\nanything', 'due Fri 10/16')).toBe(true);
+    expect(statesDue('Subject: x\n\nHomework 6 is due on\nFri 10/16 at 11:59 pm.', 'Fri 10/16 at 11:59 pm')).toBe(true);
+    expect(statesDue('Subject: x\n\nSign up for the trip by Fri 10/16.', 'Fri 10/16')).toBe(true);
+    expect(statesDue('Subject: x\n\nThe form closes Fri 10/16.', 'Fri 10/16')).toBe(true);
+  });
+
+  it('is false for the date of an event and for no words', () => {
+    expect(statesDue('Subject: [CAL CLIMBING] PRACTICES\n\nPractices are on Wed 10/14 at the gym.', 'Wed 10/14')).toBe(false);
+    expect(statesDue('Subject: Game reminder\n\nYour game is on Wed 10/14 at 9:00 pm. Come early, arrive before the start.', 'Wed 10/14 at 9:00 pm')).toBe(false);
+    // "standby" holds "by" inside a word, which is no limit.
+    expect(statesDue('Subject: x\n\nWe are on standby Wed 10/14.', 'Wed 10/14')).toBe(false);
+    expect(statesDue('Subject: x\n\nanything', null)).toBe(false);
   });
 });

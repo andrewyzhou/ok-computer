@@ -22,7 +22,7 @@ function Item({ item }: { item: DigestItem }) {
     <li className="inbox-item">
       <div className="inbox-item-head">
         <strong className="inbox-item-from">{item.from}</strong>
-        <AccountBadge account={item.account} />
+        <AccountBadge account={item.account} full />
         {/* a deadline, a bill or a package that a machine sent says so, so the owner knows that no person wrote it. it is
             plain small text, so it never reads as the badge of another account. */}
         {item.mail === 'automated' && item.section !== 'needs_reply' ? <span className="inbox-item-kind">automated mail</span> : null}
@@ -40,6 +40,9 @@ function Item({ item }: { item: DigestItem }) {
   );
 }
 
+// the longest alias that fits the column of the badges at a phone width.
+const LONG_ALIAS = 10;
+
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 // the accounts that the digest read, with the mail it hid, an account that had more mail than the read limit, and an
@@ -49,14 +52,22 @@ function Coverage({ stats }: { stats: DigestStats }) {
   const left = [
     plural(hidden, 'automated or list mail hidden', 'automated or list mails hidden'),
     stats.pastDue ? plural(stats.pastDue, 'past deadline left out', 'past deadlines left out') : null,
-    stats.notDeadlines ? plural(stats.notDeadlines, 'invitation or confirmation left out', 'invitations or confirmations left out') : null,
+    stats.notDeadlines ? plural(stats.notDeadlines, 'mail that sets no deadline left out', 'mails that set no deadline left out') : null,
+    // a due date that the mail does not state is dropped, and a deadline without its date is left out, so the owner
+    // learns that the mail may hold more deadlines than the list shows.
+    stats.droppedDates ? plural(stats.droppedDates, 'due date left out because the mail did not state it', 'due dates left out because the mail did not state them') : null,
   ].filter(Boolean);
   return (
     <div className="inbox-coverage">
       <ul className="inbox-coverage-list" aria-label="accounts in this digest">
         {stats.accounts.map((account) => (
-          <li key={account.alias} className="inbox-coverage-item" data-testid={`coverage-${account.alias}`}>
-            <AccountBadge account={account.alias} />
+          // a long alias, such as an address, takes the whole row, and its facts go under it, so the owner can read all of it.
+          <li
+            key={account.alias}
+            className={account.alias.length > LONG_ALIAS ? 'inbox-coverage-item is-long' : 'inbox-coverage-item'}
+            data-testid={`coverage-${account.alias}`}
+          >
+            <AccountBadge account={account.alias} full />
             {/* the facts of an account wrap in their own column, so a warning or an error stays next to its account. */}
             <span className="inbox-coverage-facts">
               {account.error !== null ? (

@@ -178,6 +178,32 @@ function check(input: DueInput): DueResult {
   return { ok: true, due: { at: new Date(at).toISOString(), allDay: false, dueText } };
 }
 
+// the words that make a date a due date: something must be done by then. an announcement of an event, such as a
+// practice on wednesday or a game at 9pm, has a date but none of these words.
+const DUE_WORDS =
+  /\b(?:due|deadlines?|submit(?:ted|ting)?|submissions?|turn(?:ed)?\s+in|hand\s+in|register|registration|sign[\s-]?ups?|rsvp|apply|applications?|enroll(?:ment)?|pay|payments?|expires?|expiring|closes?|closing|last\s+day|no\s+later\s+than)\b/i;
+// a word right before the date that makes it a limit, as in "by friday" or "before oct 24".
+const LIMIT_BEFORE = /\b(?:by|before|until|till)\s?$/i;
+// the characters around the words of the date that the check reads.
+const DUE_BEFORE = 80;
+const DUE_AFTER = 40;
+
+// statesDue is true when the mail says that something is due at the date of its words: a due word in the words, or
+// near them in the mail, or "by" or "before" right in front of them. the digest asks it for the deadlines of list and
+// machine mail, which often only announce an event. text is the text of the mail that the model saw.
+export function statesDue(text: string, dueText: string | null): boolean {
+  if (!dueText) return false;
+  const words = normal(dueText);
+  if (DUE_WORDS.test(words)) return true;
+  const mail = normal(evidenceOf(String(text ?? '')));
+  for (let at = mail.indexOf(words); at >= 0; at = mail.indexOf(words, at + 1)) {
+    const before = mail.slice(Math.max(0, at - DUE_BEFORE), at);
+    const after = mail.slice(at + words.length, at + words.length + DUE_AFTER);
+    if (LIMIT_BEFORE.test(before) || DUE_WORDS.test(before) || DUE_WORDS.test(after)) return true;
+  }
+  return false;
+}
+
 // one date that a text states. day is yyyy-mm-dd, time is hh:mm in 24 hours or null, and zone is the time zone that
 // the text names (for example "PT" or "+02:00") as an iana name or an offset, or null when it names none. index and
 // length give the words in the text.

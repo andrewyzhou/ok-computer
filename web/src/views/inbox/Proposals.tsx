@@ -4,7 +4,22 @@ import { useApi } from '../../api';
 import { clock, longDay } from '../../format';
 import type { RouteProps } from '../../routes';
 import { Badge, DetailsPanel, EmptyState, Facts, FilterBar, Page, Skeleton, Tabs, type Tone } from '../../ui';
-import { AccountBadge, ApprovalFor, Breakable, ErrorBox, LoadMore, minuteTime, RunLink, StateBadge, setHashQuery, useApprovals, usePaged, withQuery } from './shared';
+import {
+  AccountBadge,
+  ApprovalFor,
+  Breakable,
+  ConnectGoogle,
+  ErrorBox,
+  LoadMore,
+  minuteTime,
+  RunLink,
+  StateBadge,
+  setHashQuery,
+  useApprovals,
+  useInboxSetup,
+  usePaged,
+  withQuery,
+} from './shared';
 import './inbox.css';
 
 // the calendar events that the digest job proposes, for example a course deadline or a bill. the owner approves each
@@ -38,6 +53,10 @@ export function when(proposal: CalendarProposalView): string {
   if (proposal.allDay) return longDay(proposal.startAt.slice(0, 10));
   return proposal.endAt ? `${minuteTime(proposal.startAt)} to ${clock(proposal.endAt)}` : minuteTime(proposal.startAt);
 }
+
+// a proposed row has no approval for a moment while the digest asks for it, or for good when the app stopped in
+// between. the owner learns why no buttons show and what comes next.
+const NOT_ASKED = 'The approval of this event is not asked yet, so nothing reaches the calendar. The approve and decline buttons show here once the digest asks for it.';
 
 function fromControl(event: MouseEvent): boolean {
   return Boolean((event.target as HTMLElement).closest('a, button, input, select, textarea'));
@@ -75,6 +94,8 @@ function ProposalItem({
         <div className="inbox-proposal-approval">
           <ApprovalFor id={proposal.approvalId} approvals={approvals} onDecided={onDecided} />
         </div>
+      ) : proposal.state === 'proposed' ? (
+        <p className="muted small">{NOT_ASKED}</p>
       ) : null}
     </li>
   );
@@ -96,7 +117,11 @@ function ProposalFacts({ proposal }: { proposal: CalendarProposalView }) {
           proposal.description ? { label: 'Description', value: <div className="inbox-body">{proposal.description}</div> } : null,
           { label: 'Source', value: proposal.sourceSubject ?? <span className="muted">none</span> },
           proposal.sourceMessageId ? { label: 'Source message', value: <code>{proposal.sourceMessageId}</code> } : null,
-          proposal.approvalId !== null ? { label: 'Approval', value: <a href="#/approvals">#{proposal.approvalId}</a> } : null,
+          proposal.approvalId !== null
+            ? { label: 'Approval', value: <a href="#/approvals">#{proposal.approvalId}</a> }
+            : proposal.state === 'proposed'
+              ? { label: 'Approval', value: <span className="muted">not asked yet</span> }
+              : null,
           proposal.eventId ? { label: 'Event', value: <code>{proposal.eventId}</code> } : null,
           proposal.error ? { label: 'Error', value: <span className="error-text">{proposal.error}</span> } : null,
           { label: 'Created', value: minuteTime(proposal.createdAt) },
@@ -116,6 +141,7 @@ export function ProposalsPage({ query }: RouteProps) {
     last.length < LIMIT ? null : withQuery('/api/inbox/proposals', { ...filters, before: last.at(-1)!.id }),
   );
   const approvals = useApprovals();
+  const setup = useInboxSetup();
   const reload = () => {
     paged.reload();
     approvals.reload();
@@ -165,6 +191,8 @@ export function ProposalsPage({ query }: RouteProps) {
           </ul>
           <LoadMore paged={paged} label="Load older" />
         </>
+      ) : tab === 'proposed' && setup.state === 'missing' ? (
+        <ConnectGoogle what="The digest proposes a calendar event when the mail has a deadline or a bill." />
       ) : (
         <EmptyState icon="calendar" title={tab === 'proposed' ? 'No proposals wait for you.' : `No ${tab} proposals.`}>
           {tab === 'proposed' ? 'The digest proposes an event when the mail has a deadline or a bill.' : null}

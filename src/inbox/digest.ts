@@ -17,7 +17,7 @@ import { ownerAddresses } from './accounts.js';
 import { settleApprovals } from './actions.js';
 import { classifyMail, type MailClass } from './classify.js';
 import type { InboxContext, JobRun } from './context.js';
-import { checkDue, DONE_SUBJECT } from './deadlines.js';
+import { checkDue, DONE_SUBJECT, statesDue } from './deadlines.js';
 import { checkDrafts, draftReply } from './drafts.js';
 import { extractItems, itemsTool } from './extract.js';
 import { getMessages, listMessages, readError, receivedAt } from './gmail.js';
@@ -220,8 +220,23 @@ export async function runDigest(ctx: InboxContext, run: JobRun): Promise<{ note?
             stats.notDeadlines = (stats.notDeadlines ?? 0) + 1;
             continue;
           }
-          const kept = itemOf(ctx, alias, message, mail, each, texts.get(id) ?? '');
+          const text = texts.get(id) ?? '';
+          const kept = itemOf(ctx, alias, message, mail, each, text);
           if (kept.dropped) stats.droppedDates += 1;
+          if (kept.item.section === 'deadlines') {
+            // a deadline needs a date that the mail states. one whose date the check dropped is counted in
+            // droppedDates already, and one that the model gave without a date is no deadline.
+            if (!kept.item.dueAt) {
+              if (!kept.dropped) stats.notDeadlines = (stats.notDeadlines ?? 0) + 1;
+              continue;
+            }
+            // the mail of a list or a machine often only announces an event, such as a practice or a game. its date
+            // is a deadline only when the mail says that something is due then.
+            if (mail.kind !== 'person' && !statesDue(text, kept.dueText)) {
+              stats.notDeadlines = (stats.notDeadlines ?? 0) + 1;
+              continue;
+            }
+          }
           // a deadline or a bill whose due time passed is no task for today. it sorted first and hid the real ones.
           if (kept.item.dueAt && (kept.item.section === 'deadlines' || kept.item.section === 'bills') && pastDue(kept.item.dueAt, kept.allDay, ctx.clock(), ctx.timeZone)) {
             stats.pastDue = (stats.pastDue ?? 0) + 1;
@@ -239,7 +254,9 @@ export async function runDigest(ctx: InboxContext, run: JobRun): Promise<{ note?
   if (available.length && !accounts.length) throw new Error(notes.join('; '));
 
   const now = ctx.clock();
-  for (const each of found) {
+  // the threads are made one item each before the drafts and the proposals, so a thread gets one draft at most.
+  const kept = newestOfThreads(found);
+  for (const each of kept) {
     const { item, message } = each;
     if (item.section === 'needs_reply' && wantsDraft(each.mail)) {
       try {
@@ -274,9 +291,9 @@ export async function runDigest(ctx: InboxContext, run: JobRun): Promise<{ note?
     }
   }
 
-  const facts = new Map(found.map((each) => [each.item, { direct: each.mail.direct, list: each.mail.kind === 'list', at: Number(each.message.internalDate) || 0 }]));
+  const facts = new Map(kept.map((each) => [each.item, { direct: each.mail.direct, list: each.mail.kind === 'list', at: Number(each.message.internalDate) || 0 }]));
   const items = sortItems(
-    found.map((each) => each.item),
+    kept.map((each) => each.item),
     facts,
   );
   const day = localDay(now, ctx.timeZone);
@@ -300,6 +317,19 @@ export async function runDigest(ctx: InboxContext, run: JobRun): Promise<{ note?
     }
   }
   return notes.length ? { note: notes.join(' ') } : {};
+}
+
+// one item for each account, thread and section: the one of the newest mail. a thread such as a question and its
+// "Re:" gave two items that need a reply, so the digest showed the thread twice and asked for two drafts.
+function newestOfThreads(found: readonly Found[]): Found[] {
+  const keyOf = (each: Found) => JSON.stringify([each.item.account, each.item.threadId, each.item.section]);
+  const at = (each: Found) => Number(each.message.internalDate) || 0;
+  const newest = new Map<string, Found>();
+  for (const each of found) {
+    const old = newest.get(keyOf(each));
+    if (!old || at(each) > at(old)) newest.set(keyOf(each), each);
+  }
+  return found.filter((each) => newest.get(keyOf(each)) === each);
 }
 
 // the text of one mail for the model: the headers that say who wrote it and when, the kind that the code gave it, and

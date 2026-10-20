@@ -169,11 +169,13 @@ export function ErrorBox({ error, onRetry }: { error: string; onRetry: () => voi
 
 // the account of a row, as the api names it. the owner has more than one account, so each row says which one it came
 // from, also when only one account is configured. a long name is cut with an ellipsis, and the title holds all of it.
-export function AccountBadge({ account }: { account: string }) {
+// full shows the whole alias, broken over lines when it is long, where the row has room for it. a table keeps the
+// short badge, and its title holds the whole alias.
+export function AccountBadge({ account, full = false }: { account: string; full?: boolean }) {
   return (
-    <span className="inbox-account" data-account={account}>
+    <span className={full ? 'inbox-account is-full' : 'inbox-account'} data-account={account}>
       <Badge tone="muted" title={`account ${account}`}>
-        <span className="inbox-account-text">{account}</span>
+        <span className="inbox-account-text">{full ? <Breakable text={account} /> : account}</span>
       </Badge>
     </span>
   );

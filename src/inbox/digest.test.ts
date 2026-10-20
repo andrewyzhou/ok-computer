@@ -138,10 +138,9 @@ describe('runDigest', () => {
     expect(digest!.items.map((each) => [each.section, each.messageId])).toEqual([
       // the model put the no-reply mail in needs_reply too, and the code dropped it.
       ['needs_reply', 'm-reply'],
-      // the date of the quiz is before the mail, so the code drops it, and an item without a due time comes last.
+      // the date of the quiz is before the mail, so the code drops it, and a deadline without a date is left out.
       ['deadlines', 'm-meeting'],
       ['deadlines', 'm-course'],
-      ['deadlines', 'm-past'],
       ['bills', 'm-bill'],
       ['packages', 'm-package'],
     ]);
@@ -164,7 +163,7 @@ describe('runDigest', () => {
     expect(byId.get('m-course')).toMatchObject({ account: 'school', dueAt: '2026-10-20T07:00:00.000Z', summary: 'Homework 3 is due.', proposalId: PROPOSAL_ID });
     expect(byId.get('m-bill')).toMatchObject({ dueAt: '2026-10-26T00:00:00.000Z', amount: 80, currency: 'USD', proposalId: PROPOSAL_ID });
     expect(byId.get('m-package')).toMatchObject({ amount: null, currency: null });
-    expect(byId.get('m-past')).toMatchObject({ dueAt: null });
+    expect(byId.has('m-past')).toBe(false);
     // the mail states no time of the appointment, so it is kept as a whole day.
     expect(byId.get('m-meeting')).toMatchObject({ dueAt: '2026-10-15T07:00:00.000Z' });
     expect(byId.has('m-noreply')).toBe(false);
@@ -172,6 +171,7 @@ describe('runDigest', () => {
     expect(digest!.stats).toEqual({
       accounts: [
         { alias: 'personal', listed: 3, read: 3, capped: false, person: 2, list: 0, automated: 1, hidden: 1, error: null },
+        // the quiz mail of a person gives no item, but only list and machine mail counts as hidden.
         { alias: 'school', listed: 4, read: 4, capped: false, person: 3, list: 0, automated: 1, hidden: 0, error: null },
       ],
       // the date of the quiz is before the mail.
@@ -236,7 +236,7 @@ describe('runDigest', () => {
     const [digest] = digests(h);
     expect(h.sent).toEqual([{ text: shortTextOf({ items: digest!.items, day: digest!.day }, TZ) }]);
     expect(digest!.shortText).toBe(h.sent[0]!.text);
-    expect(h.sent[0]!.text).toMatch(/^Inbox digest for 2026-10-13: 1 needs a reply, 3 deadlines, 1 bill, 1 package\.\n- reply: Ana Ruiz - Dinner on Friday\?\n/);
+    expect(h.sent[0]!.text).toMatch(/^Inbox digest for 2026-10-13: 1 needs a reply, 2 deadlines, 1 bill, 1 package\.\n- reply: Ana Ruiz - Dinner on Friday\?\n/);
     const copies = mainEvents(h);
     expect(copies).toHaveLength(1);
     expect(copies[0]!.text).toContain('The inbox digest sent this message to the owner:\n<untrusted source="gmail:personal, gmail:school">');
@@ -305,7 +305,7 @@ describe('runDigest', () => {
     expect(result.error).toContain('The draft reply of a mail of personal failed');
     expect(result.error).toContain('The calendar proposal of a mail of school failed');
     const [digest] = digests(h);
-    expect(digest!.items).toHaveLength(6);
+    expect(digest!.items).toHaveLength(5);
     expect(digest!.items.every((each) => each.draftId === null && each.proposalId === null)).toBe(true);
     expect(h.sent).toHaveLength(1);
   });
@@ -320,6 +320,56 @@ describe('runDigest', () => {
     expect(mocks.proposeEvent).not.toHaveBeenCalled();
     // the model gave a due time that the check dropped.
     expect(digest!.stats!.droppedDates).toBe(1);
+  });
+
+  it('keeps one item for a thread, the one of its newest mail, and asks for one draft', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    const fake = h.google.fake;
+    const first = mail('m-ask', '"Ana Ruiz" <ana@friends.example>', 'A referral for the job', { to: ownerOf('personal'), date: '2026-10-12T18:00:00Z' });
+    const again = mail('m-ask-re', '"Ana Ruiz" <ana@friends.example>', 'Re: A referral for the job', { to: ownerOf('personal'), date: '2026-10-13T05:00:00Z' });
+    fake.deliver('personal', { ...first, threadId: 't-referral' });
+    fake.deliver('personal', { ...again, threadId: 't-referral' });
+    // a mail of another thread with the same subject stays its own item.
+    fake.deliver('personal', mail('m-other', '"Ben Ode" <ben@friends.example>', 'Lunch?', { to: ownerOf('personal'), date: '2026-10-12T20:00:00Z' }));
+    h.script.push(
+      answer({
+        'A referral for the job': [{ section: 'needs_reply', summary: 'Ana asks for a referral.' }],
+        'Re: A referral for the job': [{ section: 'needs_reply', summary: 'Ana asks again about the referral.' }],
+        'Lunch?': [{ section: 'needs_reply', summary: 'Ben asks about lunch.' }],
+      }),
+    );
+    await h.run('digest');
+    const [digest] = digests(h);
+    expect(digest!.items.map((each) => [each.messageId, each.threadId])).toEqual([
+      ['m-ask-re', 't-referral'],
+      ['m-other', 't-m-other'],
+    ]);
+    expect(mocks.draftReply.mock.calls.map((call) => (call[2] as { messageId: string }).messageId).sort()).toEqual(['m-ask-re', 'm-other']);
+    expect(h.sent[0]!.text).toMatch(/^Inbox digest for 2026-10-13: 2 need a reply\./);
+  });
+
+  it('leaves out a deadline without a date and the event of a list or a machine, and counts them', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    const fake = h.google.fake;
+    const club = { 'List-Id': '<climbing.lists.school.example>', 'List-Unsubscribe': '<mailto:leave@lists.school.example>' };
+    fake.deliver('personal', mail('m-hike', 'Hiking club <hikes@lists.school.example>', '[CHAOS] Tilden Seaview Hike', { headers: club, body: 'Join us for a hike this weekend.' }));
+    fake.deliver('personal', mail('m-practice', 'Climbing team <climb@lists.school.example>', '[CAL CLIMBING] PRACTICES this week', { headers: club, body: 'Practices are on Wed 10/14 at the gym. See you there.' }));
+    fake.deliver('personal', mail('m-game', 'League <no-reply@league.example>', 'Game reminder', { body: 'Your game is on Wed 10/14 at 9:00 pm on field 2.' }));
+    fake.deliver('personal', mail('m-signup', 'Climbing team <climb@lists.school.example>', '[CAL CLIMBING] Trip sign-ups', { headers: club, body: 'Sign up for the trip by Fri 10/16 so we can book the vans.' }));
+    fake.deliver('personal', mail('m-hw', 'Course site <notifications@course.example>', 'Homework 6 released', { body: 'Homework 6 is due on Fri 10/16 at 11:59 pm.' }));
+    h.script.push(
+      answer({
+        '[CHAOS] Tilden Seaview Hike': [{ section: 'deadlines', summary: 'A hike this weekend.', dueAt: null }],
+        '[CAL CLIMBING] PRACTICES this week': [{ section: 'deadlines', summary: 'Practice on Wednesday.', dueAt: '2026-10-14', dueText: 'Wed 10/14' }],
+        'Game reminder': [{ section: 'deadlines', summary: 'A game on Wednesday.', dueAt: '2026-10-14T21:00:00-07:00', dueText: 'Wed 10/14 at 9:00 pm' }],
+        '[CAL CLIMBING] Trip sign-ups': [{ section: 'deadlines', summary: 'Sign up for the trip.', dueAt: '2026-10-16', dueText: 'Fri 10/16' }],
+        'Homework 6 released': [{ section: 'deadlines', summary: 'Homework 6 is due.', dueAt: '2026-10-16T23:59:00-07:00', dueText: 'Fri 10/16 at 11:59 pm', course: true }],
+      }),
+    );
+    await h.run('digest');
+    const [digest] = digests(h);
+    expect(digest!.items.map((each) => each.messageId).sort()).toEqual(['m-hw', 'm-signup']);
+    expect(digest!.stats).toMatchObject({ droppedDates: 0, notDeadlines: 3 });
   });
 
   it('reads the inbox of the last two days and reads each message in full', async () => {
