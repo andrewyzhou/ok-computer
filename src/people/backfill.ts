@@ -62,7 +62,7 @@ export interface BackfillResult {
 // events.list only works with the request that gave it. after the backfill, the sent sweep keeps the ids that it read
 // last, because "after:" counts whole seconds and gives the newest mail again.
 type Position =
-  | { phase: 'mail'; pageToken?: string }
+  | { phase: 'mail'; pageToken?: string; read?: string[] }
   | { phase: 'events'; pageToken?: string; timeMin?: string; timeMax?: string }
   | { phase: 'sent'; seen: string[] };
 
@@ -85,7 +85,8 @@ function positionOf(state: BackfillState): Position {
 // - then the events: events.list of the primary calendar with singleEvents, from BACKFILL_DAYS back to
 //   BACKFILL_AHEAD_DAYS ahead, page by page, and builder.observeEvents. the poll reads the primary calendar too, so
 //   the meetings of a profile do not depend on which of the two read an event first.
-// - the position (a json { phase: 'mail' | 'events', pageToken }) and the counts are saved after each page, and the
+// - the position (a json { phase: 'mail' | 'events', pageToken }, and for mail the ids of the page that are read) and the
+//   counts are saved after each page and each chunk of READ_CHUNK messages, and the
 //   state is done after the last page, with backfilledAt. the first step sets sentAfter to the time it started, so
 //   the sent sweep reads the mail that the owner sends while the backfill runs.
 // - an account in done does nothing and gives state done with zero counts. an error is saved as failed with the
@@ -122,10 +123,20 @@ export async function backfillStep(deps: BackfillDeps, account: string, budget =
       const page = await deps.accounts.run(account, async (apis) => {
         const { data } = await apis.gmail.users.messages.list({ userId: 'me', q: MAIL_QUERY, maxResults: max, ...(pageToken ? { pageToken } : {}) });
         const ids = (data.messages ?? []).flatMap((each) => (each.id ? [each.id] : [])).slice(0, max);
-        const read = ids.length > 0 ? await getMessages(apis, ids, { format: 'metadata', headers: PEOPLE_HEADERS }) : [];
-        return { ids, read, next: data.nextPageToken ?? null };
+        return { ids, next: data.nextPageToken ?? null };
       });
-      if (deps.builder.observeMail(account, page.read).failed) throw new StoreFailed();
+      // the page is read in chunks, and the position keeps the ids that are done, so a rate limit in the middle of a
+      // page does not throw away the reads that finished.
+      const done = new Set(position.read ?? []);
+      const todo = page.ids.filter((id) => !done.has(id));
+      for (let start = 0; start < todo.length; start += READ_CHUNK) {
+        const chunk = todo.slice(start, start + READ_CHUNK);
+        const read = await deps.accounts.run(account, (apis) => getMessages(apis, chunk, { format: 'metadata', headers: PEOPLE_HEADERS }));
+        if (deps.builder.observeMail(account, read).failed) throw new StoreFailed();
+        for (const id of chunk) done.add(id);
+        position = { phase: 'mail', ...(pageToken ? { pageToken } : {}), read: [...done] };
+        save({});
+      }
       messages += page.ids.length;
       totalMessages += page.ids.length;
       position = page.next ? { phase: 'mail', pageToken: page.next } : { phase: 'events' };
@@ -227,6 +238,9 @@ export async function sweepSent(deps: BackfillDeps, account: string): Promise<nu
     return 0;
   }
 }
+
+// the messages of a page of the mail phase that one request batch reads before the position is saved.
+const READ_CHUNK = 50;
 
 // the most ids that the position of the sent sweep keeps.
 const SEEN_MAX = 200;

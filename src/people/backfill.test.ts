@@ -183,6 +183,27 @@ describe('backfillStep', () => {
     expect(JSON.parse(store.state.backfillPage!)).toEqual({ phase: 'mail', pageToken: '10' });
   });
 
+  it('keeps the reads of a page that finished before the rate limit, and reads only the rest next time', async () => {
+    const google = fakeGoogle({ messages: 120, events: 0 });
+    const store = fakeStore();
+    let runs = 0;
+    const { deps } = setup(google, store, async (_alias, fn) => {
+      runs++;
+      // the send-as read is the first call, the list the second and the first chunk the third. the second chunk meets
+      // the limit.
+      if (runs === 4) throw new GoogleError('rate', '429: quota exceeded');
+      return fn(google.apis);
+    });
+    expect(await backfillStep(deps, 'personal', 120)).toMatchObject({ state: 'running', messages: 0 });
+    expect(JSON.parse(store.state.backfillPage!).read).toHaveLength(50);
+    expect(store.state.backfillMessages).toBe(0);
+    const again = setup(google, store);
+    expect(await backfillStep(again.deps, 'personal', 120)).toMatchObject({ messages: 120 });
+    expect(google.calls.get).toHaveLength(120);
+    expect(new Set(google.calls.get).size).toBe(120);
+    expect(store.state.backfillMessages).toBe(120);
+  });
+
   it('keeps its position and fails when the store could not write a page', async () => {
     const google = fakeGoogle({ messages: 25, events: 0 });
     const store = fakeStore({ backfill: 'running', backfillMessages: 10, backfillPage: JSON.stringify({ phase: 'mail', pageToken: '10' }) });

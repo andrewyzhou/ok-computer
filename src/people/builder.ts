@@ -146,7 +146,8 @@ export function mailObservations(account: string, message: gmail_v1.Schema$Messa
   return result;
 }
 
-const noiseOf = (address: ObservedAddress, resource = false) => addressNoise(address, { resource, comment: address.comment ?? null });
+// the noise of an address of a mail header, with the comment of its header part for the via rule.
+const noiseOf = (address: ObservedAddress) => addressNoise(address, { comment: address.comment ?? null });
 
 // a message in one of these labels is not mail between people: spam, the trash and the owner's own drafts.
 const DROPPED_LABELS = new Set(['SPAM', 'TRASH', 'DRAFT']);
