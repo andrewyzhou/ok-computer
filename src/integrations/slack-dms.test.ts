@@ -216,7 +216,9 @@ describe('slack dm poll', () => {
     expect(t.signals().at(-1)!.externalId).toBe(`${DM_ALICE}:${later.ts}`);
   });
 
-  it('moves on when the overlap alone holds more dms than one poll reads', async () => {
+  // each of the 480 dms writes its payload as a file, and a windows runner makes each file slowly. the limit is for that
+  // runner, not for a loop that hangs: the test still stops after 10 polls.
+  it('moves on when the overlap alone holds more dms than one poll reads', { timeout: 30_000 }, async () => {
     const t = await setup();
     const total = PAGES_PER_POLL * 20 * 2;
     const step = (OVERLAP_S - 10) / total;

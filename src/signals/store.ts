@@ -42,20 +42,26 @@ export function addSignals(db: Db, signals: NewSignal[], now: Date): number {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (source, account, externalId) DO NOTHING`,
   );
   let added = 0;
-  for (const each of signals) {
-    const result = insert.run(
-      each.source,
-      each.account,
-      each.externalId,
-      each.kind,
-      each.state ?? 'ready',
-      each.summary ?? null,
-      each.occursAt ?? null,
-      each.runId ?? null,
-      now.toISOString(),
-    );
-    added += Number(result.changes);
-  }
+  // one transaction for the whole list: a commit flushes to disk, and on windows a commit for each row made a poll of
+  // many mails slow. a caller that is already in a transaction keeps its own.
+  const insertAll = () => {
+    for (const each of signals) {
+      const result = insert.run(
+        each.source,
+        each.account,
+        each.externalId,
+        each.kind,
+        each.state ?? 'ready',
+        each.summary ?? null,
+        each.occursAt ?? null,
+        each.runId ?? null,
+        now.toISOString(),
+      );
+      added += Number(result.changes);
+    }
+  };
+  if (db.isTransaction || signals.length < 2) insertAll();
+  else inTransaction(db, insertAll);
   return added;
 }
 
