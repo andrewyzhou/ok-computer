@@ -4,7 +4,7 @@
 -- of the newest version, so a list reads one row for each doc.
 -- kind: brief, plan, notes, comparison, meeting_prep or other. author: agent or owner.
 
--- one doc. title, kind and links are copies of the newest version. version is the number of the newest version, and
+-- one doc. title, kind, links and author are copies of the newest version. version is the number of the newest version, and
 -- the first version is 1. sessionKey and runId are the session and the run that wrote the first version, or null for
 -- a doc of the owner.
 CREATE TABLE docs (
