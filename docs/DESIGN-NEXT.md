@@ -1108,3 +1108,43 @@ The decisions are in 5.8, the contract is in API.md (M9), and the owner's guide 
 3. A server, when wanted: [setup/aws.md](setup/aws.md).
 4. The code sandbox, when wanted: Docker and `npm run sandbox:image`, as in [setup/sandbox.md](setup/sandbox.md).
 5. A new Mac: the steps in order are in [setup/macos.md](setup/macos.md).
+
+## 13. Phase 6
+
+The plan is [PHASE6-PLAN.md](PHASE6-PLAN.md) until the phase is done. The decisions of each track land here.
+
+### 13.2 T2 inbox-live: the inbox jobs on real mail
+
+The jobs of 12.8 ran against a copy of the owner's database with read-only Google calls on the five accounts, and these decisions come from what real mail broke. The contract is in API.md (M8, with the fields of phase 6), and the columns are in `026_inbox_live.sql`.
+
+- **Who wrote a mail is decided in code.** `classifyMail` of `src/inbox/classify.ts` reads only the headers and the Gmail labels, never the body, and gives a `MailKind`: `automated` (a no-reply sender, `Auto-Submitted`, an auto-reply or bulk header, `Precedence: bulk`, an empty return path, a calendar invitation, a reply-token address, or a shared mailbox of receipts, bills and shipping), `list` (`List-Id`, `List-Unsubscribe`, `Precedence: list` or the forums tab) or `person`. A machine signal wins over a list signal. `info@` and `hello@` are not shared mailboxes, because a person of a small club answers from them.
+- **needs_reply is for a person.** The model proposes the sections, and the code keeps a `needs_reply` item only for a person who is not the owner, in a mail to the owner or to a discussion list. A discussion list mail is a list mail with a person's address in From and no mark of bulk mail (`List-Unsubscribe-Post`, a bulk header, a shared mailbox, the promotions or updates tab): a student who writes to a course staff list, or an officer thread of a club. The mail to the owner comes first, then the copies, then the list mail. Only the mail to the owner gets a draft.
+- **The owner's addresses** match as mailboxes: a `+tag` does not count, and the dots of a Gmail address do not count either.
+- **The digest reads up to 250 mails** of each account in two days (the busiest account listed 110 on a Monday, over the old limit of 100). It lists one more id than it reads, so `capped` tells an account at the limit from one over it. The sweep does the same with its limit of 2000 and says in its note when the counts are a lower bound.
+- **A due date is checked in code.** The model gives `dueAt` and `dueText`, the words of the mail that state it. `checkDue` of `src/inbox/deadlines.ts` keeps the date only when the words are in the mail on word edges ("due Oct 2" is not in "due Oct 24"), `findDates` finds a date in them, and the date is the day of `dueAt`. A time with seconds keeps its am, pm and zone, a time range before a date starts at its first time, and a fraction, a score, a page or a room ("1/2 cup", "Score: 20/12") is no date. A time that the words do not state makes the deadline all day.
+- **The digest leaves out** a deadline or a bill whose due time passed, a deadline from a calendar invitation (the calendar and the brief show it), and a deadline from a mail that confirms a thing the owner did, such as a submitted form. `DigestStats` counts them in `pastDue` and `notDeadlines`.
+- **The receipts are read in code too.** `receiptKindOf` decides charge, refund, order or other, and a failed or declined payment is never a charge. `amountsIn` reads the amounts of the text, with "1 234,56 €" and without a credit in parentheses. The model's amount stays only when the text states it, else the one total of the text takes its place, else the row is marked and its confidence drops. The parser version of a receipt row (`PARSER_VERSION`, now 2) makes a later scan read a receipt again after a change of the reading.
+- **Confidence is honest.** `judgeSubscription` starts from the gaps between the charges (charges less than a day apart are one, also across UTC midnight) and the cadence that the receipts state, and lowers the confidence for a missing amount, a range of amounts, mixed currencies, and two charges at one gap with no stated plan (they can be two purchases). A plan whose next charge is long past drops to 0.3 with the reason. A row that the finder keeps has a confidence of at least 0.05, so 0 marks only a row that the receipts no longer support, which the page hides. The monthly totals count only rows with confidence 0.5 or more. The amount of a row is the one of the newest receipt that states one.
+- **Merchant keys** keep the letters and digits of every script, so a merchant with a name in Japanese or Chinese gets a row. The registrable domain of a sender is one function (`src/inbox/domains.ts`) for the receipts and the newsletters.
+- **Newsletter keys** (`senderIdentityOf` of `src/inbox/senders.ts`): a list of the sender's own domain keeps its List-Id as the key, a List-Id that a platform shares between customers gets the from domain after a `#`, and a no-reply address that sends for many organisers gets the organiser's name. A list whose own address takes the mailto unsubscribe, such as a group of a school or a club, is one row whoever posts to it, named by the list. A row of phase 5 (keyed by `phase5KeyOf`) is renamed in place only when no mail of the sweep still has its old key, so a real list never loses its row and its history to one outside poster.
+- **Gmail reads keep to the per-user limit.** `src/inbox/gmail.ts` starts the reads of one account at 2 a second after a burst of 20, and a read that Google limits waits 30, 60, 90 and 120 seconds and tries again, until the job stops. On the owner's accounts Gmail refused the reads after about 150 `messages.get` calls in a minute, and without this a job dropped the whole account. A note, a run error and the stats of the digest give the reason of a failed read in the words of the app (`readError`), never the text of Google, which names the OAuth project.
+- **The schedule.** The digest runs at 07:00, before the brief at 07:30 (12.8). A failed move of the schedule only logs, so it never stops the start of the app.
+- **The brief** reads the digest through `inboxForBrief` of `src/inbox/brief.ts` (API.md).
+
+**The read-only quality check.** `scripts/eval/inbox.ts` runs the parts of each job on a copy of the database, with read-only Google calls and a dry tool caller that refuses every write, and prints counts and rates, never mail text:
+
+```
+sqlite3 data/okc.sqlite ".backup <scratch>/okc.sqlite"
+npx tsx scripts/eval/inbox.ts --db <scratch>/okc.sqlite [--account <alias>]... [--job digest|subscriptions|newsletters|deadlines]... [--models] [--labels <file>] [--names] [--json]
+```
+
+It exits with 1 when a bar is not met. The bars of the digest and of the deadlines do not use the code they check: a plain second view (`src/inbox/eval/independent.ts`) gives the kind of a mail from the senders the owner wrote to (the To and Cc of the sent mail), a list of known notifier domains and the tabs of Gmail, and finds a due day in its plain forms by a search, not by the parser. The report counts where that view and `classifyMail` disagree. The recall and the precision of `needs_reply` need a labels file; without one they print as "not measured (no labels)", and a run with models adds a failure line, so a pass without labels is never read as a quality pass. The labels file is JSON outside the repo:
+
+```
+{
+  "messages": { "<account>:<gmail message id>": { "needsReply": true, "kind": "person", "due": "2026-10-24" } },
+  "subscriptions": { "<account>:<merchant key>": { "merchant": "Streamly", "amount": 15.49, "currency": "USD", "cadence": "monthly" } }
+}
+```
+
+**The baseline on real mail** (2026-10-20, before the fixes of this section, counts only): the digest search listed 6 to 21 mails in two days for four accounts and 110 to 113 for the school account; the receipt search gave 51 to 621 mails in 400 days for each account; the newsletter sweep of the school account was capped at 2000 mails in 90 days. Of 10 deadline items of one digest, 6 were already past and 5 were calendar invitations. The monthly total of the subscriptions was USD 1205.66 against about 20 to 40 that the owner pays, from two-purchase "weekly" rows and lapsed plans. One Google group became about 20 newsletter rows. The real sweep saved 36 senders against 350 in the check, because Gmail limited the reads of three accounts. Run the check again after a change and compare the counts.
