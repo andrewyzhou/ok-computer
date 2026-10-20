@@ -1,31 +1,19 @@
 import type { BriefDelegation, BriefSources } from '../dashboard/brief-types.js';
 import type { CalendarEvent } from '../dashboard/calendar-types.js';
-import type { CalendarProposalView, GoalRow, InboxDigest } from '../dashboard/types.js';
-import type { Db } from '../db/index.js';
+import type { BriefInbox } from '../dashboard/inbox-types.js';
+import type { CalendarProposalView, GoalRow } from '../dashboard/types.js';
 import { listGoals } from '../goals/store.js';
-import { getDigest, listProposals } from '../inbox/views.js';
+import { inboxForBrief } from '../inbox/brief.js';
+import { listProposals } from '../inbox/views.js';
 import { addDays, zonedToUtc } from '../time.js';
 import { LOOKAHEAD_DAYS, type BriefInput } from './build.js';
 import { readCalendar, type CalendarRead } from './calendar.js';
 import type { BriefContext } from './context.js';
 import { readDelegations } from './desk.js';
 
-// the sources of a brief: the calendar, the inbox digest, the calendar proposals, the delegations and the goals.
-
-// the id of the newest digest of one day, or undefined.
-export function digestOfDay(db: Db, day: string): number | undefined {
-  const row = db.prepare('SELECT id FROM inbox_digests WHERE day = ? ORDER BY id DESC LIMIT 1').get(day);
-  return row ? Number(row.id) : undefined;
-}
-
-// the digest of the brief: the newest digest of the day, else the newest digest of the day before, else null.
-export function digestForBrief(db: Db, day: string): InboxDigest | null {
-  for (const each of [day, addDays(day, -1)]) {
-    const id = digestOfDay(db, each);
-    if (id !== undefined) return getDigest(db, id) ?? null;
-  }
-  return null;
-}
+// the sources of a brief: the calendar, the inbox digest, the calendar proposals, the delegations and the goals. the
+// digest comes through the read api of the inbox (src/inbox/brief.ts) and the delegations through the one of the desk
+// (src/desk/index.ts), so the brief has no sql of the tables of other tracks.
 
 // the aliases of the google accounts that the brief tries to read. without a google block there are none.
 export const calendarAliases = (ctx: Pick<BriefContext, 'google'>): string[] => ctx.google?.accounts.aliases ?? [];
@@ -76,9 +64,9 @@ export async function gatherBriefInput(ctx: BriefContext, day: string): Promise<
     }
   }
 
-  let digest: InboxDigest | null = null;
+  let inbox: BriefInbox | null = null;
   try {
-    digest = digestForBrief(db, day);
+    inbox = inboxForBrief(db, day, ctx.google ? calendarAliases(ctx) : undefined);
   } catch (err) {
     failed('digest', err);
   }
@@ -90,8 +78,13 @@ export async function gatherBriefInput(ctx: BriefContext, day: string): Promise<
     failed('proposals', err);
   }
 
-  // readDelegations never throws: a missing or broken desk module gives null.
-  const delegations: BriefDelegation[] | null = await readDelegations(db, new Date(zonedToUtc(addDays(day, 1), '00:00', timeZone).getTime() - 1));
+  // a desk that cannot be read gives null, so the page does not claim that nothing waits.
+  let delegations: BriefDelegation[] | null = null;
+  try {
+    delegations = readDelegations(db, new Date(zonedToUtc(addDays(day, 1), '00:00', timeZone).getTime() - 1), ctx.clock());
+  } catch (err) {
+    failed('desk', err);
+  }
 
   let goals: GoalRow[] = [];
   try {
@@ -105,8 +98,8 @@ export async function gatherBriefInput(ctx: BriefContext, day: string): Promise<
     timeZone,
     now: ctx.clock(),
     events,
-    sources: { calendar, skipped, digest: digest ? { id: digest.id, day: digest.day } : null, desk: delegations !== null },
-    digest,
+    sources: { calendar, skipped, digest: inbox ? { id: inbox.digestId, day: inbox.day } : null, desk: delegations !== null },
+    inbox,
     proposals,
     delegations,
     goals,

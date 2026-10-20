@@ -228,8 +228,8 @@ export function ItemDetails({ item, timeZone, onClose }: { item: BriefItem | und
   );
 }
 
-// the notes about the sources that the brief did not read. a missing desk module shows nothing, because the page
-// does not claim that nothing waits.
+// the notes about the sources that the brief did not read. a desk that could not be read shows nothing, because the
+// page then has no delegations section and does not claim that nothing waits.
 export function sourceNotes(sources: BriefSources) {
   const notes: Array<{ key: string; text: string; link?: { href: string; label: string } }> = [];
   if (sources.calendar === 'off') notes.push({ key: 'off', text: 'Google is not set up, so the brief has no calendar.', link: { href: '#/google', label: 'Set up Google' } });

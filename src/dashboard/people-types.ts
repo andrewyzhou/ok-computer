@@ -83,7 +83,7 @@ export interface PersonNoteView {
   createdAt: string;
 }
 
-// a delegation of the desk that waits on this person. the list is empty until the desk (track t3) is there.
+// an active delegation of the desk that waits on this person, read through the desk read api.
 export interface PersonDelegationView {
   id: number;
   title: string;

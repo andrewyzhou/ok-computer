@@ -1,95 +1,40 @@
-import { z } from 'zod';
 import type { BriefDelegation } from '../dashboard/brief-types.js';
+import type { Delegation } from '../dashboard/desk-types.js';
 import type { Db } from '../db/index.js';
+import { listDue, listWaiting } from '../desk/index.js';
+import { findPersonByEmail } from '../people/index.js';
 
-// the delegations of the desk track (phase 6 t3), which is built at the same time as this one. the brief reads them
-// only when the desk module is there, so this file finds it at run time and never imports it by name: the build and
-// the tests pass with and without it.
+// the delegations of the brief, read through the desk read api (src/desk/index.ts): the active ones that are due or
+// have a follow-up by the end of the day, and the ones that wait on someone. a delegation that is both shows once.
 
-// the module of the desk track that lists delegations. the name is in a variable, so the type check does not look
-// for the file.
-export const DESK_MODULE = '../desk/store.js';
+// the name of the person that a delegation waits on: the name on the delegation, else the name that the people memory
+// has for its email, else the email. the people memory is filled only with a google block, so a miss is normal.
+function waitingName(db: Db, delegation: Delegation, now: Date): string | null {
+  const waitingOn = delegation.waitingOn;
+  if (!waitingOn) return null;
+  if (waitingOn.name) return waitingOn.name;
+  if (!waitingOn.email) return null;
+  return findPersonByEmail(db, waitingOn.email, now)?.name ?? waitingOn.email;
+}
 
-// the adapter of the desk module. it is the only place that knows the module, so when the desk track names its real
-// export, only DESK_MODULE and DESK_EXPORT change. the expected shape is:
-//
-//   export function listDelegations(db: Db): Array<{
-//     id: number;
-//     title: string;
-//     status: 'open' | 'waiting' | 'blocked' | 'done' | 'dropped';
-//     nextStep?: string | null;
-//     waitingOn?: string | { name: string | null; email: string | null } | null;
-//     dueAt?: string | null;            // an iso time
-//     followUpAt?: string | null;       // an iso time; nextFollowUpAt is read too
-//   }>
-//
-// other fields of a row are ignored. a row that does not have this shape is left out, and a module without the
-// function gives null, as a missing module does.
-export const DESK_EXPORT = 'listDelegations';
+const dueTime = (each: BriefDelegation) => (each.dueAt === null ? Number.POSITIVE_INFINITY : Date.parse(each.dueAt) || Number.POSITIVE_INFINITY);
 
-const optionalText = z
-  .string()
-  .nullish()
-  .transform((value) => value ?? null);
-
-// the desk keeps the person that a delegation waits on as a name and an email. the brief shows the name, else the
-// email.
-const waitingOn = z
-  .union([z.string(), z.object({ name: z.string().nullish(), email: z.string().nullish() })])
-  .nullish()
-  .transform((value) => (value === null || value === undefined ? null : typeof value === 'string' ? value : (value.name ?? value.email ?? null)));
-
-const rowSchema = z
-  .object({
-    id: z.number().int(),
-    title: z.string(),
-    status: z.enum(['open', 'waiting', 'blocked', 'done', 'dropped']),
-    nextStep: optionalText,
-    waitingOn,
-    dueAt: optionalText,
-    followUpAt: optionalText,
-    nextFollowUpAt: optionalText,
-  })
-  .transform(
-    (row): BriefDelegation => ({
-      id: row.id,
-      title: row.title,
-      status: row.status,
-      nextStep: row.nextStep,
-      waitingOn: row.waitingOn,
-      dueAt: row.dueAt,
-      followUpAt: row.followUpAt ?? row.nextFollowUpAt,
-    }),
-  );
-
-const ACTIVE = new Set<BriefDelegation['status']>(['open', 'waiting', 'blocked']);
-
-// a time that cannot be read is never due.
-const by = (iso: string | null, end: number) => iso !== null && Date.parse(iso) <= end;
-
-// the delegations that are due by the end of day or wait on someone (open, waiting or blocked, and either due by the
-// end of the day or with a follow-up by then, or waiting on someone), or null when the desk module is not there or
-// does not have the expected shape. load imports the desk module, and a test gives its own. this function never
-// throws.
-export async function readDelegations(db: Db, endOfDay: Date, load: () => Promise<unknown> = () => import(DESK_MODULE)): Promise<BriefDelegation[] | null> {
-  try {
-    const module = (await load()) as Record<string, unknown> | null | undefined;
-    const list = module?.[DESK_EXPORT];
-    if (typeof list !== 'function') return null;
-    const rows: unknown = await list(db);
-    if (!Array.isArray(rows)) return null;
-    const end = endOfDay.getTime();
-    const delegations: BriefDelegation[] = [];
-    for (const row of rows) {
-      const parsed = rowSchema.safeParse(row);
-      if (!parsed.success) continue;
-      const each = parsed.data;
-      if (!ACTIVE.has(each.status)) continue;
-      if (by(each.dueAt, end) || by(each.followUpAt, end) || each.waitingOn !== null) delegations.push(each);
-    }
-    const due = (each: BriefDelegation) => (each.dueAt === null ? Number.POSITIVE_INFINITY : Date.parse(each.dueAt) || Number.POSITIVE_INFINITY);
-    return delegations.sort((a, b) => due(a) - due(b) || a.id - b.id);
-  } catch {
-    return null;
-  }
+// readDelegations gives the delegations of the brief by due time (rows without one last), then by id. it throws when
+// the desk cannot be read, and the caller then marks the desk as not read.
+export function readDelegations(db: Db, endOfDay: Date, now: Date): BriefDelegation[] {
+  const rows = new Map<number, Delegation>();
+  for (const each of [...listDue(db, endOfDay), ...listWaiting(db)]) rows.set(each.id, each);
+  return [...rows.values()]
+    .map(
+      (each): BriefDelegation => ({
+        id: each.id,
+        title: each.title,
+        status: each.status,
+        nextStep: each.nextStep,
+        waitingOn: waitingName(db, each, now),
+        dueAt: each.dueAt,
+        followUpAt: each.nextFollowUpAt,
+      }),
+    )
+    .sort((a, b) => dueTime(a) - dueTime(b) || a.id - b.id);
 }

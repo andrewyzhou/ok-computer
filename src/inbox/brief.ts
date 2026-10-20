@@ -51,24 +51,16 @@ function unreadOf(digest: InboxDigest, configured: readonly string[] | undefined
   return (configured ?? []).filter((alias) => !digest.accounts.includes(alias));
 }
 
-// inboxForBrief gives the newest digest of the day (yyyy-mm-dd in the time zone of the app) in the shape of the brief.
-// when the day has no digest it gives the newest older one with stale true, and null when no digest exists. each
-// item links to its page: an item with a draft to #/inbox/drafts?id=<draftId>, an item with a proposal to
-// #/inbox/proposals?id=<proposalId>, and any other item to #/inbox/digests/<digestId>. accounts is the list of the
-// configured aliases, which finds the accounts that a digest of phase 5 did not read.
-export function inboxForBrief(db: Db, day: string, accounts?: readonly string[]): BriefInbox | null {
-  const today = db.prepare('SELECT id FROM inbox_digests WHERE day = ? ORDER BY id DESC LIMIT 1').get(day);
-  const row = today ?? db.prepare('SELECT id FROM inbox_digests WHERE day < ? ORDER BY day DESC, id DESC LIMIT 1').get(day);
-  if (!row) return null;
-  const digest = getDigest(db, Number(row.id));
-  if (!digest) return null;
+// briefInboxOf gives one digest in the shape of the brief. stale says that the digest is of an earlier day than the
+// brief. it reads nothing, so the brief tests give it their own digests.
+export function briefInboxOf(digest: InboxDigest, options: { stale: boolean; accounts?: readonly string[] }): BriefInbox {
   const brief: BriefInbox = {
     digestId: digest.id,
     day: digest.day,
     createdAt: digest.createdAt,
-    stale: !today,
+    stale: options.stale,
     accounts: digest.accounts,
-    unread: unreadOf(digest, accounts),
+    unread: unreadOf(digest, options.accounts),
     needsReply: [],
     deadlines: [],
     bills: [],
@@ -81,4 +73,18 @@ export function inboxForBrief(db: Db, day: string, accounts?: readonly string[])
     if (section) brief[section].push(briefItem(digest.id, item));
   }
   return brief;
+}
+
+// inboxForBrief gives the newest digest of the day (yyyy-mm-dd in the time zone of the app) in the shape of the brief.
+// when the day has no digest it gives the newest older one with stale true, and null when no digest exists. each
+// item links to its page: an item with a draft to #/inbox/drafts?id=<draftId>, an item with a proposal to
+// #/inbox/proposals?id=<proposalId>, and any other item to #/inbox/digests/<digestId>. accounts is the list of the
+// configured aliases, which finds the accounts that a digest of phase 5 did not read.
+export function inboxForBrief(db: Db, day: string, accounts?: readonly string[]): BriefInbox | null {
+  const today = db.prepare('SELECT id FROM inbox_digests WHERE day = ? ORDER BY id DESC LIMIT 1').get(day);
+  const row = today ?? db.prepare('SELECT id FROM inbox_digests WHERE day < ? ORDER BY day DESC, id DESC LIMIT 1').get(day);
+  if (!row) return null;
+  const digest = getDigest(db, Number(row.id));
+  if (!digest) return null;
+  return briefInboxOf(digest, { stale: !today, ...(accounts ? { accounts } : {}) });
 }

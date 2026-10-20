@@ -5,7 +5,7 @@ import { addGoal } from '../goals/store.js';
 import { silentLogger } from '../observability/logger.js';
 import { createRunQueue } from '../sessions/queue.js';
 import type { BriefContext } from './context.js';
-import { digestForBrief, gatherBriefInput } from './sources.js';
+import { gatherBriefInput } from './sources.js';
 
 // the calendar of a test answers from calendarAnswer, so these tests do not need google.
 let calendarAnswer: (range: { startAt: Date; endAt: Date }) => Promise<CalendarRead>;
@@ -66,18 +66,25 @@ describe('brief sources', () => {
     calendarAnswer = async () => read([], false);
   });
 
-  it('uses the newest digest of the day, else of the day before', () => {
+  it('uses the newest digest of the day, else the newest older one, through the read api of the inbox', async () => {
     const db = openDb(':memory:');
-    expect(digestForBrief(db, DAY)).toBeNull();
-    digest(db, '2026-10-10');
-    expect(digestForBrief(db, DAY)).toBeNull();
+    const digestOf = async () => (await gatherBriefInput(context(db), DAY)).inbox;
+    expect(await digestOf()).toBeNull();
+    const oldest = digest(db, '2026-10-10');
+    expect(await digestOf()).toMatchObject({ digestId: oldest, stale: true });
     const before = digest(db, '2026-10-11');
     const older = digest(db, '2026-10-11');
-    expect(digestForBrief(db, DAY)?.id).toBe(older);
+    expect((await digestOf())?.digestId).toBe(older);
     expect(before).toBeLessThan(older);
     const today = digest(db, DAY, ['personal', 'school']);
     digest(db, '2026-10-13');
-    expect(digestForBrief(db, DAY)).toMatchObject({ id: today, day: DAY, accounts: ['personal', 'school'], shortText: `digest of ${DAY}` });
+    expect(await digestOf()).toMatchObject({ digestId: today, day: DAY, stale: false, accounts: ['personal', 'school'] });
+  });
+
+  it('names the configured accounts that the digest did not read', async () => {
+    const db = openDb(':memory:');
+    digest(db, DAY, ['personal']);
+    expect((await gatherBriefInput(context(db, ['personal', 'school']), DAY)).inbox?.unread).toEqual(['school']);
   });
 
   it('reads the calendar of the day and the week after it, the proposals and the goals of the day', async () => {
@@ -94,10 +101,10 @@ describe('brief sources', () => {
     expect(input.timeZone).toBe(TZ);
     expect(input.now).toEqual(NOW);
     expect(input.events).toEqual([]);
-    expect(input.sources).toEqual({ calendar: 'off', skipped: [], digest: { id, day: '2026-10-11' }, desk: false });
-    expect(input.digest?.id).toBe(id);
+    expect(input.sources).toEqual({ calendar: 'off', skipped: [], digest: { id, day: '2026-10-11' }, desk: true });
+    expect(input.inbox?.digestId).toBe(id);
     expect(input.proposals.map((each) => [each.title, each.state])).toEqual([['Problem set 4 due', 'proposed']]);
-    expect(input.delegations).toBeNull();
+    expect(input.delegations).toEqual([]);
     expect(input.goals).toEqual([{ id: 1, day: DAY, title: 'finish essay', eta: '2026-10-13T04:00:00.000Z', status: 'open', completedAt: null, note: null }]);
   });
 
@@ -119,11 +126,14 @@ describe('brief sources', () => {
       throw new Error('the calendar broke');
     };
     const withGoogle = await gatherBriefInput(context(db, ['personal']), DAY);
-    expect(withGoogle.sources).toEqual({ calendar: 'failed', skipped: [{ account: 'personal', reason: 'The calendar could not be read.' }], digest: null, desk: false });
+    expect(withGoogle.sources).toEqual({ calendar: 'failed', skipped: [{ account: 'personal', reason: 'The calendar could not be read.' }], digest: null, desk: true });
     expect((await gatherBriefInput(context(db), DAY)).sources.calendar).toBe('off');
-    db.exec('DROP TABLE inbox_proposals');
+    db.exec('DROP TABLE inbox_proposals; DROP TABLE delegation_links; DROP TABLE delegation_nudges; DROP TABLE delegation_events; DROP TABLE delegations');
     const input = await gatherBriefInput(context(db), DAY);
     expect(input.proposals).toEqual([]);
     expect(input.goals).toEqual([]);
+    // a desk that cannot be read gives null, so the page does not say that nothing waits.
+    expect(input.delegations).toBeNull();
+    expect(input.sources.desk).toBe(false);
   });
 });

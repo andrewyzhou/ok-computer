@@ -3,6 +3,7 @@ import type { BriefContent, BriefDelegation, BriefSection } from '../dashboard/b
 import type { CalendarEvent } from '../dashboard/calendar-types.js';
 import type { CalendarProposalView, DigestItem, GoalRow, InboxDigest } from '../dashboard/types.js';
 import { BRIEF_FULL, BRIEF_QUIET, TODAY_DAY, TODAY_EVENTS, TODAY_NOW, TODAY_TZ } from '../../test/fixtures/today-data.js';
+import { briefInboxOf } from '../inbox/brief.js';
 import { briefText, buildBrief, SHORT_TEXT_LIMIT, type BriefInput } from './build.js';
 
 const at = (day: string, time: string) => new Date(`${day}T${time}:00-07:00`).toISOString();
@@ -29,6 +30,7 @@ const DIGEST: InboxDigest = {
   createdAt: '2026-10-12T14:00:00.000Z',
   accounts: ['personal', 'school'],
   shortText: 'digest',
+  stats: null,
   items: [
     digestItem({ section: 'needs_reply', account: 'personal', threadId: 't-landlord', summary: 'Reply to Dana about the lease', draftId: 5 }),
     digestItem({ section: 'needs_reply', account: 'school', threadId: 't-ta', summary: 'Answer the TA about section swap' }),
@@ -37,6 +39,9 @@ const DIGEST: InboxDigest = {
     digestItem({ section: 'packages', account: 'personal', threadId: 't-box', summary: 'Package from the bookstore', dueAt: at(TODAY_DAY, '00:00') }),
   ],
 };
+
+// the digest in the shape that the brief reads, as inboxForBrief gives it.
+const inboxOf = (digest: InboxDigest) => briefInboxOf(digest, { stale: false });
 
 function proposal(fields: Partial<CalendarProposalView> & Pick<CalendarProposalView, 'id' | 'title' | 'startAt'>): CalendarProposalView {
   return {
@@ -55,6 +60,7 @@ function proposal(fields: Partial<CalendarProposalView> & Pick<CalendarProposalV
     runId: null,
     createdAt: '2026-10-11T14:00:00.000Z',
     resolvedAt: null,
+    dueText: null,
     ...fields,
   };
 }
@@ -75,7 +81,7 @@ function input(fields: Partial<BriefInput> = {}): BriefInput {
     now: new Date(TODAY_NOW),
     events: TODAY_EVENTS,
     sources: { calendar: 'ok', skipped: [], digest: { id: 1, day: TODAY_DAY }, desk: true },
-    digest: DIGEST,
+    inbox: inboxOf(DIGEST),
     proposals: [proposal({ id: 7, title: 'Problem set 4 due', startAt: '2026-10-14' })],
     delegations: DELEGATIONS,
     goals: [goal(2, 'gym', 'open', null), goal(1, 'finish essay', 'open', at(TODAY_DAY, '21:00')), goal(3, 'laundry', 'dropped', null)],
@@ -161,7 +167,7 @@ describe('buildBrief', () => {
         digestItem({ section: 'deadlines', account: 'school', threadId: 't-far', summary: 'Next month', dueAt: at('2026-10-20', '12:00') }),
       ],
     };
-    const items = sectionOf(buildBrief(input({ digest, proposals: [], events: [] })), 'deadlines')!.items;
+    const items = sectionOf(buildBrief(input({ inbox: inboxOf(digest), proposals: [], events: [] })), 'deadlines')!.items;
     expect(items.map((item) => [item.id, item.tone, item.at])).toEqual([
       ['thread:school:t-date', 'warning', TODAY_DAY],
       ['thread:school:t-late', 'critical', at(TODAY_DAY, '06:00')],
@@ -174,7 +180,7 @@ describe('buildBrief', () => {
       ...DIGEST,
       items: [...DIGEST.items, digestItem({ section: 'needs_reply', account: 'school', threadId: 't-essay', summary: 'Reply about the essay' })],
     };
-    const inbox = sectionOf(buildBrief(input({ digest })), 'inbox')!;
+    const inbox = sectionOf(buildBrief(input({ inbox: inboxOf(digest) })), 'inbox')!;
     expect(inbox.note).toBe('2 need a reply, 1 bill, 1 package.');
     expect(inbox.items.map((item) => [item.id, item.title, item.detail, item.tone])).toEqual([
       ['thread:personal:t-landlord', 'Reply to Dana about the lease', 'A draft is in Gmail Drafts', 'warning'],
@@ -185,12 +191,12 @@ describe('buildBrief', () => {
   });
 
   it('says when the digest is of the day before, and says so when there is no digest', () => {
-    const old = buildBrief(input({ digest: { ...DIGEST, day: '2026-10-11' } }));
+    const old = buildBrief(input({ inbox: inboxOf({ ...DIGEST, day: '2026-10-11' }) }));
     expect(sectionOf(old, 'inbox')!.note).toBe('2 need a reply, 1 bill, 1 package. From the digest of 2026-10-11.');
     // with google set up, the owner can tell "nothing needs you" from "the inbox was not read".
-    expect(sectionOf(buildBrief(input({ digest: null })), 'inbox')).toEqual({ kind: 'inbox', title: 'Inbox', items: [], note: 'No inbox digest yet today.' });
+    expect(sectionOf(buildBrief(input({ inbox: null })), 'inbox')).toEqual({ kind: 'inbox', title: 'Inbox', items: [], note: 'No inbox digest yet today.' });
     // without google there is no inbox to read, so the section is left out.
-    expect(sectionOf(buildBrief(input({ digest: null, sources: { calendar: 'off', skipped: [], digest: null, desk: false } })), 'inbox')).toBeUndefined();
+    expect(sectionOf(buildBrief(input({ inbox: null, sources: { calendar: 'off', skipped: [], digest: null, desk: false } })), 'inbox')).toBeUndefined();
   });
 
   it('leaves the delegations out for null and for an empty list', () => {
@@ -224,7 +230,7 @@ describe('buildBrief', () => {
   });
 
   it('gives only the day section and the note of the missing digest on an empty day', () => {
-    const content = buildBrief(input({ events: [], digest: null, proposals: [], delegations: null, goals: [] }));
+    const content = buildBrief(input({ events: [], inbox: null, proposals: [], delegations: null, goals: [] }));
     expect(content.sections).toEqual([
       { kind: 'day', title: 'Schedule', items: [], note: 'No events today.' },
       { kind: 'inbox', title: 'Inbox', items: [], note: 'No inbox digest yet today.' },
@@ -281,7 +287,7 @@ describe('briefText', () => {
   });
 
   it('gives the quiet day', () => {
-    const content = buildBrief(input({ day: '2026-10-11', events: [], digest: null, proposals: [], delegations: null, goals: [], sources: BRIEF_QUIET.content.sources }));
+    const content = buildBrief(input({ day: '2026-10-11', events: [], inbox: null, proposals: [], delegations: null, goals: [], sources: BRIEF_QUIET.content.sources }));
     expect(briefText(content, 'http://127.0.0.1:7777/#/today/2026-10-11')).toBe(BRIEF_QUIET.shortText);
   });
 

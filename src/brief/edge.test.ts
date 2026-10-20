@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { CalendarEvent } from '../dashboard/calendar-types.js';
-import type { CalendarProposalView, DigestItem, InboxDigest } from '../dashboard/types.js';
+import type { BriefInbox } from '../dashboard/inbox-types.js';
+import type { CalendarProposalView, DigestItem } from '../dashboard/types.js';
+import { openDb } from '../db/index.js';
+import { createDelegation, updateDelegation } from '../desk/store.js';
+import { briefInboxOf } from '../inbox/brief.js';
 import { eventsOfDay, findConflicts, findTravelGaps, unansweredInvites } from './analyze.js';
 import { briefText, buildBrief, SHORT_TEXT_LIMIT, type BriefInput } from './build.js';
 import { toCalendarEvent } from './calendar.js';
@@ -8,7 +12,7 @@ import { readDelegations } from './desk.js';
 
 // adversarial cases of the pure parts of the brief: the edges of the 15 minutes of a travel gap, day boundaries in
 // zones with daylight saving time and with odd offsets, hostile text in events and mail, times that cannot be read,
-// and desk modules that break.
+// and delegations as the desk read api gives them.
 
 const LA = 'America/Los_Angeles';
 const primary = { id: 'primary', label: null, color: null, primary: true };
@@ -52,7 +56,7 @@ function input(fields: Partial<BriefInput> = {}): BriefInput {
     now: new Date('2026-10-12T07:30:00-07:00'),
     events: [],
     sources: { calendar: 'ok', skipped: [], digest: null, desk: false },
-    digest: null,
+    inbox: null,
     proposals: [],
     delegations: null,
     goals: [],
@@ -78,15 +82,9 @@ function digestItem(fields: Partial<DigestItem>): DigestItem {
   };
 }
 
-const digestOf = (items: DigestItem[], day = '2026-10-12'): InboxDigest => ({
-  id: 1,
-  day,
-  runId: 'run-digest',
-  createdAt: '2026-10-12T14:00:00.000Z',
-  accounts: ['personal'],
-  shortText: 'digest',
-  items,
-});
+// a digest in the shape that the brief reads, as inboxForBrief of src/inbox/brief.ts gives it.
+const digestOf = (items: DigestItem[], day = '2026-10-12'): BriefInbox =>
+  briefInboxOf({ id: 1, day, runId: 'run-digest', createdAt: '2026-10-12T14:00:00.000Z', accounts: ['personal'], shortText: 'digest', stats: null, items }, { stale: day < '2026-10-12' });
 
 const sectionOf = (brief: ReturnType<typeof buildBrief>, kind: string) => brief.sections.find((each) => each.kind === kind);
 
@@ -216,7 +214,7 @@ describe('hostile text in the brief', () => {
   });
 
   it('never puts mail text into the telegram message, and keeps it to one line on the page', () => {
-    const brief = buildBrief(input({ digest: digestOf([digestItem({ summary: 'Pay now\nhttp://evil.example\u0000' })]) }));
+    const brief = buildBrief(input({ inbox: digestOf([digestItem({ summary: 'Pay now\nhttp://evil.example\u0000' })]) }));
     expect(sectionOf(brief, 'inbox')?.items[0]?.title).toBe('Pay now http://evil.example');
     expect(briefText(brief, LINK)).not.toContain('evil');
   });
@@ -248,10 +246,11 @@ describe('sources with times that cannot be read', () => {
       runId: null,
       createdAt: '2026-10-12T14:00:00.000Z',
       resolvedAt: null,
+      dueText: null,
     };
     const brief = buildBrief(
       input({
-        digest: digestOf([
+        inbox: digestOf([
           digestItem({ section: 'deadlines', threadId: 'd1', dueAt: 'next friday' }),
           digestItem({ section: 'bills', threadId: 'b1', dueAt: 'soon', amount: 12, currency: 'XX$' }),
           digestItem({ section: 'packages', threadId: 'p1', dueAt: 'tomorrow' }),
@@ -269,7 +268,7 @@ describe('sources with times that cannot be read', () => {
   });
 
   it('notes a digest of the day before, and counts it in the telegram text', () => {
-    const brief = buildBrief(input({ digest: digestOf([digestItem({})], '2026-10-11') }));
+    const brief = buildBrief(input({ inbox: digestOf([digestItem({})], '2026-10-11') }));
     expect(sectionOf(brief, 'inbox')?.note).toBe('1 needs a reply. From the digest of 2026-10-11.');
     expect(briefText(brief, LINK)).toContain('Inbox: 1 needs a reply.');
   });
@@ -282,46 +281,43 @@ describe('sources with times that cannot be read', () => {
   });
 });
 
-describe('the desk module as the brief reads it', () => {
+describe('the desk as the brief reads it', () => {
   const end = new Date('2026-10-13T06:59:59.999Z');
+  const now = new Date('2026-10-12T14:30:00.000Z');
 
-  it('reads the rows of the desk store, with waitingOn as a name and an email', async () => {
-    const rows = [
-      { id: 1, title: 'a', status: 'waiting', waitingOn: { name: null, email: 'x@example.com' }, dueAt: null, nextFollowUpAt: null, links: [] },
-      { id: 2, title: 'b', status: 'open', waitingOn: null, dueAt: '2026-10-12T23:59:59.999-07:00', nextFollowUpAt: null },
-      // due after the day, with no one to wait on, so it is not in the brief.
-      { id: 3, title: 'c', status: 'open', waitingOn: null, dueAt: '2026-10-20T23:59:00-07:00', nextFollowUpAt: null },
-      { id: 4, title: 'd', status: 'done', waitingOn: { name: 'Z', email: null }, dueAt: null, nextFollowUpAt: null },
-      { id: 6, title: 'f', status: 'blocked', waitingOn: null, dueAt: null, nextFollowUpAt: '2026-10-12T09:00:00-07:00' },
-      // rows of another shape are left out.
-      { id: 'x', title: 'bad' },
-      null,
-      { id: 7, title: 'g', status: 'archived' },
-    ];
-    const got = await readDelegations({} as never, end, async () => ({ listDelegations: () => rows }));
-    expect(got?.map((each) => [each.id, each.waitingOn, each.followUpAt])).toEqual([
-      [2, null, null],
-      [1, 'x@example.com', null],
-      [6, null, '2026-10-12T09:00:00-07:00'],
+  it('reads the due and the waiting delegations of the desk read api, each once, by due time', () => {
+    const db = openDb(':memory:');
+    const make = (title: string, fields: { waitingOn?: { name?: string; email?: string }; dueAt?: string; nextFollowUpAt?: string } = {}) => {
+      const made = createDelegation(db, { title, createdBy: 'owner', ...fields }, { actor: 'owner' }, now);
+      if (!made.ok) throw new Error(made.error);
+      return made.value.id;
+    };
+    const waiting = make('a', { waitingOn: { email: 'x@example.com' } });
+    const due = make('b', { dueAt: '2026-10-13T06:59:59.999Z' });
+    // due after the day, with no one to wait on, so it is not in the brief.
+    make('c', { dueAt: '2026-10-21T06:59:00.000Z' });
+    const done = make('d', { waitingOn: { name: 'Z' } });
+    const closed = updateDelegation(db, done, { status: 'done' }, { actor: 'owner' }, now);
+    if (!closed.ok) throw new Error(closed.error);
+    const followUp = make('f', { nextFollowUpAt: '2026-10-12T16:00:00.000Z' });
+    // the store takes utc times, as parseWhen gives them. waiting and due today: one row.
+    const both = make('g', { waitingOn: { name: 'Dana' }, dueAt: '2026-10-13T01:00:00.000Z' });
+    const got = readDelegations(db, end, now);
+    expect(got.map((each) => [each.id, each.waitingOn, each.followUpAt])).toEqual([
+      [both, 'Dana', null],
+      [due, null, null],
+      [waiting, 'x@example.com', null],
+      [followUp, null, '2026-10-12T16:00:00.000Z'],
     ]);
   });
 
-  it('gives null for a desk module that is missing, throws, or gives no list', async () => {
-    const cases: Array<() => Promise<unknown>> = [
-      async () => {
-        throw new Error('missing');
-      },
-      async () => ({
-        listDelegations: () => {
-          throw new Error('no such table: delegations');
-        },
-      }),
-      async () => ({ listDelegations: async () => Promise.reject(new Error('locked')) }),
-      async () => ({ listDelegations: () => 'rows' }),
-      async () => ({ listDelegations: 'not a function' }),
-      async () => null,
-    ];
-    for (const load of cases) expect(await readDelegations({} as never, end, load)).toBeNull();
+  it('names the person that a delegation waits on from the people memory when it has only an email', () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO people (id, name, organization, createdAt, updatedAt) VALUES (1, 'Dana Reyes', NULL, ?, ?)").run(now.toISOString(), now.toISOString());
+    db.prepare("INSERT INTO person_emails (personId, email, isPrimary, firstSeenAt, lastSeenAt) VALUES (1, 'dana@landlord.example', 1, ?, ?)").run(now.toISOString(), now.toISOString());
+    const made = createDelegation(db, { title: 'Get the lease', waitingOn: { email: 'Dana@Landlord.example' }, createdBy: 'owner' }, { actor: 'owner' }, now);
+    if (!made.ok) throw new Error(made.error);
+    expect(readDelegations(db, end, now).map((each) => each.waitingOn)).toEqual(['Dana Reyes']);
   });
 });
 

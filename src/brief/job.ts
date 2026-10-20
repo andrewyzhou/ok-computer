@@ -1,5 +1,6 @@
 import { appendEvent } from '../events/log.js';
 import { requestContext } from '../google/trace.js';
+import { inboxForBrief } from '../inbox/brief.js';
 import { inboxAutomation } from '../inbox/inbox.js';
 import { calendarSource, mailSource } from '../inbox/run.js';
 import { redact } from '../observability/redact.js';
@@ -12,7 +13,7 @@ import { errorText } from '../tools/registry.js';
 import { wrapIfTainted } from '../tools/untrusted.js';
 import { briefText, buildBrief } from './build.js';
 import { briefSession, type BriefContext } from './context.js';
-import { calendarAliases, digestOfDay, gatherBriefInput } from './sources.js';
+import { calendarAliases, gatherBriefInput } from './sources.js';
 import { recordDelivery, saveBrief } from './store.js';
 
 // the job of the brief automation. it runs in code in the session brief:<runId>, without a model call.
@@ -72,7 +73,7 @@ export function digestPending(ctx: Pick<BriefContext, 'db' | 'clock' | 'timeZone
   // a digest made after its planned time of the day did not run at that time.
   if (planned < new Date(automation.createdAt)) return false;
   if (localDay(planned, ctx.timeZone) !== day) return false;
-  if (digestOfDay(db, day)) return false;
+  if (inboxForBrief(db, day)?.stale === false) return false;
   const ran = db.prepare('SELECT 1 FROM automation_runs WHERE automationId = ? AND startedAt >= ? LIMIT 1').get(automation.id, planned.toISOString());
   return !ran;
 }
@@ -121,7 +122,7 @@ export async function runBriefJob(ctx: BriefContext, options: BriefJobOptions = 
     const skipped = new Set(input.sources.skipped.filter((each) => each.calendarId === undefined).map((each) => each.account));
     const calendars = input.sources.calendar === 'off' ? [] : calendarAliases(ctx).filter((alias) => !skipped.has(alias));
     const desk = input.delegations && input.delegations.length > 0 ? [DESK_SOURCE] : [];
-    const sources = [...new Set([...calendars.map(calendarSource), ...(input.digest?.accounts ?? []).map(mailSource), ...desk])];
+    const sources = [...new Set([...calendars.map(calendarSource), ...(input.inbox?.accounts ?? []).map(mailSource), ...desk])];
     const at = clock().toISOString();
     const taint: TaintSource[] = sources.map((source) => ({ source, toolName: 'brief', runId, toolCallId: `brief-${runId}`, at }));
     if (taint.length) event(`The brief read ${sources.join(', ')}.`, taint);

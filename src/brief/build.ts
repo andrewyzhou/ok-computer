@@ -1,6 +1,7 @@
 import type { BriefContent, BriefDelegation, BriefItem, BriefSection, BriefSectionKind, BriefSources } from '../dashboard/brief-types.js';
 import type { CalendarEvent } from '../dashboard/calendar-types.js';
-import type { CalendarProposalView, DigestItem, GoalRow, InboxDigest } from '../dashboard/types.js';
+import type { BriefInbox, BriefInboxItem } from '../dashboard/inbox-types.js';
+import type { CalendarProposalView, GoalRow } from '../dashboard/types.js';
 import { cleanLine } from '../signals/store.js';
 import { addDays, localDay, localTime, zonedToUtc } from '../time.js';
 import { byStart, dedupeCopies, eventsOfDay, findConflicts, findTravelGaps, unansweredInvites } from './analyze.js';
@@ -16,16 +17,16 @@ export const LOOKAHEAD_DAYS = 7;
 export const SHORT_TEXT_LIMIT = 700;
 
 // everything the brief of one day is built from. day is yyyy-mm-dd in timeZone, and now is the time of the build.
-// events cover the day and the LOOKAHEAD_DAYS after it. digest is the digest that the brief uses (of the day, or the
-// newest one of the day before), or null. delegations is null when the desk module is not there. goals are the goals
-// of the day. proposals are the calendar proposals in the state proposed.
+// events cover the day and the LOOKAHEAD_DAYS after it. inbox is the newest digest in the shape of the brief
+// (inboxForBrief of src/inbox/brief.ts), or null. delegations is null when the desk could not be read. goals are the
+// goals of the day. proposals are the calendar proposals in the state proposed.
 export interface BriefInput {
   day: string;
   timeZone: string;
   now: Date;
   events: CalendarEvent[];
   sources: BriefSources;
-  digest: InboxDigest | null;
+  inbox: BriefInbox | null;
   proposals: CalendarProposalView[];
   delegations: BriefDelegation[] | null;
   goals: GoalRow[];
@@ -74,7 +75,7 @@ export function buildBrief(input: BriefInput): BriefContent {
 
   const deadlines = deadlineItems(input, events, clock);
   const deadlineIds = new Set(deadlines.map((item) => item.id));
-  const inbox = input.digest ? inboxSection(input.digest, deadlineIds, clock) : null;
+  const inbox = input.inbox ? inboxSection(input.inbox, deadlineIds, clock) : null;
 
   const sections: BriefSection[] = [
     daySection(events, input.sources, clock),
@@ -191,13 +192,13 @@ function deadlineItems(input: BriefInput, events: CalendarEvent[], clock: BriefC
   const found: Deadline[] = [];
   const inWindow = (start: number, end: number) => start < clock.windowEnd && end > clock.dayStart;
 
-  if (input.digest) {
-    for (const each of input.digest.items) {
-      if (each.section !== 'deadlines' || !each.dueAt) continue;
+  if (input.inbox) {
+    for (const each of input.inbox.deadlines) {
+      if (!each.dueAt) continue;
       const due = dueOf(each.dueAt, clock);
       if (!due || !inWindow(due.start, due.end)) continue;
       found.push({
-        item: threadItem(input.digest.id, each, digestTitle(each), `Due ${due.when} · from the inbox`, due.at, toneOf(due.end, clock)),
+        item: threadItem(input.inbox.digestId, each, digestTitle(each), `Due ${due.when} · from the inbox`, due.at, toneOf(due.end, clock)),
         sortAt: due.start,
       });
     }
@@ -280,25 +281,31 @@ function toneOf(dueBy: number, clock: BriefClock): BriefItem['tone'] {
   return null;
 }
 
-function inboxSection(digest: InboxDigest, deadlineIds: Set<string>, clock: BriefClock): { items: BriefItem[]; note: string } {
+function inboxSection(inbox: BriefInbox, deadlineIds: Set<string>, clock: BriefClock): { items: BriefItem[]; note: string } {
   const replies: BriefItem[] = [];
   const bills: BriefItem[] = [];
   const packages: BriefItem[] = [];
   const seen = new Set(deadlineIds);
-  for (const each of digest.items) {
+  // each thread shows once: a thread that is a deadline stays in the deadlines, and a later section skips a thread
+  // that an earlier one has.
+  const fresh = (each: BriefInboxItem) => {
     const id = `thread:${each.account}:${each.threadId}`;
-    if (each.section === 'deadlines' || seen.has(id)) continue;
+    if (seen.has(id)) return false;
     seen.add(id);
+    return true;
+  };
+  for (const each of inbox.needsReply.filter(fresh)) {
+    replies.push(threadItem(inbox.digestId, each, digestTitle(each), each.draftId !== null ? 'A draft is in Gmail Drafts' : null, null, 'warning'));
+  }
+  for (const each of inbox.bills.filter(fresh)) {
     const due = each.dueAt ? dueOf(each.dueAt, clock) : null;
-    if (each.section === 'needs_reply') {
-      replies.push(threadItem(digest.id, each, digestTitle(each), each.draftId !== null ? 'A draft is in Gmail Drafts' : null, null, 'warning'));
-    } else if (each.section === 'bills') {
-      const amount = each.amount !== null ? `, ${formatAmount(each.amount, each.currency)}` : '';
-      bills.push(threadItem(digest.id, each, `${digestTitle(each)}${amount}`, due ? `Due ${due.when}` : null, due?.at ?? null, null));
-    } else if (each.section === 'packages') {
-      const arrives = due ? (localDay(new Date(due.start), clock.timeZone) === clock.day ? 'Arrives today' : `Arrives ${due.when}`) : null;
-      packages.push(threadItem(digest.id, each, digestTitle(each), arrives, due?.at ?? null, null));
-    }
+    const amount = each.amount !== null ? `, ${formatAmount(each.amount, each.currency)}` : '';
+    bills.push(threadItem(inbox.digestId, each, `${digestTitle(each)}${amount}`, due ? `Due ${due.when}` : null, due?.at ?? null, null));
+  }
+  for (const each of inbox.packages.filter(fresh)) {
+    const due = each.dueAt ? dueOf(each.dueAt, clock) : null;
+    const arrives = due ? (localDay(new Date(due.start), clock.timeZone) === clock.day ? 'Arrives today' : `Arrives ${due.when}`) : null;
+    packages.push(threadItem(inbox.digestId, each, digestTitle(each), arrives, due?.at ?? null, null));
   }
   const counts = [
     replies.length ? `${replies.length} ${replies.length === 1 ? 'needs' : 'need'} a reply` : null,
@@ -306,15 +313,16 @@ function inboxSection(digest: InboxDigest, deadlineIds: Set<string>, clock: Brie
     packages.length ? plural(packages.length, 'package', 'packages') : null,
   ].filter((part): part is string => part !== null);
   let note = counts.length ? `${counts.join(', ')}.` : 'Nothing in the inbox needs you.';
-  if (digest.day < clock.day) note += ` From the digest of ${digest.day}.`;
+  if (inbox.day < clock.day) note += ` From the digest of ${inbox.day}.`;
+  if (inbox.unread.length) note += ` The digest could not read ${inbox.unread.join(', ')}.`;
   return { items: [...replies, ...bills, ...packages], note };
 }
 
-function digestTitle(item: DigestItem): string {
+function digestTitle(item: Pick<BriefInboxItem, 'summary' | 'subject'>): string {
   return cleanLine(item.summary || item.subject, 300);
 }
 
-function threadItem(digestId: number, each: DigestItem, title: string, detail: string | null, at: string | null, tone: BriefItem['tone']): BriefItem {
+function threadItem(digestId: number, each: BriefInboxItem, title: string, detail: string | null, at: string | null, tone: BriefItem['tone']): BriefItem {
   return {
     id: `thread:${each.account}:${each.threadId}`,
     title,

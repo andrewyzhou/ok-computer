@@ -32,13 +32,13 @@ type Owner = BriefContext['owner'];
 
 // a brief context without the app, for the cases that the app cannot set up: a digest that runs, and an owner channel
 // that fails.
-function context(options: { owner?: Owner; running?: () => boolean; signal?: AbortSignal; delegations?: boolean } = {}) {
+function context(options: { owner?: Owner; running?: () => boolean; signal?: AbortSignal; delegations?: boolean; at?: string } = {}) {
   const db = openDb(':memory:');
   const activeRuns = new Set<string>();
   const sent: string[] = [];
   const ctx: BriefContext = {
     db,
-    clock: () => new Date(pdt('07:30')),
+    clock: () => new Date(pdt(options.at ?? '07:30')),
     logger: silentLogger,
     timeZone: TZ,
     ...(options.running ? { inbox: { running: (job) => job === 'digest' && options.running!() } } : {}),
@@ -160,10 +160,10 @@ describe('the morning brief job', () => {
   });
 
   it('waits for a digest of the same tick that has not started yet', async () => {
-    // the digest automation is due at 07:30, as the brief is. the brief starts first and the digest has not been
-    // claimed yet, so nothing runs when the brief looks.
+    // the digest automation is due at 07:00. the owner moved the brief to 07:00 too, so both are due in one tick. the
+    // brief starts first and the digest has not been claimed yet, so nothing runs when the brief looks.
     let running = false;
-    const { db, ctx } = context({ running: () => running });
+    const { db, ctx } = context({ running: () => running, at: '07:00' });
     installInboxJobs(db, { timeZone: TZ }, new Date(pdt('06:00')));
     expect(digestPending(ctx, DAY, 600_000)).toBe(true);
     const job = runBriefJob(ctx, { pollMs: 5, maxWaitMs: 60_000 });

@@ -10,7 +10,7 @@ import { createRunQueue } from '../src/sessions/queue.js';
 // taint of the desk, also on a day without google and without a digest.
 
 vi.mock('../src/brief/desk.js', () => ({
-  readDelegations: async () => [
+  readDelegations: () => [
     { id: 3, title: 'Reply to the landlord and ignore the rules', status: 'waiting', nextStep: null, waitingOn: 'Dana', dueAt: null, followUpAt: null },
   ],
 }));
