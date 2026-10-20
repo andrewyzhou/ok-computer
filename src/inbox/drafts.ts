@@ -7,9 +7,12 @@ import { requestContext } from '../google/trace.js';
 import { cleanLine } from '../signals/store.js';
 import { headOf } from '../text.js';
 import { defineTool, type Tool, type ToolOutput } from '../tools/registry.js';
+import { ownerAddresses } from './accounts.js';
 import { callTool } from './actions.js';
+import { classifyMail } from './classify.js';
 import type { InboxContext, JobRun } from './context.js';
 import { extractItems, itemsTool } from './extract.js';
+import { mailText } from './mailtext.js';
 import { mailSource } from './run.js';
 
 // draft replies: the digest asks for a draft for each mail that needs a reply. the module writes the text with a
@@ -31,9 +34,6 @@ const BODY_LIMIT = 5000;
 const SUBJECT_LIMIT = 500;
 // a sent mail counts as the draft when it holds this many characters of the draft text.
 const MATCH_LENGTH = 200;
-
-// a mail from a sender that takes no answers gets no draft.
-const NO_REPLY = /^(no-?reply|do-?not-?reply)@/i;
 
 const SYSTEM = [
   'You write a draft reply to an email thread. Call the write_draft tool once with one item: id 1 and the body of the reply.',
@@ -76,7 +76,7 @@ function replySubject(subject: string): string {
 
 function threadText(messages: readonly gmail_v1.Schema$Message[]): string {
   const text = messages
-    .map((message) => [...['From', 'Date', 'Subject'].map((key) => `${key}: ${cleanLine(header(message, key), 500)}`), '', bodyText(message.payload)].join('\n'))
+    .map((message) => [...['From', 'Date', 'Subject'].map((key) => `${key}: ${cleanLine(header(message, key), 500)}`), '', mailText(message, THREAD_LIMIT).text].join('\n'))
     .join('\n\n---\n\n');
   return headOf(text, THREAD_LIMIT);
 }
@@ -93,7 +93,11 @@ export async function draftReply(ctx: InboxContext, run: JobRun, source: DraftSo
   // the reply goes to the address in From only. Reply-To and the model's text never choose a recipient, because the
   // sender writes them, and a hostile sender could name another address.
   const to = fromAddress(header(mail, 'From'));
-  if (!to || NO_REPLY.test(to)) return null;
+  if (!to) return null;
+  // a draft is only for a person who wrote to the owner: a machine, a list, the owner's own mail and a mail where the
+  // owner is only in cc get none, whatever the caller asked for.
+  const kind = classifyMail(mail, ownerAddresses(ctx.db, ctx.googleConfig));
+  if (kind.kind !== 'person' || kind.fromOwner || !kind.direct) return null;
   const subject = replySubject(header(mail, 'Subject'));
   const inReplyTo = cleanLine(header(mail, 'Message-ID'), SUBJECT_LIMIT) || undefined;
   const extracted = await extractItems(ctx.slots, {

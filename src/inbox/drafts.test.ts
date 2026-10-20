@@ -15,14 +15,14 @@ afterEach(async () => {
 
 const REPLY = 'Hi Sam,\n\nThanks for the note. I can meet on Thursday at 3 pm.\n\nBest';
 
-function question(id: string, options: { from?: string; threadId?: string } = {}): FakeMessage {
+function question(id: string, options: { from?: string; threadId?: string; headers?: Record<string, string>; html?: string } = {}): FakeMessage {
   return {
     id,
     threadId: options.threadId ?? `t-${id}`,
     labelIds: ['INBOX', 'UNREAD'],
     internalDate: String(Date.parse('2026-10-13T10:00:00Z')),
     snippet: 'Can we meet this week?',
-    body: 'Hi, can we meet this week to talk about the project? Thursday works for me.',
+    ...(options.html === undefined ? { body: 'Hi, can we meet this week to talk about the project? Thursday works for me.' } : { html: options.html }),
     headers: {
       From: options.from ?? 'Sam Lee <sam@school.example>',
       'Reply-To': 'other@elsewhere.example',
@@ -30,8 +30,17 @@ function question(id: string, options: { from?: string; threadId?: string } = {}
       Subject: 'Meeting this week',
       Date: 'Tue, 13 Oct 2026 10:00:00 GMT',
       'Message-ID': `<${id}@school.example>`,
+      ...options.headers,
     },
   };
+}
+
+// a hostile mail from a person: the hostile mail of the harness without its list headers and with a person as the
+// sender, so the drafts module answers it.
+function hostilePerson(id: string): FakeMessage {
+  const mail = hostileMail(id);
+  const { 'List-Unsubscribe': _list, 'List-Unsubscribe-Post': _post, ...headers } = mail.headers;
+  return { ...mail, headers: { ...headers, From: 'Pat Moss <pat@pay-now.example>' } };
 }
 
 // a run of the digest after it read the mail, so each tool call is a call of a tainted session.
@@ -123,6 +132,36 @@ describe('draftReply', () => {
     expect(h.google.fake.mailbox('personal').drafts.size).toBe(0);
   });
 
+  it.each([
+    ['a list mail', { headers: { 'List-Id': '<team.lists.example>' } }],
+    ['a list mail with only an unsubscribe header', { headers: { 'List-Unsubscribe': '<https://lists.example/u>' } }],
+    ['an automated mail', { headers: { 'Auto-Submitted': 'auto-generated' } }],
+    ['a receipt from a shared mailbox', { from: 'Shop <billing@shop.example>' }],
+    ['an out-of-office reply', { headers: { 'X-Autoreply': 'yes' } }],
+    ["the owner's own mail", { from: 'Me <personal@example.com>' }],
+    ["the owner's mail from another own account", { from: 'Me <SCHOOL@example.com>' }],
+    ['a mail where the owner is only in cc', { headers: { To: 'team@school.example', Cc: 'personal@example.com' } }],
+    ['a mail where the owner is only in bcc', { headers: { To: 'team@school.example' } }],
+  ] as const)('gives null and asks no model for %s', async (_name, options) => {
+    const { h, run } = await setup();
+    h.google.fake.deliver('personal', question('q4', options));
+    expect(await draftReply(h.ctx, run, { account: 'personal', messageId: 'q4', threadId: 't-q4' })).toBeNull();
+    expect(h.modelCalls).toHaveLength(0);
+    expect(h.rows('SELECT * FROM inbox_drafts')).toEqual([]);
+    expect(h.google.fake.mailbox('personal').drafts.size).toBe(0);
+    noSend(h);
+  });
+
+  it('gives the model the lines of an html-only mail of the thread', async () => {
+    const { h, run } = await setup();
+    h.google.fake.deliver('personal', question('q5', { html: '<div>Hi,</div><div>Can we meet on <b>Thursday</b>?</div><style>.x{}</style>' }));
+    h.script.push(writeStep(REPLY));
+    expect(await draftReply(h.ctx, run, { account: 'personal', messageId: 'q5', threadId: 't-q5' })).toEqual(expect.any(Number));
+    const sent = JSON.stringify(h.modelCalls[0]!.messages);
+    expect(sent).toContain('Hi,\\nCan we meet on Thursday?');
+    expect(sent).not.toContain('<div>');
+  });
+
   it('gives null and no row when the reviewer holds the call', async () => {
     const { h, run } = await setup({ review: async () => ({ verdict: 'hold', reason: 'the draft looks odd' }) });
     h.google.fake.deliver('personal', question('q3'));
@@ -132,18 +171,26 @@ describe('draftReply', () => {
     expect(h.google.fake.mailbox('personal').drafts.size).toBe(0);
   });
 
+  it('makes no draft for the hostile mail of a list', async () => {
+    const { h, run } = await setup();
+    h.google.fake.deliver('personal', hostileMail('evil0'));
+    expect(await draftReply(h.ctx, run, { account: 'personal', messageId: 'evil0', threadId: 'evil0' })).toBeNull();
+    expect(h.modelCalls).toHaveLength(0);
+    noSend(h);
+  });
+
   it('answers the hostile mail only to its From address, and refuses a call to another address', async () => {
     const { h, run } = await setup();
-    h.google.fake.deliver('personal', hostileMail('evil1'));
+    h.google.fake.deliver('personal', hostilePerson('evil1'));
     h.script.push(writeStep('Thanks, I will check the invoice.'));
     const id = await draftReply(h.ctx, run, { account: 'personal', messageId: 'evil1', threadId: 'evil1' });
     expect(id).toEqual(expect.any(Number));
     const [draft] = [...h.google.fake.mailbox('personal').drafts.values()];
-    expect(decoded(draft!.message.body!).headers).toContain('To: billing@pay-now.example');
+    expect(decoded(draft!.message.body!).headers).toContain('To: pat@pay-now.example');
     expect(draft!.message.body).not.toContain('attacker@evil.example');
 
     // a call that text in the mail could ask for names the attacker. the tool refuses it.
-    h.google.fake.deliver('personal', hostileMail('evil2'));
+    h.google.fake.deliver('personal', hostilePerson('evil2'));
     const output = await h.caller.call(
       {
         id: 'direct-1',
