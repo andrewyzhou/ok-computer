@@ -619,13 +619,23 @@ function Guests({ guests }: { guests: CalendarGuest[] }) {
     <ul className="cal-guests">
       {guests.map((guest, index) => (
         <li key={`${guest.email ?? guest.name ?? ''}-${index}`}>
-          <span className="cal-guest-name">
-            {/* a guest with an address opens the people profile through the person chip of the people view. */}
-            {guest.email && !guest.self ? <PersonChip email={guest.email} name={guest.name} /> : (guest.name ?? guest.email ?? 'a guest')}
-            {guest.self ? ' (you)' : ''}
-            {guest.organizer ? ' · organizer' : ''}
-            {guest.optional ? ' · optional' : ''}
-          </span>
+          {guest.email && !guest.self ? (
+            // a guest with an address opens the people profile through the person chip of the people view. the marks
+            // stay together on one line next to the chip.
+            <span className="cal-guest-name has-chip">
+              <PersonChip email={guest.email} name={guest.name} />
+              {guest.organizer || guest.optional ? (
+                <span className="cal-guest-marks">{[guest.organizer ? 'organizer' : null, guest.optional ? 'optional' : null].filter(Boolean).join(' · ')}</span>
+              ) : null}
+            </span>
+          ) : (
+            <span className="cal-guest-name">
+              {guest.name ?? guest.email ?? 'a guest'}
+              {guest.self ? ' (you)' : ''}
+              {guest.organizer ? ' · organizer' : ''}
+              {guest.optional ? ' · optional' : ''}
+            </span>
+          )}
           <Badge tone={ANSWER_TONE[guest.answer] ?? 'muted'}>{ANSWER[guest.answer] ?? guest.answer}</Badge>
         </li>
       ))}

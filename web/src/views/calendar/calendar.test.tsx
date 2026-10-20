@@ -134,7 +134,7 @@ describe('the calendar week', () => {
     // a guest with an address shows as a person chip, and the organizer mark follows it.
     const guest = panel.getAllByText('advisor@school.example.edu').find((each) => each.closest('.cal-guests'))!.closest('li')!;
     expect(guest.querySelector('.person-chip')).toBeTruthy();
-    expect(guest.textContent).toContain('advisor@school.example.edu · organizer');
+    expect(guest.querySelector('.cal-guest-marks')!.textContent).toBe('organizer');
     expect(block('school/primary/advisor')!.getAttribute('aria-pressed')).toBe('true');
   });
 

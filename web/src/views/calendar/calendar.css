@@ -735,6 +735,16 @@ button.cal-dayhead-button:hover {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+/* the chip gives way to the marks: a long address ends in an ellipsis, and the full address is its tooltip. */
+.cal-guest-name.has-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cal-guest-marks {
+  color: var(--muted);
+  white-space: nowrap;
+}
 .cal-guests-summary {
   margin: 0 0 4px;
 }
