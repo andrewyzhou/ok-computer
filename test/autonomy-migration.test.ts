@@ -84,6 +84,24 @@ describe('migration 024', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM autonomy_changes').get()!.n).toBe(0);
   });
 
+  it('refuses a raise row in the history that does not come from the dashboard, also for the owner', () => {
+    const db = track(openDb(':memory:'));
+    expect(() =>
+      db.prepare("INSERT INTO autonomy_changes (domain, fromLevel, toLevel, actor, via, createdAt) VALUES ('mail_drafts', 'review', 'auto', 'owner', 'chat', 'x')").run(),
+    ).toThrow(/CHECK constraint failed/);
+    for (const [fromLevel, toLevel] of [
+      ['ask', 'review'],
+      ['ask', 'auto'],
+      ['review', 'review'],
+    ] as const) {
+      expect(() => insertChange(db, { fromLevel, toLevel, actor: 'owner', via: 'chat' })).toThrow(/CHECK constraint failed/);
+    }
+    // the owner can still lower from chat, and raise on the dashboard.
+    insertChange(db, { fromLevel: 'auto', toLevel: 'ask', actor: 'owner', via: 'chat' });
+    insertChange(db, { fromLevel: 'ask', toLevel: 'auto', actor: 'owner', via: 'dashboard' });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM autonomy_changes').get()!.n).toBe(2);
+  });
+
   it('keeps a level pointed at a real history row', () => {
     const db = track(openDb(':memory:'));
     expect(() => db.exec(`INSERT INTO autonomy_levels (domain, level, changeId, updatedAt) VALUES ('mail_drafts', 'auto', 99, 'x')`)).toThrow(/FOREIGN KEY/);

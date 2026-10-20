@@ -32,6 +32,8 @@ export interface LevelChange {
   toolCallId?: string | null;
   sessionKey?: string | null;
   note?: string | null;
+  // the untrusted sources that the session of a change from chat had read.
+  taint?: readonly string[];
 }
 
 export interface StoredLevel {
@@ -48,6 +50,9 @@ export interface ChangeQuery {
 }
 
 export const NOTE_LIMIT = 500;
+// a session can read many sources. the row keeps the first ones, each cut to a limit, and the count of the others.
+export const TAINT_LIMIT = 20;
+export const TAINT_NAME_LIMIT = 200;
 export const HISTORY_LIMIT = 200;
 
 type Row = Record<string, unknown>;
@@ -66,8 +71,29 @@ export function toChangeRow(row: Row): AutonomyChangeRow {
     toolCallId: str(row.toolCallId),
     sessionKey: str(row.sessionKey),
     note: str(row.note),
+    taint: taintOf(row.taint),
     createdAt: String(row.createdAt),
   };
+}
+
+// a damaged taint cell reads as one source that says so, so the history never hides that the session was tainted.
+function taintOf(value: unknown): string[] {
+  if (value === null || value === undefined) return [];
+  try {
+    const parsed: unknown = JSON.parse(String(value));
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {
+    // the fallback below says that the cell did not parse.
+  }
+  return ['(the stored sources could not be read)'];
+}
+
+// the stored list of sources: the first TAINT_LIMIT names, each cut, then a line with the count of the others.
+function storedTaint(taint: readonly string[] | undefined): string | null {
+  if (!taint?.length) return null;
+  const shown = taint.slice(0, TAINT_LIMIT).map((each) => headOf(redact(each), TAINT_NAME_LIMIT));
+  const more = taint.length - shown.length;
+  return JSON.stringify(more > 0 ? [...shown, `and ${more} more`] : shown);
 }
 
 function known(domain: AutonomyDomain): void {
@@ -116,7 +142,7 @@ export function changeLevel(db: Db, change: LevelChange, now: Date): AutonomyCha
   const work = () => {
     const current = levelOf(db, change.domain);
     if (change.expected !== undefined && change.expected !== current) {
-      throw new AutonomyError('stale', `${spec.label} is at ${current} now, not at ${change.expected}. Load the page again`);
+      throw new AutonomyError('stale', `${spec.label} is at ${current} now, not at ${change.expected}. Read the level again, then choose again.`);
     }
     if (change.level === current) return null;
     const raise = levelRank(change.level) > levelRank(current);
@@ -127,10 +153,22 @@ export function changeLevel(db: Db, change: LevelChange, now: Date): AutonomyCha
     const at = now.toISOString();
     const row = db
       .prepare(
-        `INSERT INTO autonomy_changes (domain, fromLevel, toLevel, actor, via, runId, toolCallId, sessionKey, note, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        `INSERT INTO autonomy_changes (domain, fromLevel, toLevel, actor, via, runId, toolCallId, sessionKey, note, taint, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       )
-      .get(change.domain, current, change.level, change.actor, change.via, change.runId ?? null, change.toolCallId ?? null, change.sessionKey ?? null, note, at)!;
+      .get(
+        change.domain,
+        current,
+        change.level,
+        change.actor,
+        change.via,
+        change.runId ?? null,
+        change.toolCallId ?? null,
+        change.sessionKey ?? null,
+        note,
+        storedTaint(change.taint),
+        at,
+      )!;
     db.prepare(
       `INSERT INTO autonomy_levels (domain, level, changeId, updatedAt) VALUES (?, ?, ?, ?)
        ON CONFLICT (domain) DO UPDATE SET level = excluded.level, changeId = excluded.changeId, updatedAt = excluded.updatedAt`,

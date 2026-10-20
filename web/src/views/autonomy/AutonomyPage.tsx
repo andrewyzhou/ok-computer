@@ -11,11 +11,10 @@ import type {
 } from '../../../../src/dashboard/autonomy-types';
 import type { StreamMessage } from '../../../../src/dashboard/types';
 import { api, send, useApi } from '../../api';
-import { Load } from '../../components';
 import type { RouteProps } from '../../routes';
 import { useDevMode } from '../../shell/prefs';
-import { Badge, Button, EmptyState, Page, Section, Table, type Column } from '../../ui';
-import { LevelChoice, LevelPill, Legend, RaiseConfirm, rank, When, who } from './parts';
+import { Button, EmptyState, Page, Section, Skeleton, Table, type Column } from '../../ui';
+import { changeError, LevelChoice, LevelPill, Legend, RaiseConfirm, rank, TaintNote, When, who } from './parts';
 import './autonomy.css';
 
 // the trust ladder (docs/PHASE6-PLAN.md, track T6). each domain shows its level, and the post of this page is the only
@@ -55,6 +54,12 @@ function DomainCard({
           {domain.label}
         </h3>
         <p className="autonomy-card-explanation">{domain.explanation}</p>
+        {domain.overriddenBy !== null ? (
+          <p className="autonomy-override small" role="note">
+            The allow rule <code>{domain.overriddenBy}</code> in okc.policy.json lets these actions run without the review. Remove the rule to make
+            the level count.
+          </p>
+        ) : null}
         {devMode ? (
           <p className="autonomy-tools small muted" aria-label="tools">
             {domain.tools.length ? domain.tools.map((tool) => <code key={tool}>{tool}</code>) : 'no tool yet'}
@@ -63,8 +68,11 @@ function DomainCard({
       </div>
       <div className="autonomy-card-level">
         <div className="autonomy-card-now">
-          <LevelPill level={domain.level} />
-          {domain.level === domain.defaultLevel ? <Badge>default</Badge> : null}
+          {/* the radios show the level of a domain that can change, so only a fixed domain shows it as a pill. */}
+          {domain.fixed ? <LevelPill level={domain.level} /> : null}
+          {domain.fixed ? null : (
+            <span className="autonomy-default small">{domain.level === domain.defaultLevel ? 'Default level' : `Default: ${domain.defaultLevel}`}</span>
+          )}
           <span className="small muted">{domain.updatedAt ? <>Changed <When iso={domain.updatedAt} /></> : 'Never changed'}</span>
         </div>
         {domain.fixed ? (
@@ -135,25 +143,45 @@ function History({ data, devMode }: { data: AutonomyData; devMode: boolean }) {
   // a phone hides the last three columns, so the domain cell shows the change, who made it and the note under the
   // label.
   const columns: Array<Column<AutonomyChangeRow>> = [
-    { key: 'when', header: 'When', cell: (row) => <When iso={row.createdAt} /> },
+    {
+      key: 'when',
+      header: 'When',
+      cell: (row) => (
+        <span className="autonomy-when">
+          <When iso={row.createdAt} />
+        </span>
+      ),
+    },
     {
       key: 'domain',
       header: 'Domain',
       wrap: true,
       cell: (row) => (
         <div className="autonomy-domain-cell">
-          <span>{labels.get(row.domain) ?? row.domain}</span>
-          <div className="autonomy-phone small">
+          <span className="autonomy-domain-name">{labels.get(row.domain) ?? row.domain}</span>
+          <div className="autonomy-phone small muted">
             {change(row)}
             {whoCell(row)}
-            {row.note ? <span className="muted">{row.note}</span> : null}
+            {row.note ? <span className="autonomy-phone-note">{row.note}</span> : null}
+            <TaintNote row={row} />
           </div>
         </div>
       ),
     },
     { key: 'change', header: 'Change', hideBelow: 'sm', cell: change },
     { key: 'who', header: 'Who', wrap: true, hideBelow: 'sm', cell: whoCell },
-    { key: 'note', header: 'Note', wrap: true, hideBelow: 'sm', cell: (row) => row.note ?? <span className="muted">-</span> },
+    {
+      key: 'note',
+      header: 'Note',
+      wrap: true,
+      hideBelow: 'sm',
+      cell: (row) => (
+        <div className="autonomy-note-cell">
+          {row.note ?? <span className="muted">-</span>}
+          <TaintNote row={row} />
+        </div>
+      ),
+    },
   ];
   return (
     <Section title="History" description="Every change of a level, newest first.">
@@ -176,8 +204,8 @@ function History({ data, devMode }: { data: AutonomyData; devMode: boolean }) {
             </Button>
           ) : null}
           {current.error ? (
-            <span role="alert" className="error-text">
-              Could not load older changes: {current.error}
+            <span role="alert" className="error-text autonomy-more-error">
+              Could not load older changes. Try again. The server said: {current.error}
             </span>
           ) : null}
         </div>
@@ -205,7 +233,7 @@ function Ladder({ data, reload }: { data: AutonomyData; reload: () => void }) {
         reload();
       },
       (err: Error) => {
-        setCard(domain.id, { error: err.message });
+        setCard(domain.id, { error: changeError(err.message) });
         // another tab may have changed the level, so the page shows the levels of the server again.
         reload();
       },
@@ -252,7 +280,18 @@ export function AutonomyPage(_props: RouteProps) {
       title="Autonomy"
       subtitle="What the agent may do on its own. Only you can give it more freedom, here. The agent can take freedom away when you ask in chat."
     >
-      <Load loaded={loaded}>{(data) => <Ladder data={data} reload={loaded.reload} />}</Load>
+      {loaded.error ? (
+        <div className="error-box autonomy-load-error">
+          <p>Could not load: {loaded.error}</p>
+          <Button size="sm" onClick={loaded.reload}>
+            Try again
+          </Button>
+        </div>
+      ) : loaded.data === undefined ? (
+        <Skeleton lines={4} />
+      ) : (
+        <Ladder data={loaded.data} reload={loaded.reload} />
+      )}
     </Page>
   );
 }

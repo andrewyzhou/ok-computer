@@ -39,6 +39,7 @@ function domain(
     fixedReason,
     updatedAt: null,
     changeId: null,
+    overriddenBy: null,
   };
 }
 
@@ -65,7 +66,7 @@ export const DEFAULT_DOMAINS: AutonomyDomainView[] = [
     'calendar_guests',
     'Calendar events with guests',
     'Create an event that invites other people. Google sends each guest an invitation in your name.',
-    ['google__calendar_create_event'],
+    ['google__calendar_create_event', 'google__calendar_update_event'],
     'ask',
     'ask',
     'An invitation goes to other people in your name, so you approve each one.',
@@ -73,7 +74,7 @@ export const DEFAULT_DOMAINS: AutonomyDomainView[] = [
   domain(
     'browser_submits',
     'Browser form submits',
-    'Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.',
+    'Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.',
     ['browser_submit'],
     'ask',
     'review',
@@ -90,12 +91,20 @@ export const DEFAULT_DOMAINS: AutonomyDomainView[] = [
   domain(
     'sandbox_network',
     'Code with network access',
-    'Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.',
+    'Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway. A sub-agent never runs such code on its own.',
     ['sandbox_exec'],
     'ask',
     'review',
   ),
-  domain('purchases', 'Purchases', 'Pay for anything, in any way.', [], 'ask', 'ask', 'Money leaves your account, so you approve each payment.'),
+  domain(
+    'purchases',
+    'Purchases',
+    'Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.',
+    ['browser_submit'],
+    'ask',
+    'ask',
+    'Money leaves your account, so you approve each payment.',
+  ),
 ];
 
 // the first run: every level is the default, and the history is empty.
@@ -114,6 +123,7 @@ export const history: AutonomyChangeRow[] = [
     toolCallId: 'call-1',
     sessionKey: 'main',
     note: 'The owner asked to check labels again after a wrong archive.',
+    taint: [],
     createdAt: '2026-10-18T17:05:00.000Z',
   },
   {
@@ -127,6 +137,7 @@ export const history: AutonomyChangeRow[] = [
     toolCallId: null,
     sessionKey: null,
     note: null,
+    taint: [],
     createdAt: '2026-10-17T16:00:00.000Z',
   },
   {
@@ -140,6 +151,7 @@ export const history: AutonomyChangeRow[] = [
     toolCallId: null,
     sessionKey: null,
     note: null,
+    taint: [],
     createdAt: '2026-10-17T15:58:00.000Z',
   },
 ];

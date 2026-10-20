@@ -4,8 +4,8 @@ import { defineTool, type Tool, type ToolContext, type ToolOutput } from '../too
 import { extractIsolated } from '../web/extract-run.js';
 import { NotDone, untraced, untracedIfSecret, type ActTab, type BrowserRefusal, type BrowserWorker, type StepInput, type StepResult, type SubmitOutcome } from './worker.js';
 
-// the tools that change what leaves the pc. the owner approves each call, so they stay with the main session when a
-// browser child session gets the other tools.
+// the tools that change what leaves the pc. each call waits for the owner or, at a raised level of the trust ladder,
+// for the reviewer, so they stay with the main session when a browser child session gets the other tools.
 export const BROWSER_OWNER_TOOLS = ['browser_allow_domain', 'browser_submit'] as const;
 // the tools that read a page or change it only on this pc.
 export const BROWSER_PAGE_TOOLS = [
@@ -290,7 +290,7 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
         return view(
           await act(ctx, 'click', { ref: id, element: name }, async (page, tab) => {
             const target = await find(page, tab, id);
-            if (await sendsData(page, target)) throw new NotDone(`${id} sends a form. Nothing was clicked. Use browser_submit with its name and this ref, which the owner approves`);
+            if (await sendsData(page, target)) throw new NotDone(`${id} sends a form. Nothing was clicked. Use browser_submit with its name and this ref`);
             await target.click();
           }),
         );
@@ -356,9 +356,10 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
       name: 'browser_submit',
       description:
         'Send a form of the open page by pressing its button or link, also in a frame, or press a button that sends data with a script, such as "Add to cart" outside a form. ' +
-        'The owner approves each call and reads the address, the button and the fields that you give, so give them exactly as the page shows them now: ' +
+        'Each call waits for a check before it runs: the owner approves it, or a reviewer checks it when the owner raised the level of browser form submits, and a purchase always waits for the owner. ' +
+        'The check reads the address, the button and the fields that you give, so give them exactly as the page shows them now: ' +
         'every named field of the form of the button that a person sees, with its value, or {} for a button outside a form. ' +
-        'If the page differs when the owner approves, nothing is sent. The result lists each request that the page sent.',
+        'If the page differs when the check is done, nothing is sent. The result lists each request that the page sent.',
       input: z.object({
         url: z.string().min(1).max(2000).describe('the address of the page with the form, or of its frame'),
         button: z.string().min(1).max(200).describe('the name of the button or link, as the snapshot shows it'),
@@ -369,7 +370,9 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
       }),
       risk: 'external',
       // a submit acts on the open task of any session, so the caller can be a session with no taint, such as an
-      // automation, where a broad allow rule of the owner holds. the owner approves each send.
+      // automation, where a broad allow rule of the owner holds. the owner approves each send, unless the owner raised
+      // the level of browser submits on the autonomy page. a submit that looks like a purchase always asks the owner
+      // (src/policy/autonomy.ts).
       needsApproval: true,
       async run({ url, button, ref: id, fields }, ctx) {
         const result = await act(ctx, 'submit', { url, button, ...(id ? { ref: id } : {}), fields }, async (page, tab) => {

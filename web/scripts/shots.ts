@@ -3,11 +3,13 @@
 //
 //   npx tsx web/scripts/shots.ts <shots.json> <out dir> [name filter]
 //
-// shots.json is an array of { name, hash, width, dark?, devMode?, click?, keys?, wait?, stubs? }:
+// shots.json is an array of { name, hash, width, dark?, devMode?, click?, keys?, wait?, stubs?, height? }:
 // - check each view at width 1440 and at width 390. a width under 500 uses a scale of 2.
 // - click is a playwright selector that the script clicks after the page loads. keys is a key press after it, for
 //   example Meta+k.
 // - wait is the selector to wait for. the default is the page title in the main area.
+// - height sets the height of the window, for a page that is longer than the default window. the main area scrolls
+//   inside the shell, so a full-page shot of the document would not show more.
 // - stubs maps "GET /api/path" to a json body, for an endpoint that is not built yet. the path has no query. a value
 //   of the form { "$status": 500, "$body": {...} } answers with that status, for a shot of an error state.
 // the script uses the chrome of the system, and prints each page error, each console error and each page that
@@ -29,6 +31,7 @@ type Shot = {
   keys?: string;
   wait?: string;
   stubs?: Record<string, unknown>;
+  height?: number;
 };
 
 // a stub with a status other than 200 wraps its body, so that a plain body with a field named status stays a body.
@@ -49,7 +52,7 @@ const browser = await chromium.launch({ ...(process.env.CHROME_PATH ? { executab
 
 for (const shot of shots.filter((each) => !only || each.name.includes(only))) {
   const context = await browser.newContext({
-    viewport: { width: shot.width, height: shot.width < 500 ? 844 : 900 },
+    viewport: { width: shot.width, height: shot.height ?? (shot.width < 500 ? 844 : 900) },
     deviceScaleFactor: shot.width < 500 ? 2 : 1,
     colorScheme: shot.dark ? 'dark' : 'light',
   });

@@ -136,6 +136,21 @@ describe('the trace waterfall', () => {
     expect(inspector().getByText(/"finish essay"/)).toBeTruthy();
   });
 
+  it('shows the level of the trust ladder on the policy decision of a tool call', async () => {
+    seeded.t.db
+      .prepare("UPDATE policy_decisions SET autonomyDomain = 'mail_drafts', autonomyLevel = 'review' WHERE id = (SELECT policyDecisionId FROM tool_calls WHERE toolCallId = 'call-goals')")
+      .run();
+    openApp('#/trace/run-1/tool%3A1');
+    expect(await (await panel()).findByText('review (mail drafts)')).toBeTruthy();
+    expect(inspector().getByText('Autonomy level')).toBeTruthy();
+  });
+
+  it('shows no level for a decision outside the trust ladder', async () => {
+    openApp('#/trace/run-1/tool%3A1');
+    expect(await (await panel()).findByText(/builtin:goals_set/)).toBeTruthy();
+    expect(inspector().queryByText('Autonomy level')).toBeNull();
+  });
+
   it('says that a raw result was not stored when the blob is missing', async () => {
     seeded.t.db.prepare("UPDATE tool_calls SET truncated = 1, rawResultBlob = NULL WHERE toolCallId = 'call-bad'").run();
     openApp('#/trace/run-1/tool%3A2');

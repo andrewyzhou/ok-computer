@@ -5,13 +5,14 @@ import type { Logger } from '../src/observability/logger.js';
 import { silentLogger } from '../src/observability/logger.js';
 import { DOMAINS, LEVEL_TEXT } from '../src/policy/autonomy.js';
 import { changeLevel } from '../src/policy/autonomy-store.js';
+import type { Rule } from '../src/policy/policy.js';
 import { createTestApp } from './app-harness.js';
 
 const NOW = new Date('2026-10-19T17:00:00Z');
 
 // the autonomy routes on a fresh database. the app has no model steps, because the routes only read and write the
 // autonomy tables.
-function seed(options: { token?: string } = {}) {
+function seed(options: { token?: string; rules?: Rule[] } = {}) {
   const t = createTestApp([], { start: NOW.toISOString() });
   const logged: Array<{ message: string; fields: unknown }> = [];
   const logger: Logger = { ...silentLogger, info: (message: string, fields?: unknown) => void logged.push({ message, fields }) };
@@ -20,7 +21,7 @@ function seed(options: { token?: string } = {}) {
     config: t.config,
     clock: () => NOW,
     logger,
-    app: t.app,
+    app: options.rules ? { ...t.app, rules: [...t.app.rules, ...options.rules] } : t.app,
     ...(options.token ? { token: options.token } : {}),
   });
   return { db: t.db, dashboard, logged, close: () => t.db.close() };
@@ -28,7 +29,7 @@ function seed(options: { token?: string } = {}) {
 
 type Seeded = ReturnType<typeof seed>;
 let seeded: Seeded | undefined;
-const fresh = (options: { token?: string } = {}) => (seeded = seed(options));
+const fresh = (options: { token?: string; rules?: Rule[] } = {}) => (seeded = seed(options));
 afterEach(() => {
   seeded?.close();
   seeded = undefined;
@@ -74,6 +75,7 @@ describe('GET /api/autonomy', () => {
         fixedReason: spec.fixedReason,
         updatedAt: null,
         changeId: null,
+        overriddenBy: null,
       });
     }
     const byId = Object.fromEntries(page.domains.map((domain) => [domain.id, domain]));
@@ -85,6 +87,42 @@ describe('GET /api/autonomy', () => {
     expect(page.levelText).toEqual(LEVEL_TEXT);
     expect(page.history).toEqual([]);
     expect(page.before).toBeNull();
+  });
+});
+
+describe('GET /api/autonomy with allow rules of the owner', () => {
+  it('names the allow rule that lets the calls of a domain at its default level run without the review', async () => {
+    const { dashboard, db } = fresh({
+      rules: [
+        { id: 'okc.policy.json#1', tool: 'google__gmail_draft', effect: 'allow' },
+        { id: 'okc.policy.json#2', tool: 'google__calendar_*', effect: 'allow' },
+        { id: 'okc.policy.json#3', tool: 'browser_submit', effect: 'allow' },
+        { id: 'okc.policy.json#4', tool: 'google__gmail_label', effect: 'deny' },
+      ],
+    });
+    const byId = async () => Object.fromEntries((await get<AutonomyPage>(dashboard, '/api/autonomy')).domains.map((domain) => [domain.id, domain.overriddenBy]));
+    expect(await byId()).toEqual({
+      mail_drafts: 'okc.policy.json#1',
+      // a deny rule only adds checks.
+      mail_labels: null,
+      calendar_holds: 'okc.policy.json#2',
+      // the tools of a domain whose default is ask always ask the owner, so an allow rule changes nothing there.
+      calendar_guests: null,
+      browser_submits: null,
+      unsubscribes: null,
+      sandbox_network: null,
+      purchases: null,
+    });
+    // a raised or a lowered level decides over the rule.
+    changeLevel(db, { domain: 'mail_drafts', level: 'auto', actor: 'owner', via: 'dashboard' }, NOW);
+    changeLevel(db, { domain: 'calendar_holds', level: 'ask', actor: 'owner', via: 'dashboard' }, NOW);
+    expect(await byId()).toMatchObject({ mail_drafts: null, calendar_holds: null });
+  });
+
+  it('names a broad allow rule for every domain whose default is review', async () => {
+    const { dashboard } = fresh({ rules: [{ id: 'okc.policy.json#1', tool: '*', effect: 'allow' }] });
+    const page = await get<AutonomyPage>(dashboard, '/api/autonomy');
+    expect(page.domains.filter((domain) => domain.overriddenBy !== null).map((domain) => domain.id)).toEqual(['mail_drafts', 'mail_labels', 'calendar_holds']);
   });
 });
 

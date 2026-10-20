@@ -210,6 +210,7 @@ describe('changeLevel', () => {
       toolCallId: null,
       sessionKey: null,
       note: 'trusted now',
+      taint: [],
       createdAt: NOW.toISOString(),
     });
     expect(count(db, 'autonomy_changes')).toBe(1);

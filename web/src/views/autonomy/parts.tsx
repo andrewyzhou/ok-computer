@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { AutonomyChangeRow, AutonomyLevel } from '../../../../src/dashboard/autonomy-types';
-import { time } from '../../format';
+import { minuteTime, time } from '../../format';
 import { Button, Pill } from '../../ui';
 
 // the small parts of the autonomy page: the order of the levels, the words of a change and the controls of a card.
@@ -12,7 +12,8 @@ export const rank = (level: AutonomyLevel): number => LEVELS.indexOf(level);
 
 const LEVEL_NAME: Record<AutonomyLevel, string> = { ask: 'Ask', review: 'Review', auto: 'Auto' };
 
-// the time since a change in short words, for example 5 min ago. an older change shows its day and time.
+// the time since a change in short words, for example 5 min ago. an older change shows its day and its time without
+// seconds, and the year when it is not this year.
 export function ago(iso: string, now = Date.now()): string {
   const seconds = Math.round((now - Date.parse(iso)) / 1000);
   if (Number.isNaN(seconds)) return '-';
@@ -23,7 +24,7 @@ export function ago(iso: string, now = Date.now()): string {
   if (hours < 24) return `${hours} h ago`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days} ${days === 1 ? 'day' : 'days'} ago`;
-  return time(iso);
+  return minuteTime(iso, now);
 }
 
 // a time as a short relative text, with the full time as its title.
@@ -36,8 +37,31 @@ export function When({ iso }: { iso: string }) {
 }
 
 // who made a change, in plain words. only the owner on the dashboard raises a level, and the agent lowers one in chat.
+// a chat that had read a mail or a page may have lowered the level because of that text, so the words say so.
 export function who(row: AutonomyChangeRow): string {
-  return row.actor === 'owner' ? 'You, on the dashboard' : 'The agent, in chat';
+  if (row.actor === 'owner') return 'You, on the dashboard';
+  return row.taint.length ? 'The agent, in chat, after it read untrusted content' : 'The agent, in chat';
+}
+
+// the untrusted sources of a change from a tainted chat, under its note.
+export function TaintNote({ row }: { row: AutonomyChangeRow }) {
+  if (!row.taint.length) return null;
+  return <span className="autonomy-taint small">The chat had read: {row.taint.join(', ')}. The reason may come from that text and not from you.</span>;
+}
+
+// the level that applied to one policy decision, for the trace and the policy list, for example "review (mail
+// drafts)". null for a call outside the trust ladder and for a decision from before it.
+export function decisionLevel(row: { autonomyDomain: string | null; autonomyLevel: string | null }): string | null {
+  if (row.autonomyDomain === null || row.autonomyLevel === null) return null;
+  return `${row.autonomyLevel} (${row.autonomyDomain.replaceAll('_', ' ')})`;
+}
+
+// the text of a refusal of a raise or a lowering. a stale level means that another tab or a chat changed it, and the
+// page has already loaded the levels again, so the owner only has to choose again.
+export function changeError(message: string): string {
+  const stale = /^.* is at (ask|review|auto) now, not at (ask|review|auto)\b/.exec(message);
+  if (stale) return `The level changed in another tab or in chat. It is now ${stale[1]}. Choose again.`;
+  return /[.!?]$/.test(message.trim()) ? message.trim() : `${message.trim()}.`;
 }
 
 export function LevelPill({ level }: { level: AutonomyLevel }) {
@@ -117,7 +141,7 @@ export function RaiseConfirm({
   return (
     <div ref={box} className="autonomy-confirm" role="group" aria-label={`Confirm ${label} at ${level}`}>
       <p className="autonomy-confirm-text">
-        Let the agent {label.toLowerCase()} at {level}? {text}
+        Set {label} to {level}? {text}
       </p>
       <div className="autonomy-confirm-actions">
         <Button variant="primary" size="sm" busy={busy} onClick={onConfirm}>

@@ -46,6 +46,7 @@ const row = (extra: Partial<AutonomyChangeRow>): AutonomyChangeRow => ({
   toolCallId: 'call-9',
   sessionKey: 'main',
   note: null,
+  taint: [],
   createdAt: '2026-10-18T17:05:00.000Z',
   ...extra,
 });

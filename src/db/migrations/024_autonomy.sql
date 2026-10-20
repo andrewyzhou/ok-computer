@@ -16,12 +16,17 @@ CREATE TABLE autonomy_changes (
   toolCallId TEXT,
   sessionKey TEXT,
   note TEXT,
+  -- the untrusted sources that the session of a change from chat had read, as a json list, or null for none. a mail
+  -- or a page can make the agent lower a level, and its reason is then the text of the mail and not the owner's words,
+  -- so the history shows these sources next to the reason.
+  taint TEXT,
   createdAt TEXT NOT NULL,
-  -- only the owner on the dashboard can raise a level. the store checks it too, and this check keeps a bug in the
-  -- store from writing an agent raise.
+  -- only the owner on the dashboard can raise a level. the store checks it too, and these checks keep a bug in the
+  -- store from writing a raise that does not come from the dashboard, also one in the name of the owner. the agent
+  -- writes only from chat, and a change from chat can only lower a level.
   CHECK (actor = 'owner' OR via = 'chat'),
   CHECK (
-    actor = 'owner'
+    via = 'dashboard'
     OR (fromLevel = 'auto' AND toLevel IN ('review', 'ask'))
     OR (fromLevel = 'review' AND toLevel = 'ask')
   )

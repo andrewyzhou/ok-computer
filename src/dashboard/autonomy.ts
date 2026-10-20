@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Db } from '../db/index.js';
 import { DOMAINS, isDomain, LEVEL_TEXT, levelsUpTo, type DomainSpec } from '../policy/autonomy.js';
 import { AutonomyError, changeLevel, HISTORY_LIMIT, listChanges, NOTE_LIMIT, storedLevels, type StoredLevel } from '../policy/autonomy-store.js';
+import { glob, type Rule } from '../policy/policy.js';
 import { errorText } from '../tools/registry.js';
 import type { AutonomyDomainView, AutonomyHistoryPage, AutonomyPage, AutonomySetResponse } from './autonomy-types.js';
 import { readBody } from './http.js';
@@ -24,8 +25,19 @@ const STATUS = {
   not_lower: 409,
 } as const;
 
+// the allow rule of the owner that lets the calls of a domain run without the reviewer. at the default level the policy
+// engine decides as it did before the ladder, so an allow rule on a tool of a domain whose default is review lets the
+// call run with no check. a raised level decides over an allow rule, a lowered one makes the owner approve, and the
+// tools of a domain whose default is ask always ask the owner, so no rule overrides those. the match looks only at the
+// tool pattern: a rule with a session or args pattern can still let some of the calls through.
+function overriddenBy(spec: DomainSpec, stored: StoredLevel, rules: readonly Rule[]): string | null {
+  if (spec.defaultLevel === 'ask' || stored.level !== spec.defaultLevel) return null;
+  const rule = rules.findLast((each) => each.effect === 'allow' && spec.tools.some((tool) => glob(each.tool, tool)));
+  return rule?.id ?? null;
+}
+
 // the view of one domain for the page. a fixed domain offers only ask, so the page shows no control for it.
-function viewOf(spec: DomainSpec, stored: StoredLevel): AutonomyDomainView {
+function viewOf(spec: DomainSpec, stored: StoredLevel, rules: readonly Rule[]): AutonomyDomainView {
   const fixed = spec.fixedReason !== null;
   return {
     id: spec.id,
@@ -40,6 +52,7 @@ function viewOf(spec: DomainSpec, stored: StoredLevel): AutonomyDomainView {
     fixedReason: spec.fixedReason,
     updatedAt: stored.updatedAt,
     changeId: stored.changeId,
+    overriddenBy: overriddenBy(spec, stored, rules),
   };
 }
 
@@ -59,6 +72,7 @@ function historyPage(db: Db, query: { domain?: DomainSpec['id']; before?: number
 // route is behind the dashboard auth, and the post is the only way to raise a level. docs/API.md gives the errors.
 export function mountAutonomy(server: Hono, deps: DashboardDeps): void {
   const { db, clock, logger } = deps;
+  const rules = () => deps.app.rules;
   // a damaged row is an error that the page shows, not a crash of the request.
   const failed = (c: Context, err: unknown) => c.json({ error: errorText(err) }, 500);
 
@@ -67,7 +81,7 @@ export function mountAutonomy(server: Hono, deps: DashboardDeps): void {
       const stored = storedLevels(db);
       const page = historyPage(db, { limit: DEFAULT_PAGE });
       return c.json({
-        domains: DOMAINS.map((spec) => viewOf(spec, stored[spec.id])),
+        domains: DOMAINS.map((spec) => viewOf(spec, stored[spec.id], rules())),
         levelText: LEVEL_TEXT,
         history: page.changes,
         before: page.before,
@@ -109,7 +123,7 @@ export function mountAutonomy(server: Hono, deps: DashboardDeps): void {
       );
       if (change) logger.info('autonomy level changed', { domain, from: change.fromLevel, to: change.toLevel });
       const spec = DOMAINS.find((each) => each.id === domain)!;
-      return c.json({ domain: viewOf(spec, storedLevels(db)[domain]), change } satisfies AutonomySetResponse);
+      return c.json({ domain: viewOf(spec, storedLevels(db)[domain], rules()), change } satisfies AutonomySetResponse);
     } catch (err) {
       if (err instanceof AutonomyError) return c.json({ error: err.message }, STATUS[err.code]);
       return failed(c, err);

@@ -46,6 +46,7 @@ function answer(id: string, body: AutonomySetRequest): AutonomySetResponse {
       toolCallId: null,
       sessionKey: null,
       note: null,
+      taint: [],
       createdAt: '2026-10-19T12:00:00.000Z',
     },
   };
@@ -69,8 +70,13 @@ describe('the autonomy page', () => {
     }
     expect(cardOf('Purchases').getByText('Money leaves your account, so you approve each payment.')).toBeTruthy();
     expect(inMain().getAllByRole('radiogroup')).toHaveLength(5);
-    // every domain is at its default level on a first run.
-    expect(inMain().getAllByText('default')).toHaveLength(8);
+    // every domain is at its default level on a first run. a domain that can change says so, and a fixed one shows its
+    // level as a pill and no radio.
+    expect(inMain().getAllByText('Default level')).toHaveLength(5);
+    expect(cardOf('Purchases').queryByText('Default level')).toBeNull();
+    expect(cardOf('Purchases').getByText('ask')).toBeTruthy();
+    // a domain that can change shows its level once, in the radios.
+    expect(cardOf('Mail drafts').queryByText('review')).toBeNull();
     expect(inMain().getAllByText('Never changed')).toHaveLength(8);
     const legend = within(document.querySelector<HTMLElement>('main dl[aria-label="levels"]')!);
     expect(legend.getByText('You approve each action before it happens.')).toBeTruthy();
@@ -101,13 +107,14 @@ describe('the autonomy page', () => {
     });
     fireEvent.click(cardOf('Mail drafts').getByRole('radio', { name: 'Auto' }));
     const confirm = cardOf('Mail drafts').getByRole('group', { name: 'Confirm Mail drafts at auto' });
-    expect(confirm.textContent).toContain('Let the agent mail drafts at auto? The agent acts on its own.');
+    expect(confirm.textContent).toContain('Set Mail drafts to auto? The agent acts on its own.');
     expect(posts(calls)).toHaveLength(0);
     fireEvent.click(within(confirm).getByRole('button', { name: 'Confirm' }));
     await waitFor(() => expect(cardOf('Mail drafts').queryByRole('group', { name: /Confirm/ })).toBeNull());
     expect(posts(calls)).toEqual([{ method: 'POST', url: '/api/autonomy/mail_drafts', body: { level: 'auto', from: 'review' } }]);
     await waitFor(() => expect((cardOf('Mail drafts').getByRole('radio', { name: 'Auto' }) as HTMLInputElement).checked).toBe(true));
-    expect(cardOf('Mail drafts').queryByText('default')).toBeNull();
+    expect(cardOf('Mail drafts').queryByText('Default level')).toBeNull();
+    expect(cardOf('Mail drafts').getByText('Default: review')).toBeTruthy();
     // the history loads again after the change.
     await waitFor(() => expect(calls.filter((call) => call.method === 'GET' && call.url === '/api/autonomy')).toHaveLength(2));
     const table = within(await inMain().findByRole('table', { name: 'autonomy history' }));
@@ -154,7 +161,8 @@ describe('the autonomy page', () => {
     expect(rows[0]!.querySelector('time')?.getAttribute('title')).toBeTruthy();
     // the run link is for developer mode only.
     expect(table.queryByRole('link', { name: /run/ })).toBeNull();
-    expect(cardOf('Mail drafts').queryByText('default')).toBeNull();
+    expect(cardOf('Mail drafts').queryByText('Default level')).toBeNull();
+    expect(cardOf('Mail drafts').getByText('Default: review')).toBeTruthy();
     expect(cardOf('Mail drafts').getByText(/Changed/)).toBeTruthy();
     expect(inMain().queryByRole('button', { name: 'Show older' })).toBeNull();
   });

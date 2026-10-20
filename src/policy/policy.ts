@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
 import type { Result } from '../config/load.js';
 import { headOf } from '../text.js';
-import { clampLevel, domainSpec, type AutonomyContext } from './autonomy.js';
+import { clampLevel, domainSpec, isLevel, type AutonomyContext } from './autonomy.js';
 
 // exec runs code that the model wrote in the code sandbox (src/sandbox). the container has no network, so the call
 // cannot send data off the pc, but the code can change the scratch files and use the cpu, so a reviewer checks it.
@@ -33,7 +33,9 @@ const LOCAL_WRITE_TOOLS = [
   'automations_create',
   'automations_delete',
   'automations_update',
-  // autonomy_lower can only lower a level of the trust ladder, so each call makes the agent ask more, never less.
+  // autonomy_lower can only lower a level of the trust ladder, so each call makes the agent ask more, never less. a
+  // change from a session that read untrusted content keeps those sources in its history row, so the history does not
+  // claim that the owner asked when a mail did.
   'autonomy_lower',
   'consolidation_save',
   'goal_update',
@@ -95,9 +97,14 @@ export interface Verdict {
 // the risk level decides. the level of the domain of the trust ladder then changes the decision, and the default
 // level of each domain changes nothing. in a sub-agent session a call that needs the owner is denied.
 export function decide(input: PolicyInput, rules: readonly Rule[]): Verdict {
-  const verdict = withLevel(input, rules);
+  const subagent = input.sessionKey.startsWith(SUBAGENT_PREFIX);
+  // a raise is for the owner chat and the automations. a domain whose default is ask has tools that act on the
+  // outside world, and a sub-agent never does that without its parent, so a sub-agent gets the verdict of the engine
+  // without the level there. a lowered level still holds for a sub-agent.
+  const raisedForSubagent = subagent && input.autonomy !== undefined && domainSpec(input.autonomy.domain).defaultLevel === 'ask';
+  const verdict = raisedForSubagent ? decideAny(input, rules) : withLevel(input, rules);
   const autonomy = input.autonomy ? { autonomy: input.autonomy } : {};
-  if (verdict.decision !== 'approve' || !input.sessionKey.startsWith(SUBAGENT_PREFIX)) return { ...verdict, ...autonomy };
+  if (verdict.decision !== 'approve' || !subagent) return { ...verdict, ...autonomy };
   const [, profile, childRunId] = input.sessionKey.split(':');
   return {
     decision: 'deny',
@@ -114,10 +121,13 @@ function withLevel(input: PolicyInput, rules: readonly Rule[]): Verdict {
   if (!input.autonomy) return base;
   const { domain } = input.autonomy;
   const spec = domainSpec(domain);
-  if (input.autonomy.level === spec.defaultLevel) return base;
+  // a level that is not one of the three counts as ask, the level with the least freedom. the store never gives one,
+  // but the level comes from a dependency that a caller can replace.
+  const stored = isLevel(input.autonomy.level) ? input.autonomy.level : 'ask';
+  if (stored === spec.defaultLevel) return base;
   // a stored level above the most of its domain counts as that most, so a hand edit of the database cannot raise a
   // fixed domain.
-  const level = clampLevel(input.autonomy.level, spec.maxLevel);
+  const level = clampLevel(stored, spec.maxLevel);
   if (level === spec.defaultLevel || base.decision === 'deny') return base;
   const label = spec.label.toLowerCase();
   if (level === 'ask') {

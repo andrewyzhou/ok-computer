@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { Db } from '../db/index.js';
 import { DOMAIN_IDS, DOMAINS, domainSpec, LEVEL_TEXT, type AutonomyDomain } from '../policy/autonomy.js';
 import { AutonomyError, changeLevel, storedLevels } from '../policy/autonomy-store.js';
+import { sessionTaint } from '../policy/store.js';
 import { MAIN_SESSION } from '../sessions/router.js';
 import { defineTool, type Tool } from '../tools/registry.js';
 
@@ -60,6 +61,10 @@ export function createAutonomyTools(deps: AutonomyToolDeps): Tool[] {
       }
       const { domain } = input;
       const { label } = domainSpec(domain);
+      // a lowering only adds checks, so it runs also after the session read a mail or a page. the reason can then be
+      // the text of that mail, so the history row keeps the sources, and the page shows that the owner may not have
+      // asked.
+      const taint = [...new Set(sessionTaint(db, ctx.sessionKey).map((each) => each.source))];
       try {
         const row = changeLevel(
           db,
@@ -72,6 +77,7 @@ export function createAutonomyTools(deps: AutonomyToolDeps): Tool[] {
             toolCallId: ctx.toolCallId ?? null,
             sessionKey: ctx.sessionKey,
             note: input.reason,
+            taint,
           },
           ctx.clock(),
         );

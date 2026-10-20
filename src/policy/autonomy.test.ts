@@ -37,7 +37,9 @@ describe('domainOf', () => {
     expect(domainOf('google__gmail_draft', {})).toBe('mail_drafts');
     expect(domainOf('inbox_draft_reply', {})).toBe('mail_drafts');
     for (const tool of ['google__gmail_label', 'google__gmail_archive', 'google__gmail_mark_read']) expect(domainOf(tool, {})).toBe('mail_labels');
-    expect(domainOf('browser_submit', {})).toBe('browser_submits');
+    expect(domainOf('browser_submit', { url: 'https://example.com/signup', button: 'Sign up', fields: { email: 'owner@example.com' } })).toBe('browser_submits');
+    // a submit with no fields is a script button, which counts as a purchase.
+    expect(domainOf('browser_submit', {})).toBe('purchases');
     expect(domainOf('google__gmail_unsubscribe', {})).toBe('unsubscribes');
     expect(domainOf('inbox_unsubscribe', {})).toBe('unsubscribes');
   });

@@ -39,6 +39,9 @@ export interface AutonomyDomainView {
   // the last change of the level, or null while the domain has its default level.
   updatedAt: string | null;
   changeId: number | null;
+  // the id of an allow rule in okc.policy.json that lets the calls of the domain run without the reviewer, while the
+  // domain is at its default level. the policy rule then decides, not the level. null when no rule does.
+  overriddenBy: string | null;
 }
 
 // one row of the append-only history of the levels.
@@ -55,6 +58,9 @@ export interface AutonomyChangeRow {
   sessionKey: string | null;
   // the reason that the agent gave, or the note of the owner.
   note: string | null;
+  // the untrusted sources, such as a mail or a page, that the session of a change from chat had read before the
+  // change. the reason may then come from that content and not from the owner. empty when there were none.
+  taint: string[];
   createdAt: string;
 }
 

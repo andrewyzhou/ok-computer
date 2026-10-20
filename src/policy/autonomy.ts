@@ -75,7 +75,7 @@ export const DOMAINS: readonly DomainSpec[] = [
     id: 'calendar_guests',
     label: 'Calendar events with guests',
     explanation: 'Create an event that invites other people. Google sends each guest an invitation in your name.',
-    tools: [GOOGLE('calendar_create_event')],
+    tools: [GOOGLE('calendar_create_event'), GOOGLE('calendar_update_event')],
     defaultLevel: 'ask',
     maxLevel: 'ask',
     fixedReason: 'An invitation goes to other people in your name, so you approve each one.',
@@ -83,7 +83,8 @@ export const DOMAINS: readonly DomainSpec[] = [
   {
     id: 'browser_submits',
     label: 'Browser form submits',
-    explanation: 'Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.',
+    explanation:
+      'Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.',
     tools: ['browser_submit'],
     defaultLevel: 'ask',
     maxLevel: 'review',
@@ -101,7 +102,8 @@ export const DOMAINS: readonly DomainSpec[] = [
   {
     id: 'sandbox_network',
     label: 'Code with network access',
-    explanation: 'Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.',
+    explanation:
+      'Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway. A sub-agent never runs such code on its own.',
     tools: ['sandbox_exec'],
     defaultLevel: 'ask',
     maxLevel: 'review',
@@ -110,8 +112,9 @@ export const DOMAINS: readonly DomainSpec[] = [
   {
     id: 'purchases',
     label: 'Purchases',
-    explanation: 'Pay for anything, in any way.',
-    tools: [],
+    explanation:
+      'Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.',
+    tools: ['browser_submit'],
     defaultLevel: 'ask',
     maxLevel: 'ask',
     fixedReason: 'Money leaves your account, so you approve each payment.',
@@ -141,15 +144,48 @@ const FIXED_DOMAINS: Readonly<Record<string, AutonomyDomain>> = {
   [GOOGLE('gmail_label')]: 'mail_labels',
   [GOOGLE('gmail_archive')]: 'mail_labels',
   [GOOGLE('gmail_mark_read')]: 'mail_labels',
-  browser_submit: 'browser_submits',
   [GOOGLE('gmail_unsubscribe')]: 'unsubscribes',
   inbox_unsubscribe: 'unsubscribes',
 };
 
+// the words that make a browser submit a purchase. the text of the page address, the button and each field name and
+// value is split into words first, so "cardNumber", "cc-exp" and "/checkout/pay" match too. the list is broad on
+// purpose: a submit that it takes for a purchase by mistake asks the owner, which is the default of browser submits
+// anyway, and a purchase that it misses could go out with only the reviewer's check.
+const PURCHASE_WORDS =
+  /\b(buy|buying|pay|paying|payment|payments|purchase|purchases|checkout|check out|order|orders|cart|basket|bag|billing|card|cards|credit|debit|cc|cvc|cvv|csc|cid|exp|expiry|expiration|iban|bic|swift|routing|subscribe|subscription|donate|donation|tip|wallet|invoice|price|total|amount|sum|coupon|promo)\b/i;
+
+// a value with 13 to 19 digits, with or without spaces or dashes, can be a card number.
+const CARD_NUMBER = /(?:\d[ -]?){12,18}\d/;
+
+// the words of a text: a lower-case letter before an upper-case one, and a letter next to a digit, start a new word,
+// and any other character than a letter or a digit splits words.
+const wordsOf = (text: string): string =>
+  text
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([a-zA-Z])(\d)|(\d)([a-zA-Z])/g, '$1$3 $2$4')
+    .replace(/[^a-zA-Z0-9]+/g, ' ');
+
+// isPurchase tells whether a browser submit looks like a payment. a button outside a form sends what its script
+// chooses, and the call names no field of it, so the owner approves it, the same as an "Add to cart" or a "Pay now".
+export function isPurchase(fields: Record<string, unknown>): boolean {
+  const formFields = fields.fields !== null && typeof fields.fields === 'object' ? (fields.fields as Record<string, unknown>) : {};
+  const names = Object.keys(formFields);
+  if (!names.length) return true;
+  const values = Object.values(formFields).flatMap((value) => (Array.isArray(value) ? value : [value])).map(String);
+  if (values.some((value) => CARD_NUMBER.test(value))) return true;
+  const texts = [String(fields.url ?? ''), String(fields.button ?? ''), ...names, ...values];
+  return texts.some((text) => PURCHASE_WORDS.test(wordsOf(text)));
+}
+
 // domainOf gives the domain of one call, or undefined for a call outside the ladder. the policy engine then decides
-// it as before. calendar_create_event is a hold without attendees and an event with guests with them. sandbox_exec is
-// in sandbox_network only with network access. the tools of the dashboard flows (inbox_archive_sender,
-// inbox_create_event, inbox_cancel_subscription) stay outside the ladder, because the dashboard asks the owner for each.
+// it as before. calendar_create_event is a hold without attendees and an event with guests with them.
+// calendar_update_event with a new attendee list sends each guest an update, so it is an event with guests. any other
+// update and calendar_delete_event stay outside the ladder: they always ask the owner, and google tells the guests
+// that the event already has. a browser submit that looks like a payment is a purchase, and any other is a browser
+// submit. sandbox_exec is in sandbox_network only with network access. the tools of the dashboard flows
+// (inbox_archive_sender, inbox_create_event, inbox_cancel_subscription) stay outside the ladder, because the dashboard
+// asks the owner for each.
 export function domainOf(tool: string, input: unknown): AutonomyDomain | undefined {
   if (Object.hasOwn(FIXED_DOMAINS, tool)) return FIXED_DOMAINS[tool];
   // an input that is not an object has no fields. the tool then fails its own check of the input.
@@ -158,6 +194,8 @@ export function domainOf(tool: string, input: unknown): AutonomyDomain | undefin
     // any guest gets an invitation, so a list with an item is an event with guests. a missing or empty list is a hold.
     return Array.isArray(fields.attendees) && fields.attendees.length > 0 ? 'calendar_guests' : 'calendar_holds';
   }
+  if (tool === GOOGLE('calendar_update_event')) return Array.isArray(fields.attendees) && fields.attendees.length > 0 ? 'calendar_guests' : undefined;
+  if (tool === 'browser_submit') return isPurchase(fields) ? 'purchases' : 'browser_submits';
   if (tool === 'sandbox_exec') return fields.network !== null && typeof fields.network === 'object' ? 'sandbox_network' : undefined;
   return undefined;
 }

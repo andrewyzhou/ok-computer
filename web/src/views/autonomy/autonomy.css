@@ -51,6 +51,7 @@
 }
 .autonomy-card-title {
   margin: 0 0 4px;
+  color: var(--ink);
   font-size: var(--text-md);
   font-weight: 600;
 }
@@ -81,6 +82,20 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+.autonomy-default {
+  color: var(--ink-2);
+}
+.autonomy-override {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--warning);
+  color: var(--ink-2);
+}
+.autonomy-override code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 .autonomy-fixed {
   display: flex;
@@ -146,10 +161,23 @@
 .autonomy-confirm-actions {
   display: flex;
   gap: 8px;
+  margin-top: 10px;
 }
 
-.autonomy-change {
+.autonomy-change,
+.autonomy-when {
   white-space: nowrap;
+}
+.autonomy-note-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.autonomy-taint {
+  color: var(--warning-ink);
+}
+.autonomy-domain-name {
+  font-weight: 600;
 }
 .autonomy-who {
   display: flex;
@@ -166,9 +194,23 @@
 }
 .autonomy-more {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
   padding-top: 12px;
+}
+/* the error takes its own full line under the button, so a long server text stays readable on a phone. */
+.autonomy-more-error {
+  flex: 1 0 100%;
+}
+.autonomy-load-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+.autonomy-load-error p {
+  margin: 0;
 }
 
 @media (max-width: 759.98px) {
@@ -189,6 +231,9 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+  }
+  .autonomy-phone-note {
+    color: var(--ink-2);
   }
   .autonomy-choice {
     display: flex;
