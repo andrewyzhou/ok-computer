@@ -36,10 +36,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -120,6 +121,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -182,7 +230,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -264,10 +312,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -348,6 +397,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -410,7 +506,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -484,17 +580,18 @@
     "name": "autonomy-full-390",
     "hash": "#/autonomy",
     "width": 390,
-    "height": 2400,
+    "height": 3000,
     "stubs": {
       "GET /api/autonomy": {
         "domains": [
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -575,6 +672,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -637,7 +781,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -712,17 +856,18 @@
     "hash": "#/autonomy",
     "width": 390,
     "dark": true,
-    "height": 2400,
+    "height": 3000,
     "stubs": {
       "GET /api/autonomy": {
         "domains": [
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -803,6 +948,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -865,7 +1057,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -972,10 +1164,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -1056,6 +1249,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -1118,7 +1358,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -1637,10 +1877,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -1721,6 +1962,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -1783,7 +2071,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -2301,10 +2589,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -2385,6 +2674,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -2447,7 +2783,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -2966,10 +3302,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -3050,6 +3387,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -3112,7 +3496,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -3684,10 +4068,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -3768,6 +4153,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -3830,7 +4262,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -3918,10 +4350,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -4002,6 +4435,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -4064,7 +4544,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -4151,10 +4631,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -4235,6 +4716,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -4297,7 +4825,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -4385,10 +4913,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -4469,6 +4998,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -4531,7 +5107,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -4619,10 +5195,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -4703,6 +5280,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -4765,7 +5389,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -5291,10 +5915,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -5375,6 +6000,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -5437,7 +6109,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -5962,10 +6634,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -6046,6 +6719,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -6108,7 +6828,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -6634,10 +7354,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -6718,6 +7439,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -6780,7 +7548,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -7305,10 +8073,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -7389,6 +8158,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -7451,7 +8267,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -7971,10 +8787,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -8055,6 +8872,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -8117,7 +8981,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -8636,10 +9500,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -8720,6 +9585,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -8782,7 +9694,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],
@@ -9302,10 +10214,11 @@
           {
             "id": "mail_drafts",
             "label": "Mail drafts",
-            "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+            "explanation": "Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.",
             "tools": [
               "google__gmail_draft",
-              "inbox_draft_reply"
+              "inbox_draft_reply",
+              "desk_draft_nudge"
             ],
             "level": "auto",
             "defaultLevel": "review",
@@ -9386,6 +10299,53 @@
             "overriddenBy": null
           },
           {
+            "id": "delegations",
+            "label": "Delegations",
+            "explanation": "Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.",
+            "tools": [
+              "delegation_create",
+              "delegation_done",
+              "delegation_update",
+              "delegation_wait_on"
+            ],
+            "level": "review",
+            "defaultLevel": "review",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
+            "id": "local_writes",
+            "label": "Docs and notes",
+            "explanation": "Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.",
+            "tools": [
+              "doc_update",
+              "doc_write",
+              "person_note"
+            ],
+            "level": "auto",
+            "defaultLevel": "auto",
+            "maxLevel": "auto",
+            "levels": [
+              "ask",
+              "review",
+              "auto"
+            ],
+            "fixed": false,
+            "fixedReason": null,
+            "updatedAt": null,
+            "changeId": null,
+            "overriddenBy": null
+          },
+          {
             "id": "browser_submits",
             "label": "Browser form submits",
             "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A submit that looks like a purchase is in Purchases and always asks you. A page that the agent read makes each submit ask you anyway. A sub-agent never sends a form on its own.",
@@ -9448,7 +10408,7 @@
           {
             "id": "purchases",
             "label": "Purchases",
-            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or its fields name an order, a payment, a cart, a checkout or a card, and so does a button that sends data with a script outside a form.",
+            "explanation": "Pay for anything, in any way. A form submit in the agent browser counts as a purchase when its page, its button or any of its fields name an order, a payment, a booking, a ticket or a card, and so does a button that sends data with a script.",
             "tools": [
               "browser_submit"
             ],

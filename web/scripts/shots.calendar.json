@@ -1722,6 +1722,29 @@
     "wait": "main .cal-page"
   },
   {
+    "name": "day-1440-dark",
+    "hash": "#/calendar?day=2026-10-12&mode=day",
+    "width": 1440,
+    "dark": true,
+    "wait": "main .cal-page",
+    "stubsOf": "day-1440"
+  },
+  {
+    "name": "day-390",
+    "hash": "#/calendar?day=2026-10-12&mode=day",
+    "width": 390,
+    "wait": "main .cal-page",
+    "stubsOf": "day-1440"
+  },
+  {
+    "name": "day-390-dark",
+    "hash": "#/calendar?day=2026-10-12&mode=day",
+    "width": 390,
+    "dark": true,
+    "wait": "main .cal-page",
+    "stubsOf": "day-1440"
+  },
+  {
     "name": "selected-1440",
     "hash": "#/calendar?day=2026-10-12",
     "width": 1440,
@@ -2336,7 +2359,33 @@
       }
     },
     "wait": "main .cal-page",
-    "click": "main .cal-block[data-key='school/primary/advisor']"
+    "click": "main [data-key='school/primary/advisor']"
+  },
+  {
+    "name": "selected-1440-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 1440,
+    "dark": true,
+    "wait": "main .cal-page",
+    "click": "main [data-key='school/primary/advisor']",
+    "stubsOf": "selected-1440"
+  },
+  {
+    "name": "selected-390",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "wait": "main .cal-page",
+    "click": "main [data-key='school/primary/advisor']",
+    "stubsOf": "selected-1440"
+  },
+  {
+    "name": "selected-390-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "dark": true,
+    "wait": "main .cal-page",
+    "click": "main [data-key='school/primary/advisor']",
+    "stubsOf": "selected-1440"
   },
   {
     "name": "proposal-1440",
@@ -2953,7 +3002,33 @@
       }
     },
     "wait": "main .cal-page",
-    "click": "main .cal-bar[data-key='proposal:7']"
+    "click": "main [data-key='proposal:7']"
+  },
+  {
+    "name": "proposal-1440-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 1440,
+    "dark": true,
+    "wait": "main .cal-page",
+    "click": "main [data-key='proposal:7']",
+    "stubsOf": "proposal-1440"
+  },
+  {
+    "name": "proposal-390",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "wait": "main .cal-page",
+    "click": "main [data-key='proposal:7']",
+    "stubsOf": "proposal-1440"
+  },
+  {
+    "name": "proposal-390-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "dark": true,
+    "wait": "main .cal-page",
+    "click": "main [data-key='proposal:7']",
+    "stubsOf": "proposal-1440"
   },
   {
     "name": "dense-1440",
@@ -3992,6 +4067,29 @@
     "wait": "main .cal-page"
   },
   {
+    "name": "dense-1440-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 1440,
+    "dark": true,
+    "wait": "main .cal-page",
+    "stubsOf": "dense-1440"
+  },
+  {
+    "name": "dense-390",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "wait": "main .cal-page",
+    "stubsOf": "dense-1440"
+  },
+  {
+    "name": "dense-390-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "dark": true,
+    "wait": "main .cal-page",
+    "stubsOf": "dense-1440"
+  },
+  {
     "name": "dense-1440-selected",
     "hash": "#/calendar?day=2026-10-12",
     "width": 1440,
@@ -5026,7 +5124,33 @@
       }
     },
     "wait": "main .cal-page",
-    "click": "main .cal-block[data-key='school/primary/side1']"
+    "click": "main [data-key='school/primary/side1']"
+  },
+  {
+    "name": "dense-selected-1440-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 1440,
+    "dark": true,
+    "wait": "main .cal-page",
+    "click": "main [data-key='school/primary/side1']",
+    "stubsOf": "dense-1440-selected"
+  },
+  {
+    "name": "dense-selected-390",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "wait": "main .cal-page",
+    "click": "main [data-key='school/primary/side1']",
+    "stubsOf": "dense-1440-selected"
+  },
+  {
+    "name": "dense-selected-390-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "dark": true,
+    "wait": "main .cal-page",
+    "click": "main [data-key='school/primary/side1']",
+    "stubsOf": "dense-1440-selected"
   },
   {
     "name": "agenda-390",
@@ -6876,7 +7000,33 @@
       }
     },
     "wait": "main .cal-page",
-    "click": "main .cal-agenda-item[data-key='school/primary/reading']"
+    "click": "main [data-key='school/primary/reading']"
+  },
+  {
+    "name": "details-1440",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 1440,
+    "wait": "main .cal-page",
+    "click": "main [data-key='school/primary/reading']",
+    "stubsOf": "agenda-390-details"
+  },
+  {
+    "name": "details-1440-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 1440,
+    "dark": true,
+    "wait": "main .cal-page",
+    "click": "main [data-key='school/primary/reading']",
+    "stubsOf": "agenda-390-details"
+  },
+  {
+    "name": "details-390-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "dark": true,
+    "wait": "main .cal-page",
+    "click": "main [data-key='school/primary/reading']",
+    "stubsOf": "agenda-390-details"
   },
   {
     "name": "empty-1440",
@@ -6936,6 +7086,29 @@
     "wait": "main .cal-page"
   },
   {
+    "name": "empty-1440-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 1440,
+    "dark": true,
+    "wait": "main .cal-page",
+    "stubsOf": "empty-1440"
+  },
+  {
+    "name": "empty-390",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "wait": "main .cal-page",
+    "stubsOf": "empty-1440"
+  },
+  {
+    "name": "empty-390-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "dark": true,
+    "wait": "main .cal-page",
+    "stubsOf": "empty-1440"
+  },
+  {
     "name": "first-run-390",
     "hash": "#/calendar?day=2026-10-12",
     "width": 390,
@@ -6966,6 +7139,29 @@
       }
     },
     "wait": "main .cal-page"
+  },
+  {
+    "name": "first-run-1440",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 1440,
+    "wait": "main .cal-page",
+    "stubsOf": "first-run-390"
+  },
+  {
+    "name": "first-run-1440-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 1440,
+    "dark": true,
+    "wait": "main .cal-page",
+    "stubsOf": "first-run-390"
+  },
+  {
+    "name": "first-run-390-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "dark": true,
+    "wait": "main .cal-page",
+    "stubsOf": "first-run-390"
   },
   {
     "name": "failed-1440",
@@ -7007,6 +7203,29 @@
       }
     },
     "wait": "main .cal-page"
+  },
+  {
+    "name": "failed-1440-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 1440,
+    "dark": true,
+    "wait": "main .cal-page",
+    "stubsOf": "failed-1440"
+  },
+  {
+    "name": "failed-390",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "wait": "main .cal-page",
+    "stubsOf": "failed-1440"
+  },
+  {
+    "name": "failed-390-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "dark": true,
+    "wait": "main .cal-page",
+    "stubsOf": "failed-1440"
   },
   {
     "name": "partial-390",
@@ -7282,5 +7501,92 @@
       }
     },
     "wait": "main .cal-page"
+  },
+  {
+    "name": "partial-1440",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 1440,
+    "wait": "main .cal-page",
+    "stubsOf": "partial-390"
+  },
+  {
+    "name": "partial-1440-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 1440,
+    "dark": true,
+    "wait": "main .cal-page",
+    "stubsOf": "partial-390"
+  },
+  {
+    "name": "partial-390-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "dark": true,
+    "wait": "main .cal-page",
+    "stubsOf": "partial-390"
+  },
+  {
+    "name": "seeded-1440",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 1440,
+    "seed": "today",
+    "wait": "main .cal-page"
+  },
+  {
+    "name": "seeded-1440-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 1440,
+    "dark": true,
+    "seed": "today",
+    "wait": "main .cal-page"
+  },
+  {
+    "name": "seeded-390",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "seed": "today",
+    "wait": "main .cal-page"
+  },
+  {
+    "name": "seeded-390-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "dark": true,
+    "seed": "today",
+    "wait": "main .cal-page"
+  },
+  {
+    "name": "seeded-proposal-1440",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 1440,
+    "seed": "today",
+    "wait": "main .cal-page",
+    "click": "main [data-key='proposal:7']"
+  },
+  {
+    "name": "seeded-proposal-1440-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 1440,
+    "dark": true,
+    "seed": "today",
+    "wait": "main .cal-page",
+    "click": "main [data-key='proposal:7']"
+  },
+  {
+    "name": "seeded-proposal-390",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "seed": "today",
+    "wait": "main .cal-page",
+    "click": "main [data-key='proposal:7']"
+  },
+  {
+    "name": "seeded-proposal-390-dark",
+    "hash": "#/calendar?day=2026-10-12",
+    "width": 390,
+    "dark": true,
+    "seed": "today",
+    "wait": "main .cal-page",
+    "click": "main [data-key='proposal:7']"
   }
 ]

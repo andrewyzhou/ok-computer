@@ -69,15 +69,15 @@ describe('the autonomy page', () => {
       expect(cardOf(label).queryByRole('radio')).toBeNull();
     }
     expect(cardOf('Purchases').getByText('Money leaves your account, so you approve each payment.')).toBeTruthy();
-    expect(inMain().getAllByRole('radiogroup')).toHaveLength(5);
+    expect(inMain().getAllByRole('radiogroup')).toHaveLength(7);
     // every domain is at its default level on a first run. a domain that can change says so, and a fixed one shows its
     // level as a pill and no radio.
-    expect(inMain().getAllByText('Default level')).toHaveLength(5);
+    expect(inMain().getAllByText('Default level')).toHaveLength(7);
     expect(cardOf('Purchases').queryByText('Default level')).toBeNull();
     expect(cardOf('Purchases').getByText('ask')).toBeTruthy();
     // a domain that can change shows its level once, in the radios.
     expect(cardOf('Mail drafts').queryByText('review')).toBeNull();
-    expect(inMain().getAllByText('Never changed')).toHaveLength(8);
+    expect(inMain().getAllByText('Never changed')).toHaveLength(10);
     const legend = within(document.querySelector<HTMLElement>('main dl[aria-label="levels"]')!);
     expect(legend.getByText('You approve each action before it happens.')).toBeTruthy();
     expect(inMain().getByText('No changes yet')).toBeTruthy();
