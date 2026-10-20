@@ -112,6 +112,23 @@ The waterfall (M1) gives a `sandbox` span with `ref.sandboxExecId` for each exec
 
 The default image is `okc-sandbox:1` (`SANDBOX_IMAGE` in `src/sandbox/limits.ts`), built from `sandbox/Dockerfile` by `npm run sandbox:image`. It runs as `1000:1000` with the home `/work`, the create request resets the entrypoint of its base (`Entrypoint: [""]`), and it holds the relay of the network mode at `/opt/okc/relay.mjs`. A change of what the image holds changes the tag in `limits.ts` and in the `sandbox:image` script together. The decisions are in DESIGN-NEXT 5.8.
 
+### T5: people (`src/dashboard/people.ts`, `src/people/`)
+
+The types are in `src/dashboard/people-types.ts`, which imports nothing. Every read passes the clock of the dashboard as `now`, because the counts and the contact times count only contacts until now, and a cancelled meeting never counts. Nothing in these routes talks to Google: the existing polls and the backfill fill the store from mail headers (From, To, Cc) and calendar attendees, and no body is stored.
+
+| Method | Path | Query / body | Response | Notes |
+|---|---|---|---|---|
+| GET | `/api/people` | `q` (trimmed, at most 200 characters; matched without case against every name, every email and the organization; blank lists everyone), `sort` (`PersonSort`: `recent`, `frequent`, `name`; default `recent`), `cursor`, `limit` 1–200 (default 50) | `PeoplePage` | Cursor paging, but the field is `next: string \| null`, and `total` counts every match on each page. `recent` puts the last contact first and a person with no past contact last, `frequent` counts mail and meetings together, `name` sorts `displayName` without case, and each sort breaks ties by id. `400` `give q as text of at most 200 characters`, `give sort as one of: recent, frequent, name`, and `the cursor is not valid`. |
+| GET | `/api/people/status` | none | `PeopleStatus` | `configured` is false without a `google` block, and `accounts` is then `[]`. Otherwise `accounts` has one `PeopleAccountStatus` for each account of the config, in its order, and an account that the backfill has not started shows as `pending`. |
+| GET | `/api/people/lookup` | `email` | `PersonSummary` | The address is normalized first (trimmed, `<>` taken off, lower case), so any address of the person finds them. It is for the person chip. `400 give email as one address` when `email` is missing or is not one address. `404 person not found`. |
+| GET | `/api/people/:id` | none | `PersonProfile` | `404 person not found` for an unknown id and for an id that is not a positive whole number. `upcoming` holds at most 10 meetings, `recentMeetings` at most 5, and `openThreads` the threads of the last 30 days where the person wrote last, at most 10. `notes` and `preferences` leave out each note that a later note supersedes. `delegations` is `[]` until the desk (T3) is there. |
+| POST | `/api/people/:id/notes` | `PersonNoteInput` `{ kind, text, supersedes? }` | `201 PersonNoteView` | Appends a note with `author: 'owner'` and `runId: null`. Notes are append-only: a change is a new note that supersedes the old one. `kind` is `note` or `preference`, `text` is 1 to 2000 characters after a trim, and `supersedes` is the id of a note of the same person. `400` for each of these and for a key that the body does not take, and `400 supersedes names no note of this person`. `404 person not found`. The log line names the person and never the text. |
+
+- `/api/people/status` and `/api/people/lookup` are registered before `/api/people/:id`, so neither word is read as an id.
+- The agent's tools (`src/people/tools.ts`) are registered only with a `google` block. `person_lookup` and `people_search` only read and mark their output as untrusted, because the names come from other people's mail headers. `person_note` appends a note with `author: 'agent'` and the run of the call. The `main` session gets all three when the google sessions include `main`, an automation gets all three with `auto` and only the two read tools with `auto-read`, and any other session gets none.
+- The read API for the other parts of the app is `src/people/index.ts` (`searchPeople`, `getPerson`, `findPersonByEmail`, `normalizeEmail`). It only reads, and each function takes the clock time of the caller.
+- The tables are in `023_people.sql`: `people`, `person_emails`, `person_names`, `person_contacts`, the append-only `person_notes`, and `people_accounts` (the backfill of each account). Mailing lists, no-reply and notification senders and very large meetings are left out. The organization comes from the email domain, and a personal domain such as gmail.com gives none.
+
 ## 3. Event streams
 
 Both streams are SSE. With `DASHBOARD_TOKEN` set, they take `?token=` because `EventSource` sends no headers. The cookie also works. A stream sends `event: ready` with `{}` first. Then each message is an unnamed event whose data is one JSON value.
@@ -137,7 +154,8 @@ The routes stay in the hash (`#/<path>`). `web/src/routes.ts` holds the registry
 | Nav group | Item → route | Owner |
 |---|---|---|
 | Today | Overview → `#/` | core, M3 restyles |
-| Desk, Calendar, Docs, People | none in phase 5. The groups stay hidden until a view registers. | |
+| Desk, Calendar, Docs | none in phase 5. The groups stay hidden until a view registers. | |
+| People | People → `#/people`, detail `#/people/:id` | T5 |
 | Inbox | Digest → `#/inbox`, Newsletters → `#/inbox/newsletters`, Subscriptions → `#/inbox/subscriptions`, Drafts → `#/inbox/drafts`, Proposals → `#/inbox/proposals`. Detail: `#/inbox/digests/:id` | M8 |
 | Chats | Chats → `#/chats`. Detail: `#/chats/:key` (the `main@<id>` key, URL-encoded) | M4 |
 | Activity | Activity → `#/activity` (`?kind=` filters). Detail: `#/activity/:key` | M4 |
@@ -163,6 +181,7 @@ Each team edits only its own files. A shared file gets only the change written h
 | M7 | `Dockerfile`, `compose.yaml`, `litestream.yml`, `.github/workflows/`, `docs/setup/aws.md`, `src/dashboard/deploy.ts`, `src/secrets/` (the file and aws backends) | `types.ts` (its section), `src/config/schema.ts` (`secrets`), the store choice in `src/app.ts` |
 | M8 | `src/db/migrations/019_inbox.sql`, `src/inbox/`, `src/dashboard/inbox.ts`, `web/src/views/inbox/` | `types.ts` (its section), the tool registration in `src/app.ts`, `src/google/` for new Gmail and Calendar calls |
 | M9 | `src/db/migrations/020_sandbox.sql`, `src/sandbox/`, `src/dashboard/sandbox.ts`, `sandbox/` (the image), `docs/setup/sandbox.md` | `types.ts` (its section), the tool registration in `src/app.ts` and its policy rule, `src/browser/proxy.ts` (the `EgressProxyOptions` with `allowHost` and the listen address; the browser team reviews it), `src/main.ts` (`sandbox: {}`), the `sandbox:image` script of `package.json`, `RISK_TEXT.exec` in `src/integrations/discovery.ts`, and `README.md` |
+| T5 | `src/db/migrations/023_people.sql`, `src/people/`, `src/dashboard/people.ts`, `src/dashboard/people-types.ts`, `web/src/views/people/`, `test/seed-people.ts`, `test/dashboard-people.test.ts` | one line in `server.ts` (the `mountPeople` call, with its import), two lines in `src/app.ts` (the people tools of a session and their registration, with their import), the nav tests (`web/src/routes.test.tsx`, `web/src/routes.edge.test.tsx`, `web/src/shell/shell.test.tsx`) |
 
 - **Route modules.** Each new module `src/dashboard/<area>.ts` exports `mount<Area>(server, deps)`. The stub exists already, and `server.ts` already mounts it with one line after the sign-in check and before the `/api/*` 404. A team fills its stub and does not edit those lines. A team that needs a new part of `App` adds one key to the `app` pick in `DashboardDeps`.
 - **Types.** Each team adds fields only in its own section of `types.ts`. A new shape that another team reads goes there too, and nothing in that file imports anything.
