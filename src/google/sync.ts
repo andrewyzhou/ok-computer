@@ -6,6 +6,7 @@ import type { Logger } from '../observability/logger.js';
 import { redactedJson } from '../observability/redact.js';
 import type { CalendarItem } from '../signals/detectors.js';
 import { addSignals, cleanLine, inTransaction, type NewSignal } from '../signals/store.js';
+import type { PeopleBuilder } from '../people/builder.js';
 import { zonedToUtc, type Clock } from '../time.js';
 import type { GoogleAccounts } from './accounts.js';
 import { GoogleError } from './errors.js';
@@ -37,6 +38,9 @@ export interface SyncDeps {
   blobs: BlobStore;
   accounts: GoogleAccounts;
   timeZone: string;
+  // the people memory reads the headers and the attendees that the poll already has. without it, the poll reads the
+  // same and only makes signals.
+  people?: PeopleBuilder;
 }
 
 // a poll reads at most this many history pages. a large import of mail then moves the cursor in steps, and each
@@ -56,7 +60,8 @@ const FIRST_READ_BACK_MS = DAY_MS;
 // the detectors read the calendars from yesterday to this many days ahead. the date detector looks 60 days ahead.
 const RANGE_AHEAD_DAYS = 61;
 const RANGE_PAGES = 4;
-const HEADERS = ['From', 'Subject', 'Date', 'List-Unsubscribe', 'List-Unsubscribe-Post'];
+// the people memory needs the recipients and the list headers too. they are not part of the signal blob.
+const HEADERS = ['From', 'Subject', 'Date', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'To', 'Cc', 'List-Id', 'Precedence', 'Auto-Submitted'];
 
 type Gmail = gmail_v1.Gmail;
 
@@ -65,6 +70,17 @@ class CursorMoved extends Error {}
 export function createSync(deps: SyncDeps): Sync {
   const { db, clock, logger, accounts, timeZone } = deps;
   let running: Promise<AccountPoll[]> | undefined;
+
+  // the builder never throws, but the poll must not depend on that. the log line has no error text and no address,
+  // because the text of a failure in the builder can hold one.
+  const observe = (alias: string, what: 'mail' | 'events', call: (builder: PeopleBuilder) => unknown) => {
+    if (!deps.people) return;
+    try {
+      call(deps.people);
+    } catch {
+      logger.warn('the people builder failed, so the poll goes on without it', { alias, what });
+    }
+  };
 
   const cursorOf = (alias: string, column: 'historyId' | 'calendarSyncToken'): string | null =>
     (db.prepare(`SELECT ${column} AS cursor FROM google_accounts WHERE alias = ?`).get(alias)?.cursor as string | null | undefined) ?? null;
@@ -193,6 +209,7 @@ export function createSync(deps: SyncDeps): Sync {
         blob,
         row.id,
       );
+      observe(alias, 'mail', (builder) => builder.observeMail(alias, [message]));
     }
     if (!refusal) return;
     if (!answered) throw refusal;
@@ -251,6 +268,9 @@ export function createSync(deps: SyncDeps): Sync {
         const kept = db.prepare('UPDATE google_accounts SET calendarPage = ? WHERE alias = ? AND calendarSyncToken IS ?').run(next, alias, pageToken ? cursor : data.nextSyncToken!);
         if (Number(kept.changes) !== 1) throw new CursorMoved();
       });
+      // the people memory reads each page after its commit. a first read gives the events of the coming days, and a
+      // change list gives the cancelled events, which mark their meeting rows.
+      observe(alias, 'events', (builder) => builder.observeEvents(alias, data.items ?? []));
       if (!pageToken) return;
     }
     logger.info('the calendar read did not end in this poll, so the next poll goes on from its position', { alias });
@@ -298,6 +318,8 @@ export function createSync(deps: SyncDeps): Sync {
           ...(pageToken ? { pageToken } : {}),
         }),
       );
+      // the builder gets the raw page. it handles the declined and the cancelled events itself.
+      observe(alias, 'events', (builder) => builder.observeEvents(alias, data.items ?? []));
       for (const event of data.items ?? []) {
         const start = startOf(event);
         const declined = event.attendees?.some((each) => each.self && each.responseStatus === 'declined');
