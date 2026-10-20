@@ -123,7 +123,8 @@ describe('migration 024', () => {
     `);
     const old = db.prepare('SELECT * FROM policy_decisions').get()!;
 
-    expect(migrate(db, real)).toEqual(['024_autonomy.sql']);
+    // the migrations after 024 belong to other tracks and apply in the same open.
+    expect(migrate(db, real)).toEqual(sqlFiles().filter((file) => file >= '024').sort());
 
     const row = db.prepare('SELECT * FROM policy_decisions').get()!;
     expect(row).toEqual({ ...old, autonomyDomain: null, autonomyLevel: null });

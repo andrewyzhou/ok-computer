@@ -1,6 +1,6 @@
 import type { calendar_v3 } from '@googleapis/calendar';
 import type { gmail_v1 } from '@googleapis/gmail';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Db } from '../db/index.js';
 import type { GoogleApis } from '../google/accounts.js';
 import { GoogleError } from '../google/errors.js';
@@ -8,6 +8,11 @@ import type { Logger } from '../observability/logger.js';
 import { BACKFILL_DAYS, BACKFILL_MAX_MESSAGES, backfillStep, MAIL_QUERY, sweepSent, type BackfillDeps } from './backfill.js';
 import type { PeopleBuilder } from './builder.js';
 import type { BackfillState } from './store.js';
+import { setGmailPaceForTests } from '../inbox/gmail.js';
+
+// the gmail reads keep to the pace of the inbox (src/inbox/gmail.ts). a test never waits for it.
+beforeEach(() => setGmailPaceForTests({ sleep: async () => {} }));
+afterEach(() => setGmailPaceForTests());
 
 const NOW = new Date('2026-10-19T12:00:00Z');
 const db = {} as Db;

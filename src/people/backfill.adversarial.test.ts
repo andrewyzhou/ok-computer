@@ -1,11 +1,16 @@
 import type { gmail_v1 } from '@googleapis/gmail';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb, type Db } from '../db/index.js';
 import type { GoogleApis } from '../google/accounts.js';
 import { createLogger } from '../observability/logger.js';
 import { backfillStep, SENT_SWEEP_MAX, sweepSent, type BackfillDeps } from './backfill.js';
 import { createPeopleBuilder } from './builder.js';
 import { backfillStateOf, saveBackfillState, searchPeople } from './store.js';
+import { setGmailPaceForTests } from '../inbox/gmail.js';
+
+// the gmail reads keep to the pace of the inbox (src/inbox/gmail.ts). a test never waits for it.
+beforeEach(() => setGmailPaceForTests({ sleep: async () => {} }));
+afterEach(() => setGmailPaceForTests());
 
 // the backfill and the sent sweep on the real store, with a fake gmail that lists the newest mail first, as gmail
 // does. these cases look for mail that is read twice or never.

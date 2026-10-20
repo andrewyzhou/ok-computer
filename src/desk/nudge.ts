@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Delegation } from '../dashboard/desk-types.js';
 import { toGoogleError } from '../google/errors.js';
 import { badAddress, fromAddress, header, rawMessage } from '../google/mime.js';
-import { failed } from '../google/send.js';
+import { failed } from '../google/failed.js';
 import { requestContext } from '../google/trace.js';
 import { extractItems, itemsTool } from '../inbox/extract.js';
 import { mailSource } from '../inbox/run.js';
