@@ -1,0 +1,6212 @@
+[
+ {
+  "name": "autonomy-first-run-1440",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-first-run-1440-dark",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "dark": true,
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-first-run-390",
+  "hash": "#/autonomy",
+  "width": 390,
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-first-run-390-dark",
+  "hash": "#/autonomy",
+  "width": 390,
+  "dark": true,
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-full-1440",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "auto",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-17T15:58:00.000Z",
+      "changeId": 1
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-18T17:05:00.000Z",
+      "changeId": 3
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [
+     {
+      "id": 3,
+      "domain": "mail_labels",
+      "fromLevel": "auto",
+      "toLevel": "review",
+      "actor": "agent",
+      "via": "chat",
+      "runId": "run-12",
+      "toolCallId": "call-1",
+      "sessionKey": "main",
+      "note": "The owner asked to check labels again after a wrong archive.",
+      "createdAt": "2026-10-18T17:05:00.000Z"
+     },
+     {
+      "id": 2,
+      "domain": "mail_labels",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T16:00:00.000Z"
+     },
+     {
+      "id": 1,
+      "domain": "mail_drafts",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T15:58:00.000Z"
+     }
+    ],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-full-1440-dark",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "dark": true,
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "auto",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-17T15:58:00.000Z",
+      "changeId": 1
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-18T17:05:00.000Z",
+      "changeId": 3
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [
+     {
+      "id": 3,
+      "domain": "mail_labels",
+      "fromLevel": "auto",
+      "toLevel": "review",
+      "actor": "agent",
+      "via": "chat",
+      "runId": "run-12",
+      "toolCallId": "call-1",
+      "sessionKey": "main",
+      "note": "The owner asked to check labels again after a wrong archive.",
+      "createdAt": "2026-10-18T17:05:00.000Z"
+     },
+     {
+      "id": 2,
+      "domain": "mail_labels",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T16:00:00.000Z"
+     },
+     {
+      "id": 1,
+      "domain": "mail_drafts",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T15:58:00.000Z"
+     }
+    ],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-full-390",
+  "hash": "#/autonomy",
+  "width": 390,
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "auto",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-17T15:58:00.000Z",
+      "changeId": 1
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-18T17:05:00.000Z",
+      "changeId": 3
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [
+     {
+      "id": 3,
+      "domain": "mail_labels",
+      "fromLevel": "auto",
+      "toLevel": "review",
+      "actor": "agent",
+      "via": "chat",
+      "runId": "run-12",
+      "toolCallId": "call-1",
+      "sessionKey": "main",
+      "note": "The owner asked to check labels again after a wrong archive.",
+      "createdAt": "2026-10-18T17:05:00.000Z"
+     },
+     {
+      "id": 2,
+      "domain": "mail_labels",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T16:00:00.000Z"
+     },
+     {
+      "id": 1,
+      "domain": "mail_drafts",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T15:58:00.000Z"
+     }
+    ],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-full-390-dark",
+  "hash": "#/autonomy",
+  "width": 390,
+  "dark": true,
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "auto",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-17T15:58:00.000Z",
+      "changeId": 1
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-18T17:05:00.000Z",
+      "changeId": 3
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [
+     {
+      "id": 3,
+      "domain": "mail_labels",
+      "fromLevel": "auto",
+      "toLevel": "review",
+      "actor": "agent",
+      "via": "chat",
+      "runId": "run-12",
+      "toolCallId": "call-1",
+      "sessionKey": "main",
+      "note": "The owner asked to check labels again after a wrong archive.",
+      "createdAt": "2026-10-18T17:05:00.000Z"
+     },
+     {
+      "id": 2,
+      "domain": "mail_labels",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T16:00:00.000Z"
+     },
+     {
+      "id": 1,
+      "domain": "mail_drafts",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T15:58:00.000Z"
+     }
+    ],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-confirm-1440",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "click": "role=radiogroup[name='Mail drafts level'] >> role=radio[name='Auto']",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-confirm-1440-dark",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "dark": true,
+  "click": "role=radiogroup[name='Mail drafts level'] >> role=radio[name='Auto']",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-confirm-390",
+  "hash": "#/autonomy",
+  "width": 390,
+  "click": "role=radiogroup[name='Mail drafts level'] >> role=radio[name='Auto']",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-confirm-390-dark",
+  "hash": "#/autonomy",
+  "width": 390,
+  "dark": true,
+  "click": "role=radiogroup[name='Mail drafts level'] >> role=radio[name='Auto']",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-first-run-lower-1440",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "click": "main h3:has-text('Browser form submits')",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-first-run-lower-1440-dark",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "dark": true,
+  "click": "main h3:has-text('Browser form submits')",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-first-run-lower-390",
+  "hash": "#/autonomy",
+  "width": 390,
+  "click": "main h3:has-text('Browser form submits')",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-first-run-lower-390-dark",
+  "hash": "#/autonomy",
+  "width": 390,
+  "dark": true,
+  "click": "main h3:has-text('Browser form submits')",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-first-run-history-1440",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "click": "main h2:has-text('History')",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-first-run-history-1440-dark",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "dark": true,
+  "click": "main h2:has-text('History')",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-first-run-history-390",
+  "hash": "#/autonomy",
+  "width": 390,
+  "click": "main h2:has-text('History')",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-first-run-history-390-dark",
+  "hash": "#/autonomy",
+  "width": 390,
+  "dark": true,
+  "click": "main h2:has-text('History')",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-full-history-1440",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "click": "main h2:has-text('History')",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "auto",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-17T15:58:00.000Z",
+      "changeId": 1
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-18T17:05:00.000Z",
+      "changeId": 3
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [
+     {
+      "id": 3,
+      "domain": "mail_labels",
+      "fromLevel": "auto",
+      "toLevel": "review",
+      "actor": "agent",
+      "via": "chat",
+      "runId": "run-12",
+      "toolCallId": "call-1",
+      "sessionKey": "main",
+      "note": "The owner asked to check labels again after a wrong archive.",
+      "createdAt": "2026-10-18T17:05:00.000Z"
+     },
+     {
+      "id": 2,
+      "domain": "mail_labels",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T16:00:00.000Z"
+     },
+     {
+      "id": 1,
+      "domain": "mail_drafts",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T15:58:00.000Z"
+     }
+    ],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-full-history-1440-dark",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "dark": true,
+  "click": "main h2:has-text('History')",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "auto",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-17T15:58:00.000Z",
+      "changeId": 1
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-18T17:05:00.000Z",
+      "changeId": 3
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [
+     {
+      "id": 3,
+      "domain": "mail_labels",
+      "fromLevel": "auto",
+      "toLevel": "review",
+      "actor": "agent",
+      "via": "chat",
+      "runId": "run-12",
+      "toolCallId": "call-1",
+      "sessionKey": "main",
+      "note": "The owner asked to check labels again after a wrong archive.",
+      "createdAt": "2026-10-18T17:05:00.000Z"
+     },
+     {
+      "id": 2,
+      "domain": "mail_labels",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T16:00:00.000Z"
+     },
+     {
+      "id": 1,
+      "domain": "mail_drafts",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T15:58:00.000Z"
+     }
+    ],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-full-history-390",
+  "hash": "#/autonomy",
+  "width": 390,
+  "click": "main h2:has-text('History')",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "auto",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-17T15:58:00.000Z",
+      "changeId": 1
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-18T17:05:00.000Z",
+      "changeId": 3
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [
+     {
+      "id": 3,
+      "domain": "mail_labels",
+      "fromLevel": "auto",
+      "toLevel": "review",
+      "actor": "agent",
+      "via": "chat",
+      "runId": "run-12",
+      "toolCallId": "call-1",
+      "sessionKey": "main",
+      "note": "The owner asked to check labels again after a wrong archive.",
+      "createdAt": "2026-10-18T17:05:00.000Z"
+     },
+     {
+      "id": 2,
+      "domain": "mail_labels",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T16:00:00.000Z"
+     },
+     {
+      "id": 1,
+      "domain": "mail_drafts",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T15:58:00.000Z"
+     }
+    ],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-full-history-390-dark",
+  "hash": "#/autonomy",
+  "width": 390,
+  "dark": true,
+  "click": "main h2:has-text('History')",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "auto",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-17T15:58:00.000Z",
+      "changeId": 1
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-18T17:05:00.000Z",
+      "changeId": 3
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [
+     {
+      "id": 3,
+      "domain": "mail_labels",
+      "fromLevel": "auto",
+      "toLevel": "review",
+      "actor": "agent",
+      "via": "chat",
+      "runId": "run-12",
+      "toolCallId": "call-1",
+      "sessionKey": "main",
+      "note": "The owner asked to check labels again after a wrong archive.",
+      "createdAt": "2026-10-18T17:05:00.000Z"
+     },
+     {
+      "id": 2,
+      "domain": "mail_labels",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T16:00:00.000Z"
+     },
+     {
+      "id": 1,
+      "domain": "mail_drafts",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T15:58:00.000Z"
+     }
+    ],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-error-1440",
+  "hash": "#/autonomy",
+  "width": 1440
+ },
+ {
+  "name": "autonomy-error-1440-dark",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "dark": true
+ },
+ {
+  "name": "autonomy-error-390",
+  "hash": "#/autonomy",
+  "width": 390
+ },
+ {
+  "name": "autonomy-error-390-dark",
+  "hash": "#/autonomy",
+  "width": 390,
+  "dark": true
+ },
+ {
+  "name": "autonomy-dev-1440",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "devMode": true,
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "auto",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-17T15:58:00.000Z",
+      "changeId": 1
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-18T17:05:00.000Z",
+      "changeId": 3
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [
+     {
+      "id": 3,
+      "domain": "mail_labels",
+      "fromLevel": "auto",
+      "toLevel": "review",
+      "actor": "agent",
+      "via": "chat",
+      "runId": "run-12",
+      "toolCallId": "call-1",
+      "sessionKey": "main",
+      "note": "The owner asked to check labels again after a wrong archive.",
+      "createdAt": "2026-10-18T17:05:00.000Z"
+     },
+     {
+      "id": 2,
+      "domain": "mail_labels",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T16:00:00.000Z"
+     },
+     {
+      "id": 1,
+      "domain": "mail_drafts",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T15:58:00.000Z"
+     }
+    ],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-dev-1440-dark",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "dark": true,
+  "devMode": true,
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "auto",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-17T15:58:00.000Z",
+      "changeId": 1
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-18T17:05:00.000Z",
+      "changeId": 3
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [
+     {
+      "id": 3,
+      "domain": "mail_labels",
+      "fromLevel": "auto",
+      "toLevel": "review",
+      "actor": "agent",
+      "via": "chat",
+      "runId": "run-12",
+      "toolCallId": "call-1",
+      "sessionKey": "main",
+      "note": "The owner asked to check labels again after a wrong archive.",
+      "createdAt": "2026-10-18T17:05:00.000Z"
+     },
+     {
+      "id": 2,
+      "domain": "mail_labels",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T16:00:00.000Z"
+     },
+     {
+      "id": 1,
+      "domain": "mail_drafts",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T15:58:00.000Z"
+     }
+    ],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-dev-390",
+  "hash": "#/autonomy",
+  "width": 390,
+  "devMode": true,
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "auto",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-17T15:58:00.000Z",
+      "changeId": 1
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-18T17:05:00.000Z",
+      "changeId": 3
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [
+     {
+      "id": 3,
+      "domain": "mail_labels",
+      "fromLevel": "auto",
+      "toLevel": "review",
+      "actor": "agent",
+      "via": "chat",
+      "runId": "run-12",
+      "toolCallId": "call-1",
+      "sessionKey": "main",
+      "note": "The owner asked to check labels again after a wrong archive.",
+      "createdAt": "2026-10-18T17:05:00.000Z"
+     },
+     {
+      "id": 2,
+      "domain": "mail_labels",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T16:00:00.000Z"
+     },
+     {
+      "id": 1,
+      "domain": "mail_drafts",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T15:58:00.000Z"
+     }
+    ],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-dev-390-dark",
+  "hash": "#/autonomy",
+  "width": 390,
+  "dark": true,
+  "devMode": true,
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "auto",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-17T15:58:00.000Z",
+      "changeId": 1
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-18T17:05:00.000Z",
+      "changeId": 3
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [
+     {
+      "id": 3,
+      "domain": "mail_labels",
+      "fromLevel": "auto",
+      "toLevel": "review",
+      "actor": "agent",
+      "via": "chat",
+      "runId": "run-12",
+      "toolCallId": "call-1",
+      "sessionKey": "main",
+      "note": "The owner asked to check labels again after a wrong archive.",
+      "createdAt": "2026-10-18T17:05:00.000Z"
+     },
+     {
+      "id": 2,
+      "domain": "mail_labels",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T16:00:00.000Z"
+     },
+     {
+      "id": 1,
+      "domain": "mail_drafts",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T15:58:00.000Z"
+     }
+    ],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-dev-history-1440",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "devMode": true,
+  "click": "main h2:has-text('History')",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "auto",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-17T15:58:00.000Z",
+      "changeId": 1
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-18T17:05:00.000Z",
+      "changeId": 3
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [
+     {
+      "id": 3,
+      "domain": "mail_labels",
+      "fromLevel": "auto",
+      "toLevel": "review",
+      "actor": "agent",
+      "via": "chat",
+      "runId": "run-12",
+      "toolCallId": "call-1",
+      "sessionKey": "main",
+      "note": "The owner asked to check labels again after a wrong archive.",
+      "createdAt": "2026-10-18T17:05:00.000Z"
+     },
+     {
+      "id": 2,
+      "domain": "mail_labels",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T16:00:00.000Z"
+     },
+     {
+      "id": 1,
+      "domain": "mail_drafts",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T15:58:00.000Z"
+     }
+    ],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-dev-history-1440-dark",
+  "hash": "#/autonomy",
+  "width": 1440,
+  "dark": true,
+  "devMode": true,
+  "click": "main h2:has-text('History')",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "auto",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-17T15:58:00.000Z",
+      "changeId": 1
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-18T17:05:00.000Z",
+      "changeId": 3
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [
+     {
+      "id": 3,
+      "domain": "mail_labels",
+      "fromLevel": "auto",
+      "toLevel": "review",
+      "actor": "agent",
+      "via": "chat",
+      "runId": "run-12",
+      "toolCallId": "call-1",
+      "sessionKey": "main",
+      "note": "The owner asked to check labels again after a wrong archive.",
+      "createdAt": "2026-10-18T17:05:00.000Z"
+     },
+     {
+      "id": 2,
+      "domain": "mail_labels",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T16:00:00.000Z"
+     },
+     {
+      "id": 1,
+      "domain": "mail_drafts",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T15:58:00.000Z"
+     }
+    ],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-dev-history-390",
+  "hash": "#/autonomy",
+  "width": 390,
+  "devMode": true,
+  "click": "main h2:has-text('History')",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "auto",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-17T15:58:00.000Z",
+      "changeId": 1
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-18T17:05:00.000Z",
+      "changeId": 3
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [
+     {
+      "id": 3,
+      "domain": "mail_labels",
+      "fromLevel": "auto",
+      "toLevel": "review",
+      "actor": "agent",
+      "via": "chat",
+      "runId": "run-12",
+      "toolCallId": "call-1",
+      "sessionKey": "main",
+      "note": "The owner asked to check labels again after a wrong archive.",
+      "createdAt": "2026-10-18T17:05:00.000Z"
+     },
+     {
+      "id": 2,
+      "domain": "mail_labels",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T16:00:00.000Z"
+     },
+     {
+      "id": 1,
+      "domain": "mail_drafts",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T15:58:00.000Z"
+     }
+    ],
+    "before": null
+   }
+  }
+ },
+ {
+  "name": "autonomy-dev-history-390-dark",
+  "hash": "#/autonomy",
+  "width": 390,
+  "dark": true,
+  "devMode": true,
+  "click": "main h2:has-text('History')",
+  "stubs": {
+   "GET /api/autonomy": {
+    "domains": [
+     {
+      "id": "mail_drafts",
+      "label": "Mail drafts",
+      "explanation": "Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.",
+      "tools": [
+       "google__gmail_draft",
+       "inbox_draft_reply"
+      ],
+      "level": "auto",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-17T15:58:00.000Z",
+      "changeId": 1
+     },
+     {
+      "id": "mail_labels",
+      "label": "Mail labels and archive",
+      "explanation": "Add or remove labels, mark mail as read, and take mail out of the inbox. Nothing is deleted, and archived mail stays in All Mail.",
+      "tools": [
+       "google__gmail_label",
+       "google__gmail_archive",
+       "google__gmail_mark_read"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": "2026-10-18T17:05:00.000Z",
+      "changeId": 3
+     },
+     {
+      "id": "calendar_holds",
+      "label": "Calendar holds",
+      "explanation": "Put a block of time on your own calendar, with no guests. Nobody else gets an invitation.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "review",
+      "defaultLevel": "review",
+      "maxLevel": "auto",
+      "levels": [
+       "ask",
+       "review",
+       "auto"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "calendar_guests",
+      "label": "Calendar events with guests",
+      "explanation": "Create an event that invites other people. Google sends each guest an invitation in your name.",
+      "tools": [
+       "google__calendar_create_event"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An invitation goes to other people in your name, so you approve each one.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "browser_submits",
+      "label": "Browser form submits",
+      "explanation": "Send a form on a web page in the agent browser, for example a sign-up or a search form. A page that the agent read makes each submit ask you anyway.",
+      "tools": [
+       "browser_submit"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "unsubscribes",
+      "label": "Unsubscribes",
+      "explanation": "Leave a mailing list with its unsubscribe link.",
+      "tools": [
+       "google__gmail_unsubscribe",
+       "inbox_unsubscribe"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "An unsubscribe cannot be taken back, so it always waits for you.",
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "sandbox_network",
+      "label": "Code with network access",
+      "explanation": "Run code in the sandbox that can reach the web sites on its allow list. A page or a mail that the agent read makes each such run ask you anyway.",
+      "tools": [
+       "sandbox_exec"
+      ],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "review",
+      "levels": [
+       "ask",
+       "review"
+      ],
+      "fixed": false,
+      "fixedReason": null,
+      "updatedAt": null,
+      "changeId": null
+     },
+     {
+      "id": "purchases",
+      "label": "Purchases",
+      "explanation": "Pay for anything, in any way.",
+      "tools": [],
+      "level": "ask",
+      "defaultLevel": "ask",
+      "maxLevel": "ask",
+      "levels": [
+       "ask"
+      ],
+      "fixed": true,
+      "fixedReason": "Money leaves your account, so you approve each payment.",
+      "updatedAt": null,
+      "changeId": null
+     }
+    ],
+    "levelText": {
+     "ask": "You approve each action before it happens.",
+     "review": "A second model checks each action and lets it through or holds it. You see every action in the activity and the trace.",
+     "auto": "The agent acts on its own. You see every action in the activity and the trace."
+    },
+    "history": [
+     {
+      "id": 3,
+      "domain": "mail_labels",
+      "fromLevel": "auto",
+      "toLevel": "review",
+      "actor": "agent",
+      "via": "chat",
+      "runId": "run-12",
+      "toolCallId": "call-1",
+      "sessionKey": "main",
+      "note": "The owner asked to check labels again after a wrong archive.",
+      "createdAt": "2026-10-18T17:05:00.000Z"
+     },
+     {
+      "id": 2,
+      "domain": "mail_labels",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T16:00:00.000Z"
+     },
+     {
+      "id": 1,
+      "domain": "mail_drafts",
+      "fromLevel": "review",
+      "toLevel": "auto",
+      "actor": "owner",
+      "via": "dashboard",
+      "runId": null,
+      "toolCallId": null,
+      "sessionKey": null,
+      "note": null,
+      "createdAt": "2026-10-17T15:58:00.000Z"
+     }
+    ],
+    "before": null
+   }
+  }
+ }
+]
