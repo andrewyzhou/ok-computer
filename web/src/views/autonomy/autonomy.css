@@ -1,0 +1,201 @@
+/* the classes of the autonomy page only. each color comes from the tokens of styles.css. */
+
+.autonomy-legend {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 28px;
+  margin: 0;
+}
+.autonomy-legend-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.autonomy-legend dt,
+.autonomy-legend dd {
+  margin: 0;
+}
+.autonomy-legend dd {
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
+.autonomy-level-review {
+  border-color: var(--warning);
+  color: var(--warning-ink);
+}
+.autonomy-level-auto {
+  border-color: var(--good);
+  color: var(--good-ink);
+}
+
+.autonomy-cards {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.autonomy-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
+  gap: 12px 32px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.autonomy-card:last-child {
+  border-bottom: 0;
+}
+.autonomy-card-text {
+  min-width: 0;
+}
+.autonomy-card-title {
+  margin: 0 0 4px;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.autonomy-card-explanation {
+  margin: 0;
+  color: var(--ink-2);
+}
+.autonomy-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+.autonomy-tools code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.autonomy-card-level {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.autonomy-card-now {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.autonomy-fixed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* the radios look like the shared segmented control. the input stays in the page for the keyboard and for a screen
+   reader, and only its circle is hidden. */
+.autonomy-choice {
+  display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+  padding: 2px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-pill);
+}
+.autonomy-option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 14px;
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.autonomy-option input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.autonomy-option:hover {
+  color: var(--ink);
+}
+.autonomy-option.is-on {
+  background: var(--primary-bg);
+  color: var(--primary-ink);
+}
+.autonomy-option:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.autonomy-choice[aria-disabled='true'] .autonomy-option {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.autonomy-confirm {
+  align-self: stretch;
+  padding: 10px 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+}
+.autonomy-confirm-text {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.autonomy-confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.autonomy-change {
+  white-space: nowrap;
+}
+.autonomy-who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.autonomy-domain-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.autonomy-phone {
+  display: none;
+}
+.autonomy-more {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+@media (max-width: 759.98px) {
+  .autonomy-legend {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .autonomy-legend-item {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr);
+    align-items: baseline;
+    gap: 10px;
+  }
+  .autonomy-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .autonomy-phone {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .autonomy-choice {
+    display: flex;
+    width: 100%;
+  }
+  .autonomy-option {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+}
