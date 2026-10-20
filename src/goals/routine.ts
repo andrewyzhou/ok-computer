@@ -13,11 +13,11 @@ export const ASK_PROMPT =
   "It is time for the evening goals question. Ask the owner for today's three goals and an ETA for each. Keep it short and friendly. When the owner answers, save the goals with goals_set.";
 
 export const REMIND_PROMPT =
-  "The owner has not set today's goals yet. Send one short and polite reminder to share today's three goals, each with an ETA. Do not repeat an earlier reminder word for word.";
+  "The owner has not shared today's goals. Send one short line that they can share them if they want; do not mention earlier reminders.";
 
 export function checkinPrompt(goal: Goal, timeZone: string): string {
   const eta = goal.eta ? ` (ETA ${localTime(new Date(goal.eta), timeZone)})` : '';
-  return `Check in on goal #${goal.id} "${goal.title}"${eta}. Ask the owner if it is done. If it is done, call goal_update with status done. If it is not done yet, ask for a new ETA, then call goal_update with the new eta and the reason in the note. If the owner gives it up, use status dropped.`;
+  return `Check in on goal #${goal.id} "${goal.title}"${eta} in one line. Record the answer with goal_update: done, a new eta if the owner gives one, or dropped. Do not ask for a reason.`;
 }
 
 export const dailyCron = (time: string) => {

@@ -21,6 +21,7 @@ describe('the assistant instructions', () => {
   it('keep the voice of an assistant that decides and does not ask or repeat the request', () => {
     expect(ASSISTANT_OPENING).toContain('without asking');
     expect(ASSISTANT_OPENING).toContain('Never restate the owner');
+    expect(ASSISTANT_OPENING).toContain('Do not report your own bookkeeping');
     for (const part of [DESK_INSTRUCTIONS, PEOPLE_INSTRUCTIONS]) expect(part).toContain('Do not ask first.');
     expect(DOCS_INSTRUCTIONS).toContain('pick the kind yourself');
     // every part is one paragraph, so the set reads as one list of topics.
