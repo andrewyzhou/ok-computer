@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
 import type { Result } from '../config/load.js';
 import { headOf } from '../text.js';
+import type { AutonomyContext } from './autonomy.js';
 
 // exec runs code that the model wrote in the code sandbox (src/sandbox). the container has no network, so the call
 // cannot send data off the pc, but the code can change the scratch files and use the cpu, so a reviewer checks it.
@@ -32,6 +33,8 @@ const LOCAL_WRITE_TOOLS = [
   'automations_create',
   'automations_delete',
   'automations_update',
+  // autonomy_lower can only lower a level of the trust ladder, so each call makes the agent ask more, never less.
+  'autonomy_lower',
   'consolidation_save',
   'goal_update',
   'goals_set',
@@ -68,6 +71,9 @@ export interface PolicyInput {
   // seen tells whether a url is in the text that the session already read. the policy asks only in a tainted session,
   // and only for a url that can carry data.
   seen?: (url: string) => boolean;
+  // the domain of the trust ladder that the call is in, and its level (see autonomy.ts). a call outside the ladder has
+  // none, and the policy decides it as before the ladder.
+  autonomy?: AutonomyContext;
 }
 
 // a sub-agent runs in a session sub:<profile>:<childRunId>. no run reads the result of an approval in that session,
@@ -79,6 +85,8 @@ export interface Verdict {
   // rule names what decided: a rule id, "taint", "exfiltration", "subagent", "tool", or "risk:<level>".
   rule: string;
   reason: string;
+  // the domain and the level that applied to the call. the decision row keeps them for the trace.
+  autonomy?: AutonomyContext;
 }
 
 // a deny rule always wins, in any position in the file. so a broad allow rule that comes later cannot cancel a deny

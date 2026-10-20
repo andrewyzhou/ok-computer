@@ -141,7 +141,7 @@ The routes stay in the hash (`#/<path>`). `web/src/routes.ts` holds the registry
 | Inbox | Digest → `#/inbox`, Newsletters → `#/inbox/newsletters`, Subscriptions → `#/inbox/subscriptions`, Drafts → `#/inbox/drafts`, Proposals → `#/inbox/proposals`. Detail: `#/inbox/digests/:id` | M8 |
 | Chats | Chats → `#/chats`. Detail: `#/chats/:key` (the `main@<id>` key, URL-encoded) | M4 |
 | Activity | Activity → `#/activity` (`?kind=` filters). Detail: `#/activity/:key` | M4 |
-| Agent | Goals `#/goals`, Memory `#/memory` (`?path=` selects a file), Automations `#/automations`, Signals `#/signals`, Approvals `#/approvals` | core |
+| Agent | Goals `#/goals`, Memory `#/memory` (`?path=` selects a file), Automations `#/automations`, Signals `#/signals`, Approvals `#/approvals`, Autonomy `#/autonomy` | core, T6 for Autonomy |
 | Connections | Google `#/google`, Integrations `#/integrations` (detail `#/integrations/:id*`), Browser `#/browser` (detail `#/browser/:id*`) | core |
 | Dev | Runs `#/runs` (detail `#/runs/:id*`), Sessions `#/sessions` (detail `#/sessions/:sessionKey*`), Policy `#/policy`, Cost `#/cost`, Logs `#/logs`, Sandbox `#/sandbox`. Each of these six pages is devOnly. | core, M5 for Sandbox |
 | none | Search → `#/search?q=` (the full page behind ⌘K) | M4 |
