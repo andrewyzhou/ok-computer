@@ -51,6 +51,7 @@ import { mountDesk } from './desk.js';
 import { mountDocs } from './docs.js';
 import { readBody } from './http.js';
 import { mountInbox } from './inbox.js';
+import { mountPeople } from './people.js';
 import { mountSandbox } from './sandbox.js';
 import { mountSearch } from './search.js';
 import { mountSpans } from './spans.js';
@@ -377,6 +378,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
   mountAutonomy(server, deps);
   mountDesk(server, deps);
   mountDocs(server, deps);
+  mountPeople(server, deps);
 
   server.all('/api/*', (c) => notFound(c, 'api route'));
   if (existsSync(join(webDir, 'index.html'))) {

@@ -188,6 +188,15 @@ describe('policy decisions', () => {
     expect(decide(call({ tool: 'goals_set', taint: ['web'] }), BUILTIN_RULES)).toMatchObject({ decision: 'allow' });
     expect(decide(call({ tool: 'unknown_writer' }), BUILTIN_RULES)).toMatchObject({ decision: 'review' });
   });
+
+  it('allows person_note in a clean session, and sends it to the reviewer in a tainted one unless a rule of the owner allows it', () => {
+    expect(decide(call({ tool: 'person_note' }), BUILTIN_RULES)).toMatchObject({ decision: 'allow', rule: 'builtin:person_note' });
+    const tainted = decide(call({ tool: 'person_note', taint: ['gmail:personal'] }), BUILTIN_RULES);
+    expect(tainted).toMatchObject({ decision: 'review', rule: 'taint' });
+    expect(tainted.reason).toContain('gmail:personal');
+    const owner = [...BUILTIN_RULES, rule('notes', { tool: 'person_note', effect: 'allow' })];
+    expect(decide(call({ tool: 'person_note', taint: ['gmail:personal'] }), owner)).toMatchObject({ decision: 'allow', rule: 'notes' });
+  });
 });
 
 describe('the policy file', () => {

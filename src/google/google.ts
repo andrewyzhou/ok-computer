@@ -7,6 +7,8 @@ import type { SlotRunner } from '../models/slots.js';
 import type { BlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
 import { redact } from '../observability/redact.js';
+import { backfillStep, sweepSent } from '../people/backfill.js';
+import { createPeopleBuilder, type PeopleBuilder } from '../people/builder.js';
 import type { JobResult } from '../scheduler/scheduler.js';
 import { createAutomation, listAutomations, updateAutomation } from '../scheduler/store.js';
 import { classifySignals } from '../signals/classify.js';
@@ -54,6 +56,9 @@ export interface GoogleDeps {
   newId?: () => string;
   // tests replace the https post of a one-click unsubscribe.
   oneClick?: (target: string) => Promise<OneClickResult>;
+  // the people memory. the default builder writes the real store. backfill false leaves out the backfill and the sent
+  // sweep, so a test reads only what the poll reads.
+  people?: { builder?: PeopleBuilder; backfill?: boolean };
 }
 
 const POLL_SYNCED_EVERY = 'google_poll_synced_every_ms';
@@ -101,7 +106,11 @@ export function createGoogle(deps: GoogleDeps): Google {
     onNeedsAuth: (_alias, text) => deps.notifyOwner(text),
     onNewMailbox: (alias) => sync.reset(alias),
   });
-  const sync = createSync({ db, clock, logger, blobs: deps.blobs, accounts, timeZone: deps.timeZone });
+  // the expected addresses of the config count as the owner's, also before the first sign-in of an account.
+  const people =
+    deps.people?.builder ??
+    createPeopleBuilder({ db, clock, logger, timeZone: deps.timeZone, ownerEmails: config.accounts.flatMap((each) => (each.email ? [each.email] : [])) });
+  const sync = createSync({ db, clock, logger, blobs: deps.blobs, accounts, timeZone: deps.timeZone, people });
   // the one-click post goes to the sender, not to google, and it is in the same trace as the read that checked it.
   const recordedOneClick = async (target: string) => {
     const done = trace('POST', target, ONE_CLICK_BODY);
@@ -156,6 +165,48 @@ export function createGoogle(deps: GoogleDeps): Google {
     }
   };
 
+  // each account that the poll could read gets one step of the people backfill, then the sweep of its new sent mail.
+  // the accounts run side by side, and the two reads of one account run in turn. a failure is logged and never fails
+  // the poll. it gives a note only for the backfill, because the sweep tries again at the next poll anyway. two polls
+  // can overlap (the scheduler has two kinds of poll jobs), and both would read the same saved position and count
+  // the same pages, so a second call for an account joins the one that runs, as sync.pollAll does.
+  const filling = new Map<string, Promise<string[]>>();
+  const fillAccount = async (alias: string): Promise<string[]> => {
+    const backfillDeps = { db, clock, logger, accounts, builder: people };
+    let failed = false;
+    try {
+      const step = await backfillStep(backfillDeps, alias);
+      if (step.state === 'failed') {
+        failed = true;
+        logger.warn('people backfill step failed', { alias, ...(step.error ? { error: step.error } : {}) });
+      }
+    } catch (err) {
+      failed = true;
+      logger.warn('people backfill step failed', { alias, err });
+    }
+    try {
+      await sweepSent(backfillDeps, alias);
+    } catch (err) {
+      logger.warn('people sent sweep failed', { alias, err });
+    }
+    return failed ? [`people backfill of ${alias} failed`] : [];
+  };
+  const fillPeople = async (polls: AccountPoll[]): Promise<string[]> => {
+    if (deps.people?.backfill === false) return [];
+    const notes = await Promise.all(
+      polls
+        .filter((each) => each.ok && !accounts.unavailable(each.alias))
+        .map(({ alias }) => {
+          const running = filling.get(alias);
+          if (running) return running;
+          const fill = fillAccount(alias).finally(() => filling.delete(alias));
+          filling.set(alias, fill);
+          return fill;
+        }),
+    );
+    return notes.flat();
+  };
+
   const notes = (polls: AccountPoll[]) => [
     ...polls.filter((each) => each.resync).map((each) => `the gmail history of ${each.alias} was too old, so only its inbox mail of the last 2 days made signals`),
     ...polls.filter((each) => !each.ok).map((each) => `${each.alias}: ${each.error}`),
@@ -178,12 +229,13 @@ export function createGoogle(deps: GoogleDeps): Google {
         void accounts.alertPending();
         stallAlerts(polls);
         detect(polls, runId);
+        const peopleNotes = await requestContext.run({ runId }, () => fillPeople(polls));
         try {
           await classifySignals({ db, slots: deps.slots, logger, runId, ...(deps.signal ? { signal: deps.signal } : {}) });
         } catch (err) {
           logger.error('signal classification failed', { runId, err });
         }
-        note = notes(polls).join('; ');
+        note = [...notes(polls), ...peopleNotes].join('; ');
       } catch (err) {
         logger.error('google poll failed', { runId, err });
         note = `the poll stopped: ${redact(errorText(err))}`;

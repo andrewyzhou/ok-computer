@@ -33,6 +33,7 @@ import { createDocTools } from './docs/tools.js';
 import { createGoogle, syncGooglePoll, type Google } from './google/google.js';
 import { createInbox, installInboxJobs, type Inbox } from './inbox/inbox.js';
 import { createDesk, DESK_INSTRUCTIONS, installDeskJobs } from './desk/index.js';
+import { createPeopleTools, peopleToolsFor } from './people/tools.js';
 import type { GoogleEndpoints } from './google/accounts.js';
 import { finishDigest, noteFailedDigest, signalDigest, type Digest } from './signals/digest.js';
 import { sessionProfile, type IntegrationEntry } from './integrations/config.js';
@@ -268,6 +269,7 @@ export function createApp(deps: AppDeps): App {
     ...sandbox.toolsFor(sessionKey),
     ...integrations.allowedNames(sessionKey),
     ...(google?.toolNames(sessionProfile(sessionKey)) ?? []),
+    ...(config.google ? peopleToolsFor(config.google, sessionProfile(sessionKey)) : []),
   ];
 
   const approvals = createApprovalFlow({
@@ -337,6 +339,7 @@ export function createApp(deps: AppDeps): App {
       ...(google?.tools ?? []),
       ...(inbox?.tools ?? []),
       ...desk.tools,
+      ...(google ? createPeopleTools({ db }) : []),
     ],
     logger,
     integrations.find,

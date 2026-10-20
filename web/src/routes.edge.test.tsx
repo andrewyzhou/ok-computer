@@ -74,7 +74,9 @@ describe('the routes of the contract', () => {
   it('keeps the groups with no view out of the nav in each mode', () => {
     for (const dev of [true, false]) {
       const groups = navSections(dev).map((section) => section.group);
-      for (const empty of ['calendar', 'people']) expect(groups).not.toContain(empty);
+      const empty = NAV_GROUPS.map((group) => group.id).filter((id) => !ROUTES.some((route) => route.group === id));
+      for (const group of empty) expect(groups).not.toContain(group);
+      expect(groups.every((group) => ROUTES.some((route) => route.group === group))).toBe(true);
     }
   });
 
