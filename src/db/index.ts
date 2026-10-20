@@ -9,7 +9,9 @@ const MIGRATIONS_DIR = join(import.meta.dirname, 'migrations');
 export function openDb(path: string, migrationsDir = MIGRATIONS_DIR): Db {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
-  db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+  // the busy timeout comes first. the switch to wal needs a lock, and before the timeout is set it fails at once with
+  // "database is locked" when another process (the agent, or npm run chat) writes at that moment.
+  db.exec('PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   // with the default synchronous mode each commit flushes the wal to disk. a flush on windows took about 5 ms on an
   // idle disk and much longer on a busy one, against well under 0.1 ms on macos, so a poll that writes a row for each
   // request and each mail spent seconds on flushes. in wal mode, normal flushes at each checkpoint instead. the

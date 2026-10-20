@@ -1,6 +1,8 @@
+import { spawn } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { migrate, openDb } from './index.js';
@@ -123,6 +125,28 @@ describe('openDb', () => {
     );
     db.close();
   });
+
+  // the agent and npm run chat can open the same database at the same moment. the switch to wal ran before the busy
+  // timeout was set, so the second open failed at once with "database is locked" instead of waiting.
+  it('waits for a lock of another process while it opens', async () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'okc-db-')), 'okc.sqlite');
+    const holder = new DatabaseSync(path);
+    holder.exec('BEGIN EXCLUSIVE');
+    const url = pathToFileURL(join(import.meta.dirname, 'index.ts')).href;
+    const body = `const { openDb } = await import(${JSON.stringify(url)});\nopenDb(${JSON.stringify(path)}).close();\nconsole.log('opened');`;
+    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', body], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()));
+    child.stderr.on('data', (chunk: Buffer) => (err += chunk.toString()));
+    const exited = new Promise<number | null>((done) => child.once('exit', done));
+    // the lock goes away after the child started to open, so the open must wait for it.
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    holder.exec('COMMIT');
+    holder.close();
+    expect({ code: await exited, err: err.includes('database is locked') ? 'locked' : '' }).toEqual({ code: 0, err: '' });
+    expect(out).toContain('opened');
+  }, 20_000);
 });
 
 describe('migration 010', () => {
