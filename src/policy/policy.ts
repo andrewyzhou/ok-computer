@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
 import type { Result } from '../config/load.js';
 import { headOf } from '../text.js';
-import type { AutonomyContext } from './autonomy.js';
+import { clampLevel, domainSpec, type AutonomyContext } from './autonomy.js';
 
 // exec runs code that the model wrote in the code sandbox (src/sandbox). the container has no network, so the call
 // cannot send data off the pc, but the code can change the scratch files and use the cpu, so a reviewer checks it.
@@ -82,7 +82,8 @@ export const SUBAGENT_PREFIX = 'sub:';
 
 export interface Verdict {
   decision: Decision;
-  // rule names what decided: a rule id, "taint", "exfiltration", "subagent", "tool", or "risk:<level>".
+  // rule names what decided: a rule id, "taint", "exfiltration", "subagent", "tool", "risk:<level>", or
+  // "autonomy:<domain>" when the level of a domain of the trust ladder decided.
   rule: string;
   reason: string;
   // the domain and the level that applied to the call. the decision row keeps them for the trace.
@@ -91,16 +92,50 @@ export interface Verdict {
 
 // a deny rule always wins, in any position in the file. so a broad allow rule that comes later cannot cancel a deny
 // rule. taint makes every external call go to the owner, also when a rule allows the tool. without a matching rule,
-// the risk level decides. in a sub-agent session a call that needs the owner is denied.
+// the risk level decides. the level of the domain of the trust ladder then changes the decision, and the default
+// level of each domain changes nothing. in a sub-agent session a call that needs the owner is denied.
 export function decide(input: PolicyInput, rules: readonly Rule[]): Verdict {
-  const verdict = decideAny(input, rules);
-  if (verdict.decision !== 'approve' || !input.sessionKey.startsWith(SUBAGENT_PREFIX)) return verdict;
+  const verdict = withLevel(input, rules);
+  const autonomy = input.autonomy ? { autonomy: input.autonomy } : {};
+  if (verdict.decision !== 'approve' || !input.sessionKey.startsWith(SUBAGENT_PREFIX)) return { ...verdict, ...autonomy };
   const [, profile, childRunId] = input.sessionKey.split(':');
   return {
     decision: 'deny',
     rule: 'subagent',
     reason: `${verdict.reason}, but the ${profile} sub-agent (run ${childRunId}) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it`,
+    ...autonomy,
   };
+}
+
+// withLevel applies the level of the domain of the call (see autonomy.ts). the default level of a domain gives the
+// verdict of the policy engine without the ladder, so the defaults equal the behavior from before the ladder.
+function withLevel(input: PolicyInput, rules: readonly Rule[]): Verdict {
+  const base = decideAny(input, rules);
+  if (!input.autonomy) return base;
+  const { domain } = input.autonomy;
+  const spec = domainSpec(domain);
+  if (input.autonomy.level === spec.defaultLevel) return base;
+  // a stored level above the most of its domain counts as that most, so a hand edit of the database cannot raise a
+  // fixed domain.
+  const level = clampLevel(input.autonomy.level, spec.maxLevel);
+  if (level === spec.defaultLevel || base.decision === 'deny') return base;
+  const label = spec.label.toLowerCase();
+  if (level === 'ask') {
+    // a lowered level makes the owner approve each call that the engine would allow or send to the reviewer.
+    if (base.decision === 'approve') return base;
+    return { decision: 'approve', rule: `autonomy:${domain}`, reason: `the owner set ${label} to ask, so the owner approves each call` };
+  }
+  // a raised level. a domain whose default is ask has tools that always ask the owner, so the engine decides the call
+  // again without that.
+  const raised = spec.defaultLevel === 'ask' ? decideAny({ ...input, alwaysApprove: false }, rules) : base;
+  // a deny rule, the taint, the exfiltration check and a tool that still always asks keep their verdict. when an allow
+  // rule or the risk level would decide the call, the level decides instead, so a raised domain is never looser than
+  // its level, also when an allow rule matches the call.
+  if (raised.decision !== 'allow' && !raised.rule.startsWith('risk:')) return raised;
+  if (level === 'review') {
+    return { decision: 'review', rule: `autonomy:${domain}`, reason: `the owner set ${label} to review, so a reviewer checks it first` };
+  }
+  return { decision: 'allow', rule: `autonomy:${domain}`, reason: `the owner set ${label} to auto` };
 }
 
 function decideAny(input: PolicyInput, rules: readonly Rule[]): Verdict {

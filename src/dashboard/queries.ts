@@ -148,6 +148,8 @@ export function toDecision(row: Row): PolicyDecisionRow {
     approvalId: num(row.approvalId),
     approvalStatus: str(row.approvalStatus),
     taint: row.taint ? JSON.parse(String(row.taint)) : [],
+    autonomyDomain: str(row.autonomyDomain),
+    autonomyLevel: str(row.autonomyLevel),
     createdAt: String(row.createdAt),
   };
 }
