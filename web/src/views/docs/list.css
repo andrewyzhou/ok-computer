@@ -1,0 +1,127 @@
+/* the docs list at #/docs. it uses only the tokens of styles.css, so the dark theme follows by itself. */
+
+.docs-search {
+  display: flex;
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 360px;
+}
+.docs-search .search-field {
+  flex: 1;
+}
+
+/* the old rows stay while a new filter loads, a little faded, so the owner sees that the list is about to change. */
+.docs-list {
+  transition: opacity 0.15s ease;
+}
+.docs-list.is-loading {
+  opacity: 0.55;
+}
+
+.docs-title-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 12rem;
+  overflow-wrap: anywhere;
+}
+.docs-title {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+.docs-title:hover {
+  text-decoration: underline;
+}
+.docs-snippet {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.docs-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.docs-nowrap {
+  white-space: nowrap;
+}
+
+.docs-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: var(--space-4);
+}
+
+.docs-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* the cards of a phone. the title link stretches over the whole card, so a tap anywhere on it opens the doc. */
+.docs-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+/* the filter bar draws the rule above the first card. */
+.docs-card:first-child {
+  padding-top: 0;
+}
+.docs-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--rule);
+  min-width: 0;
+}
+.docs-card:hover {
+  background: var(--bg-hover);
+}
+.docs-card-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: var(--text-lg);
+  line-height: 1.35;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.docs-card-title::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+.docs-card-title:focus-visible {
+  outline: none;
+}
+.docs-card:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.docs-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+/* the badge with its title stays above the stretched link, so a long press shows why it is there. */
+.docs-card-meta .badge[title] {
+  position: relative;
+  z-index: 1;
+}
