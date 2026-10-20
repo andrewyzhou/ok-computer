@@ -99,3 +99,108 @@ describe('toCalendarEvent with hostile fields', () => {
     expect(event.startDay).toBe('2026-10-20');
   });
 });
+
+describe('the calendar read of busy and shared calendars', () => {
+  let harness: GoogleHarness;
+  const ctx = () => ({ google: { accounts: harness.accounts }, timeZone: TZ, logger: harness.logger });
+
+  beforeEach(async () => {
+    harness = await createGoogleHarness();
+  });
+
+  afterEach(async () => {
+    await harness.close();
+  });
+
+  it('reads every event of a busy week, past the first page of 100', async () => {
+    harness.signedIn('school');
+    for (let i = 0; i < 130; i++) {
+      const start = new Date(Date.parse('2026-10-20T15:00:00Z') + i * 30 * 60_000);
+      harness.fake.upsertEvent('school', { id: `e${i}`, summary: `slot ${i}`, start: { dateTime: start.toISOString() }, end: { dateTime: new Date(start.getTime() + 20 * 60_000).toISOString() } });
+    }
+    const read = await readCalendar(ctx(), range);
+    expect(read.events).toHaveLength(130);
+  });
+
+  it('notes a calendar with more events than it reads, and keeps the ones it read', async () => {
+    harness.signedIn('school');
+    // 1001 events of one minute, more than four pages of 250.
+    for (let i = 0; i < 1001; i++) {
+      const start = new Date(Date.parse('2026-10-20T15:00:00Z') + i * 2 * 60_000);
+      harness.fake.upsertEvent('school', { id: `m${i}`, summary: `m ${i}`, start: { dateTime: start.toISOString() }, end: { dateTime: new Date(start.getTime() + 60_000).toISOString() } });
+    }
+    const read = await readCalendar(ctx(), range);
+    expect(read.events).toHaveLength(1000);
+    expect(read.skipped.filter((each) => each.account === 'school')).toEqual([
+      { account: 'school', calendarId: 'primary', reason: 'school: Only the first 1000 events of the primary calendar are shown.' },
+    ]);
+  });
+
+  it('keeps one copy of an invitation that a shared calendar gives with another offset', async () => {
+    harness.signedIn('school');
+    const instant = { iCalUID: 'inv-2@example.com', summary: 'section' };
+    harness.fake.upsertEvent('school', { id: 'inv-primary', ...instant, start: { dateTime: '2026-10-22T13:00:00-07:00' }, end: { dateTime: '2026-10-22T14:00:00-07:00' }, attendees: [{ email: 'school@example.com', self: true, responseStatus: 'accepted' }] });
+    harness.fake.addCalendar('school', { id: 'cs189-class', summary: 'CS 189 lectures', events: [{ id: 'inv-shared', ...instant, start: { dateTime: '2026-10-22T16:00:00-04:00' }, end: { dateTime: '2026-10-22T17:00:00-04:00' } }] });
+    const read = await readCalendar(ctx(), range);
+    expect(read.events.map((each) => each.key)).toEqual(['school/primary/inv-primary']);
+  });
+});
+
+describe('the owner on calendars of other people', () => {
+  const colleague = { id: 'colleague@example.com', label: 'Colleague', color: null, primary: false };
+  const own = { id: 'health@group.calendar.google.com', label: 'health', color: null, primary: false, owned: true };
+  const ownedIds = new Set(['school@example.com', 'health@group.calendar.google.com']);
+  const timed = { start: { dateTime: '2026-10-20T09:00:00-07:00' }, end: { dateTime: '2026-10-20T10:00:00-07:00' } };
+
+  it('reads self on a shared calendar as the other person, not the owner', () => {
+    // the colleague organized it, and google marks the colleague as self on the colleague's calendar.
+    const theirs = toCalendarEvent(
+      {
+        id: 'c1',
+        ...timed,
+        organizer: { email: 'colleague@example.com', self: true },
+        attendees: [
+          { email: 'colleague@example.com', self: true, responseStatus: 'needsAction' },
+          { email: 'pat@example.com', responseStatus: 'accepted' },
+        ],
+      },
+      colleague,
+      'school',
+      TZ,
+      ownedIds,
+    )!;
+    expect([theirs.answer, theirs.organizerSelf]).toEqual([null, false]);
+    expect(theirs.guests.every((guest) => !guest.self)).toBe(true);
+    // the owner is on the guest list of the colleague's copy under the address of the account.
+    const invited = toCalendarEvent(
+      { id: 'c2', ...timed, organizer: { email: 'colleague@example.com', self: true }, attendees: [{ email: 'School@example.com', responseStatus: 'accepted' }] },
+      colleague,
+      'school',
+      TZ,
+      ownedIds,
+    )!;
+    expect([invited.answer, invited.organizerSelf]).toEqual(['accepted', false]);
+    expect(findConflicts([theirs, invited])).toEqual([]);
+  });
+
+  it('counts an event that the owner made on his own calendar and sent to his primary as his own', () => {
+    const copy = toCalendarEvent(
+      {
+        id: 'h1',
+        ...timed,
+        organizer: { email: 'health@group.calendar.google.com', displayName: 'health' },
+        attendees: [{ email: 'school@example.com', self: true, responseStatus: 'needsAction' }],
+      },
+      primary,
+      'school',
+      TZ,
+      ownedIds,
+    )!;
+    expect(copy.organizerSelf).toBe(true);
+    const block = toCalendarEvent({ id: 'h2', ...timed, organizer: { email: 'health@group.calendar.google.com', self: true } }, own, 'school', TZ, ownedIds)!;
+    expect(block.organizerSelf).toBe(true);
+    // a calendar of deadlines marks its events.
+    expect(toCalendarEvent({ id: 'd1', ...timed }, { ...own, label: '📅 deadlines' }, 'school', TZ, ownedIds)!.deadlineCalendar).toBe(true);
+    expect(block.deadlineCalendar).toBeUndefined();
+  });
+});

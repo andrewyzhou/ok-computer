@@ -10,7 +10,8 @@ import type { BriefContext } from './context.js';
 // same code as calendar_list_events (src/google/calendar-events.ts). the calendar page and the brief both read it.
 
 // what one read gives. configured is false without a google block. skipped names each account that could not be read
-// (signed out, or an error), with one sentence for the owner.
+// (signed out, or an error), with one sentence for the owner. an entry with a calendarId is about one calendar of an
+// account that was read: that calendar failed, or only its first events are there.
 export interface CalendarRead {
   configured: boolean;
   calendars: CalendarInfo[];
@@ -40,21 +41,61 @@ function fnv1a(text: string): number {
 
 const ANSWERS = new Set(['needsAction', 'accepted', 'tentative', 'declined']);
 
-// the owner's own answer. an attendee with self true is the owner, and an answer that google does not document counts
-// as no answer yet.
-function answerOf(event: calendar_v3.Schema$Event): CalendarAnswer {
-  const own = (event.attendees ?? []).find((each) => each.self === true);
+// in google, self on an attendee or on the organizer means the calendar that this copy of the event sits on, not the
+// signed-in owner. on the primary calendar and on a calendar that the owner owns, that calendar is the owner. on a
+// shared or subscribed calendar of someone else it is that other person, so there the owner is only the attendee or
+// the organizer whose address is one of the calendars that the account owns (ownedIds).
+const trusted = (calendar: ShownCalendar) => calendar.primary || calendar.owned === true;
+
+const isOwner = (who: { self?: boolean | null; email?: string | null } | null | undefined, calendar: ShownCalendar, ownedIds: ReadonlySet<string>) =>
+  who !== undefined && who !== null && ((trusted(calendar) && who.self === true) || (who.email !== null && who.email !== undefined && ownedIds.has(who.email.toLowerCase())));
+
+// the owner's own answer, or null when the owner is not on the guest list. an answer that google does not document
+// counts as no answer yet.
+function answerOf(event: calendar_v3.Schema$Event, calendar: ShownCalendar, ownedIds: ReadonlySet<string>): CalendarAnswer {
+  const own = (event.attendees ?? []).find((each) => isOwner(each, calendar, ownedIds));
   if (!own) return null;
   const answer = own.responseStatus ?? 'needsAction';
   return ANSWERS.has(answer) ? (answer as CalendarAnswer) : 'needsAction';
 }
 
+// true when the owner made the event: the organizer or the creator is the owner, or the organizer is one of the
+// calendars that the account owns (an event that the owner made on his own health calendar and sent to his primary
+// one names that calendar as the organizer). an event without an organizer and without guests on a calendar of the
+// owner is one the owner made alone.
+function organizedByOwner(event: calendar_v3.Schema$Event, calendar: ShownCalendar, ownedIds: ReadonlySet<string>): boolean {
+  if (isOwner(event.organizer, calendar, ownedIds)) return true;
+  if (trusted(calendar) && event.creator?.self === true) return true;
+  return !event.organizer && trusted(calendar) && (event.attendees ?? []).length === 0;
+}
+
+// the notes of an event are at most NOTES_LIMIT characters. a longer text is cut at the end of a word and ends with an
+// ellipsis, so the owner sees that it goes on.
+export const NOTES_LIMIT = 500;
+
+function shortNotes(text: string): string {
+  if (text.length <= NOTES_LIMIT) return text;
+  const cut = text.slice(0, NOTES_LIMIT - 1);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > NOTES_LIMIT / 2 ? cut.slice(0, space) : cut).replace(/[\s.,;:]+$/, '')}…`;
+}
+
+// a calendar whose name says it holds deadlines, such as "deadlines" or "due dates". each of its events is a deadline.
+export const DEADLINE_CALENDAR = /deadline|\bdue\b/i;
+
 // a link that the page may open. only http and https links pass, so a javascript: link never reaches an anchor.
 const webLink = (text: string | null | undefined): string | null => (text && /^https?:\/\/\S+$/i.test(text.trim()) ? text.trim() : null);
 
 // one google event as the page reads it, or undefined for an event without an id or a start. see CalendarEvent for
-// the rules of each field. timeZone is the zone of the app, for the days of an all-day event.
-export function toCalendarEvent(event: calendar_v3.Schema$Event, calendar: ShownCalendar, account: string, timeZone: string): CalendarEvent | undefined {
+// the rules of each field. timeZone is the zone of the app, for the days of an all-day event. ownedIds holds the ids
+// of the calendars that the account owns, in lower case.
+export function toCalendarEvent(
+  event: calendar_v3.Schema$Event,
+  calendar: ShownCalendar,
+  account: string,
+  timeZone: string,
+  ownedIds: ReadonlySet<string> = new Set(),
+): CalendarEvent | undefined {
   if (!event.id || !(event.start?.dateTime || event.start?.date)) return undefined;
   const allDay = !event.start.dateTime;
   let startAt: string;
@@ -89,10 +130,10 @@ export function toCalendarEvent(event: calendar_v3.Schema$Event, calendar: Shown
       answer: each.responseStatus ?? 'needsAction',
       organizer: each.organizer === true,
       optional: each.optional === true,
-      self: each.self === true,
+      self: isOwner(each, calendar, ownedIds),
     }));
   const place = event.location?.trim() ?? '';
-  const notes = event.description ? plainText(event.description).replace(/\s+/g, ' ').trim().slice(0, 500) : '';
+  const notes = event.description ? shortNotes(plainText(event.description).replace(/\s+/g, ' ').trim()) : '';
   const organizer = event.organizer?.displayName ?? event.organizer?.email;
   return {
     key: `${account}/${calendar.id}/${event.id}`,
@@ -110,14 +151,15 @@ export function toCalendarEvent(event: calendar_v3.Schema$Event, calendar: Shown
     location: place && !isLink(place) ? cleanLine(place, 300) : null,
     videoUrl: webLink(videoOf(event)),
     status: event.status === 'cancelled' || event.status === 'tentative' ? event.status : 'confirmed',
-    answer: answerOf(event),
-    organizerSelf: event.organizer ? event.organizer.self === true : attendees.length === 0,
+    answer: answerOf(event, calendar, ownedIds),
+    organizerSelf: organizedByOwner(event, calendar, ownedIds),
     organizer: organizer ? cleanLine(organizer, 200) || null : null,
     guests,
     showsAsFree: event.transparency === 'transparent',
     recurring: Boolean(event.recurringEventId),
     notes: notes || null,
     htmlLink: event.htmlLink?.startsWith('https://') ? event.htmlLink : null,
+    ...(calendar.label && DEADLINE_CALENDAR.test(calendar.label) ? { deadlineCalendar: true } : {}),
   };
 }
 
@@ -156,9 +198,10 @@ export async function readCalendar(ctx: Pick<BriefContext, 'google' | 'timeZone'
       calendars.push({ key, account: each.alias, calendarId: calendar.id, label: calendar.primary ? each.alias : (calendar.label ?? calendar.id), color: calendarColor(calendar.color, key), primary: calendar.primary });
     }
     for (const { event, calendar } of each.read!.events) {
-      const shown = toCalendarEvent(event, calendar, each.alias, ctx.timeZone);
+      const shown = toCalendarEvent(event, calendar, each.alias, ctx.timeZone, each.read!.ownedIds);
       if (shown) events.push(shown);
     }
+    for (const note of each.read!.notes) skipped.push({ account: each.alias, calendarId: note.calendar.id, reason: cleanLine(`${each.alias}: ${note.reason}`, 200) });
   }
   events.sort((a, b) => (a.startAt === b.startAt ? (a.key < b.key ? -1 : a.key > b.key ? 1 : 0) : a.startAt < b.startAt ? -1 : 1));
   return { configured: true, calendars, events, skipped };

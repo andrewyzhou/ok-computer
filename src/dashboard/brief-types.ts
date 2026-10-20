@@ -49,11 +49,12 @@ export interface BriefDelegation {
 }
 
 // what the brief could read. calendar is ok, partial (some accounts failed), failed (every account failed), or off
-// (no google block). digest is the digest that the brief used, or null. desk is false when the desk module is not
+// (no google block). an entry of skipped with a calendarId is one calendar of an account that was read, so it makes the
+// state partial and not failed. digest is the digest that the brief used, or null. desk is false when the desk module is not
 // there, so the page does not claim that nothing waits.
 export interface BriefSources {
   calendar: 'ok' | 'partial' | 'failed' | 'off';
-  skipped: Array<{ account: string; reason: string }>;
+  skipped: Array<{ account: string; reason: string; calendarId?: string }>;
   digest: { id: number; day: string } | null;
   desk: boolean;
 }

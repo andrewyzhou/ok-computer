@@ -34,7 +34,10 @@ export interface CalendarGuest {
 // account that got the same invitation. a timed event has startAt and endAt in utc. an all-day event has allDay true,
 // startDay and endDay (the last day, inclusive) in the time zone of the app, and startAt and endAt at midnight of
 // startDay and of the day after endDay in that zone. location is null when it is empty or only a link (a link is the
-// video link). notes holds the first 500 characters of the description as plain text.
+// video link). notes holds the first 500 characters of the description as plain text, cut at a word with an ellipsis.
+// answer and organizerSelf are about the owner: on a shared calendar of someone else they are null and false unless
+// the owner is on the guest list or made the event. deadlineCalendar is true for an event of a calendar whose name
+// says it holds deadlines, and is left out otherwise.
 export interface CalendarEvent {
   key: string;
   uid: string | null;
@@ -59,9 +62,11 @@ export interface CalendarEvent {
   recurring: boolean;
   notes: string | null;
   htmlLink: string | null;
+  deadlineCalendar?: boolean;
 }
 
-// two events that overlap, both accepted or organized by the owner. startAt and endAt are the overlap.
+// two events that overlap, both accepted or organized by the owner, and at least one of them a meeting with other
+// people. two time blocks of the owner alone never conflict. startAt and endAt are the overlap.
 export interface CalendarConflict {
   a: string;
   b: string;
@@ -93,10 +98,12 @@ export interface CalendarProposalBlock {
   approvalId: number | null;
 }
 
-// an account that the page could not read, and why. a reason is one sentence for the owner.
+// an account that the page could not read, and why. a reason is one sentence for the owner. with calendarId, the
+// account was read but that one calendar was not, or only its first events were.
 export interface CalendarSkipped {
   account: string;
   reason: string;
+  calendarId?: string;
 }
 
 // GET /api/calendar. from is a day (yyyy-mm-dd in the time zone of the app). days is 1 to 14, and the default is 7.

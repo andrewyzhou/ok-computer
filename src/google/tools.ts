@@ -386,11 +386,14 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
       run: async ({ account: which, from, to }, ctx) => {
         const output = await eachAccount(name('calendar_list_events'), which, 'calendar', async (apis, alias) => {
           // the calendar page of the today track reads the same events through listShownEvents.
-          const { events: found, used } = await listShownEvents(apis, from, to);
+          const { events: found, used, notes } = await listShownEvents(apis, from, to);
           const events = found.map(({ event, calendar }) => eventLine(event, calendar.label ? `${alias}/${calendar.label}` : alias));
           // the id of each other calendar comes once, for calendar_get_event, and not on each line.
           const legend = used.filter((each) => each.label);
-          return legend.length ? [...events, `[${alias}] calendar ids: ${legend.map((each) => `${each.label} = ${each.id}`).join('; ')}`] : events;
+          const ids = legend.length ? [`[${alias}] calendar ids: ${legend.map((each) => `${each.label} = ${each.id}`).join('; ')}`] : [];
+          // a calendar that failed or that has more events than one read takes says so, so the list never looks whole
+          // when it is not.
+          return [...events, ...ids, ...notes.map((each) => `[${alias}] ${each.reason}`)];
         });
         // the lines of all accounts sort by time, so a merged list reads as one day. google writes each start in the
         // zone of its calendar, so the sort uses the time and not the text. an all-day event starts at midnight in the

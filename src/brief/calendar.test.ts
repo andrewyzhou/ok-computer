@@ -228,6 +228,8 @@ describe('readCalendar', () => {
         startDay: '2026-10-20',
         endDay: '2026-10-20',
         location: 'Wheeler 150',
+        // the class calendar belongs to someone else, so its event is not one that the owner made.
+        organizerSelf: false,
       }),
     );
     expect(read.events[3]).toMatchObject({ allDay: true, startDay: '2026-10-21', endDay: '2026-10-23', startAt: '2026-10-21T07:00:00.000Z', endAt: '2026-10-24T07:00:00.000Z' });
@@ -244,22 +246,36 @@ describe('readCalendar', () => {
     expect(read.events.map((each) => each.key)).toEqual(['school/cs189-class/c1', 'school/primary/s1']);
   });
 
-  it('skips an account whose read fails with 500 and still reads the other', async () => {
+  it('skips an account whose primary calendar fails with 500 and still reads the other', async () => {
     harness.signedIn('personal');
     harness.signedIn('school');
     seed();
-    // only the school account has the class calendar, so the fault hits that account alone.
-    harness.fake.fault({ route: 'GET /calendar/v3/calendars/cs189-class/events', status: 500, echoAuth: true });
+    // the first read of a primary calendar fails, whichever account it is.
+    harness.fake.fault({ route: 'GET /calendar/v3/calendars/primary/events', status: 500, echoAuth: true, times: 1 });
     const read = await readCalendar(ctx(), range);
     expect(read.skipped).toHaveLength(1);
-    expect(read.skipped[0]!.account).toBe('school');
-    expect(read.skipped[0]!.reason).toMatch(/^school could not be read: /);
-    expect(read.skipped[0]!.reason.length).toBeLessThanOrEqual(200);
+    const failed = read.skipped[0]!;
+    expect(failed.calendarId).toBeUndefined();
+    expect(failed.reason).toMatch(new RegExp(`^${failed.account} could not be read: `));
+    expect(failed.reason.length).toBeLessThanOrEqual(200);
     // the fault echoes the authorization header, and no token may reach the reason.
-    expect(read.skipped[0]!.reason).not.toMatch(/ya29|fake-access/);
-    expect(read.skipped[0]!.reason).toContain('[redacted]');
-    expect(read.calendars.map((each) => each.key)).toEqual(['personal/primary']);
-    expect(read.events.map((each) => each.key)).toEqual(['personal/primary/p1', 'personal/primary/p2']);
+    expect(failed.reason).not.toMatch(/ya29|fake-access/);
+    expect(failed.reason).toContain('[redacted]');
+    const other = failed.account === 'school' ? 'personal' : 'school';
+    expect(read.calendars.every((each) => each.account === other)).toBe(true);
+    expect(read.events.length).toBeGreaterThan(0);
+    expect(read.events.every((each) => each.account === other)).toBe(true);
+  });
+
+  it('notes one shared calendar that fails and still reads the rest of its account', async () => {
+    harness.signedIn('personal');
+    harness.signedIn('school');
+    seed();
+    harness.fake.fault({ route: 'GET /calendar/v3/calendars/cs189-class/events', status: 500, echoAuth: true });
+    const read = await readCalendar(ctx(), range);
+    expect(read.skipped).toEqual([{ account: 'school', calendarId: 'cs189-class', reason: 'school: The calendar CS 189 lectures could not be read.' }]);
+    expect(read.calendars.map((each) => each.key)).toEqual(['personal/primary', 'school/primary', 'school/cs189-class']);
+    expect(read.events.map((each) => each.key)).toEqual(['personal/primary/p1', 'school/primary/s1', 'personal/primary/p2']);
   });
 
   it('gives no events and skips every alias when every account fails', async () => {
