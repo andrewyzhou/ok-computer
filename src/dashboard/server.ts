@@ -46,6 +46,7 @@ import { mountBrowser } from './browser.js';
 import { mountChat } from './chat.js';
 import { mountChats } from './chats.js';
 import { mountDeploy } from './deploy.js';
+import { mountDocs } from './docs.js';
 import { readBody } from './http.js';
 import { mountInbox } from './inbox.js';
 import { mountSandbox } from './sandbox.js';
@@ -60,7 +61,7 @@ export interface DashboardDeps {
   config: Config;
   clock: Clock;
   logger: Logger;
-  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google' | 'rules' | 'chat' | 'inbox' | 'sandbox' | 'secretVault'>;
+  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google' | 'rules' | 'chat' | 'inbox' | 'sandbox' | 'secretVault' | 'docs'>;
   // with a token, every api request must give it. the browser gives it in the query, because EventSource has no
   // headers.
   token?: string;
@@ -371,6 +372,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
   mountDeploy(server, deps);
   mountInbox(server, deps);
   mountSandbox(server, deps);
+  mountDocs(server, deps);
 
   server.all('/api/*', (c) => notFound(c, 'api route'));
   if (existsSync(join(webDir, 'index.html'))) {

@@ -112,6 +112,22 @@ The waterfall (M1) gives a `sandbox` span with `ref.sandboxExecId` for each exec
 
 The default image is `okc-sandbox:1` (`SANDBOX_IMAGE` in `src/sandbox/limits.ts`), built from `sandbox/Dockerfile` by `npm run sandbox:image`. It runs as `1000:1000` with the home `/work`, the create request resets the entrypoint of its base (`Entrypoint: [""]`), and it holds the relay of the network mode at `/opt/okc/relay.mjs`. A change of what the image holds changes the tag in `limits.ts` and in the `sandbox:image` script together. The decisions are in DESIGN-NEXT 5.8.
 
+### T4: docs (`src/dashboard/docs.ts`, `src/dashboard/docs-comments.ts`, `src/docs/`)
+
+The types are in `src/dashboard/docs-types.ts`, which imports nothing. The tables are in `022_docs.sql`: `docs` is the view of the newest version, and `doc_versions`, `doc_comments` and `doc_comment_deliveries` are append-only. A doc is never deleted.
+
+| Method | Path | Query / body | Response | Notes |
+|---|---|---|---|---|
+| GET | `/api/docs` | `DocsQuery`: `q` 1–200 characters, `kind` (`DocKind`), `cursor`, `limit` 1–100 (default 30) | `DocsPage` | Cursor paging, newest `updatedAt` first. Without `q`, `mode` is `null` and each `snippet` is `null`. With `q`, the search reads the newest version of each doc (title and body) by the rules of `/api/search`: `fts` with 3 or more characters, `like` with fewer, NUL characters dropped first; each hit has a snippet of its body with `marks`. A search answers at most `limit` hits and `nextCursor: null`. `400` for an unknown kind, a `q` of only spaces or over 200 characters, or a cursor that cannot be read. |
+| GET | `/api/docs/:id` | `version` (optional) | `DocDetail` | `version` is the asked version, or the newest. `versions` is newest first, `comments` oldest first. `404 doc not found` for an id that is not a positive whole number or has no doc, `404 version not found` for a version the doc does not have. |
+| GET | `/api/docs/:id/diff` | `from`, `to` (version numbers, both required) | `DocDiff` | A line diff with 3 lines of context. `from` may be greater than `to`; the diff then goes from the newer to the older text. `from = to` gives no hunks. A body over 5,000 lines gives `coarse: true`. `400` for a missing or bad number, `404` as above. |
+| GET | `/api/docs/:id/export` | `version` (optional) | `text/markdown; charset=utf-8` | The body of the version exactly as stored, with `content-disposition: attachment; filename="<slug>-v<N>.md"`. The slug is the title in lower case, with each run of characters other than `a-z 0-9` as one `-`, at most 60 characters, or `doc-<id>` when nothing is left. `x-content-type-options: nosniff`. `404` as above. |
+| POST | `/api/docs/:id/comments` | `DocCommentRequest` `{ text, version, quote? }`, `text` 1–4,000 characters after a trim, `quote` at most 500 | `201 DocComment` | Strict body. The comment is stored at once, and a `system_event` with its text goes to the `main` session through the session queue, so the agent sees it in its next run; `eventId` is `null` until then. `400` for a bad body, `404` for the doc or the version. |
+
+- The agent's tools are `doc_write`, `doc_update` (a new version), `doc_read`, `doc_list` and `doc_search`, in `src/docs/tools.ts`. The read tools have risk `read`, and the two write tools change only the local database, so a builtin rule allows them. The main session and the automations get all five, and the research sub-agent gets the three read tools (`src/docs/names.ts`).
+- A version keeps the taint of the session that wrote it, and a later version keeps the taint of the earlier ones. `doc_read` marks the text of a tainted version as untrusted, so a doc never carries outside text into a session as trusted text. The page shows the sources (`DocVersionMeta.taint`).
+- The text of a doc is model text. The page renders its markdown with no raw HTML, loads no image without a click, and makes only `http(s)`, `mailto` and `#/` links clickable. A link of `DocLink` is an `http(s)` url or a `#/` hash; the store refuses every other href.
+
 ## 3. Event streams
 
 Both streams are SSE. With `DASHBOARD_TOKEN` set, they take `?token=` because `EventSource` sends no headers. The cookie also works. A stream sends `event: ready` with `{}` first. Then each message is an unnamed event whose data is one JSON value.
@@ -139,6 +155,7 @@ The routes stay in the hash (`#/<path>`). `web/src/routes.ts` holds the registry
 | Today | Overview → `#/` | core, M3 restyles |
 | Desk, Calendar, Docs, People | none in phase 5. The groups stay hidden until a view registers. | |
 | Inbox | Digest → `#/inbox`, Newsletters → `#/inbox/newsletters`, Subscriptions → `#/inbox/subscriptions`, Drafts → `#/inbox/drafts`, Proposals → `#/inbox/proposals`. Detail: `#/inbox/digests/:id` | M8 |
+| Docs | Docs → `#/docs` (`?q=` searches, `?kind=` filters). Detail: `#/docs/:id` (`?version=` picks a version, `?diff=<from>` shows the diff from that version) | T4 |
 | Chats | Chats → `#/chats`. Detail: `#/chats/:key` (the `main@<id>` key, URL-encoded) | M4 |
 | Activity | Activity → `#/activity` (`?kind=` filters). Detail: `#/activity/:key` | M4 |
 | Agent | Goals `#/goals`, Memory `#/memory` (`?path=` selects a file), Automations `#/automations`, Signals `#/signals`, Approvals `#/approvals` | core |

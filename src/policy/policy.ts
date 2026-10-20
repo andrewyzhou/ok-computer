@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
 import type { Result } from '../config/load.js';
+import { DOC_WRITE_TOOLS } from '../docs/names.js';
 import { headOf } from '../text.js';
 
 // exec runs code that the model wrote in the code sandbox (src/sandbox). the container has no network, so the call
@@ -39,6 +40,7 @@ const LOCAL_WRITE_TOOLS = [
   'heartbeat_respond',
   'memory_write',
   'message_owner',
+  ...DOC_WRITE_TOOLS,
 ];
 
 export const BUILTIN_RULES: Rule[] = [

@@ -11,6 +11,7 @@ import { createLogger, silentLogger } from '../src/observability/logger.js';
 import { setChecklist } from '../src/scheduler/heartbeat.js';
 import { handleIn } from '../src/tools/results.js';
 import { createTestApp } from './app-harness.js';
+import { seedDocs } from './docs-seed.js';
 
 export const pdt = (time: string, day = '2026-10-12') => new Date(`${day}T${time}:00-07:00`).toISOString();
 
@@ -112,6 +113,8 @@ export async function seedDashboard(options: Partial<Pick<DashboardDeps, 'token'
     });
   }
 
+  const docs = seedDocs(t.db);
+
   const logger = createLogger({ dir: join(t.dataDir, 'logs'), consoleLevel: 'off', clock: t.clock });
   logger.info('run started', { runId: 'run-1' });
   logger.warn('transient model error', { runId: 'run-3' });
@@ -126,5 +129,5 @@ export async function seedDashboard(options: Partial<Pick<DashboardDeps, 'token'
     webDir: join(t.dataDir, 'no-web'),
     ...options,
   });
-  return { t, dashboard, pendingApprovalId: pending.id, deniedApprovalId: denied.id };
+  return { t, dashboard, pendingApprovalId: pending.id, deniedApprovalId: denied.id, docs };
 }
