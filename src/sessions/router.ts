@@ -22,6 +22,8 @@ export const MAIN_TOOLS: readonly string[] = [
   'automations_delete',
   'automations_list',
   'automations_update',
+  'autonomy_levels',
+  'autonomy_lower',
   'delegate',
   'goal_update',
   'goals_list',
