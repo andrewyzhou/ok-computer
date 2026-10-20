@@ -92,11 +92,11 @@ describe('levelOf', () => {
 });
 
 describe('storedLevels', () => {
-  it('gives an entry for each of the 8 domains, with null times at the defaults', () => {
+  it('gives an entry for each of the 10 domains, with null times at the defaults', () => {
     const db = memoryDb();
     const levels = storedLevels(db);
     expect(Object.keys(levels).sort()).toEqual([...DOMAIN_IDS].sort());
-    expect(DOMAIN_IDS).toHaveLength(8);
+    expect(DOMAIN_IDS).toHaveLength(10);
     for (const spec of DOMAINS) expect(levels[spec.id]).toEqual({ level: spec.defaultLevel, updatedAt: null, changeId: null });
   });
 

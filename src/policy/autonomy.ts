@@ -1,4 +1,6 @@
 import type { AutonomyDomain, AutonomyLevel } from '../dashboard/autonomy-types.js';
+import { DESK_MAIN_TOOLS, NUDGE_TOOL } from '../desk/names.js';
+import { DOC_WRITE_TOOLS } from '../docs/names.js';
 
 // the trust ladder of phase 6 (docs/PHASE6-PLAN.md, track T6). each domain has one level on top of the policy engine.
 // the default level of each domain gives the same decision as the policy engine gave before the ladder, so nothing
@@ -43,12 +45,19 @@ export const LEVEL_TEXT: Record<AutonomyLevel, string> = {
 // the tools of each domain. a google tool has the prefix of the google integration ("google__").
 const GOOGLE = (tool: string) => `google__${tool}`;
 
+// the desk tools that change a delegation. delegation_list only reads, so it is outside the ladder.
+const DESK_WRITE_TOOLS: readonly string[] = DESK_MAIN_TOOLS.filter((tool) => tool !== 'delegation_list');
+
+// the tools that write only the local data of the app and that a builtin rule allows. their default level is auto,
+// which keeps the verdict of that rule, and the owner can lower it.
+const LOCAL_WRITES: readonly string[] = [...DOC_WRITE_TOOLS, 'person_note'];
+
 export const DOMAINS: readonly DomainSpec[] = [
   {
     id: 'mail_drafts',
     label: 'Mail drafts',
-    explanation: 'Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.',
-    tools: [GOOGLE('gmail_draft'), 'inbox_draft_reply'],
+    explanation: 'Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.',
+    tools: [GOOGLE('gmail_draft'), 'inbox_draft_reply', NUDGE_TOOL],
     defaultLevel: 'review',
     maxLevel: 'auto',
     fixedReason: null,
@@ -79,6 +88,24 @@ export const DOMAINS: readonly DomainSpec[] = [
     defaultLevel: 'ask',
     maxLevel: 'ask',
     fixedReason: 'An invitation goes to other people in your name, so you approve each one.',
+  },
+  {
+    id: 'delegations',
+    label: 'Delegations',
+    explanation: 'Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.',
+    tools: DESK_WRITE_TOOLS,
+    defaultLevel: 'review',
+    maxLevel: 'auto',
+    fixedReason: null,
+  },
+  {
+    id: 'local_writes',
+    label: 'Docs and notes',
+    explanation: 'Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.',
+    tools: LOCAL_WRITES,
+    defaultLevel: 'auto',
+    maxLevel: 'auto',
+    fixedReason: null,
   },
   {
     id: 'browser_submits',
@@ -146,6 +173,9 @@ const FIXED_DOMAINS: Readonly<Record<string, AutonomyDomain>> = {
   [GOOGLE('gmail_mark_read')]: 'mail_labels',
   [GOOGLE('gmail_unsubscribe')]: 'unsubscribes',
   inbox_unsubscribe: 'unsubscribes',
+  [NUDGE_TOOL]: 'mail_drafts',
+  ...Object.fromEntries(DESK_WRITE_TOOLS.map((tool) => [tool, 'delegations' as const])),
+  ...Object.fromEntries(LOCAL_WRITES.map((tool) => [tool, 'local_writes' as const])),
 };
 
 // the words that make a browser submit a purchase. the text of the page address, the button and each field name and

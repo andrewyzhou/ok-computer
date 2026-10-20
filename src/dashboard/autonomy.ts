@@ -28,10 +28,11 @@ const STATUS = {
 // the allow rule of the owner that lets the calls of a domain run without the reviewer. at the default level the policy
 // engine decides as it did before the ladder, so an allow rule on a tool of a domain whose default is review lets the
 // call run with no check. a raised level decides over an allow rule, a lowered one makes the owner approve, and the
-// tools of a domain whose default is ask always ask the owner, so no rule overrides those. the match looks only at the
-// tool pattern: a rule with a session or args pattern can still let some of the calls through.
+// tools of a domain whose default is ask always ask the owner, so no rule overrides those. the calls of a domain whose
+// default is auto run without the reviewer anyway, so no rule overrides those either. the match looks only at the tool
+// pattern: a rule with a session or args pattern can still let some of the calls through.
 function overriddenBy(spec: DomainSpec, stored: StoredLevel, rules: readonly Rule[]): string | null {
-  if (spec.defaultLevel === 'ask' || stored.level !== spec.defaultLevel) return null;
+  if (spec.defaultLevel !== 'review' || stored.level !== spec.defaultLevel) return null;
   const rule = rules.findLast((each) => each.effect === 'allow' && spec.tools.some((tool) => glob(each.tool, tool)));
   return rule?.id ?? null;
 }

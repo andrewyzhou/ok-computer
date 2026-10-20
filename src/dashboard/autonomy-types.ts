@@ -11,6 +11,8 @@ export type AutonomyDomain =
   | 'mail_labels'
   | 'calendar_holds'
   | 'calendar_guests'
+  | 'delegations'
+  | 'local_writes'
   | 'browser_submits'
   | 'unsubscribes'
   | 'sandbox_network'

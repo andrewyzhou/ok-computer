@@ -182,6 +182,44 @@ export const LADDER_CALLS: readonly LadderCall[] = [
   { name: 'an integration write', tool: 'slack_send_message', risk: 'external', alwaysApprove: false, input: { channel: 'C1', text: 'hi' }, domain: null },
 ];
 
+// the write tools of the desk, the docs and the people memory of phase 6, which came after the golden file of the
+// engine from before the ladder. the policy of master has no rule for them, so they are not in LADDER_CALLS and its
+// golden file. the equivalence test decides them at the default level and without the ladder, and the two verdicts
+// must be the same, so their default levels keep the behavior that the merged tracks gave them.
+export const PHASE6_LADDER_CALLS: readonly LadderCall[] = [
+  {
+    name: 'a nudge draft of a delegation',
+    tool: 'desk_draft_nudge',
+    risk: 'write',
+    alwaysApprove: false,
+    input: {
+      account,
+      delegationId: 1,
+      threadId: 't-1',
+      followUpAt: '2026-10-20T09:00:00-07:00',
+      to: ['ana@example.com'],
+      subject: 'Re: the lease',
+      body: 'Any news on the signed lease?',
+    },
+    domain: 'mail_drafts',
+  },
+  { name: 'a delegation create', tool: 'delegation_create', risk: 'write', alwaysApprove: false, input: { title: 'Book the Denver flights' }, domain: 'delegations' },
+  { name: 'a delegation update', tool: 'delegation_update', risk: 'write', alwaysApprove: false, input: { id: 1, nextStep: 'Pick a seat' }, domain: 'delegations' },
+  {
+    name: 'a delegation wait',
+    tool: 'delegation_wait_on',
+    risk: 'write',
+    alwaysApprove: false,
+    input: { id: 1, waitingOn: { name: 'Ana', email: 'ana@example.com' } },
+    domain: 'delegations',
+  },
+  { name: 'a delegation done', tool: 'delegation_done', risk: 'write', alwaysApprove: false, input: { id: 1 }, domain: 'delegations' },
+  { name: 'a doc write', tool: 'doc_write', risk: 'write', alwaysApprove: false, input: { title: 'Trip plan', kind: 'plan', body: '# Trip' }, domain: 'local_writes' },
+  { name: 'a doc update', tool: 'doc_update', risk: 'write', alwaysApprove: false, input: { id: 1, baseVersion: 1, body: '# Trip v2' }, domain: 'local_writes' },
+  { name: 'a person note', tool: 'person_note', risk: 'write', alwaysApprove: false, input: { person: 'ana@example.com', text: 'prefers mornings', kind: 'preference' }, domain: 'local_writes' },
+  { name: 'a delegation list', tool: 'delegation_list', risk: 'read', alwaysApprove: false, input: {}, domain: null },
+];
+
 // the sessions that the equivalence test decides each call in: the owner chat, an automation, a sub-agent, and a
 // tainted owner chat (the taint list is given with the call).
 export const LADDER_SESSIONS = [

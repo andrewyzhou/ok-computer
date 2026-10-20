@@ -55,11 +55,11 @@ async function error(response: Response | Promise<Response>, status: number): Pr
 const count = (db: Seeded['db'], table: string) => Number(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()!.n);
 
 describe('GET /api/autonomy', () => {
-  it('shows the 8 domains at their defaults with an empty history on a fresh database', async () => {
+  it('shows the 10 domains at their defaults with an empty history on a fresh database', async () => {
     const { dashboard } = fresh();
     const page = await get<AutonomyPage>(dashboard, '/api/autonomy');
     expect(page.domains.map((domain) => domain.id)).toEqual(DOMAINS.map((spec) => spec.id));
-    expect(page.domains).toHaveLength(8);
+    expect(page.domains).toHaveLength(10);
     for (const [index, view] of page.domains.entries()) {
       const spec = DOMAINS[index]!;
       expect(view).toEqual({
@@ -108,6 +108,9 @@ describe('GET /api/autonomy with allow rules of the owner', () => {
       calendar_holds: 'okc.policy.json#2',
       // the tools of a domain whose default is ask always ask the owner, so an allow rule changes nothing there.
       calendar_guests: null,
+      delegations: null,
+      // the default of docs and notes is auto, so their calls run without the reviewer anyway.
+      local_writes: null,
       browser_submits: null,
       unsubscribes: null,
       sandbox_network: null,
@@ -122,7 +125,7 @@ describe('GET /api/autonomy with allow rules of the owner', () => {
   it('names a broad allow rule for every domain whose default is review', async () => {
     const { dashboard } = fresh({ rules: [{ id: 'okc.policy.json#1', tool: '*', effect: 'allow' }] });
     const page = await get<AutonomyPage>(dashboard, '/api/autonomy');
-    expect(page.domains.filter((domain) => domain.overriddenBy !== null).map((domain) => domain.id)).toEqual(['mail_drafts', 'mail_labels', 'calendar_holds']);
+    expect(page.domains.filter((domain) => domain.overriddenBy !== null).map((domain) => domain.id)).toEqual(['mail_drafts', 'mail_labels', 'calendar_holds', 'delegations']);
   });
 });
 

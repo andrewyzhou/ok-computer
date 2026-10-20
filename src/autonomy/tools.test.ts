@@ -39,6 +39,8 @@ describe('autonomy_levels', () => {
       'mail_labels (Mail labels and archive): review; the default is review; it can go up to auto',
       'calendar_holds (Calendar holds): review; the default is review; it can go up to auto',
       'calendar_guests (Calendar events with guests): ask; it always stays at ask: An invitation goes to other people in your name, so you approve each one.',
+      'delegations (Delegations): review; the default is review; it can go up to auto',
+      'local_writes (Docs and notes): auto; the default is auto; it can go up to auto',
       'browser_submits (Browser form submits): ask; the default is ask; it can go up to review',
       'unsubscribes (Unsubscribes): ask; it always stays at ask: An unsubscribe cannot be taken back, so it always waits for you.',
       'sandbox_network (Code with network access): ask; the default is ask; it can go up to review',

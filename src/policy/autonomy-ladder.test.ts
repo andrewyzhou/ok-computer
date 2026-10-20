@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { goldenCases } from '../../scripts/autonomy-golden.js';
+import { PHASE6_LADDER_CALLS } from '../../test/autonomy-calls.js';
 import { DOMAINS, domainOf, domainSpec, LEVELS, levelRank, type AutonomyLevel } from './autonomy.js';
 import { BUILTIN_RULES, decide, type Decision, type Verdict } from './policy.js';
 
@@ -10,7 +11,7 @@ import { BUILTIN_RULES, decide, type Decision, type Verdict } from './policy.js'
 // how strict a decision is. deny is the most strict, and allow the least.
 const STRICT: Record<Decision, number> = { deny: 3, approve: 2, review: 1, allow: 0 };
 
-const cases = goldenCases().filter((each) => domainOf(each.call.tool, each.call.input) !== undefined);
+const cases = [...goldenCases(), ...goldenCases(PHASE6_LADDER_CALLS)].filter((each) => domainOf(each.call.tool, each.call.input) !== undefined);
 
 function at(each: (typeof cases)[number], level: AutonomyLevel): Verdict {
   const domain = domainOf(each.call.tool, each.call.input)!;
@@ -81,9 +82,10 @@ describe('the levels of the trust ladder over every shared call', () => {
       for (const level of LEVELS) {
         const verdict = at(each, level);
         if (base.decision === 'deny' && base.rule !== 'subagent') expect(verdict, `${each.key}: ${level}`).toMatchObject({ decision: 'deny', rule: base.rule });
-        // the taint of an external call is outside the ladder: a raise must still ask the owner.
+        // the taint is outside the ladder: a raise must still ask the owner for an external call, and still send a
+        // local write that later runs read back (person_note) to the reviewer.
         if (base.rule === 'taint' && levelRank(level) >= levelRank(domainSpec(domainOf(each.call.tool, each.call.input)!).defaultLevel)) {
-          expect(verdict, `${each.key}: ${level}`).toMatchObject({ decision: 'approve', rule: 'taint' });
+          expect(verdict, `${each.key}: ${level}`).toMatchObject({ decision: base.decision, rule: 'taint' });
         }
       }
     }

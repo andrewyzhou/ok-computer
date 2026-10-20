@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { GOLDEN_PATH, goldenCases, type Golden } from '../../scripts/autonomy-golden.js';
-import { LADDER_CALLS } from '../../test/autonomy-calls.js';
+import { LADDER_CALLS, PHASE6_LADDER_CALLS } from '../../test/autonomy-calls.js';
 import { domainOf, domainSpec } from './autonomy.js';
 import { BUILTIN_RULES, decide } from './policy.js';
 
@@ -13,7 +13,18 @@ const cases = goldenCases();
 
 describe('the default levels of the trust ladder', () => {
   it('give each call the domain that the shared calls name', () => {
-    for (const call of LADDER_CALLS) expect(domainOf(call.tool, call.input) ?? null, call.name).toBe(call.domain);
+    for (const call of [...LADDER_CALLS, ...PHASE6_LADDER_CALLS]) expect(domainOf(call.tool, call.input) ?? null, call.name).toBe(call.domain);
+  });
+
+  // the tools of phase 6 have no verdict in the engine of master, so the verdict without the ladder comes from the
+  // current engine with no domain for the call.
+  it.each(goldenCases(PHASE6_LADDER_CALLS).map((each) => [each.key, each] as const))('give a tool of phase 6 the verdict without the ladder: %s', (_key, each) => {
+    const domain = domainOf(each.call.tool, each.call.input);
+    const autonomy = domain ? { domain, level: domainSpec(domain).defaultLevel } : undefined;
+    const rules = each.rules(BUILTIN_RULES);
+    const { decision, rule, reason } = decide({ ...each.input, ...(autonomy ? { autonomy } : {}) }, rules);
+    const without = decide(each.input, rules);
+    expect({ decision, rule, reason }).toEqual({ decision: without.decision, rule: without.rule, reason: without.reason });
   });
 
   it('have a golden verdict for each case, and no golden verdict without a case', () => {

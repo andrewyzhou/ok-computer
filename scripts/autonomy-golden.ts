@@ -40,9 +40,10 @@ export interface GoldenCase {
 
 export type Golden = Record<string, Pick<Verdict, 'decision' | 'rule' | 'reason'>>;
 
-// each case once, with a key that names the call, the session and the rule set. no url counts as read.
-export function goldenCases(): GoldenCase[] {
-  return LADDER_CALLS.flatMap((call) =>
+// each case once, with a key that names the call, the session and the rule set. no url counts as read. the golden
+// file holds the cases of LADDER_CALLS, and a test can give other calls.
+export function goldenCases(calls: readonly LadderCall[] = LADDER_CALLS): GoldenCase[] {
+  return calls.flatMap((call) =>
     LADDER_SESSIONS.flatMap((session) =>
       RULE_SETS.map((set) => ({
         key: `${call.name} | ${session.name} | ${set.name}`,

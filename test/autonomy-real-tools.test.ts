@@ -5,11 +5,16 @@ import type { InboxContext } from '../src/inbox/context.js';
 import { createDraftTools } from '../src/inbox/drafts.js';
 import { createNewsletterTools } from '../src/inbox/newsletters.js';
 import { createBrowserTools } from '../src/browser/tools.js';
+import type { DeskContext } from '../src/desk/context.js';
+import { createNudgeTools } from '../src/desk/nudge.js';
+import { createDeskTools } from '../src/desk/tools.js';
+import { createDocTools } from '../src/docs/tools.js';
+import { createPeopleTools } from '../src/people/tools.js';
 import { DOMAINS, domainOf } from '../src/policy/autonomy.js';
 import { createSandboxExecTool, SANDBOX_EXEC } from '../src/sandbox/tool.js';
 import type { SandboxToolDeps } from '../src/sandbox/tool.js';
 import type { Tool } from '../src/tools/registry.js';
-import { LADDER_CALLS } from './autonomy-calls.js';
+import { LADDER_CALLS, PHASE6_LADDER_CALLS } from './autonomy-calls.js';
 import { createGoogleHarness, type GoogleHarness } from './google-harness.js';
 
 // the equivalence test of the trust ladder decides the calls of LADDER_CALLS with the risk and the approval flag that
@@ -27,12 +32,17 @@ async function realTools(): Promise<Map<string, Tool>> {
   h = await createGoogleHarness({ accounts: ['personal'] });
   const fake = {} as never;
   const inbox = { googleConfig: h.config } as unknown as InboxContext;
+  const desk = { google: {}, googleConfig: h.config, timeZone: 'America/Los_Angeles' } as unknown as DeskContext;
   const tools: Tool[] = [
     ...createGoogleTools({ accounts: h.accounts, config: { ...h.config, send: true }, logger: h.logger }),
     ...createDraftTools(inbox),
     ...createNewsletterTools(inbox),
     ...createBrowserTools(fake as BrowserWorker),
     createSandboxExecTool({ clock: () => new Date(), live: new Set() } as unknown as SandboxToolDeps),
+    ...createDeskTools(desk),
+    ...createNudgeTools(desk),
+    ...createDocTools({ db: fake, dashboardUrl: 'http://127.0.0.1:7777' }),
+    ...createPeopleTools({ db: fake }),
   ];
   return new Map(tools.map((tool) => [tool.name, tool]));
 }
@@ -47,7 +57,7 @@ describe('the shared calls of the ladder against the real tools', () => {
   it('name the risk and the approval flag that the real tool gives, for a parsed input', async () => {
     const tools = await realTools();
     let checked = 0;
-    for (const call of LADDER_CALLS) {
+    for (const call of [...LADDER_CALLS, ...PHASE6_LADDER_CALLS]) {
       const tool = tools.get(call.tool);
       if (!tool) continue;
       const parsed = tool.input.safeParse(call.input);
@@ -58,8 +68,9 @@ describe('the shared calls of the ladder against the real tools', () => {
       expect(domainOf(tool.name, parsed.data) ?? null, call.name).toBe(call.domain);
       checked++;
     }
-    // the google, inbox, browser and sandbox calls of the list are all checked.
-    expect(checked).toBeGreaterThanOrEqual(14);
+    // the google, inbox, browser and sandbox calls of the list, and the desk, doc and people calls of phase 6, are all
+    // checked.
+    expect(checked).toBeGreaterThanOrEqual(14 + PHASE6_LADDER_CALLS.length);
   });
 
   it('cover each tool that a domain lists with a real tool of that name', async () => {

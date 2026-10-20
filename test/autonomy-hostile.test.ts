@@ -206,7 +206,7 @@ describe('the autonomy routes against hostile requests', () => {
 });
 
 describe('the autonomy page with rows that the current list does not know', () => {
-  it('shows a history row of a domain that a later phase adds, and keeps the eight domains', async () => {
+  it('shows a history row of a domain that a later phase adds, and keeps the ten domains', async () => {
     const { dashboard, db } = fresh();
     db.prepare(
       "INSERT INTO autonomy_changes (domain, fromLevel, toLevel, actor, via, createdAt) VALUES ('wire_transfers', 'ask', 'review', 'owner', 'dashboard', ?)",
@@ -214,7 +214,7 @@ describe('the autonomy page with rows that the current list does not know', () =
     const response = await dashboard.request('/api/autonomy');
     expect(response.status).toBe(200);
     const page = (await response.json()) as AutonomyPage;
-    expect(page.domains).toHaveLength(8);
+    expect(page.domains).toHaveLength(10);
     expect(page.history.map((row) => row.domain)).toEqual(['wire_transfers']);
     // a filter by that domain is a bad request, because the list does not name it.
     expect((await dashboard.request('/api/autonomy/history?domain=wire_transfers')).status).toBe(400);
