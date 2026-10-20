@@ -8,6 +8,9 @@ import type { PersonContactRole } from '../dashboard/people-types.js';
 export interface ObservedAddress {
   email: string;
   name: string | null;
+  // the text in parentheses of a header part that also had a name, for example "via Slack" in
+  // "Jane (via Slack) <jane@x.com>". the name leaves it out, and the noise rules read it. missing when there was none.
+  comment?: string;
 }
 
 export interface Organization {
@@ -37,9 +40,13 @@ export interface Observation {
   address: ObservedAddress;
   organization: Organization | null;
   contact: Contact;
+  // true when the item may update a person that is already known but must not make a new one: a meeting that the
+  // owner declined or that was cancelled, and a meeting too large to make people from strangers.
+  onlyKnown?: boolean;
 }
 
-// what the store did with one observation.
+// what the store did with one observation. the store gives null in its place for an observation with onlyKnown
+// whose address no person has.
 export interface Recorded {
   personId: number;
   // true when the email was new, so a person was made.
@@ -56,6 +63,7 @@ export type NoiseReason =
   | 'notification'
   | 'role_address'
   | 'calendar_resource'
+  | 'calendar_mail'
   | 'mailing_list'
   | 'bulk'
   | 'auto_submitted'

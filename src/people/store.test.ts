@@ -1,15 +1,18 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { openDb, type Db } from '../db/index.js';
+import { DESK_DELEGATIONS } from '../../test/fixtures/people/desk-delegations.js';
 import { PEOPLE_ACCOUNTS, PEOPLE_NOW, seedPeople } from '../../test/seed-people.js';
 import {
   addNote,
   backfillStateOf,
   cancelMeetings,
   countPeople,
+  deskShape,
   findPersonByEmail,
   getPerson,
   InvalidCursor,
   listBackfillStates,
+  NotePermission,
   PersonNotFound,
   recordObservation,
   recordObservations,
@@ -160,9 +163,9 @@ describe('the seeded people', () => {
 describe('recordObservation', () => {
   it('makes a person, and counts a contact and its name once when the same mail comes again', () => {
     empty();
-    const first = recordObservation(db, observation('Jane@Acme.example', 'Jane Doe', {}, acme), PEOPLE_NOW);
+    const first = recordObservation(db, observation('Jane@Acme.example', 'Jane Doe', {}, acme), PEOPLE_NOW)!;
     expect(first).toEqual({ personId: first.personId, createdPerson: true, createdContact: true });
-    const again = recordObservation(db, observation('jane@acme.example', 'Jane Doe', { subject: 'Hello again', at: at('10-11') }, acme), PEOPLE_NOW);
+    const again = recordObservation(db, observation('jane@acme.example', 'Jane Doe', { subject: 'Hello again', at: at('10-11') }, acme), PEOPLE_NOW)!;
     expect(again).toEqual({ personId: first.personId, createdPerson: false, createdContact: false });
     expect(db.prepare('SELECT count(*) AS n FROM person_contacts').get()?.n).toBe(1);
     const jane = getPerson(db, first.personId, PEOPLE_NOW);
@@ -190,7 +193,7 @@ describe('recordObservation', () => {
 
   it('takes the name seen most often, and never replaces a name the owner chose', () => {
     empty();
-    const id = recordObservation(db, observation('jane@acme.example', 'Jane Doe', { externalId: 'm-1', at: at('10-01') }), PEOPLE_NOW).personId;
+    const id = recordObservation(db, observation('jane@acme.example', 'Jane Doe', { externalId: 'm-1', at: at('10-01') }), PEOPLE_NOW)!.personId;
     recordObservation(db, observation('jane@acme.example', 'Jane Doe', { externalId: 'm-2', at: at('10-02') }), PEOPLE_NOW);
     recordObservation(db, observation('jane@acme.example', 'J. Doe', { externalId: 'm-3', at: at('10-03') }), PEOPLE_NOW);
     expect(getPerson(db, id, PEOPLE_NOW)?.name).toBe('Jane Doe');
@@ -210,7 +213,7 @@ describe('recordObservation', () => {
 
   it('moves the organization to the newest contact, and never clears it with null', () => {
     empty();
-    const id = recordObservation(db, observation('jane@acme.example', null, { externalId: 'm-1', at: at('10-05') }, acme), PEOPLE_NOW).personId;
+    const id = recordObservation(db, observation('jane@acme.example', null, { externalId: 'm-1', at: at('10-05') }, acme), PEOPLE_NOW)!.personId;
     recordObservation(db, observation('jane@acme.example', null, { externalId: 'm-2', at: at('10-08') }, globex), PEOPLE_NOW);
     expect(getPerson(db, id, PEOPLE_NOW)).toMatchObject({ organization: 'Globex', organizationDomain: 'globex.example' });
     // an older mail that comes late does not move it back.
@@ -231,7 +234,7 @@ describe('recordObservation', () => {
       ],
       PEOPLE_NOW,
     );
-    expect(results.map((r) => [r.createdPerson, r.createdContact])).toEqual([
+    expect(results.map((r) => [r!.createdPerson, r!.createdContact])).toEqual([
       [true, true],
       [true, true],
       [false, false],
@@ -252,8 +255,8 @@ describe('cancelMeetings', () => {
   it('takes the event out of upcoming for every attendee', () => {
     empty();
     const meeting = { kind: 'meeting' as const, externalId: 'e-9', threadId: null, direction: null, role: 'attendee' as const, subject: 'Offsite', at: at('10-24'), endAt: at('10-24', '18:00') };
-    const a = recordObservation(db, observation('a@acme.example', 'A', meeting), PEOPLE_NOW).personId;
-    const b = recordObservation(db, observation('b@acme.example', 'B', { ...meeting, role: 'organizer' }), PEOPLE_NOW).personId;
+    const a = recordObservation(db, observation('a@acme.example', 'A', meeting), PEOPLE_NOW)!.personId;
+    const b = recordObservation(db, observation('b@acme.example', 'B', { ...meeting, role: 'organizer' }), PEOPLE_NOW)!.personId;
     expect(getPerson(db, a, PEOPLE_NOW)?.upcoming.map((m) => m.eventId)).toEqual(['e-9']);
     expect(cancelMeetings(db, 'school', ['e-9'], PEOPLE_NOW)).toBe(0);
     expect(cancelMeetings(db, 'personal', [], PEOPLE_NOW)).toBe(0);
@@ -286,7 +289,7 @@ describe('open threads', () => {
 
   it('leave out threads older than 30 days and mail without a thread', () => {
     empty();
-    const id = recordObservation(db, observation('a@acme.example', 'A', { externalId: 'm-1', threadId: 't-old', at: at('09-10') }), PEOPLE_NOW).personId;
+    const id = recordObservation(db, observation('a@acme.example', 'A', { externalId: 'm-1', threadId: 't-old', at: at('09-10') }), PEOPLE_NOW)!.personId;
     recordObservation(db, observation('a@acme.example', 'A', { externalId: 'm-2', threadId: null, at: at('10-15') }), PEOPLE_NOW);
     recordObservation(db, observation('a@acme.example', 'A', { externalId: 'm-3', threadId: 't-new', subject: null, at: at('10-12') }), PEOPLE_NOW);
     expect(getPerson(db, id, PEOPLE_NOW)?.openThreads).toEqual([
@@ -355,12 +358,22 @@ describe('searchPeople', () => {
 describe('addNote', () => {
   it('appends a trimmed note that supersedes an earlier one', () => {
     seeded();
-    const note = addNote(db, { personId: 2, kind: 'preference', text: '  prefers calls  ', author: 'owner' }, PEOPLE_NOW);
-    expect(note).toEqual({ id: 5, kind: 'preference', text: 'prefers calls', author: 'owner', runId: null, createdAt: PEOPLE_NOW.toISOString() });
+    const note = addNote(db, { personId: 2, kind: 'preference', text: '  prefers calls  ', author: 'agent' }, PEOPLE_NOW);
+    expect(note).toEqual({ id: 5, kind: 'preference', text: 'prefers calls', author: 'agent', runId: null, createdAt: PEOPLE_NOW.toISOString() });
     const later = addNote(db, { personId: 2, kind: 'preference', text: 'prefers mail', author: 'agent', supersedes: 5, runId: 'run-1', toolCallId: 'call-1' }, PEOPLE_NOW);
     expect(later.runId).toBe('run-1');
     expect(getPerson(db, 2, PEOPLE_NOW)?.preferences.map((n) => n.text)).toEqual(['prefers mail']);
     expect(getPerson(db, 2, PEOPLE_NOW)?.notes.map((n) => n.id)).toEqual([4]);
+  });
+
+  it('lets the owner supersede any note, and refuses an agent note that supersedes a note of the owner', () => {
+    seeded();
+    const owner = addNote(db, { personId: 2, kind: 'preference', text: 'never before 10:00', author: 'owner' }, PEOPLE_NOW);
+    expect(() => addNote(db, { personId: 2, kind: 'preference', text: 'prefers 07:00', author: 'agent', supersedes: owner.id }, PEOPLE_NOW)).toThrow(NotePermission);
+    expect(getPerson(db, 2, PEOPLE_NOW)?.preferences.map((n) => n.text)).toEqual(['never before 10:00']);
+    // note 4 is the agent's, and the owner may replace it.
+    addNote(db, { personId: 2, kind: 'note', text: 'the lease is signed', author: 'owner', supersedes: 4 }, PEOPLE_NOW);
+    expect(getPerson(db, 2, PEOPLE_NOW)?.notes.map((n) => n.text)).toEqual(['the lease is signed']);
   });
 
   it('refuses an unknown person, a note of another person, and a text that is blank or too long', () => {
@@ -390,19 +403,31 @@ describe('the delegations of a person', () => {
 
   it('are empty when the table has another shape', () => {
     seeded();
+    db.exec('DROP TABLE IF EXISTS delegations');
     db.exec('CREATE TABLE delegations (id INTEGER PRIMARY KEY, name TEXT, person TEXT)');
+    expect(deskShape(db)).toBe('mismatch');
     db.prepare("INSERT INTO delegations (name, person) VALUES ('x', 'tomas.okafor@gmail.com')").run();
     expect(getPerson(db, 2, PEOPLE_NOW)?.delegations).toEqual([]);
   });
 
-  it('show the open delegations that wait on one of the addresses', () => {
+  it('show the open delegations that wait on one of the addresses, or on the full name when they have no address', () => {
     seeded();
-    db.exec('CREATE TABLE delegations (id INTEGER PRIMARY KEY, title TEXT, status TEXT, waitingOn TEXT, dueAt TEXT)');
-    const insert = db.prepare('INSERT INTO delegations (title, status, waitingOn, dueAt) VALUES (?, ?, ?, ?)');
-    insert.run('Get the signed lease', 'waiting', 'Tomas.Okafor@Gmail.com', at('10-20'));
-    insert.run('An old one', 'done', 'tomas.okafor@gmail.com', null);
-    insert.run('Someone else', 'waiting', 'maya@northwind.example', null);
-    expect(getPerson(db, 2, PEOPLE_NOW)?.delegations).toEqual([{ id: 1, title: 'Get the signed lease', status: 'waiting', dueAt: at('10-20') }]);
+    // the delegations table of the desk (021_delegations.sql of track t3). when the desk is merged, its migration
+    // made the table already, and this keeps it.
+    db.exec(DESK_DELEGATIONS);
+    expect(deskShape(db)).toBe('ok');
+    const insert = db.prepare(
+      `INSERT INTO delegations (title, status, waitingOnName, waitingOnEmail, waitingOnKey, dueAt, createdBy, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, 'owner', '2026-10-18T00:00:00.000Z', '2026-10-18T00:00:00.000Z')`,
+    );
+    insert.run('Get the signed lease', 'waiting', 'Tomas', 'Tomas.Okafor@Gmail.com', 'tomas.okafor@gmail.com', at('10-20'));
+    insert.run('An old one', 'done', null, 'tomas.okafor@gmail.com', 'tomas.okafor@gmail.com', null);
+    insert.run('A dropped one', 'dropped', null, 'tomas.okafor@gmail.com', 'tomas.okafor@gmail.com', null);
+    insert.run('Someone else', 'waiting', null, 'maya@northwind.example', 'maya@northwind.example', null);
+    insert.run('Call about the deposit', 'blocked', 'Tomas Okafor', null, 'tomas okafor', null);
+    insert.run('Only a first name', 'open', 'Tomas', null, 'tomas', null);
+    expect(getPerson(db, 2, PEOPLE_NOW)?.delegations.map((each) => each.title)).toEqual(['Get the signed lease', 'Call about the deposit']);
+    expect(getPerson(db, 2, PEOPLE_NOW)?.delegations[0]).toMatchObject({ status: 'waiting', dueAt: at('10-20') });
   });
 });
 
@@ -429,6 +454,7 @@ describe('the backfill state', () => {
       backfillEvents: 0,
       backfilledAt: null,
       sentAfter: null,
+      aliases: null,
       error: null,
     });
     saveBackfillState(db, 'work', { backfill: 'running', backfillPage: '{"pageToken":"p-2"}', backfillMessages: 100 }, later);

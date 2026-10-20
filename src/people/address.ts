@@ -140,7 +140,10 @@ function parsePart(part: string): ObservedAddress | null {
     name = [quoted, ...words.slice(0, index), ...words.slice(index + 1)].join(' ');
   }
   if (!email) return null;
-  return { email, name: cleanName(name, email) ?? cleanName(comment, email) };
+  const named = cleanName(name, email);
+  if (named === null) return { email, name: cleanName(comment, email) };
+  const note = comment.replace(/\s+/g, ' ').trim();
+  return note ? { email, name: named, comment: note } : { email, name: named };
 }
 
 // cleanName takes the quotes off a display name and folds its spaces. it gives null for an empty name and for a
@@ -206,5 +209,28 @@ export function organizationOf(domain: string): Organization | null {
   const registrable = labels.slice(-keep).join('.');
   if (isPersonalDomain(registrable)) return null;
   const first = labels[labels.length - keep]!;
-  return { name: first.charAt(0).toUpperCase() + first.slice(1), domain: registrable };
+  return { name: organizationName(first), domain: registrable };
+}
+
+// the name of an organization from its domain label: each part between hyphens with a capital, for example
+// "Hudson Trading" for hudson-trading. the label has no word breaks of its own, so "primeintellect" stays one word.
+function organizationName(label: string): string {
+  return label
+    .split('-')
+    .filter((word) => word.length > 0)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+// guessedName reads a name from the local part of an address with a separator, for example "Jane Doe" for
+// jane.doe@acme.com or jane_doe@acme.com. it gives null for a local part without one (jdoe), with a digit, or with a
+// plus tag, because then the guess is more often wrong than right. the views and the tools show it for a person
+// without a name, and the address stays the key.
+export function guessedName(email: string): string | null {
+  const local = email.slice(0, email.lastIndexOf('@'));
+  if (!/^[a-z]+([._][a-z]+)+$/i.test(local)) return null;
+  return local
+    .split(/[._]/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
 }

@@ -107,6 +107,12 @@ export interface PersonProfile extends PersonSummary {
   delegations: PersonDelegationView[];
 }
 
+// POST /api/people/:id/merge: the other person joins this one, which stays. the answer is the PersonProfile of the
+// person that stays, and the id of the other one then gives that profile too.
+export interface PersonMergeInput {
+  otherId: number;
+}
+
 // POST /api/people/:id/notes.
 export interface PersonNoteInput {
   kind: PersonNoteKind;

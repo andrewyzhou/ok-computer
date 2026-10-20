@@ -5,7 +5,7 @@ import type { Db } from '../db/index.js';
 import type { GoogleApis } from '../google/accounts.js';
 import { GoogleError } from '../google/errors.js';
 import type { Logger } from '../observability/logger.js';
-import { BACKFILL_DAYS, BACKFILL_MAX_MESSAGES, backfillStep, sweepSent, type BackfillDeps } from './backfill.js';
+import { BACKFILL_DAYS, BACKFILL_MAX_MESSAGES, backfillStep, MAIL_QUERY, sweepSent, type BackfillDeps } from './backfill.js';
 import type { PeopleBuilder } from './builder.js';
 import type { BackfillState } from './store.js';
 
@@ -71,6 +71,7 @@ function fakeStore(initial: Partial<BackfillState> = {}) {
     backfillEvents: 0,
     backfilledAt: null,
     sentAfter: null,
+    aliases: null,
     error: null,
     ...initial,
   };
@@ -106,11 +107,12 @@ describe('backfillStep', () => {
 
     const first = await backfillStep(deps, 'personal', 10);
     expect(first).toEqual({ account: 'personal', state: 'running', messages: 10, events: 0 });
-    expect(google.calls.list[0]).toMatchObject({ q: `newer_than:${BACKFILL_DAYS}d -in:chats -in:spam -in:trash`, maxResults: 10 });
+    expect(MAIL_QUERY).toBe(`newer_than:${BACKFILL_DAYS}d -in:chats -in:spam -in:trash -category:promotions -category:social -category:updates -category:forums`);
+    expect(google.calls.list[0]).toMatchObject({ q: MAIL_QUERY, maxResults: 10 });
     expect(JSON.parse(store.state.backfillPage!)).toEqual({ phase: 'mail', pageToken: '10' });
     expect(store.state).toMatchObject({ backfill: 'running', backfillMessages: 10 });
-    // the newest sent mail of the step is m0.
-    expect(store.state.sentAfter).toBe(new Date(NOW.getTime() - 60_000).toISOString());
+    // the sent sweep starts where the backfill started, so mail that the owner sends while it runs is read too.
+    expect(store.state.sentAfter).toBe(NOW.toISOString());
 
     const second = await backfillStep(deps, 'personal', 10);
     expect(second.messages).toBe(10);
@@ -170,6 +172,29 @@ describe('backfillStep', () => {
     expect(store.state.error).toBeNull();
   });
 
+  it('ends the step as running at the gmail rate limit, and the next step reads the same page', async () => {
+    const google = fakeGoogle({ messages: 25, events: 0 });
+    const store = fakeStore({ backfill: 'running', backfillMessages: 10, backfillPage: JSON.stringify({ phase: 'mail', pageToken: '10' }) });
+    const { deps } = setup(google, store, async () => {
+      throw new GoogleError('rate', '429: quota exceeded');
+    });
+    expect(await backfillStep(deps, 'personal', 10)).toEqual({ account: 'personal', state: 'running', messages: 0, events: 0 });
+    expect(store.state).toMatchObject({ backfill: 'running', error: null, backfillMessages: 10 });
+    expect(JSON.parse(store.state.backfillPage!)).toEqual({ phase: 'mail', pageToken: '10' });
+  });
+
+  it('keeps its position and fails when the store could not write a page', async () => {
+    const google = fakeGoogle({ messages: 25, events: 0 });
+    const store = fakeStore({ backfill: 'running', backfillMessages: 10, backfillPage: JSON.stringify({ phase: 'mail', pageToken: '10' }) });
+    const { deps, builder } = setup(google, store);
+    builder.observeMail.mockReturnValueOnce({ observations: [], skipped: {}, failed: true } as never);
+    expect(await backfillStep(deps, 'personal', 10)).toMatchObject({ state: 'failed', messages: 0 });
+    expect(store.state).toMatchObject({ backfill: 'failed', backfillMessages: 10 });
+    expect(JSON.parse(store.state.backfillPage!)).toEqual({ phase: 'mail', pageToken: '10' });
+    expect(await backfillStep(deps, 'personal', 10)).toMatchObject({ state: 'running', messages: 10 });
+    expect(google.calls.list.map((each) => each.pageToken)).toEqual(['10', '10']);
+  });
+
   it('starts again from the beginning when the saved page is damaged', async () => {
     const google = fakeGoogle({ messages: 3, events: 0 });
     const store = fakeStore({ backfill: 'running', backfillPage: '{not json' });
@@ -198,7 +223,7 @@ describe('sweepSent', () => {
     const { deps, builder } = setup(google, store);
 
     expect(await sweepSent(deps, 'personal')).toBe(2);
-    expect(google.calls.list[0]).toMatchObject({ q: `in:sent after:${Math.floor(start / 1000)}`, maxResults: 50 });
+    expect(google.calls.list[0]).toMatchObject({ q: `in:sent after:${Math.floor(start / 1000)}` });
     expect(builder.observeMail).toHaveBeenCalledWith('personal', [expect.objectContaining({ id: 's2' }), expect.objectContaining({ id: 's1' })]);
     expect(store.state.sentAfter).toBe(new Date(NOW.getTime() - 1_500).toISOString());
 
@@ -210,7 +235,7 @@ describe('sweepSent', () => {
     expect(store.state.backfill).toBe('done');
   });
 
-  it('starts at the end of the backfill when it read no sent mail, and never throws', async () => {
+  it('starts at the end of the backfill for a row without sentAfter, and never throws', async () => {
     const google = fakeGoogle({ messages: 0, events: 0 });
     const store = fakeStore({ backfill: 'done', backfilledAt: NOW.toISOString() });
     const { deps } = setup(google, store);

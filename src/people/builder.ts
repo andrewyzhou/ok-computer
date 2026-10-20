@@ -6,7 +6,7 @@ import type { Logger } from '../observability/logger.js';
 import { cleanLine } from '../signals/store.js';
 import { zonedToUtc, type Clock } from '../time.js';
 import { cleanName, domainOf, normalizeEmail, organizationOf, parseAddressList } from './address.js';
-import { addressNoise, mailNoise, MAX_MAIL_RECIPIENTS, MAX_MEETING_ATTENDEES } from './noise.js';
+import { addressNoise, mailNoise, MAX_MAIL_RECIPIENTS, MAX_MEETING_ATTENDEES, MAX_NEW_PERSON_ATTENDEES } from './noise.js';
 import { peopleStore, type PeopleStore } from './store.js';
 import type { Contact, NoiseReason, Observation, ObservedAddress } from './types.js';
 
@@ -16,32 +16,59 @@ import type { Contact, NoiseReason, Observation, ObservedAddress } from './types
 
 // the gmail metadata headers that the builder needs. the poll and the backfill ask gmail for these. the date is only
 // read when a message has no internal date.
-export const PEOPLE_HEADERS = ['From', 'To', 'Cc', 'Subject', 'Date', 'List-Id', 'List-Unsubscribe', 'Precedence', 'Auto-Submitted'] as const;
+export const PEOPLE_HEADERS = ['From', 'To', 'Cc', 'Subject', 'Date', 'List-Id', 'List-Unsubscribe', 'Precedence', 'Auto-Submitted', 'Sender', 'Message-ID'] as const;
 
 // the addresses of the owner, in lower case. a mail from one of them is direction out, and they never make a person.
 export type OwnerAddresses = ReadonlySet<string>;
+
+// isOwnerAddress checks an address against the owner's, also with its plus tag taken off: owner+receipts@example.com
+// is the mailbox owner@example.com.
+export function isOwnerAddress(owner: OwnerAddresses, email: string): boolean {
+  if (owner.has(email)) return true;
+  const at = email.lastIndexOf('@');
+  const plus = email.indexOf('+');
+  return plus > 0 && plus < at && owner.has(email.slice(0, plus) + email.slice(at));
+}
 
 // what one mail or one batch of events gave. skipped counts the left-out addresses (or the whole item for a mail or
 // meeting reason) by reason, so a log line and the real-data check can show the noise without any address.
 export interface BuildResult {
   observations: Observation[];
   skipped: Partial<Record<NoiseReason, number>>;
+  // true when the store failed to write what was built, so the backfill keeps its position and tries again.
+  failed?: boolean;
 }
 
-// ownerAddresses reads the owner's addresses: the email of every google_accounts row, and the expected addresses of
-// the config that the caller gives.
+// ownerAddresses reads the owner's addresses: the email of every google_accounts row, the send-as addresses that the
+// backfill read from gmail for each account (people_accounts.aliases), and the expected addresses of the config that
+// the caller gives.
 export function ownerAddresses(db: Db, extra: readonly string[] = []): OwnerAddresses {
   const rows = db.prepare('SELECT email FROM google_accounts WHERE email IS NOT NULL').all() as Array<{ email: string }>;
   const out = new Set<string>();
-  for (const raw of [...rows.map((row) => row.email), ...extra]) {
+  for (const raw of [...rows.map((row) => row.email), ...aliasesOf(db), ...extra]) {
     const email = normalizeEmail(raw);
     if (email) out.add(email);
   }
   return out;
 }
 
+// the send-as addresses of every account, as the backfill saved them. a damaged list counts as none.
+function aliasesOf(db: Db): string[] {
+  const rows = db.prepare('SELECT aliases FROM people_accounts WHERE aliases IS NOT NULL').all() as Array<{ aliases: string }>;
+  return rows.flatMap((row) => {
+    try {
+      const list: unknown = JSON.parse(row.aliases);
+      return Array.isArray(list) ? list.filter((each): each is string => typeof each === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 // mailObservations reads one gmail message in the metadata format with PEOPLE_HEADERS.
 // - mailNoise on the headers and labels leaves the whole mail out. a message in SPAM or TRASH, or a draft, is out too.
+// - a From address that is no-reply or a notification makes no person, and neither do the To and Cc addresses of that
+//   mail: an automated sender that copies people does not make the owner know them.
 // - a From address of the owner makes the mail direction out: each To and Cc address becomes a person with role to
 //   or cc. any other From makes direction in: the From address gets role from, and the other To and Cc addresses
 //   (not the owner) get role to or cc, so a person cc'd with the owner is known too.
@@ -66,6 +93,8 @@ export function mailObservations(account: string, message: gmail_v1.Schema$Messa
     listUnsubscribe: header('List-Unsubscribe'),
     precedence: header('Precedence'),
     autoSubmitted: header('Auto-Submitted'),
+    sender: header('Sender'),
+    messageId: header('Message-ID'),
     labels,
   });
   if (noise) {
@@ -75,7 +104,12 @@ export function mailObservations(account: string, message: gmail_v1.Schema$Messa
   const from = parseAddressList(header('From'))[0];
   const to = parseAddressList(header('To', true));
   const cc = parseAddressList(header('Cc', true));
-  const out = from !== undefined && owner.has(from.email);
+  const out = from !== undefined && isOwnerAddress(owner, from.email);
+  const fromNoise = from !== undefined && !out ? noiseOf(from) : null;
+  if (fromNoise === 'no_reply' || fromNoise === 'notification') {
+    count(result, fromNoise);
+    return result;
+  }
   const subject = cleanLine(header('Subject'), 200) || null;
   const contact = (role: PersonContactRole): Contact => ({
     kind: 'mail',
@@ -98,11 +132,11 @@ export function mailObservations(account: string, message: gmail_v1.Schema$Messa
   for (const { address, role } of candidates) {
     if (seen.has(address.email)) continue;
     seen.add(address.email);
-    if (owner.has(address.email)) {
+    if (isOwnerAddress(owner, address.email)) {
       count(result, 'owner');
       continue;
     }
-    const reason = addressNoise(address);
+    const reason = noiseOf(address);
     if (reason) {
       count(result, reason);
       continue;
@@ -111,6 +145,8 @@ export function mailObservations(account: string, message: gmail_v1.Schema$Messa
   }
   return result;
 }
+
+const noiseOf = (address: ObservedAddress, resource = false) => addressNoise(address, { resource, comment: address.comment ?? null });
 
 // a message in one of these labels is not mail between people: spam, the trash and the owner's own drafts.
 const DROPPED_LABELS = new Set(['SPAM', 'TRASH', 'DRAFT']);
@@ -144,8 +180,12 @@ function count(result: BuildResult, reason: NoiseReason, by = 1): void {
 //   gets role attendee. a resource attendee and each addressNoise address are skipped.
 // - kind meeting, externalId the event id, threadId and direction null, subject the summary cleaned and cut to 200
 //   characters, at the start (an all-day date becomes midnight in timeZone), endAt the end the same way.
-// - cancelled is true when the event status is cancelled, or when that attendee declined. a cancelled event in a
-//   sync list often has no attendees: it then gives no observation, and observeEvents marks its rows with cancelMeetings of the store.
+// - cancelled is true when the event status is cancelled, when the owner declined it, or when that attendee declined.
+//   a cancelled event in a sync list often has no attendees: it then gives no observation, and observeEvents marks
+//   its rows with cancelMeetings of the store.
+// - onlyKnown is set when the event was cancelled, when the owner declined it, or when it has more than
+//   MAX_NEW_PERSON_ATTENDEES attendees: such an event updates the people that are known already and makes no new one,
+//   so a spam invite, a declined meeting or a seminar does not fill the memory with strangers.
 export function eventObservations(account: string, events: readonly calendar_v3.Schema$Event[], owner: OwnerAddresses, timeZone: string): BuildResult {
   const result: BuildResult = { observations: [], skipped: {} };
   for (const event of events) {
@@ -162,7 +202,7 @@ export function eventObservations(account: string, events: readonly calendar_v3.
       count(result, 'large_meeting');
       continue;
     }
-    const isOwner = (email: string | null, self: boolean | null | undefined) => self === true || (email !== null && owner.has(email));
+    const isOwner = (email: string | null, self: boolean | null | undefined) => self === true || (email !== null && isOwnerAddress(owner, email));
     const organizerEmail = normalizeEmail(event.organizer?.email ?? '');
     const organizer =
       organizerEmail !== null && !isOwner(organizerEmail, event.organizer?.self) && addressNoise({ email: organizerEmail, name: null }) !== 'calendar_resource'
@@ -171,7 +211,9 @@ export function eventObservations(account: string, events: readonly calendar_v3.
     const others = attendees.filter((each) => !isOwner(normalizeEmail(each.email ?? ''), each.self));
     // a hold with only the owner makes no person, and counts nothing.
     if (organizer === null && others.length === 0) continue;
-    const cancelledAll = event.status === 'cancelled';
+    const ownerDeclined = attendees.some((each) => isOwner(normalizeEmail(each.email ?? ''), each.self) && each.responseStatus === 'declined');
+    const cancelledAll = event.status === 'cancelled' || ownerDeclined;
+    const onlyKnown = cancelledAll || attendees.length > MAX_NEW_PERSON_ATTENDEES;
     const subject = cleanLine(event.summary ?? '', 200) || null;
     const endAt = eventTime(event.end, timeZone);
     const contact = (role: PersonContactRole, declined: boolean): Contact => ({
@@ -186,6 +228,8 @@ export function eventObservations(account: string, events: readonly calendar_v3.
       endAt,
       cancelled: cancelledAll || declined,
     });
+    const observe = (address: ObservedAddress, email: string, made: Contact) =>
+      result.observations.push({ address, organization: organizationOf(domainOf(email)), contact: made, ...(onlyKnown ? { onlyKnown: true } : {}) });
     const responseOf = (email: string) => attendees.find((each) => normalizeEmail(each.email ?? '') === email)?.responseStatus;
     const seen = new Set<string>();
     if (organizer !== null) {
@@ -193,7 +237,7 @@ export function eventObservations(account: string, events: readonly calendar_v3.
       const address = { email: organizer, name: cleanName(event.organizer?.displayName, organizer) };
       const reason = addressNoise(address);
       if (reason) count(result, reason);
-      else result.observations.push({ address, organization: organizationOf(domainOf(organizer)), contact: contact('organizer', responseOf(organizer) === 'declined') });
+      else observe(address, organizer, contact('organizer', responseOf(organizer) === 'declined'));
     }
     for (const attendee of attendees) {
       const email = normalizeEmail(attendee.email ?? '');
@@ -213,10 +257,19 @@ export function eventObservations(account: string, events: readonly calendar_v3.
         count(result, reason);
         continue;
       }
-      result.observations.push({ address, organization: organizationOf(domainOf(email)), contact: contact('attendee', attendee.responseStatus === 'declined') });
+      observe(address, email, contact('attendee', attendee.responseStatus === 'declined'));
     }
   }
   return result;
+}
+
+// the addresses of the guests and the organizer of an event whose whole list of attendees google gave, or null when
+// the list is missing, cut short or too large to make people.
+function guestsOf(event: calendar_v3.Schema$Event): string[] | null {
+  const attendees = event.attendees ?? [];
+  if (attendees.length === 0 || attendees.length > MAX_MEETING_ATTENDEES || event.attendeesOmitted) return null;
+  const emails = [...attendees.map((each) => each.email), event.organizer?.email].map((each) => normalizeEmail(each ?? ''));
+  return emails.filter((each): each is string => each !== null);
 }
 
 // a cancelled event that a sync list gives without its attendees.
@@ -245,16 +298,18 @@ export interface PeopleBuilderDeps {
   timeZone: string;
   // the expected addresses of the google accounts in the config, which also count as the owner's.
   ownerEmails?: readonly string[];
-  // the default is the real store. the tests give a fake.
-  store?: Pick<PeopleStore, 'recordObservations' | 'cancelMeetings'>;
+  // the default is the real store. the tests give a fake, which may leave out cancelMissingGuests.
+  store?: Pick<PeopleStore, 'recordObservations' | 'cancelMeetings'> & Partial<Pick<PeopleStore, 'cancelMissingGuests'>>;
 }
 
 // the builder of the polls and the backfill. each method writes what it found through the store and never throws: a
-// failure is logged with the account and the counts (never an address or a subject), and the poll goes on.
+// failure is logged with the account, the counts and the kind of the error (never its text, which can hold an address
+// or a subject), the result has failed set, and the poll goes on.
 export interface PeopleBuilder {
   observeMail(account: string, messages: readonly gmail_v1.Schema$Message[]): BuildResult;
   // the events of a read of the calendar. a cancelled event without attendees marks the meeting rows of that event as
-  // cancelled, so a meeting that was called off leaves the upcoming list.
+  // cancelled, so a meeting that was called off leaves the upcoming list. an event with its list of attendees marks
+  // the rows of the people that are no longer on it the same way.
   observeEvents(account: string, events: readonly calendar_v3.Schema$Event[]): BuildResult;
 }
 
@@ -267,7 +322,10 @@ export function createPeopleBuilder(deps: PeopleBuilderDeps): PeopleBuilder {
     try {
       work(result);
     } catch (err) {
-      deps.logger.warn('people builder failed', { account, count: size, err });
+      result.failed = true;
+      const name = err instanceof Error ? err.name : typeof err;
+      const code = (err as { code?: unknown } | null)?.code;
+      deps.logger.warn('people builder failed', { account, count: size, error: name, ...(typeof code === 'string' ? { code } : {}) });
     }
     return result;
   };
@@ -285,6 +343,12 @@ export function createPeopleBuilder(deps: PeopleBuilderDeps): PeopleBuilder {
         if (result.observations.length > 0) store.recordObservations(deps.db, result.observations, now);
         const cancelled = events.filter((event) => isBareCancel(event) && event.id).map((event) => event.id!);
         if (cancelled.length > 0) store.cancelMeetings(deps.db, account, cancelled, now);
+        if (store.cancelMissingGuests) {
+          for (const event of events) {
+            const guests = guestsOf(event);
+            if (event.id && guests) store.cancelMissingGuests(deps.db, account, event.id, guests, now);
+          }
+        }
       }),
   };
 }

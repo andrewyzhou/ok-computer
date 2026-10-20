@@ -30,7 +30,9 @@ describe('addressNoise', () => {
     ['bounces+123@acme.com', null, 'no_reply'],
     ['bounces-123@acme.com', null, 'no_reply'],
     ['msg+a1b2c3d4e5f6g7h8i9@acme.com', null, 'no_reply'],
-    ['noreplyjane@acme.com', null, null],
+    ['noreplyuclc@school.example', null, 'no_reply'],
+    ['donotreplyteam@acme.com', null, 'no_reply'],
+    ['norene@acme.com', null, null],
     ['bouncer@acme.com', null, null],
     ['jane+work@acme.com', null, null],
     // notifications.
@@ -65,12 +67,38 @@ describe('addressNoise', () => {
     ['informatics@acme.com', null, null],
     ['teamlead@acme.com', null, null],
     ['helena@acme.com', null, null],
+    // automated senders of the real-data check, with the names changed.
+    ['contact@scheduler.example', null, 'role_address'],
+    ['notify@updates.notes.example', null, 'notification'],
+    ['notify@notes.example', null, 'notification'],
+    ['noti@acme.com', null, 'notification'],
+    ['campus@warnme.school.example', null, 'notification'],
+    ['jane@em123.acme.com', null, 'notification'],
+    ['news.desk@news.paper.example', null, 'notification'],
+    ['account@wifi.example', null, 'role_address'],
+    ['accounts@acme.com', null, 'role_address'],
+    ['scheduling@acme.com', null, 'role_address'],
+    ['volunteer@org.example', null, 'role_address'],
+    ['careers@acme.com', null, 'role_address'],
+    ['jobs@acme.com', null, 'role_address'],
+    ['events@acme.com', null, 'role_address'],
+    ['university.recruiting@acme.com', null, 'role_address'],
+    ['universityrecruiting2026@acme.com', null, 'role_address'],
+    ['jane@emory.example', null, null],
+    ['jane@newsroom.example', null, null],
+    ['contactless@acme.com', null, null],
   ];
   for (const [email, name, reason, options] of cases) {
     it(`gives ${String(reason)} for ${email}${name ? ` named ${name}` : ''}${options ? ` with ${JSON.stringify(options)}` : ''}`, () => {
       expect(addressNoise({ email, name }, options)).toBe(reason);
     });
   }
+
+  it('reads the comment of a header part as part of the name for the via rule', () => {
+    expect(addressNoise({ email: 'jane@x.com', name: 'Jane' }, { comment: 'via Slack' })).toBe('notification');
+    expect(addressNoise({ email: 'jane@x.com', name: 'Jane' }, { comment: 'work' })).toBeNull();
+    expect(addressNoise({ email: 'jane@x.com', name: 'Jane' }, { comment: null })).toBeNull();
+  });
 
   it('checks the reasons in order: a resource no-reply address is a resource', () => {
     expect(addressNoise({ email: 'noreply@acme.com', name: null }, { resource: true })).toBe('calendar_resource');
@@ -99,6 +127,12 @@ describe('mailNoise', () => {
     [{ autoSubmitted: 'No' }, null],
     [{ autoSubmitted: 'auto-generated' }, 'auto_submitted'],
     [{ autoSubmitted: 'auto-replied' }, 'auto_submitted'],
+    [{ sender: 'Google Calendar <calendar-notification@google.com>' }, 'calendar_mail'],
+    [{ sender: 'calendar-notification@google.com', listId: '<x.acme.com>' }, 'calendar_mail'],
+    [{ messageId: '<calendar-6f1c2e@google.com>' }, 'calendar_mail'],
+    [{ messageId: ' <Calendar-6F1C2E@Google.com> ' }, 'calendar_mail'],
+    [{ sender: 'Jane Doe <jane@acme.com>' }, null],
+    [{ messageId: '<calendar-6f1c2e@acme.com>' }, null],
   ];
   for (const [change, reason] of cases) {
     it(`gives ${String(reason)} for ${JSON.stringify(change)}`, () => expect(mailNoise({ ...none, ...change })).toBe(reason));

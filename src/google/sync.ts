@@ -61,7 +61,7 @@ const FIRST_READ_BACK_MS = DAY_MS;
 const RANGE_AHEAD_DAYS = 61;
 const RANGE_PAGES = 4;
 // the people memory needs the recipients and the list headers too. they are not part of the signal blob.
-const HEADERS = ['From', 'Subject', 'Date', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'To', 'Cc', 'List-Id', 'Precedence', 'Auto-Submitted'];
+const HEADERS = ['From', 'Subject', 'Date', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'To', 'Cc', 'List-Id', 'Precedence', 'Auto-Submitted', 'Sender', 'Message-ID'];
 
 type Gmail = gmail_v1.Gmail;
 

@@ -268,6 +268,33 @@ describe('the notes of a person', () => {
   });
 });
 
+describe('the merge of two people', () => {
+  it('moves the addresses and contacts of the other person, keeps its notes, and lists one person', async () => {
+    const { dashboard, logged } = build();
+    const response = await post(dashboard, '/api/people/1/merge', { otherId: 2 });
+    expect(response.status).toBe(200);
+    const profile = (await response.json()) as PersonProfile;
+    expect(profile.id).toBe(1);
+    expect(profile.emails).toEqual(['maya@northwind.example', 'maya.lindqvist@gmail.com', 'tomas.okafor@gmail.com']);
+    expect(profile.mailCount).toBe(5);
+    // the note of tomas stays, under its own id.
+    expect(profile.notes.map((each) => each.id)).toEqual([4, 2]);
+    expect((await get<PersonProfile>(dashboard, '/api/people/2')).id).toBe(1);
+    expect((await get<PeoplePage>(dashboard, '/api/people')).total).toBe(4);
+    expect(logged).toEqual([{ msg: 'dashboard merged two people', fields: { personId: 1, otherId: 2 } }]);
+  });
+
+  it('refuses the same person, an unknown person and a bad body', async () => {
+    const { dashboard } = build();
+    expect(await error(post(dashboard, '/api/people/1/merge', { otherId: 1 }), 400)).toBe('give otherId as another person than this one');
+    expect(await error(post(dashboard, '/api/people/1/merge', { otherId: 999 }), 404)).toBe('person not found');
+    expect(await error(post(dashboard, '/api/people/999/merge', { otherId: 1 }), 404)).toBe('person not found');
+    expect(await error(post(dashboard, '/api/people/1/merge', { otherId: 'two' }), 400)).toBe('give otherId as the id of a person, a positive whole number');
+    expect(await error(post(dashboard, '/api/people/1/merge', { otherId: 2, extra: true }), 400)).toBe('leave out extra, because this request does not take it');
+    expect((await get<PeoplePage>(dashboard, '/api/people')).total).toBe(5);
+  });
+});
+
 describe('the people routes in the dashboard', () => {
   it('refuses a note without a json content type', async () => {
     const { dashboard } = build({ full: true });

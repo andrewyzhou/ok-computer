@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPersonalDomain, organizationOf, parseAddressList } from './address.js';
+import { guessedName, isPersonalDomain, organizationOf, parseAddressList } from './address.js';
 
 describe('parseAddressList', () => {
   const cases: Array<[string, Array<[string, string | null]>]> = [
@@ -27,9 +27,28 @@ describe('parseAddressList', () => {
   ];
   for (const [header, expected] of cases) {
     it(`reads ${JSON.stringify(header)}`, () => {
-      expect(parseAddressList(header)).toEqual(expected.map(([email, name]) => ({ email, name })));
+      expect(parseAddressList(header).map(({ email, name }) => ({ email, name }))).toEqual(expected.map(([email, name]) => ({ email, name })));
     });
   }
+
+  it('gives the comment of a part that also has a name apart, and none when the comment is the name', () => {
+    expect(parseAddressList('Bob <bob@y.com> (work)')).toEqual([{ email: 'bob@y.com', name: 'Bob', comment: 'work' }]);
+    expect(parseAddressList('Jane (via Slack) <jane@x.com>')).toEqual([{ email: 'jane@x.com', name: 'Jane', comment: 'via Slack' }]);
+    expect(parseAddressList('bob@y.com (Bob Stone)')).toEqual([{ email: 'bob@y.com', name: 'Bob Stone' }]);
+  });
+});
+
+describe('guessedName', () => {
+  const cases: Array<[string, string | null]> = [
+    ['jane.doe@acme.com', 'Jane Doe'],
+    ['JANE_DOE@acme.com', 'Jane Doe'],
+    ['k.osei@acme.com', 'K Osei'],
+    ['jdoe@acme.com', null],
+    ['jane.doe2@acme.com', null],
+    ['jane.doe+work@acme.com', null],
+    ['.jane@acme.com', null],
+  ];
+  for (const [email, expected] of cases) it(`gives ${String(expected)} for ${email}`, () => expect(guessedName(email)).toBe(expected));
 });
 
 describe('isPersonalDomain', () => {
@@ -47,7 +66,9 @@ describe('organizationOf', () => {
     ['foo.co.uk', { name: 'Foo', domain: 'foo.co.uk' }],
     ['mail.foo.co.uk', { name: 'Foo', domain: 'foo.co.uk' }],
     ['cs.ox.ac.uk', { name: 'Ox', domain: 'ox.ac.uk' }],
-    ['ACME-Labs.com', { name: 'Acme-labs', domain: 'acme-labs.com' }],
+    ['ACME-Labs.com', { name: 'Acme Labs', domain: 'acme-labs.com' }],
+    ['hudson-trading.com', { name: 'Hudson Trading', domain: 'hudson-trading.com' }],
+    ['a--b.com', { name: 'A B', domain: 'a--b.com' }],
     ['toyota.co.jp', { name: 'Toyota', domain: 'toyota.co.jp' }],
     ['gmail.com', null],
     ['yahoo.co.uk', null],

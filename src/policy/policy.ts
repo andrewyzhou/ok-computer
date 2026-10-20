@@ -42,6 +42,11 @@ const LOCAL_WRITE_TOOLS = [
   'person_note',
 ];
 
+// a tool of LOCAL_WRITE_TOOLS whose text later runs read back as fact. in a tainted session an injected instruction
+// could make it store words from outside, so the builtin allow does not cover such a call there, and a reviewer
+// checks it first. a rule of the owner still allows it.
+const TAINT_REVIEW_TOOLS = new Set(['person_note']);
+
 export const BUILTIN_RULES: Rule[] = [
   ...LOCAL_WRITE_TOOLS.map((tool): Rule => ({ id: `builtin:${tool}`, tool, effect: 'allow', note: 'the tool changes only local data' })),
   { id: 'builtin:delegate', tool: 'delegate', effect: 'allow', note: 'delegate starts a sub-agent; each call of the sub-agent gets its own policy decision' },
@@ -118,6 +123,13 @@ function decideAny(input: PolicyInput, rules: readonly Rule[]): Verdict {
       decision: 'review',
       rule: 'exfiltration',
       reason: `the session read untrusted content (${sourceNames(input.taint)}), and ${input.tool} ${leak}, so a reviewer checks it first`,
+    };
+  }
+  if (rule && input.taint.length && TAINT_REVIEW_TOOLS.has(input.tool) && BUILTIN_RULES.some((each) => each.id === rule.id)) {
+    return {
+      decision: 'review',
+      rule: 'taint',
+      reason: `the session read untrusted content (${sourceNames(input.taint)}), and ${input.tool} keeps text that later runs read, so a reviewer checks it first`,
     };
   }
   if (rule) return { decision: 'allow', rule: rule.id, reason: rule.note ?? `the policy rule ${rule.id} allows ${input.tool}` };

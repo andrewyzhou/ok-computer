@@ -7,13 +7,16 @@
 -- name that was seen most often (person_names), or null when no header gave a name. organization and
 -- organizationDomain come from the domain of the newest email of the person that is not a personal domain (gmail and
 -- others give no organization). the counts and the first and last contact are not stored here: they are read from
--- person_contacts, so a reprocessed header can never count twice.
+-- person_contacts, so a reprocessed header can never count twice. mergedInto is set when the owner merged this person
+-- into another one: its addresses, contacts and names moved there, its notes stay here (they never change), and the
+-- views follow mergedInto, so an old id still finds the person.
 CREATE TABLE people (
   id INTEGER PRIMARY KEY,
   name TEXT,
   nameSource TEXT NOT NULL DEFAULT 'header' CHECK (nameSource IN ('header', 'owner')),
   organization TEXT,
   organizationDomain TEXT,
+  mergedInto INTEGER REFERENCES people (id),
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
@@ -98,6 +101,7 @@ END;
 -- pages, and backfillPage is the json position of the next one), done, or failed (error says why; the next poll tries
 -- again). the backfill reads the headers of recent mail and the events of recent weeks one time. sentAfter is the
 -- internal date of the newest sent mail that the sent sweep of the polls has read, so each poll reads only newer mail.
+-- aliases is the json list of the send-as addresses that gmail gave for the account, which count as the owner's too.
 CREATE TABLE people_accounts (
   account TEXT PRIMARY KEY,
   backfill TEXT NOT NULL DEFAULT 'pending' CHECK (backfill IN ('pending', 'running', 'done', 'failed')),
@@ -106,6 +110,7 @@ CREATE TABLE people_accounts (
   backfillEvents INTEGER NOT NULL DEFAULT 0,
   backfilledAt TEXT,
   sentAfter TEXT,
+  aliases TEXT,
   error TEXT,
   updatedAt TEXT NOT NULL
 );

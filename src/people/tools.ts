@@ -6,7 +6,8 @@ import { cleanLine } from '../signals/store.js';
 import { headOf } from '../text.js';
 import { localDay, localTime } from '../time.js';
 import { defineTool, type Tool } from '../tools/registry.js';
-import { PersonNotFound, peopleStore, type PeopleStore } from './store.js';
+import { guessedName } from './address.js';
+import { NotePermission, PersonNotFound, peopleStore, type PeopleStore } from './store.js';
 
 // the agent tools of the people memory: person_lookup, people_search (both read only) and person_note (a write).
 // the names and the profiles come from other people's mail headers, so the read tools mark their output as untrusted.
@@ -40,11 +41,19 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
 // clean line.
 const line = (text: string, limit = 200) => cleanLine(text, limit);
 
+// the name to show: the person's name, or for a person without one a name guessed from the address and marked as a
+// guess, or else the address.
+function shownName(person: PersonSummary): string {
+  if (person.name) return line(person.name, 120);
+  const guess = guessedName(person.primaryEmail);
+  return guess ? `${guess} (name guessed)` : line(person.displayName, 120);
+}
+
 // one line for a person in a list: the id, the name, the primary email, the organization, the last contact and the
 // counts.
 function summaryLine(person: PersonSummary, timeZone: string): string {
   const parts = [
-    `id ${person.id}: ${line(person.displayName, 120)} <${person.primaryEmail}>`,
+    `id ${person.id}: ${shownName(person)} <${person.primaryEmail}>`,
     ...(person.organization ? [line(person.organization, 80)] : []),
     `last contact ${whenOf(person.lastContactAt, timeZone)}`,
     `${plural(person.mailCount, 'mail')}, ${plural(person.meetingCount, 'meeting')}`,
@@ -56,7 +65,7 @@ function summaryLine(person: PersonSummary, timeZone: string): string {
 function profileText(person: PersonProfile, timeZone: string): string {
   const otherNames = person.names.map((each) => each.name).filter((name) => name !== person.displayName);
   const lines = [
-    `${line(person.displayName, 120)} (id ${person.id})`,
+    `${shownName(person)} (id ${person.id})`,
     `emails: ${person.emails.map((email) => (email === person.primaryEmail ? `${email} (primary)` : email)).join(', ')}`,
     ...(otherNames.length ? [`also named: ${otherNames.map((name) => line(name, 80)).join(', ')}`] : []),
     `organization: ${person.organization ? `${line(person.organization, 80)} (${person.organizationDomain ?? 'no domain'})` : 'none'}`,
@@ -160,7 +169,7 @@ export function createPeopleTools(deps: PeopleToolDeps): Tool[] {
   const personNote = defineTool({
     name: 'person_note',
     description:
-      'Save a lasting note or preference about a person, for example "prefers morning meetings". Name the person by email address or by id; this tool never makes a new person. A note that changes an earlier one gives that note id as supersedes, and the earlier note then no longer shows. The kind preference is for how the person likes to work, and note is for the rest.',
+      'Save a lasting note or preference about a person, for example "prefers morning meetings". Name the person by email address or by id; this tool never makes a new person. A note that changes an earlier one gives that note id as supersedes, and the earlier note then no longer shows. A note that the owner wrote can only be replaced by the owner. The kind preference is for how the person likes to work, and note is for the rest.',
     input: z.object({
       person: z
         .union([z.number().int().positive(), z.string().trim().min(3).max(320).regex(/@/, 'use an email address or the id of the person')])
@@ -195,6 +204,13 @@ export function createPeopleTools(deps: PeopleToolDeps): Tool[] {
         );
         return { content: `saved note ${note.id} for ${line(person.displayName, 120)}` };
       } catch (err) {
+        if (err instanceof NotePermission) {
+          return {
+            content: `note ${input.supersedes} was written by the owner, so only the owner can replace it, and no note was saved. Save a new note without supersedes, or ask the owner.`,
+            isError: true,
+            effect: 'none',
+          };
+        }
         if (!(err instanceof PersonNotFound)) throw err;
         const content =
           input.supersedes !== undefined

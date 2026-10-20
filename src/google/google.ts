@@ -167,31 +167,41 @@ export function createGoogle(deps: GoogleDeps): Google {
 
   // each account that the poll could read gets one step of the people backfill, then the sweep of its new sent mail.
   // the accounts run side by side, and the two reads of one account run in turn. a failure is logged and never fails
-  // the poll. it gives a note only for the backfill, because the sweep tries again at the next poll anyway.
+  // the poll. it gives a note only for the backfill, because the sweep tries again at the next poll anyway. two polls
+  // can overlap (the scheduler has two kinds of poll jobs), and both would read the same saved position and count
+  // the same pages, so a second call for an account joins the one that runs, as sync.pollAll does.
+  const filling = new Map<string, Promise<string[]>>();
+  const fillAccount = async (alias: string): Promise<string[]> => {
+    const backfillDeps = { db, clock, logger, accounts, builder: people };
+    let failed = false;
+    try {
+      const step = await backfillStep(backfillDeps, alias);
+      if (step.state === 'failed') {
+        failed = true;
+        logger.warn('people backfill step failed', { alias, ...(step.error ? { error: step.error } : {}) });
+      }
+    } catch (err) {
+      failed = true;
+      logger.warn('people backfill step failed', { alias, err });
+    }
+    try {
+      await sweepSent(backfillDeps, alias);
+    } catch (err) {
+      logger.warn('people sent sweep failed', { alias, err });
+    }
+    return failed ? [`people backfill of ${alias} failed`] : [];
+  };
   const fillPeople = async (polls: AccountPoll[]): Promise<string[]> => {
     if (deps.people?.backfill === false) return [];
-    const backfillDeps = { db, clock, logger, accounts, builder: people };
     const notes = await Promise.all(
       polls
         .filter((each) => each.ok && !accounts.unavailable(each.alias))
-        .map(async ({ alias }) => {
-          let failed = false;
-          try {
-            const step = await backfillStep(backfillDeps, alias);
-            if (step.state === 'failed') {
-              failed = true;
-              logger.warn('people backfill step failed', { alias, ...(step.error ? { error: step.error } : {}) });
-            }
-          } catch (err) {
-            failed = true;
-            logger.warn('people backfill step failed', { alias, err });
-          }
-          try {
-            await sweepSent(backfillDeps, alias);
-          } catch (err) {
-            logger.warn('people sent sweep failed', { alias, err });
-          }
-          return failed ? [`people backfill of ${alias} failed`] : [];
+        .map(({ alias }) => {
+          const running = filling.get(alias);
+          if (running) return running;
+          const fill = fillAccount(alias).finally(() => filling.delete(alias));
+          filling.set(alias, fill);
+          return fill;
         }),
     );
     return notes.flat();

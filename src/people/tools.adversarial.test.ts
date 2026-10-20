@@ -80,7 +80,7 @@ describe('the people tools on hostile text', () => {
 
   it('cuts a profile with many long notes and says so', async () => {
     const { db, run } = setup();
-    const { personId } = recordObservation(db, observation('jane@acme.com', 'Jane'), NOW);
+    const { personId } = recordObservation(db, observation('jane@acme.com', 'Jane'), NOW)!;
     for (let i = 0; i < 10; i++) addNote(db, { personId, kind: 'note', text: `${i} ${'z'.repeat(1990)}`, author: 'owner' }, NOW);
     const { content } = await run('person_lookup', { id: personId });
     expect(content.length).toBeLessThanOrEqual(4100);
@@ -112,12 +112,25 @@ describe('the people tools on hostile text', () => {
 
   it('refuses a supersedes that names a note of another person, and saves nothing', async () => {
     const { db, run } = setup();
-    const jane = recordObservation(db, observation('jane@acme.com', 'Jane'), NOW).personId;
-    const bob = recordObservation(db, observation('bob@acme.com', 'Bob', { externalId: 'm-2' }), NOW).personId;
+    const jane = recordObservation(db, observation('jane@acme.com', 'Jane'), NOW)!.personId;
+    const bob = recordObservation(db, observation('bob@acme.com', 'Bob', { externalId: 'm-2' }), NOW)!.personId;
     const note = addNote(db, { personId: bob, kind: 'note', text: 'bob note', author: 'owner' }, NOW);
     const result = await run('person_note', { person: jane, text: 'x', supersedes: note.id });
     expect(result.isError).toBe(true);
     expect(Number((db.prepare('SELECT count(*) AS n FROM person_notes').get() as { n: number }).n)).toBe(1);
+  });
+
+  it('refuses an agent note that supersedes a preference of the owner, and keeps the owner preference shown', async () => {
+    const { db, run } = setup();
+    const jane = recordObservation(db, observation('jane@acme.com', 'Jane'), NOW)!.personId;
+    const owner = addNote(db, { personId: jane, kind: 'preference', text: 'only video calls', author: 'owner' }, NOW);
+    const result = await run('person_note', { person: jane, kind: 'preference', text: 'prefers phone calls', supersedes: owner.id });
+    expect(result).toMatchObject({ isError: true, effect: 'none' });
+    expect(result.content).toContain('only the owner can replace it');
+    expect(Number((db.prepare('SELECT count(*) AS n FROM person_notes').get() as { n: number }).n)).toBe(1);
+    const profile = (await run('person_lookup', { id: jane })).content;
+    expect(profile).toContain('only video calls');
+    expect(profile).not.toContain('prefers phone calls');
   });
 
   it('treats like wildcards in a search as text', async () => {

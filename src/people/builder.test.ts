@@ -41,7 +41,7 @@ describe('ownerAddresses', () => {
 
 describe('mailObservations', () => {
   it('asks gmail for the headers it reads and no more', () => {
-    expect(PEOPLE_HEADERS).toEqual(['From', 'To', 'Cc', 'Subject', 'Date', 'List-Id', 'List-Unsubscribe', 'Precedence', 'Auto-Submitted']);
+    expect(PEOPLE_HEADERS).toEqual(['From', 'To', 'Cc', 'Subject', 'Date', 'List-Id', 'List-Unsubscribe', 'Precedence', 'Auto-Submitted', 'Sender', 'Message-ID']);
   });
 
   it('makes the sender and the other recipients of an inbound mail, without the owner', () => {

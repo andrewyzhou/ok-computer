@@ -1,7 +1,7 @@
 import type { Context, Hono } from 'hono';
 import { z } from 'zod';
 import { normalizeEmail } from '../people/address.js';
-import { InvalidCursor, PersonNotFound, peopleStore, type PeopleStore } from '../people/store.js';
+import { deskShape, InvalidCursor, InvalidMerge, PersonNotFound, peopleStore, type PeopleStore } from '../people/store.js';
 import { limitOf } from './params.js';
 import type { PeopleStatus } from './people-types.js';
 import type { DashboardDeps } from './server.js';
@@ -14,6 +14,8 @@ import type { DashboardDeps } from './server.js';
 // - GET /api/people/lookup?email= gives the PersonSummary of an address, for the person chip.
 // - GET /api/people/:id gives a PersonProfile.
 // - POST /api/people/:id/notes takes a PersonNoteInput and gives the new PersonNoteView, written by the owner.
+// - POST /api/people/:id/merge takes a PersonMergeInput and merges that other person into this one, for one human that
+//   shows as two people. it gives the PersonProfile of the person that stays.
 // docs/API.md gives the errors. every read passes the clock of the dashboard as now, because the store splits the
 // counts and the upcoming meetings at it. nothing here talks to google: the polls fill the store.
 // store is the real store, and a test can give a fake.
@@ -35,6 +37,15 @@ const listQuery = z.object({
     .optional()
     .transform((raw) => limitOf(raw, 200, 50)),
 });
+
+const mergeBody = z
+  .object({
+    otherId: z
+      .number({ error: 'give otherId as the id of a person, a positive whole number' })
+      .int('give otherId as the id of a person, a positive whole number')
+      .positive('give otherId as the id of a person, a positive whole number'),
+  })
+  .strict();
 
 const noteBody = z
   .object({
@@ -71,6 +82,9 @@ export function mountPeople(server: Hono, deps: DashboardDeps, store: PeopleStor
   const { db, logger } = deps;
   const accounts = deps.config.google?.accounts.map((each) => each.alias) ?? [];
   const personNotFound = (c: Context) => c.json({ error: 'person not found' }, 404);
+  // the profile reads the delegations of the desk. a desk table of another shape would hide them without an error,
+  // so a mismatch is logged once here.
+  if (deskShape(db) === 'mismatch') logger.debug('the delegations table has columns that the people profile does not know, so profiles show no delegations');
 
   server.get('/api/people', (c) => {
     const parsed = listQuery.safeParse(c.req.query());
@@ -127,6 +141,26 @@ export function mountPeople(server: Hono, deps: DashboardDeps, store: PeopleStor
       // person. its message tells them apart.
       if (err.message === new PersonNotFound().message) return personNotFound(c);
       return c.json({ error: 'supersedes names no note of this person' }, 400);
+    }
+  });
+
+  server.post('/api/people/:id/merge', async (c) => {
+    const keepId = idOf(c);
+    if (keepId === undefined) return personNotFound(c);
+    const raw: unknown = await c.req.json().catch(() => undefined);
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return c.json({ error: 'send a json object as the body' }, 400);
+    const parsed = mergeBody.safeParse(raw);
+    if (!parsed.success) return c.json({ error: firstError(parsed.error) }, 400);
+    const now = deps.clock();
+    try {
+      const kept = store.mergePeople(db, keepId, parsed.data.otherId, now);
+      logger.info('dashboard merged two people', { personId: kept, otherId: parsed.data.otherId });
+      const person = store.getPerson(db, kept, now);
+      return person ? c.json(person) : personNotFound(c);
+    } catch (err) {
+      if (err instanceof PersonNotFound) return personNotFound(c);
+      if (err instanceof InvalidMerge) return c.json({ error: 'give otherId as another person than this one' }, 400);
+      throw err;
     }
   });
 }

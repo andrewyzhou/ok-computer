@@ -274,6 +274,34 @@ describe('people backfill in the poll job', () => {
     await google.close();
   });
 
+  it('joins the backfill of an account that an overlapping poll runs, so a page is never read or counted twice', async () => {
+    h = await createGoogleHarness({ accounts: ['personal'] });
+    h.signedIn('personal');
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => (started = resolve));
+    backfill.step = async (_deps, account) => {
+      started();
+      await held;
+      return { account, state: 'running', messages: 0, events: 0 };
+    };
+    backfill.sweep = async () => 0;
+    const google = googleOf({ builder: recordingBuilder().builder });
+    const first = google.poll();
+    await running;
+    const second = google.poll();
+    // the second poll gets to its people step while the first one still waits in its backfill step.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    release();
+    await Promise.all([first, second]);
+    expect(backfill.calls).toEqual(['backfill personal', 'sweep personal']);
+    // a later poll runs its own step again.
+    await google.poll();
+    expect(backfill.calls.filter((each) => each === 'backfill personal')).toHaveLength(2);
+    await google.close();
+  });
+
   it('notes a failed backfill step on the run and still completes it', async () => {
     h = await createGoogleHarness({ accounts: ['personal', 'school'] });
     h.signedIn('personal');

@@ -85,6 +85,64 @@ describe('the sent sweep after a long pause', () => {
     expect(page.total).toBe(5);
     expect(page.people.every((each) => each.mailCount === 1)).toBe(true);
   });
+
+  it('reads every sent mail when more than one sweep of mail was sent since the last poll', async () => {
+    const base = NOW.getTime() - 7 * 86_400_000;
+    const mail: gmail_v1.Schema$Message[] = [];
+    const { db, deps } = setup(() => mail);
+    saveBackfillState(db, 'personal', { backfill: 'done', backfilledAt: new Date(base).toISOString(), sentAfter: new Date(base).toISOString(), backfillPage: JSON.stringify({ phase: 'sent', seen: [] }) }, NOW);
+    for (let i = 0; i < SENT_SWEEP_MAX + 10; i++) mail.push(sent(i, base + (i + 1) * 60_000));
+    for (let poll = 0; poll < 5; poll++) await sweepSent(deps, 'personal');
+    expect(searchPeople(db, { limit: 200 }, NOW).total).toBe(SENT_SWEEP_MAX + 10);
+  });
+
+  it('reads the mail that the owner sent while a backfill of many polls ran', async () => {
+    const start = NOW.getTime() - 3_600_000;
+    const mail = [sent(0, start - 60_000), sent(2, start - 120_000)];
+    let now = new Date(start);
+    const { db, deps } = setup(() => mail);
+    const clocked = { ...deps, clock: () => now };
+    // the first step reads one of the two older mails and stops at its budget.
+    await backfillStep(clocked, 'personal', 1);
+    mail.push(sent(1, start + 60_000));
+    now = new Date(start + 120_000);
+    await backfillStep(clocked, 'personal', 10);
+    expect(backfillStateOf(db, 'personal', now).backfill).toBe('done');
+    await sweepSent(clocked, 'personal');
+    expect(searchPeople(db, { limit: 10 }, now).total).toBe(3);
+  });
+});
+
+describe('the send-as addresses of the owner', () => {
+  it('reads them once, and mail from an alias of the owner makes no person of the alias', async () => {
+    const mail: gmail_v1.Schema$Message[] = [
+      {
+        id: 'a1',
+        threadId: 'ta',
+        labelIds: ['SENT'],
+        internalDate: String(NOW.getTime() - 60_000),
+        payload: { headers: [{ name: 'From', value: 'Owner <owner@work.example>' }, { name: 'To', value: 'Jane <jane@acme.com>' }] },
+      },
+    ];
+    const { db, deps } = setup(() => mail);
+    let reads = 0;
+    const apis = fakeGmail(() => mail);
+    (apis.gmail.users as unknown as { settings: unknown }).settings = {
+      sendAs: {
+        list: async () => {
+          reads++;
+          return { data: { sendAs: [{ sendAsEmail: 'owner@example.com' }, { sendAsEmail: 'Owner@Work.example' }] } };
+        },
+      },
+    };
+    const withAlias = { ...deps, accounts: { run: async <T>(_alias: string, fn: (apis: GoogleApis) => Promise<T>) => fn(apis) } };
+    await backfillStep(withAlias, 'personal', 10);
+    await backfillStep(withAlias, 'personal', 10);
+    expect(reads).toBe(1);
+    expect(backfillStateOf(db, 'personal', NOW).aliases).toEqual(['owner@example.com', 'owner@work.example']);
+    const page = searchPeople(db, { limit: 10 }, NOW);
+    expect(page.people.map((each) => each.primaryEmail)).toEqual(['jane@acme.com']);
+  });
 });
 
 describe('the backfill on the real store', () => {

@@ -14,7 +14,7 @@ import type {
 } from '../dashboard/people-types.js';
 import { likePattern } from '../search/fts.js';
 import { inTransaction } from '../signals/store.js';
-import { normalizeEmail } from './address.js';
+import { isPersonalDomain, normalizeEmail, organizationOf } from './address.js';
 import type { Observation, Recorded } from './types.js';
 
 // the store of the people memory: every read and write of 023_people.sql goes through this file. the builder writes
@@ -34,6 +34,17 @@ export class PersonNotFound extends Error {
     super(`${what} not found`);
   }
 }
+
+// an agent note that tries to supersede a note that the owner wrote. the owner's own words about a person stay
+// until the owner changes them.
+export class NotePermission extends Error {
+  constructor() {
+    super('a note of the owner can only be superseded by the owner');
+  }
+}
+
+// a merge that names the same person twice, or a person that is gone or was merged already.
+export class InvalidMerge extends Error {}
 
 export interface SearchInput {
   // matched without case against every name, every email and the organization. empty or missing lists everyone.
@@ -65,6 +76,8 @@ export interface BackfillState {
   backfillEvents: number;
   backfilledAt: string | null;
   sentAfter: string | null;
+  // the send-as addresses of the account that gmail gave, or null before they were read.
+  aliases: string[] | null;
   error: string | null;
 }
 
@@ -74,14 +87,49 @@ const text = (value: unknown): string => String(value);
 const textOrNull = (value: unknown): string | null => (value === null || value === undefined ? null : String(value));
 const count = (value: unknown): number => Number(value ?? 0);
 
+// people_fold lowers the case of any text, not only of ascii letters as sqlite's lower and like do, so a search for
+// élodie finds Élodie. node:sqlite registers a function per connection, so each one gets it once.
+const folding = new WeakSet<Db>();
+function withFold(db: Db): Db {
+  if (!folding.has(db)) {
+    db.function('people_fold', { deterministic: true }, (value) => (typeof value === 'string' ? value.toLowerCase() : value));
+    folding.add(db);
+  }
+  return db;
+}
+
 // a caller that is already in a transaction keeps its own, so the store can run inside a poll's transaction.
 function atomically<T>(db: Db, work: () => T): T {
   return db.isTransaction ? work() : inTransaction(db, work);
 }
 
-function recordOne(db: Db, observation: Observation, now: string): Recorded {
+// a name of two words or more, compared without case, that exactly one person has: the person that a new address of
+// that name belongs to, when the address is at that person's organization or at a personal domain. otherwise null,
+// and the address makes a new person. a wrong merge joins two people, which is worse than a split, so a name that two
+// people share never attaches.
+function attachTarget(db: Db, name: string | null, email: string): number | null {
+  if (name === null || name.trim().split(/\s+/).length < 2) return null;
+  const rows = withFold(db)
+    .prepare(
+      `SELECT DISTINCT p.id, p.organizationDomain FROM people p
+       WHERE p.mergedInto IS NULL AND (
+         people_fold(p.name) = people_fold(:name)
+         OR EXISTS (SELECT 1 FROM person_names n WHERE n.personId = p.id AND people_fold(n.name) = people_fold(:name)))
+       LIMIT 2`,
+    )
+    .all({ name: name.trim() });
+  if (rows.length !== 1) return null;
+  const domain = email.slice(email.lastIndexOf('@') + 1);
+  const organization = organizationOf(domain);
+  const target = rows[0]!;
+  if (isPersonalDomain(domain) || (organization !== null && organization.domain === textOrNull(target.organizationDomain))) return count(target.id);
+  return null;
+}
+
+function recordOne(db: Db, observation: Observation, now: string): Recorded | null {
   const email = normalizeEmail(observation.address.email);
-  if (!email) throw new Error(`not a valid email address: ${JSON.stringify(observation.address.email)}`);
+  // the error names no address, because the log line of the builder must not hold one.
+  if (!email) throw new Error('an observation has an address that is not valid');
   const contact = observation.contact;
   const name = observation.address.name?.trim() || null;
   const organization = observation.organization;
@@ -89,8 +137,13 @@ function recordOne(db: Db, observation: Observation, now: string): Recorded {
   let createdPerson = false;
   let personId: number;
   const known = db.prepare('SELECT personId FROM person_emails WHERE email = ?').get(email);
+  const attachTo = known || observation.onlyKnown ? null : attachTarget(db, name, email);
   if (known) {
     personId = count(known.personId);
+  } else if (observation.onlyKnown) {
+    return null;
+  } else if (attachTo !== null) {
+    personId = attachTo;
   } else {
     const person = db
       .prepare(
@@ -101,9 +154,9 @@ function recordOne(db: Db, observation: Observation, now: string): Recorded {
     personId = count(person?.id);
     createdPerson = true;
   }
-  if (createdPerson) {
-    // the first address of a person is its primary one. an address that a person gets later (only through a merge)
-    // is not.
+  if (!known) {
+    // the first address of a person is its primary one. an address that a person gets later (through a name that
+    // matches, or a merge) is not.
     db.prepare(
       `INSERT INTO person_emails (email, personId, isPrimary, firstSeenAt, lastSeenAt)
        VALUES (?, ?, NOT EXISTS (SELECT 1 FROM person_emails WHERE personId = ?), ?, ?)`,
@@ -177,12 +230,15 @@ function recordOne(db: Db, observation: Observation, now: string): Recorded {
 //   nameSource is header then takes the name with the highest count (the newest on a tie). an owner name stays.
 // - the organization: set from the observation when it is not null and the contact is the newest of the person, so
 //   a person who moved to a new company shows the new one. a null organization never clears one.
-export function recordObservation(db: Db, observation: Observation, now: Date): Recorded {
+// - a new address with a name of two words or more that exactly one person has joins that person (attachTarget),
+//   when it is at that person's organization or at a personal domain.
+// - an observation with onlyKnown and a new address writes nothing and gives null.
+export function recordObservation(db: Db, observation: Observation, now: Date): Recorded | null {
   return atomically(db, () => recordOne(db, observation, now.toISOString()));
 }
 
 // recordObservations writes many observations in one transaction and gives one result for each, in order.
-export function recordObservations(db: Db, observations: readonly Observation[], now: Date): Recorded[] {
+export function recordObservations(db: Db, observations: readonly Observation[], now: Date): Array<Recorded | null> {
   if (observations.length === 0) return [];
   const at = now.toISOString();
   return atomically(db, () => observations.map((observation) => recordOne(db, observation, at)));
@@ -213,34 +269,41 @@ export function cancelMeetings(db: Db, account: string, eventIds: readonly strin
   });
 }
 
-// the summary columns of every person, from aggregated subqueries. :now splits the past from the upcoming. a cancelled
-// meeting never counts, and a mail is never cancelled.
-const SUMMARY_FROM = `
+// the summary columns of people, from aggregated subqueries. :now splits the past from the upcoming. a cancelled
+// meeting never counts, and a mail is never cancelled. one event on the calendars of two of the owner's accounts has
+// the same event id in both, so a meeting counts once for each event id. filter narrows each subquery: the read of one
+// person gives "WHERE personId = :id", because sqlite does not push a filter of the outer query into a grouped
+// subquery, and without it each read of one person would group every contact of everyone.
+const summaryFrom = (filter: string) => `
   FROM people p
   LEFT JOIN (
     SELECT personId,
       sum(kind = 'mail' AND at <= :now) AS mailCount,
-      sum(kind = 'meeting' AND at <= :now AND cancelled = 0) AS meetingCount,
+      count(DISTINCT CASE WHEN kind = 'meeting' AND at <= :now AND cancelled = 0 THEN externalId END) AS meetingCount,
       min(CASE WHEN at <= :now AND cancelled = 0 THEN at END) AS firstContactAt,
       max(CASE WHEN at <= :now AND cancelled = 0 THEN at END) AS lastContactAt,
       min(CASE WHEN kind = 'meeting' AND at > :now AND cancelled = 0 THEN at END) AS nextMeetingAt
-    FROM person_contacts GROUP BY personId
+    FROM person_contacts ${filter} GROUP BY personId
   ) c ON c.personId = p.id
   LEFT JOIN (
     SELECT personId, json_group_array(email ORDER BY isPrimary DESC, firstSeenAt ASC, email ASC) AS emails
-    FROM person_emails GROUP BY personId
+    FROM person_emails ${filter} GROUP BY personId
   ) e ON e.personId = p.id`;
 
-const SUMMARY_SELECT = `
+const summarySelect = (filter: string) => `
   SELECT * FROM (
-    SELECT p.id, p.name, p.organization, p.organizationDomain,
+    SELECT p.id, p.name, p.organization, p.organizationDomain, p.mergedInto,
       coalesce(e.emails, '[]') AS emails,
       coalesce(json_extract(e.emails, '$[0]'), '') AS primaryEmail,
       coalesce(p.name, json_extract(e.emails, '$[0]'), '') AS displayName,
       coalesce(c.mailCount, 0) AS mailCount, coalesce(c.meetingCount, 0) AS meetingCount,
       c.firstContactAt, c.lastContactAt, c.nextMeetingAt
-    ${SUMMARY_FROM}
+    ${summaryFrom(filter)}
+    ${filter ? 'WHERE p.id = :id' : ''}
   ) s`;
+
+const SUMMARY_ALL = summarySelect('');
+const SUMMARY_ONE = summarySelect('WHERE personId = :id');
 
 function summaryOf(row: Row): PersonSummary {
   return {
@@ -259,8 +322,21 @@ function summaryOf(row: Row): PersonSummary {
   };
 }
 
+// the id that a person has now: a person that the owner merged into another one is that other one. the merge keeps
+// the chain flat, so this ends after one step, and the cap only guards against a damaged row.
+function currentId(db: Db, id: number): number | undefined {
+  let at = id;
+  for (let step = 0; step < 8; step++) {
+    const row = db.prepare('SELECT mergedInto FROM people WHERE id = ?').get(at);
+    if (!row) return undefined;
+    if (row.mergedInto === null || row.mergedInto === undefined) return at;
+    at = count(row.mergedInto);
+  }
+  return undefined;
+}
+
 function summaryById(db: Db, id: number, now: string): PersonSummary | undefined {
-  const row = db.prepare(`${SUMMARY_SELECT} WHERE s.id = :id`).get({ now, id });
+  const row = db.prepare(SUMMARY_ONE).get({ now, id });
   return row ? summaryOf(row) : undefined;
 }
 
@@ -271,11 +347,12 @@ const ORDER: Record<PersonSort, string> = {
 };
 
 // a person matches when the text is in its name, in any name that a header gave, in any of its addresses or in its
-// organization.
-const MATCH = `(:pattern IS NULL
-  OR s.name LIKE :pattern ESCAPE '\\'
-  OR s.organization LIKE :pattern ESCAPE '\\'
-  OR EXISTS (SELECT 1 FROM person_names n WHERE n.personId = s.id AND n.name LIKE :pattern ESCAPE '\\')
+// organization. the text and each field are folded to lower case first (people_fold), so the match ignores the case
+// of any letter. a person that was merged into another one never shows.
+const MATCH = `s.mergedInto IS NULL AND (:pattern IS NULL
+  OR people_fold(s.name) LIKE :pattern ESCAPE '\\'
+  OR people_fold(s.organization) LIKE :pattern ESCAPE '\\'
+  OR EXISTS (SELECT 1 FROM person_names n WHERE n.personId = s.id AND people_fold(n.name) LIKE :pattern ESCAPE '\\')
   OR EXISTS (SELECT 1 FROM person_emails m WHERE m.personId = s.id AND m.email LIKE :pattern ESCAPE '\\'))`;
 
 const encodeCursor = (offset: number) => Buffer.from(JSON.stringify({ o: offset })).toString('base64url');
@@ -297,14 +374,16 @@ function decodeCursor(cursor: string): number {
 // before now count, and a cancelled meeting never counts.
 export function searchPeople(db: Db, input: SearchInput, now: Date): PeoplePage {
   const q = input.q?.trim() ?? '';
-  const pattern = q === '' ? null : likePattern(q);
+  const pattern = q === '' ? null : likePattern(q.toLowerCase());
   const sort = input.sort ?? 'recent';
-  const order = ORDER[sort] ?? ORDER.recent;
+  // the sort also comes through the read api, so a key that only the prototype has (constructor) must not reach the sql.
+  const order = Object.hasOwn(ORDER, sort) ? ORDER[sort] : ORDER.recent;
   const offset = input.cursor === undefined ? 0 : decodeCursor(input.cursor);
   const at = now.toISOString();
+  withFold(db);
   const total = count(db.prepare(`SELECT count(*) AS n FROM people s WHERE ${MATCH}`).get({ pattern })?.n);
   const rows = db
-    .prepare(`${SUMMARY_SELECT} WHERE ${MATCH} ORDER BY ${order} LIMIT :limit OFFSET :offset`)
+    .prepare(`${SUMMARY_ALL} WHERE ${MATCH} ORDER BY ${order} LIMIT :limit OFFSET :offset`)
     .all({ now: at, pattern, limit: input.limit, offset });
   const end = offset + rows.length;
   return { people: rows.map(summaryOf), next: rows.length > 0 && end < total ? encodeCursor(end) : null, total };
@@ -367,35 +446,51 @@ function openThreadsOf(db: Db, id: number, now: Date): PersonThreadView[] {
   }));
 }
 
-const DELEGATION_COLUMNS = ['id', 'title', 'status', 'waitingOn', 'dueAt'];
+// the columns of the delegations table of the desk (track t3, 021_delegations.sql) that the profile reads.
+// waitingOnKey is the address in lower case, or the name in lower case when the delegation names no address.
+const DELEGATION_COLUMNS = ['id', 'title', 'status', 'waitingOnEmail', 'waitingOnKey', 'dueAt'];
 
-// the delegations of the desk (track t3) that wait on one of these addresses. the desk may not be there, or its table
-// may have another shape, so this reads it with care and gives an empty list instead of an error.
-function delegationsOf(db: Db, emails: readonly string[]): PersonDelegationView[] {
+// deskShape says whether the delegations table of the desk is there and has the columns that the profile reads. the
+// people routes log a mismatch once, so a change of the desk table does not hide the delegations without a word.
+export function deskShape(db: Db): 'missing' | 'ok' | 'mismatch' {
+  const table = db.prepare("SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = 'delegations'").get();
+  if (!table) return 'missing';
+  const columns = new Set(db.prepare("SELECT name FROM pragma_table_info('delegations')").all().map((row) => text(row.name)));
+  return DELEGATION_COLUMNS.every((column) => columns.has(column)) ? 'ok' : 'mismatch';
+}
+
+// the delegations of the desk that wait on a person: on one of their addresses, or, for a delegation without an
+// address, on their name when it has two words or more (a first name alone names too many people). the desk may not
+// be there, or its table may have another shape, so this reads it with care and gives an empty list instead of an
+// error. a delegation that is done or dropped waits on nobody.
+function delegationsOf(db: Db, emails: readonly string[], name: string | null): PersonDelegationView[] {
   if (emails.length === 0) return [];
   try {
-    const table = db.prepare("SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = 'delegations'").get();
-    if (!table) return [];
-    const columns = new Set(db.prepare("SELECT name FROM pragma_table_info('delegations')").all().map((row) => text(row.name)));
-    if (!DELEGATION_COLUMNS.every((column) => columns.has(column))) return [];
-    // a delegation that is done or dropped waits on nobody.
-    const rows = db
+    if (deskShape(db) !== 'ok') return [];
+    const keys = emails.map((email) => email.toLowerCase());
+    const fullName = name !== null && name.trim().split(/\s+/).length >= 2 ? name.trim().toLowerCase() : null;
+    const list = keys.map(() => '?').join(', ');
+    const rows = withFold(db)
       .prepare(
         `SELECT id, title, status, dueAt FROM delegations
-         WHERE lower(trim(waitingOn)) IN (${emails.map(() => '?').join(', ')})
+         WHERE (waitingOnKey IN (${list}) OR lower(trim(waitingOnEmail)) IN (${list})
+             OR (waitingOnEmail IS NULL AND ? IS NOT NULL AND people_fold(trim(waitingOnKey)) = ?))
            AND coalesce(status, '') NOT IN ('done', 'dropped')
          ORDER BY dueAt IS NULL, dueAt ASC, id ASC`,
       )
-      .all(...emails.map((email) => email.toLowerCase()));
+      .all(...keys, ...keys, fullName, fullName);
     return rows.map((row) => ({ id: count(row.id), title: text(row.title), status: text(row.status), dueAt: textOrNull(row.dueAt) }));
   } catch {
     return [];
   }
 }
 
-// getPerson gives the profile of a person, or undefined for an unknown id.
-export function getPerson(db: Db, id: number, now: Date): PersonProfile | undefined {
+// getPerson gives the profile of a person, or undefined for an unknown id. the id of a person that the owner merged
+// into another one gives the profile of that other one.
+export function getPerson(db: Db, requested: number, now: Date): PersonProfile | undefined {
   const at = now.toISOString();
+  const id = currentId(db, requested);
+  if (id === undefined) return undefined;
   const summary = summaryById(db, id, at);
   if (!summary) return undefined;
   const names = db
@@ -406,21 +501,28 @@ export function getPerson(db: Db, id: number, now: Date): PersonProfile | undefi
     .prepare('SELECT email, isPrimary, firstSeenAt, lastSeenAt FROM person_emails WHERE personId = ? ORDER BY isPrimary DESC, firstSeenAt ASC, email ASC')
     .all(id)
     .map((row) => ({ email: text(row.email), isPrimary: count(row.isPrimary) === 1, firstSeenAt: text(row.firstSeenAt), lastSeenAt: text(row.lastSeenAt) }));
+  // one event on the calendars of two accounts shows once, with the row of the first account by name.
   const meetings = (where: string, order: string, limit: number) =>
     db
       .prepare(
-        `SELECT account, externalId, subject, at, endAt, role FROM person_contacts
-         WHERE personId = ? AND kind = 'meeting' AND cancelled = 0 AND ${where} ORDER BY ${order} LIMIT ${limit}`,
+        `SELECT account, externalId, subject, at, endAt, role FROM (
+           SELECT *, row_number() OVER (PARTITION BY externalId ORDER BY account ASC, id ASC) AS copy
+           FROM person_contacts
+           WHERE personId = ? AND kind = 'meeting' AND cancelled = 0 AND ${where}
+         ) WHERE copy = 1 ORDER BY ${order} LIMIT ${limit}`,
       )
       .all(id, at)
       .map(meetingOf);
+  // the notes of a person that was merged into this one stay with their own person id, because a note never
+  // changes, so the profile reads them through mergedInto.
   const notes = db
     .prepare(
       `SELECT id, kind, text, author, runId, createdAt FROM person_notes n
-       WHERE personId = ? AND NOT EXISTS (SELECT 1 FROM person_notes later WHERE later.supersedes = n.id)
+       WHERE personId IN (SELECT id FROM people WHERE id = :id OR mergedInto = :id)
+         AND NOT EXISTS (SELECT 1 FROM person_notes later WHERE later.supersedes = n.id)
        ORDER BY createdAt DESC, id DESC`,
     )
-    .all(id)
+    .all({ id })
     .map(noteOf);
   return {
     ...summary,
@@ -431,7 +533,7 @@ export function getPerson(db: Db, id: number, now: Date): PersonProfile | undefi
     openThreads: openThreadsOf(db, id, now),
     notes: notes.filter((note) => note.kind === 'note'),
     preferences: notes.filter((note) => note.kind === 'preference'),
-    delegations: delegationsOf(db, summary.emails),
+    delegations: delegationsOf(db, summary.emails, summary.name),
   };
 }
 
@@ -446,12 +548,18 @@ export function findPersonByEmail(db: Db, email: string, now: Date): PersonSumma
 const NOTE_LIMIT = 2000;
 
 // addNote appends a note. it throws PersonNotFound for an unknown person, or for a supersedes id that is not a note
-// of the same person. the text is trimmed, and it must be 1 to 2000 characters (the caller checks the length first).
+// of the same person, and NotePermission when the agent tries to supersede a note of the owner: text in a mail could
+// otherwise make the agent hide what the owner said about a person. the text is trimmed, and it must be 1 to 2000
+// characters (the caller checks the length first). a note for a person that was merged goes to the person it is now.
 export function addNote(db: Db, input: NoteInput, now: Date): PersonNoteView {
-  if (!db.prepare('SELECT 1 AS found FROM people WHERE id = ?').get(input.personId)) throw new PersonNotFound();
+  const personId = currentId(db, input.personId);
+  if (personId === undefined) throw new PersonNotFound();
   if (input.supersedes !== undefined) {
-    const earlier = db.prepare('SELECT 1 AS found FROM person_notes WHERE id = ? AND personId = ?').get(input.supersedes, input.personId);
+    const earlier = db
+      .prepare('SELECT author FROM person_notes WHERE id = :note AND personId IN (SELECT id FROM people WHERE id = :person OR mergedInto = :person)')
+      .get({ note: input.supersedes, person: personId });
     if (!earlier) throw new PersonNotFound('note');
+    if (input.author === 'agent' && text(earlier.author) === 'owner') throw new NotePermission();
   }
   const body = input.text.trim();
   if (body.length === 0) throw new Error('the note is empty');
@@ -461,13 +569,71 @@ export function addNote(db: Db, input: NoteInput, now: Date): PersonNoteView {
       `INSERT INTO person_notes (personId, kind, text, author, supersedes, runId, toolCallId, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, kind, text, author, runId, createdAt`,
     )
-    .get(input.personId, input.kind, body, input.author, input.supersedes ?? null, input.runId ?? null, input.toolCallId ?? null, now.toISOString());
+    .get(personId, input.kind, body, input.author, input.supersedes ?? null, input.runId ?? null, input.toolCallId ?? null, now.toISOString());
   return noteOf(row as Row);
 }
 
-// the number of people, for the status route.
+// cancelMissingGuests sets cancelled on the meeting rows of one event of an account whose person has none of these
+// addresses, so a guest that was taken off an event loses the meeting. guests is the whole list of the event: its
+// attendees and its organizer. it gives the number of rows that changed.
+export function cancelMissingGuests(db: Db, account: string, eventId: string, guests: readonly string[], now: Date): number {
+  const emails = [...new Set(guests.map((each) => normalizeEmail(each)).filter((each): each is string => each !== null))].slice(0, ID_CHUNK);
+  const result = db
+    .prepare(
+      `UPDATE person_contacts SET cancelled = 1, seenAt = ?
+       WHERE kind = 'meeting' AND account = ? AND externalId = ? AND cancelled = 0
+         AND personId NOT IN (SELECT personId FROM person_emails WHERE email IN (${emails.length ? emails.map(() => '?').join(', ') : 'NULL'}))`,
+    )
+    .run(now.toISOString(), account, eventId, ...emails);
+  return Number(result.changes);
+}
+
+// mergePeople joins other into keep, for the owner, when one human shows as two people: the addresses, the contacts
+// and the header names move to keep, and other gets mergedInto, so an old id still finds the person. the notes stay
+// where they are, because a note never changes, and the profile of keep reads them through mergedInto. a contact
+// that both had (the same item seen at two addresses) stays once. it throws PersonNotFound for an unknown person and
+// InvalidMerge for the same person twice. it gives the id of the person that stays.
+export function mergePeople(db: Db, keepId: number, otherId: number, now: Date): number {
+  const at = now.toISOString();
+  return atomically(db, () => {
+    const keep = currentId(db, keepId);
+    const other = currentId(db, otherId);
+    if (keep === undefined || other === undefined) throw new PersonNotFound();
+    if (keep === other) throw new InvalidMerge('the two ids name the same person');
+    db.prepare('UPDATE person_emails SET personId = ?, isPrimary = 0 WHERE personId = ?').run(keep, other);
+    db.prepare(
+      `DELETE FROM person_contacts WHERE personId = :other AND EXISTS (
+         SELECT 1 FROM person_contacts k
+         WHERE k.personId = :keep AND k.kind = person_contacts.kind AND k.account = person_contacts.account AND k.externalId = person_contacts.externalId)`,
+    ).run({ keep, other });
+    db.prepare('UPDATE person_contacts SET personId = ? WHERE personId = ?').run(keep, other);
+    db.prepare(
+      `INSERT INTO person_names (personId, name, count, firstSeenAt, lastSeenAt)
+       SELECT ?, name, count, firstSeenAt, lastSeenAt FROM person_names WHERE personId = ? AND true
+       ON CONFLICT (personId, name) DO UPDATE SET
+         count = count + excluded.count, firstSeenAt = min(firstSeenAt, excluded.firstSeenAt), lastSeenAt = max(lastSeenAt, excluded.lastSeenAt)`,
+    ).run(keep, other);
+    db.prepare('DELETE FROM person_names WHERE personId = ?').run(other);
+    db.prepare(
+      `UPDATE people SET name = (
+         SELECT name FROM person_names WHERE personId = :keep ORDER BY count DESC, lastSeenAt DESC, name ASC LIMIT 1
+       ) WHERE id = :keep AND nameSource = 'header' AND EXISTS (SELECT 1 FROM person_names WHERE personId = :keep)`,
+    ).run({ keep });
+    db.prepare(
+      `UPDATE people SET organization = (SELECT organization FROM people WHERE id = :other),
+         organizationDomain = (SELECT organizationDomain FROM people WHERE id = :other)
+       WHERE id = :keep AND organization IS NULL`,
+    ).run({ keep, other });
+    // a person that was merged into other earlier now points at keep too, so the chain stays one step long.
+    db.prepare('UPDATE people SET mergedInto = :keep, updatedAt = :at WHERE id = :other OR mergedInto = :other').run({ keep, other, at });
+    db.prepare('UPDATE people SET updatedAt = ? WHERE id = ?').run(at, keep);
+    return keep;
+  });
+}
+
+// the number of people, for the status route. a person that was merged into another one is not counted.
 export function countPeople(db: Db): number {
-  return count(db.prepare('SELECT count(*) AS n FROM people').get()?.n);
+  return count(db.prepare('SELECT count(*) AS n FROM people WHERE mergedInto IS NULL').get()?.n);
 }
 
 function backfillOf(row: Row): BackfillState {
@@ -479,8 +645,20 @@ function backfillOf(row: Row): BackfillState {
     backfillEvents: count(row.backfillEvents),
     backfilledAt: textOrNull(row.backfilledAt),
     sentAfter: textOrNull(row.sentAfter),
+    aliases: aliasList(row.aliases),
     error: textOrNull(row.error),
   };
+}
+
+// the json list of send-as addresses, or null when none was saved or it is damaged.
+function aliasList(value: unknown): string[] | null {
+  if (value === null || value === undefined) return null;
+  try {
+    const list: unknown = JSON.parse(String(value));
+    return Array.isArray(list) ? list.filter((each): each is string => typeof each === 'string') : null;
+  } catch {
+    return null;
+  }
 }
 
 const ensureBackfillRow = (db: Db, account: string, now: string) =>
@@ -493,7 +671,7 @@ export function backfillStateOf(db: Db, account: string, now: Date): BackfillSta
 }
 
 // the columns that saveBackfillState may change. the names go into the sql, so only these are taken.
-const BACKFILL_FIELDS = ['backfill', 'backfillPage', 'backfillMessages', 'backfillEvents', 'backfilledAt', 'sentAfter', 'error'] as const;
+const BACKFILL_FIELDS = ['backfill', 'backfillPage', 'backfillMessages', 'backfillEvents', 'backfilledAt', 'sentAfter', 'aliases', 'error'] as const;
 
 // saveBackfillState changes the given fields of the people_accounts row of an account and sets updatedAt.
 export function saveBackfillState(db: Db, account: string, change: Partial<Omit<BackfillState, 'account'>>, now: Date): void {
@@ -502,7 +680,7 @@ export function saveBackfillState(db: Db, account: string, change: Partial<Omit<
   atomically(db, () => {
     ensureBackfillRow(db, account, at);
     db.prepare(`UPDATE people_accounts SET ${[...fields.map((field) => `${field} = ?`), 'updatedAt = ?'].join(', ')} WHERE account = ?`).run(
-      ...fields.map((field) => change[field] ?? null),
+      ...fields.map((field) => (field === 'aliases' ? (change.aliases ? JSON.stringify(change.aliases) : null) : (change[field] as string | number | null | undefined) ?? null)),
       at,
       account,
     );
@@ -537,6 +715,8 @@ export const peopleStore = {
   recordObservation,
   recordObservations,
   cancelMeetings,
+  cancelMissingGuests,
+  mergePeople,
   searchPeople,
   getPerson,
   findPersonByEmail,

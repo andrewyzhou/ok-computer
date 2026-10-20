@@ -6,7 +6,18 @@ import { createLogger } from '../observability/logger.js';
 import { cleanName, isPersonalDomain, normalizeEmail, organizationOf, parseAddressList } from './address.js';
 import { createPeopleBuilder, eventObservations, mailObservations } from './builder.js';
 import { addressNoise, mailNoise } from './noise.js';
-import { addNote, getPerson, recordObservation, recordObservations, searchPeople, cancelMeetings, findPersonByEmail } from './store.js';
+import {
+  addNote,
+  cancelMeetings,
+  findPersonByEmail,
+  getPerson,
+  InvalidMerge,
+  mergePeople,
+  PersonNotFound,
+  recordObservation,
+  recordObservations,
+  searchPeople,
+} from './store.js';
 import type { Contact, Observation } from './types.js';
 
 // adversarial cases for the people memory: hostile headers, odd addresses, time zones and day boundaries, and the
@@ -353,7 +364,7 @@ describe('the store under repeated, late and odd reads', () => {
     const d = fresh();
     const now = new Date('2026-10-18T16:00:00Z');
     recordObservation(d, observation('jane@acme.com', 'Jane'), now);
-    const again = recordObservation(d, observation('JANE@acme.com', 'Jane'), now);
+    const again = recordObservation(d, observation('JANE@acme.com', 'Jane'), now)!;
     expect(again).toMatchObject({ createdPerson: false, createdContact: false });
     const person = getPerson(d, again.personId, now)!;
     expect(person.mailCount).toBe(1);
@@ -370,7 +381,7 @@ describe('the store under repeated, late and odd reads', () => {
   it('keeps the organization of the newest contact when an older mail from another company is read late', () => {
     const d = fresh();
     const now = new Date('2026-10-18T16:00:00Z');
-    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane', { at: '2026-10-10T16:00:00.000Z' }, { name: 'Acme', domain: 'acme.com' }), now);
+    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane', { at: '2026-10-10T16:00:00.000Z' }, { name: 'Acme', domain: 'acme.com' }), now)!;
     recordObservation(d, observation('jane@acme.com', 'Jane', { externalId: 'm-old', at: '2026-01-01T16:00:00.000Z' }, { name: 'Old', domain: 'old.com' }), now);
     expect(getPerson(d, personId, now)).toMatchObject({ organization: 'Acme', organizationDomain: 'acme.com' });
   });
@@ -378,7 +389,7 @@ describe('the store under repeated, late and odd reads', () => {
   it('splits past and upcoming exactly at now', () => {
     const d = fresh();
     const now = new Date('2026-10-18T16:00:00.000Z');
-    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane', { kind: 'meeting', externalId: 'e-now', threadId: null, direction: null, role: 'attendee', at: now.toISOString() }), now);
+    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane', { kind: 'meeting', externalId: 'e-now', threadId: null, direction: null, role: 'attendee', at: now.toISOString() }), now)!;
     recordObservation(d, observation('jane@acme.com', 'Jane', { kind: 'meeting', externalId: 'e-next', threadId: null, direction: null, role: 'attendee', at: '2026-10-18T16:00:00.001Z' }), now);
     const person = getPerson(d, personId, now)!;
     expect(person.meetingCount).toBe(1);
@@ -391,7 +402,7 @@ describe('the store under repeated, late and odd reads', () => {
     const d = fresh();
     const now = new Date('2026-10-18T16:00:00Z');
     const meeting = { kind: 'meeting' as const, externalId: 'e1', threadId: null, direction: null, role: 'attendee' as const, at: '2026-10-21T17:00:00.000Z' };
-    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane', meeting), now);
+    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane', meeting), now)!;
     expect(cancelMeetings(d, 'personal', ['e1', 'unknown'], now)).toBe(1);
     expect(getPerson(d, personId, now)!.upcoming).toEqual([]);
     expect(cancelMeetings(d, 'school', ['e1'], now)).toBe(0);
@@ -409,7 +420,7 @@ describe('the store under repeated, late and odd reads', () => {
   it('keeps the owner name when headers give other names', () => {
     const d = fresh();
     const now = new Date('2026-10-18T16:00:00Z');
-    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane'), now);
+    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane'), now)!;
     d.prepare("UPDATE people SET name = 'Janie', nameSource = 'owner' WHERE id = ?").run(personId);
     recordObservation(d, observation('jane@acme.com', 'Jane Doe', { externalId: 'm-2' }), now);
     expect(getPerson(d, personId, now)!.name).toBe('Janie');
@@ -453,7 +464,7 @@ describe('the store under repeated, late and odd reads', () => {
   it('never changes or deletes a note, also with sql', () => {
     const d = fresh();
     const now = new Date('2026-10-18T16:00:00Z');
-    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane'), now);
+    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane'), now)!;
     const note = addNote(d, { personId, kind: 'note', text: '  likes tea  ', author: 'owner' }, now);
     expect(note.text).toBe('likes tea');
     expect(() => d.prepare('UPDATE person_notes SET text = ? WHERE id = ?').run('x', note.id)).toThrow(/append-only/);
@@ -463,8 +474,8 @@ describe('the store under repeated, late and odd reads', () => {
   it('refuses a note that supersedes a note of another person', () => {
     const d = fresh();
     const now = new Date('2026-10-18T16:00:00Z');
-    const jane = recordObservation(d, observation('jane@acme.com', 'Jane'), now).personId;
-    const bob = recordObservation(d, observation('bob@acme.com', 'Bob', { externalId: 'm-2' }), now).personId;
+    const jane = recordObservation(d, observation('jane@acme.com', 'Jane'), now)!.personId;
+    const bob = recordObservation(d, observation('bob@acme.com', 'Bob', { externalId: 'm-2' }), now)!.personId;
     const note = addNote(d, { personId: jane, kind: 'note', text: 'one', author: 'owner' }, now);
     expect(() => addNote(d, { personId: bob, kind: 'note', text: 'two', author: 'owner', supersedes: note.id }, now)).toThrow(/note not found/);
     expect(() => addNote(d, { personId: jane, kind: 'note', text: '   ', author: 'owner' }, now)).toThrow(/empty/);
@@ -473,7 +484,7 @@ describe('the store under repeated, late and odd reads', () => {
   it('shows the newest of two notes that supersede the same one only once each', () => {
     const d = fresh();
     const now = new Date('2026-10-18T16:00:00Z');
-    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane'), now);
+    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane'), now)!;
     const first = addNote(d, { personId, kind: 'preference', text: 'mornings', author: 'agent' }, now);
     addNote(d, { personId, kind: 'preference', text: 'afternoons', author: 'owner', supersedes: first.id }, new Date('2026-10-18T17:00:00Z'));
     const profile = getPerson(d, personId, now)!;
@@ -491,7 +502,7 @@ describe('the store under repeated, late and odd reads', () => {
   it('opens an open thread only when the person wrote last and the owner did not answer', () => {
     const d = fresh();
     const now = new Date('2026-10-18T16:00:00Z');
-    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane', { externalId: 'a', at: '2026-10-15T10:00:00.000Z' }), now);
+    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane', { externalId: 'a', at: '2026-10-15T10:00:00.000Z' }), now)!;
     expect(getPerson(d, personId, now)!.openThreads).toHaveLength(1);
     // the owner answers to someone else in the thread, with jane only in the thread through her earlier mail.
     recordObservation(d, observation('bob@acme.com', 'Bob', { externalId: 'b', direction: 'out', role: 'to', at: '2026-10-15T11:00:00.000Z' }), now);
@@ -501,7 +512,7 @@ describe('the store under repeated, late and odd reads', () => {
   it('keeps one thread id per account apart, so the same thread id in two accounts is two threads', () => {
     const d = fresh();
     const now = new Date('2026-10-18T16:00:00Z');
-    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane', { externalId: 'a', at: '2026-10-15T10:00:00.000Z' }), now);
+    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane', { externalId: 'a', at: '2026-10-15T10:00:00.000Z' }), now)!;
     recordObservation(d, observation('bob@acme.com', 'Bob', { account: 'school', externalId: 'b', direction: 'out', role: 'to', at: '2026-10-15T11:00:00.000Z' }), now);
     expect(getPerson(d, personId, now)!.openThreads).toHaveLength(1);
   });
@@ -555,5 +566,216 @@ describe('the builder never throws into the poll', () => {
     expect(searchPeople(d, { limit: 10 }, now).people[0]!.nextMeetingAt).toBe('2026-10-21T17:00:00.000Z');
     builder.observeEvents('personal', [{ id: 'e1', status: 'cancelled' }]);
     expect(searchPeople(d, { limit: 10 }, now).people[0]!.nextMeetingAt).toBeNull();
+  });
+});
+
+describe('the findings of the review', () => {
+  it('gives no person from an event that the owner declined', () => {
+    const declined = event({
+      attendees: [
+        { email: 'owner@example.com', self: true, responseStatus: 'declined' },
+        { email: 'jane@acme.com', responseStatus: 'accepted' },
+      ],
+    });
+    const result = eventObservations('personal', [declined], OWNER, TZ);
+    expect(result.observations.every((each) => each.contact.cancelled)).toBe(true);
+  });
+
+  it('makes no person and no upcoming meeting from a stranger invite that the owner declined, and cancels the meeting of a known person', () => {
+    const d = fresh();
+    const now = new Date('2026-10-18T16:00:00Z');
+    const builder = createPeopleBuilder({ db: d, clock: () => now, logger: silent, timeZone: TZ, ownerEmails: ['owner@example.com'] });
+    builder.observeMail('personal', [message({ From: 'Bob <bob@acme.com>', To: 'owner@example.com' })]);
+    const spam = event({
+      id: 'spam',
+      organizer: { email: 'stranger@spam.example' },
+      attendees: [
+        { email: 'owner@example.com', self: true, responseStatus: 'declined' },
+        { email: 'stranger@spam.example', responseStatus: 'accepted' },
+        { email: 'bob@acme.com', responseStatus: 'accepted' },
+      ],
+    });
+    builder.observeEvents('personal', [spam]);
+    const page = searchPeople(d, { limit: 10 }, now);
+    expect(page.people.map((each) => each.primaryEmail)).toEqual(['bob@acme.com']);
+    expect(page.people[0]!.nextMeetingAt).toBeNull();
+    expect(getPerson(d, page.people[0]!.id, now)!.upcoming).toEqual([]);
+  });
+
+  it('does not show one meeting twice when it is on the calendars of two accounts of the owner', () => {
+    const d = fresh();
+    const now = new Date('2026-10-18T16:00:00Z');
+    const meeting = { kind: 'meeting' as const, externalId: 'shared-event', threadId: null, direction: null, role: 'attendee' as const, at: '2026-10-21T17:00:00.000Z' };
+    const { personId } = recordObservation(d, observation('jane@acme.com', 'Jane', { ...meeting, account: 'personal' }), now)!;
+    recordObservation(d, observation('jane@acme.com', 'Jane', { ...meeting, account: 'school' }), now);
+    expect(getPerson(d, personId, now)!.upcoming).toHaveLength(1);
+    // once it is past, it counts once.
+    const later = new Date('2026-10-22T16:00:00Z');
+    expect(getPerson(d, personId, later)!).toMatchObject({ meetingCount: 1 });
+    expect(getPerson(d, personId, later)!.recentMeetings).toHaveLength(1);
+  });
+
+  it('does not take the owner as a person when the owner writes from a plus address of their own mailbox', () => {
+    const result = mailObservations('personal', message({ From: 'jane@acme.com', To: 'owner+receipts@example.com' }), OWNER);
+    expect(emails(result.observations.map((each) => each.address))).toEqual(['jane@acme.com']);
+    const sent = mailObservations('personal', message({ From: 'owner+lists@example.com', To: 'jane@acme.com' }), OWNER);
+    expect(sent.observations[0]!.contact.direction).toBe('out');
+  });
+
+  it('matches a name with accents without case', () => {
+    const d = fresh();
+    const now = new Date('2026-10-18T16:00:00Z');
+    recordObservation(d, observation('elodie@acme.com', 'Élodie Ødegaard'), now);
+    expect(searchPeople(d, { q: 'élodie', limit: 10 }, now).total).toBe(1);
+    expect(searchPeople(d, { q: 'ØDEGAARD', limit: 10 }, now).total).toBe(1);
+  });
+
+  it('refuses a sort that is an inherited object key', () => {
+    const d = fresh();
+    const now = new Date('2026-10-18T16:00:00Z');
+    recordObservation(d, observation('jane@acme.com', 'Jane'), now);
+    expect(searchPeople(d, { limit: 10, sort: 'constructor' as never }, now).total).toBe(1);
+  });
+
+  it('leaves out a calendar invitation mail that google sent for the organizer', () => {
+    const invite = message({
+      From: 'Jane Doe <jane@acme.com>',
+      To: 'owner@example.com',
+      Sender: 'Google Calendar <calendar-notification@google.com>',
+      Subject: 'Invitation: Sync @ Tue Oct 21, 2026 10am',
+    });
+    const result = mailObservations('personal', invite, OWNER);
+    expect(result.observations).toEqual([]);
+    expect(result.skipped).toEqual({ calendar_mail: 1 });
+    const byId = mailObservations('personal', message({ From: 'jane@acme.com', To: 'owner@example.com', 'Message-ID': '<calendar-1a2b3c@google.com>' }), OWNER);
+    expect(byId.skipped).toEqual({ calendar_mail: 1 });
+  });
+
+  it('makes no person from the recipients of a mail from a no-reply or notification sender', () => {
+    for (const from of ['noreply@school.example', 'notify@updates.tool.example']) {
+      const result = mailObservations('personal', message({ From: from, To: 'owner@example.com', Cc: 'Jane Prof <jane@school.example>' }), OWNER);
+      expect(result.observations, from).toEqual([]);
+    }
+    expect(mailObservations('personal', message({ From: 'noreply@school.example', Cc: 'jane@school.example' }), OWNER).skipped).toEqual({ no_reply: 1 });
+  });
+
+  it('treats an unquoted name with a via comment as a notification', () => {
+    const result = mailObservations('personal', message({ From: 'Jane (via Slack) <jane@x.com>', To: 'owner@example.com' }), OWNER);
+    expect(result.observations).toEqual([]);
+    expect(result.skipped).toEqual({ notification: 1 });
+  });
+
+  it('counts a send-as alias of the owner as the owner', () => {
+    const d = fresh();
+    const now = new Date('2026-10-18T16:00:00Z');
+    d.prepare("INSERT INTO people_accounts (account, aliases, updatedAt) VALUES ('personal', ?, 'x')").run(JSON.stringify(['me@alias.example']));
+    const builder = createPeopleBuilder({ db: d, clock: () => now, logger: silent, timeZone: TZ, ownerEmails: ['owner@example.com'] });
+    const out = builder.observeMail('personal', [message({ From: 'Me <me@alias.example>', To: 'jane@acme.com' })]);
+    expect(out.observations.map((each) => [each.address.email, each.contact.direction])).toEqual([['jane@acme.com', 'out']]);
+    expect(out.skipped).toEqual({ owner: 1 });
+  });
+
+  it('cancels the meeting of a guest who was taken off the event', () => {
+    const d = fresh();
+    const now = new Date('2026-10-18T16:00:00Z');
+    const builder = createPeopleBuilder({ db: d, clock: () => now, logger: silent, timeZone: TZ, ownerEmails: ['owner@example.com'] });
+    const guests = [{ email: 'owner@example.com', self: true }, { email: 'jane@acme.com' }, { email: 'bob@acme.com' }];
+    builder.observeEvents('personal', [event({ attendees: guests })]);
+    builder.observeEvents('personal', [event({ attendees: guests.filter((each) => each.email !== 'bob@acme.com') })]);
+    expect(findPersonByEmail(d, 'bob@acme.com', now)!.nextMeetingAt).toBeNull();
+    expect(findPersonByEmail(d, 'jane@acme.com', now)!.nextMeetingAt).toBe('2026-10-21T17:00:00.000Z');
+    // when bob is put back, the meeting comes back.
+    builder.observeEvents('personal', [event({ attendees: guests })]);
+    expect(findPersonByEmail(d, 'bob@acme.com', now)!.nextMeetingAt).toBe('2026-10-21T17:00:00.000Z');
+  });
+
+  it('adds a meeting of more than 15 attendees only to people that are known already', () => {
+    const d = fresh();
+    const now = new Date('2026-10-18T16:00:00Z');
+    const builder = createPeopleBuilder({ db: d, clock: () => now, logger: silent, timeZone: TZ, ownerEmails: ['owner@example.com'] });
+    builder.observeMail('personal', [message({ From: 'p3@acme.com', To: 'owner@example.com' })]);
+    const attendees = [{ email: 'owner@example.com', self: true }, ...Array.from({ length: 19 }, (_, i) => ({ email: `p${i}@acme.com` }))];
+    builder.observeEvents('personal', [event({ attendees })]);
+    const page = searchPeople(d, { limit: 50 }, now);
+    expect(page.people.map((each) => each.primaryEmail)).toEqual(['p3@acme.com']);
+    expect(page.people[0]!.nextMeetingAt).toBe('2026-10-21T17:00:00.000Z');
+    // a meeting of 15 makes people as before.
+    builder.observeEvents('personal', [event({ id: 'e2', attendees: attendees.slice(0, 15) })]);
+    expect(searchPeople(d, { limit: 50 }, now).total).toBe(14);
+  });
+
+  it('logs only the kind of a store error, never its text, and says that the write failed', () => {
+    const d = fresh();
+    const fields: unknown[] = [];
+    const logger = { ...silent, warn: (_msg: string, data?: unknown) => void fields.push(data), child: () => logger };
+    const builder = createPeopleBuilder({
+      db: d,
+      clock: () => new Date('2026-10-18T16:00:00Z'),
+      logger,
+      timeZone: TZ,
+      store: {
+        recordObservations: () => {
+          throw Object.assign(new Error('UNIQUE failed for jane@acme.com'), { code: 'ERR_SQLITE_ERROR' });
+        },
+        cancelMeetings: () => 0,
+      },
+    });
+    expect(builder.observeMail('personal', [message({ From: 'jane@acme.com' })]).failed).toBe(true);
+    expect(JSON.stringify(fields)).not.toContain('jane@acme.com');
+    expect(fields).toEqual([{ account: 'personal', count: 1, error: 'Error', code: 'ERR_SQLITE_ERROR' }]);
+  });
+});
+
+describe('one human at two addresses', () => {
+  const now = new Date('2026-10-18T16:00:00Z');
+  const school = { name: 'Berkeley', domain: 'berkeley.edu' };
+
+  it('attaches a new address to the one person with the same full name at the same organization or at a personal domain', () => {
+    const d = fresh();
+    const first = recordObservation(d, observation('jdoe@berkeley.edu', 'Jane Doe', {}, school), now)!;
+    const sub = recordObservation(d, observation('jdoe@hkn.eecs.berkeley.edu', 'jane doe', { externalId: 'm-2' }, school), now)!;
+    const personal = recordObservation(d, observation('jane.doe@gmail.com', 'Jane Doe', { externalId: 'm-3' }), now)!;
+    expect([sub.personId, personal.personId]).toEqual([first.personId, first.personId]);
+    expect(sub.createdPerson).toBe(false);
+    const profile = getPerson(d, first.personId, now)!;
+    expect(profile.primaryEmail).toBe('jdoe@berkeley.edu');
+    expect(profile.emails).toHaveLength(3);
+    expect(profile.mailCount).toBe(3);
+  });
+
+  it('does not attach a one-word name, another organization, or a name that two people share', () => {
+    const d = fresh();
+    recordObservation(d, observation('jane@acme.com', 'Jane', {}, { name: 'Acme', domain: 'acme.com' }), now);
+    expect(recordObservation(d, observation('jane@gmail.com', 'Jane', { externalId: 'm-2' }), now)!.createdPerson).toBe(true);
+    recordObservation(d, observation('sam.lee@acme.com', 'Sam Lee', { externalId: 'm-3' }, { name: 'Acme', domain: 'acme.com' }), now);
+    expect(recordObservation(d, observation('sam.lee@globex.com', 'Sam Lee', { externalId: 'm-4' }, { name: 'Globex', domain: 'globex.com' }), now)!.createdPerson).toBe(true);
+    // two people are named Sam Lee now, so a third address of that name stays apart.
+    expect(recordObservation(d, observation('sam@gmail.com', 'Sam Lee', { externalId: 'm-5' }), now)!.createdPerson).toBe(true);
+  });
+
+  it('merges two people for the owner, keeps the notes of both, and finds the person by the old id', () => {
+    const d = fresh();
+    const a = recordObservation(d, observation('maya@northwind.example', 'Maya L', { externalId: 'm-1' }, { name: 'Northwind', domain: 'northwind.example' }), now)!;
+    const b = recordObservation(d, observation('m.lindqvist@other.example', 'Maya Lindqvist', { externalId: 'm-2', at: '2026-10-12T16:00:00.000Z' }), now)!;
+    // the same mail, seen at both addresses.
+    recordObservation(d, observation('m.lindqvist@other.example', 'Maya Lindqvist', { externalId: 'm-1' }), now);
+    addNote(d, { personId: b.personId, kind: 'preference', text: 'prefers mornings', author: 'owner' }, now);
+    expect(mergePeople(d, a.personId, b.personId, now)).toBe(a.personId);
+    const profile = getPerson(d, a.personId, now)!;
+    expect(profile.emails).toEqual(['maya@northwind.example', 'm.lindqvist@other.example']);
+    expect(profile.mailCount).toBe(2);
+    expect(profile.preferences.map((each) => each.text)).toEqual(['prefers mornings']);
+    expect(profile.names.map((each) => [each.name, each.count])).toEqual([
+      ['Maya Lindqvist', 2],
+      ['Maya L', 1],
+    ]);
+    expect(getPerson(d, b.personId, now)!.id).toBe(a.personId);
+    expect(searchPeople(d, { limit: 10 }, now).total).toBe(1);
+    expect(findPersonByEmail(d, 'm.lindqvist@other.example', now)!.id).toBe(a.personId);
+    // a note for the old id goes to the person that stays.
+    addNote(d, { personId: b.personId, kind: 'note', text: 'met in Oslo', author: 'agent' }, now);
+    expect(getPerson(d, a.personId, now)!.notes.map((each) => each.text)).toEqual(['met in Oslo']);
+    expect(() => mergePeople(d, a.personId, b.personId, now)).toThrow(InvalidMerge);
+    expect(() => mergePeople(d, a.personId, 999, now)).toThrow(PersonNotFound);
   });
 });

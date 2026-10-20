@@ -153,7 +153,7 @@ describe('the people tools', () => {
       'id 1: Maya Lindqvist <maya@northwind.example> | Northwind | last contact 2026-10-17 10:00 | 3 mails, 1 meeting',
       'id 2: Tomas Okafor <tomas.okafor@gmail.com> | last contact 2026-10-16 09:00 | 2 mails, 0 meetings',
       'id 3: Priya <praman@berkeley.edu> | Berkeley | last contact 2026-10-14 13:00 | 1 mail, 1 meeting',
-      'id 4: k.osei@fabrikam.example <k.osei@fabrikam.example> | Fabrikam | last contact 2026-10-12 11:00 | 2 mails, 0 meetings',
+      'id 4: K Osei (name guessed) <k.osei@fabrikam.example> | Fabrikam | last contact 2026-10-12 11:00 | 2 mails, 0 meetings',
       'id 5: Jonas Weber <jonas.weber@outlook.com> | last contact none | 0 mails, 0 meetings',
     ]);
     const frequent = await run('people_search', { sort: 'frequent', limit: 2 });
