@@ -1,2 +1,208 @@
 /* the board of the desk. the work package "desk board" owns this file. use the tokens of styles.css only, so the
-   light and the dark theme both work. */
+   light and the dark theme both work. the board is a container, so its layout follows its own width: the details
+   panel takes room from it on a wide screen too. */
+
+.desk-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.desk-due-today {
+  margin: 0;
+  color: var(--warning-ink);
+  font-weight: 600;
+}
+
+.desk-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.desk-error p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.desk-board {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+/* narrow: one stacked list with a section for each status. */
+.desk-columns {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-width: 0;
+}
+.desk-column {
+  min-width: 0;
+}
+.desk-column.is-folded {
+  display: none;
+}
+.desk-column-head {
+  display: flex;
+  align-items: center;
+  margin: 0 0 10px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  color: var(--ink);
+}
+
+.desk-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.desk-cards > li {
+  min-width: 0;
+}
+
+.desk-none,
+.desk-limit {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.desk-limit {
+  margin-top: 10px;
+}
+
+.desk-closed-toggle {
+  margin-top: 16px;
+}
+
+/* a card is a button, so the keyboard reaches it and Enter selects it. */
+.desk-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.desk-card:hover {
+  border-color: var(--rule-strong);
+}
+.desk-card:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.desk-card[aria-pressed='true'] {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
+}
+
+/* the title and the next step stop after two lines, so a long text never stretches the card. */
+.desk-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.desk-card-title {
+  font-weight: 600;
+  line-height: 1.35;
+}
+.desk-card-next {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.desk-card-person {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  max-width: 100%;
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+.desk-person {
+  max-width: 100%;
+  min-width: 0;
+}
+.desk-person-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.desk-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+.desk-card-meta:empty {
+  display: none;
+}
+.desk-card-when.is-soon {
+  color: var(--warning-ink);
+  font-weight: 600;
+}
+
+/* a board of one status, from the status filter, lays its cards out in a grid. */
+.desk-board-one .desk-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+/* middle: the three active columns side by side, and the done and dropped columns under them when they are open. */
+@container (min-width: 560px) {
+  .desk-board-all .desk-columns {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 20px 12px;
+    align-items: start;
+  }
+  .desk-board-all .desk-column {
+    padding: 12px;
+    border-radius: var(--radius-lg);
+    background: var(--bg-sunken);
+  }
+  .desk-board-all .desk-column-head {
+    padding: 0 2px;
+  }
+  .desk-board-all .desk-none,
+  .desk-board-all .desk-limit {
+    padding: 0 2px;
+  }
+}
+
+/* wide: all five columns, with narrower done and dropped columns, and no fold. */
+@container (min-width: 1000px) {
+  .desk-board-all .desk-columns {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) repeat(2, minmax(0, 0.8fr));
+  }
+  .desk-board-all .desk-column.is-folded {
+    display: block;
+  }
+  .desk-board-all .desk-closed-toggle {
+    display: none;
+  }
+}
