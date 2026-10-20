@@ -77,13 +77,23 @@ export function setDeskQuery(query: URLSearchParams, changes: Record<string, str
   location.hash = `#/${DESK_PATH}${search ? `?${search}` : ''}`;
 }
 
-// the filters of the board from the query of the hash. an unknown status is left out.
+// the limits of the filters, the same as the route's: q has 1 to 200 characters and person 1 to 320.
+export const MAX_DESK_Q = 200;
+export const MAX_DESK_PERSON = 320;
+
+// a filter value of the hash, trimmed and cut to its limit, or undefined when it is blank. a link or a hash typed by
+// hand can hold any text, and the route answers 400 for a blank or a long value, so the board would show an error.
+const filterOf = (value: string | null, max: number) => (value ?? '').trim().slice(0, max).trim() || undefined;
+
+// the filters of the board from the query of the hash. an unknown status is left out, and so is a blank q or person.
 export function deskQueryOf(query: URLSearchParams): DeskQuery {
   const status = query.get('status');
+  const person = filterOf(query.get('person'), MAX_DESK_PERSON);
+  const q = filterOf(query.get('q'), MAX_DESK_Q);
   return {
     ...(status && (STATUSES as readonly string[]).includes(status) ? { status: status as DelegationStatus } : {}),
-    ...(query.get('person') ? { person: query.get('person')! } : {}),
-    ...(query.get('q') ? { q: query.get('q')! } : {}),
+    ...(person ? { person } : {}),
+    ...(q ? { q } : {}),
   };
 }
 

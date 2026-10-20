@@ -138,11 +138,11 @@ describe('a delegation', () => {
     expect(ids(board).done).toEqual([1, 5]);
 
     const relinked = await post(dashboard, '/api/desk/delegations/4', {
-      addLinks: [{ kind: 'doc', ref: 'doc-2', label: 'The photo rules' }],
-      removeLinks: [{ kind: 'doc', ref: 'doc-1' }],
+      addLinks: [{ kind: 'doc', ref: '2', label: 'The photo rules' }],
+      removeLinks: [{ kind: 'doc', ref: '1' }],
     });
     expect(relinked.status).toBe(200);
-    expect(((await relinked.json()) as Delegation).links.map((each) => each.ref)).toEqual(['doc-2']);
+    expect(((await relinked.json()) as Delegation).links.map((each) => each.ref)).toEqual(['2']);
 
     const one = await get<DelegationDetail>(dashboard, '/api/desk/delegations/1');
     expect(one.history.slice(-2).map((event) => [event.kind, event.actor, event.text])).toEqual([
@@ -152,8 +152,8 @@ describe('a delegation', () => {
     expect(one.history.at(-2)!.data).toEqual({ from: 'open', to: 'done' });
     const four = await get<DelegationDetail>(dashboard, '/api/desk/delegations/4');
     expect(four.history.slice(-2).map((event) => [event.kind, event.data.ref])).toEqual([
-      ['link_removed', 'doc-1'],
-      ['link_added', 'doc-2'],
+      ['link_removed', '1'],
+      ['link_added', '2'],
     ]);
   });
 
@@ -162,5 +162,25 @@ describe('a delegation', () => {
     const response = await post(dashboard, '/api/desk/delegations/2', { status: 'open', waitingOn: null, dueAt: null, nextFollowUpAt: null, nextStep: null });
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ status: 'open', waitingOn: null, waitingSince: null, dueAt: null, nextFollowUpAt: null, nextStep: null });
+  });
+
+  it('links a doc by its id, so the href opens a doc that exists', async () => {
+    const { dashboard } = await seedDashboard();
+    const four = await get<DelegationDetail>(dashboard, '/api/desk/delegations/4');
+    const doc = four.links.find((each) => each.kind === 'doc')!;
+    expect(doc).toMatchObject({ ref: '1', href: 'docs/1' });
+    expect((await dashboard.request(`/api/${doc.href}`)).status).toBe(200);
+  });
+
+  it('refuses a doc link whose ref is not the id of a doc', async () => {
+    const { dashboard } = await seedDashboard();
+    for (const ref of ['doc-1', '0', '1.5', '-2']) {
+      const made = await post(dashboard, '/api/desk/delegations', { title: 'x', links: [{ kind: 'doc', ref }] });
+      expect(made.status, ref).toBe(400);
+      expect(await made.json()).toEqual({ error: 'give a doc link ref as the id of a doc' });
+    }
+    const added = await post(dashboard, '/api/desk/delegations/4', { addLinks: [{ kind: 'doc', ref: 'doc-2' }] });
+    expect(added.status).toBe(400);
+    expect(await added.json()).toEqual({ error: 'give a doc link ref as the id of a doc' });
   });
 });

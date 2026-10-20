@@ -1,7 +1,7 @@
 import type { Context, Hono } from 'hono';
 import { z } from 'zod';
 import type { Db } from '../db/index.js';
-import { ACTIVE_STATUSES, DESK_CLOSED_LIMIT, DESK_STATUSES, isActive, LIMITS, LINK_KINDS, parseWhen, validEmail } from '../desk/shared.js';
+import { ACTIVE_STATUSES, DESK_CLOSED_LIMIT, DESK_STATUSES, DOC_REF_ERROR, isActive, LIMITS, LINK_KINDS, parseWhen, validDocRef, validEmail } from '../desk/shared.js';
 import { createDelegation, getDelegation, getDelegationDetail, listDelegations, textMatch, updateDelegation, type DelegationPatch, type StoreResult } from '../desk/store.js';
 import { addDays, localDay, zonedToUtc } from '../time.js';
 import { errorText } from '../tools/registry.js';
@@ -50,7 +50,9 @@ const link = z
     { error: 'give each link as an object with kind and ref' },
   )
   .strict()
-  .refine((value) => (value.kind !== 'thread' && value.kind !== 'event') || Boolean(value.account), 'give a thread or an event link its google account');
+  .refine((value) => (value.kind !== 'thread' && value.kind !== 'event') || Boolean(value.account), 'give a thread or an event link its google account')
+  .refine((value) => value.kind !== 'doc' || validDocRef(value.ref), DOC_REF_ERROR);
+// a link to remove takes any ref, so an old link with a bad ref can still go.
 const removeLink = z
   .object({ kind, ref: text('the link ref', LIMITS.ref, 1), account: text('the link account', ACCOUNT_CHARS, 1).optional() }, { error: 'give each link as an object with kind and ref' })
   .strict();

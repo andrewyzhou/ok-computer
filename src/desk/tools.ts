@@ -4,7 +4,7 @@ import { sessionTaint } from '../policy/store.js';
 import { addDays, formatLocal, localDay, zonedToUtc } from '../time.js';
 import { defineTool, type Tool, type ToolContext, type ToolOutput } from '../tools/registry.js';
 import type { DeskContext } from './context.js';
-import { ACTIVE_STATUSES, isClosed, LIMITS, LINK_KINDS, parseWhen, personKey, validEmail } from './shared.js';
+import { ACTIVE_STATUSES, DOC_REF_ERROR, isClosed, LIMITS, LINK_KINDS, parseWhen, personKey, validDocRef, validEmail } from './shared.js';
 import { createDelegation, fold, getDelegation, listDelegations, updateDelegation, type ChangeBy, type StoreResult } from './store.js';
 
 // the agent tools of the desk: delegation_create, delegation_update, delegation_wait_on, delegation_done and
@@ -22,7 +22,7 @@ const person = z
 const link = z
   .object({
     kind: z.enum(LINK_KINDS as [string, ...string[]]),
-    ref: z.string().min(1).max(LIMITS.ref).describe('The run id, doc id, Gmail thread id or calendar event id.'),
+    ref: z.string().min(1).max(LIMITS.ref).describe('The run id, the doc id as a number (for example "12"), the Gmail thread id or the calendar event id.'),
     account: z.string().min(1).max(100).optional().describe('The Google account alias of a thread or an event.'),
     label: z.string().min(1).max(LIMITS.label).optional(),
   })
@@ -126,8 +126,10 @@ function personError(person: Person): string | undefined {
 }
 
 // a thread or an event lives in one google account, so its link needs the alias. with a google config the alias must
-// be one of its accounts, so the follow-up job can read the thread.
+// be one of its accounts, so the follow-up job can read the thread. a doc link names the doc by its id, so its href
+// opens a doc.
 function linkError(ctx: DeskContext, link: LinkIn): string | undefined {
+  if (link.kind === 'doc' && !validDocRef(link.ref)) return `"${link.ref}" is not a doc id. ${DOC_REF_ERROR[0]!.toUpperCase()}${DOC_REF_ERROR.slice(1)}, the number in its #/docs/<id> link.`;
   if (link.kind !== 'thread' && link.kind !== 'event') return undefined;
   const account = link.account?.trim();
   if (!account) return `a ${link.kind} link needs the account, the alias of its Google account`;

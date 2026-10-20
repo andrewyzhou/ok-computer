@@ -86,6 +86,9 @@ export interface DelegationEvent {
   data: Record<string, unknown>;
   runId: string | null;
   toolCallId: string | null;
+  // true when the agent wrote the row after its session read outside text, for example a mail, so the text may come
+  // from that mail.
+  tainted: boolean;
   createdAt: string;
 }
 

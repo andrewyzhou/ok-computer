@@ -6,7 +6,7 @@ import { Button, EmptyState, FilterBar, Page, SearchField, Select, Skeleton, Tab
 import { Board } from './Board';
 import { NewDelegationPanel } from './DelegationForm';
 import { DelegationPanel } from './Details';
-import { STATUSES, STATUS_LABEL, boardPath, deskQueryOf, refreshDesk, setDeskQuery } from './data';
+import { MAX_DESK_Q, STATUSES, STATUS_LABEL, boardPath, deskQueryOf, refreshDesk, setDeskQuery } from './data';
 import './desk.css';
 
 // the desk: a board of the delegations with a column for each status, the filters by status and person, the details
@@ -18,25 +18,48 @@ const SEARCH_DELAY_MS = 300;
 
 type StatusTab = DelegationStatus | 'all';
 
+// the route refuses a filter with this kind of error. the page shows it next to the search, not as a load failure.
+const FILTER_ERROR = /^give (q|person) /;
+
 // the search field keeps its text while the owner types, and writes it to the hash after a pause. a change of the
-// hash from elsewhere, for example the clear button, sets the text again.
+// hash from elsewhere, for example the clear button, sets the text again. the text of the hash is cut to the limit of
+// the route, like the filter of the board.
 function DeskSearch({ query }: { query: URLSearchParams }) {
-  const hashValue = query.get('q') ?? '';
+  const hashValue = deskQueryOf(query).q ?? '';
   const [value, setValue] = useState(hashValue);
   const latest = useRef(query);
   latest.current = query;
   useEffect(() => setValue(hashValue), [hashValue]);
   useEffect(() => {
-    if (value === (latest.current.get('q') ?? '')) return;
-    const timer = setTimeout(() => setDeskQuery(latest.current, { q: value.trim() || null }), SEARCH_DELAY_MS);
+    // the text is compared with the cut text of the hash, so opening a link with a long or a blank q writes nothing.
+    if (value === (deskQueryOf(latest.current).q ?? '')) return;
+    const timer = setTimeout(() => setDeskQuery(latest.current, { q: value.trim().slice(0, MAX_DESK_Q) || null }), SEARCH_DELAY_MS);
     return () => clearTimeout(timer);
   }, [value]);
-  return <SearchField label="Search the desk" placeholder="Search" value={value} onChange={setValue} maxLength={200} />;
+  return <SearchField label="Search the desk" placeholder="Search" value={value} onChange={setValue} maxLength={MAX_DESK_Q} />;
 }
+
+// the note under the filter bar for a search that the route refused, or for a search in a link that was cut to the
+// limit. it takes a row of its own, so the controls of the bar stay on one line.
+function SearchNote({ query, error }: { query: URLSearchParams; error?: string | undefined }) {
+  const cut = (query.get('q') ?? '').trim().length > MAX_DESK_Q;
+  const note = error ?? (cut ? `The search uses the first ${MAX_DESK_Q} characters.` : undefined);
+  if (!note) return null;
+  return (
+    <p className={`desk-search-note${error ? ' is-error' : ''}`} role={error ? 'alert' : 'status'}>
+      {note}
+    </p>
+  );
+}
+
+// the words of a filter error of the route, for the note under the search.
+const filterErrorText = (error: string) =>
+  error.startsWith('give q ') ? `Search with 1 to ${MAX_DESK_Q} characters.` : 'Pick a person from the list.';
 
 export function DeskPage({ query }: RouteProps) {
   const filters = deskQueryOf(query);
   const board = useApi<DeskBoard>(boardPath(filters), refreshDesk);
+  const filterError = board.error !== undefined && FILTER_ERROR.test(board.error) ? filterErrorText(board.error) : undefined;
   const rawId = query.get('id');
   const selectedId = rawId && /^[1-9]\d{0,15}$/.test(rawId) ? Number(rawId) : null;
   const creating = query.get('new') === '1';
@@ -82,10 +105,21 @@ export function DeskPage({ query }: RouteProps) {
               Clear filters
             </Button>
           ) : null}
+          <SearchNote query={query} error={filterError} />
         </FilterBar>
       }
     >
-      {board.error !== undefined ? (
+      {filterError !== undefined ? (
+        <EmptyState
+          icon="desk"
+          title="The desk cannot use this filter."
+          action={
+            <Button icon="close" onClick={clearFilters}>
+              Clear filters
+            </Button>
+          }
+        />
+      ) : board.error !== undefined ? (
         <div className="error-box desk-error" role="alert">
           <p>Could not load the desk: {board.error}</p>
           <Button size="sm" onClick={board.reload}>

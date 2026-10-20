@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeskHarness, D, deskLink, H, nudgeStep, threadMessage, type DeskHarness } from '../../test/desk-harness.js';
+import { registerSecret } from '../observability/redact.js';
 import { sessionTaint } from '../policy/store.js';
 import { runFollowUps } from './followups.js';
 import { listDelegationEvents, updateDelegation } from './store.js';
@@ -390,6 +391,26 @@ describe('runFollowUps', () => {
     expect(h.history(second.id)).toContain('follow_up_due');
     expect(h.logged.map((each) => each.msg)).toContain('the desk follow-up of a delegation failed');
     expect(h.sent).toHaveLength(1);
+  });
+
+  it('writes a redacted and short error of one delegation into the history', async () => {
+    const h = await setup();
+    const secret = 'desk-followup-secret-0123456789';
+    registerSecret(secret, 'test:desk-followup-error');
+    const first = h.seed({ thread: { account: 'personal', ref: 't-lease' } });
+    asked(h);
+    const broken = {
+      ...h.ctx,
+      caller: () => {
+        throw new Error(`the token endpoint said: bad token ${secret}\n${'x'.repeat(2_000)}`);
+      },
+    };
+    await runFollowUps(broken);
+    const text = events(h, first.id).find((each) => each.kind === 'follow_up_failed')!.text!;
+    expect(text).toContain('the follow-up stopped: the token endpoint said: bad token [redacted]');
+    expect(text).not.toContain(secret);
+    expect(text).not.toContain('\n');
+    expect(text.length).toBeLessThan(400);
   });
 
   it('reports the decisions of a dry run, and writes, drafts and sends nothing', async () => {

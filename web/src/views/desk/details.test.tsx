@@ -104,7 +104,8 @@ describe('the details panel of a delegation', () => {
               links: [
                 { kind: 'run', ref: 'run-1', account: null, label: 'The chat where you asked', href: 'runs/run-1' },
                 { kind: 'run', ref: 'run-2', account: null, label: null, href: null },
-                { kind: 'doc', ref: 'doc-1', account: null, label: 'Passport checklist', href: 'docs/doc-1' },
+                { kind: 'doc', ref: '1', account: null, label: 'Passport checklist', href: 'docs/1' },
+                { kind: 'doc', ref: 'doc-9', account: null, label: 'An old doc link', href: null },
                 { kind: 'event', ref: 'ev-1', account: 'school', label: null, href: null },
               ],
             },
@@ -112,11 +113,32 @@ describe('the details panel of a delegation', () => {
     const { panel } = renderPanel(1);
     expect((await panel().findByRole('link', { name: 'The chat where you asked' })).getAttribute('href')).toBe('#/runs/run-1');
     expect(panel().getByRole('link', { name: 'Run run-2' }).getAttribute('href')).toBe('#/runs/run-2');
-    expect(panel().getByRole('link', { name: 'Passport checklist' }).getAttribute('href')).toBe('#/docs/doc-1');
+    expect(panel().getByRole('link', { name: 'Passport checklist' }).getAttribute('href')).toBe('#/docs/1');
+    // an old doc link whose ref is not the id of a doc has no href, so it shows as text and not as a dead link.
+    expect(panel().queryByRole('link', { name: 'An old doc link' })).toBeNull();
+    expect(panel().getByText('An old doc link')).toBeTruthy();
     expect([...document.querySelectorAll('.desk-link')].at(-1)!.textContent).toBe('Calendar event in school ev-1');
     cleanup();
     renderPanel(6);
     expect(await screen.findByText('No links')).toBeTruthy();
+  });
+
+  it('marks the history rows that the agent wrote after it read outside text', async () => {
+    const base = detail(4);
+    stubDesk({
+      'GET /api/desk/delegations/:id': () => ({
+        ...base,
+        history: [
+          { ...base.history[0]!, id: 1, actor: 'owner', tainted: false },
+          { ...base.history[0]!, id: 2, kind: 'note', actor: 'agent', text: 'The mail says to bring two photos.', tainted: true },
+        ],
+      }),
+    });
+    const { panel } = renderPanel(4);
+    await panel().findByText('The mail says to bring two photos.');
+    const rows = [...document.querySelectorAll('.desk-history-row')];
+    expect(rows.map((row) => row.querySelector('.badge')?.textContent ?? null)).toEqual([null, 'outside text']);
+    expect(rows[1]!.querySelector('.badge')!.getAttribute('title')).toContain('read outside text');
   });
 
   it('marks a delegation done with its status, then loads it again and tells the board', async () => {
@@ -221,10 +243,10 @@ describe('the details panel of a delegation', () => {
     const odd: DelegationDetail = {
       ...detail(3),
       history: [
-        { id: 1, delegationId: 3, kind: 'mystery' as never, actor: 'robot' as never, text: null, data: null as never, runId: null, toolCallId: null, createdAt: '2026-10-12T01:00:00.000Z' },
-        { id: 2, delegationId: 3, kind: 'status', actor: 'owner', text: null, data: { from: 5, to: 'gone' }, runId: null, toolCallId: null, createdAt: '2026-10-12T02:00:00.000Z' },
-        { id: 3, delegationId: 3, kind: 'updated', actor: 'owner', text: null, data: { changes: 'all' }, runId: null, toolCallId: null, createdAt: '2026-10-12T03:00:00.000Z' },
-        { id: 4, delegationId: 3, kind: 'reply_seen', actor: 'system', text: null, data: { from: 'front@dentist.example' }, runId: null, toolCallId: null, createdAt: '2026-10-12T04:00:00.000Z' },
+        { id: 1, delegationId: 3, kind: 'mystery' as never, actor: 'robot' as never, text: null, data: null as never, runId: null, toolCallId: null, tainted: false, createdAt: '2026-10-12T01:00:00.000Z' },
+        { id: 2, delegationId: 3, kind: 'status', actor: 'owner', text: null, data: { from: 5, to: 'gone' }, runId: null, toolCallId: null, tainted: false, createdAt: '2026-10-12T02:00:00.000Z' },
+        { id: 3, delegationId: 3, kind: 'updated', actor: 'owner', text: null, data: { changes: 'all' }, runId: null, toolCallId: null, tainted: false, createdAt: '2026-10-12T03:00:00.000Z' },
+        { id: 4, delegationId: 3, kind: 'reply_seen', actor: 'system', text: null, data: { from: 'front@dentist.example' }, runId: null, toolCallId: null, tainted: false, createdAt: '2026-10-12T04:00:00.000Z' },
       ],
     };
     stubDesk({ 'GET /api/desk/delegations/:id': () => odd });

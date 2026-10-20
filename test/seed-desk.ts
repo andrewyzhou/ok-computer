@@ -11,7 +11,7 @@ import { appendDelegationEvent, createDelegation, markChecked, updateDelegation,
 //  1 open     Book the Denver flights                 -                                  +3d      -          run run-1
 //  2 waiting  Get the lease renewal from Dana         Dana Park <dana@landlord.example>  +5d      +1d        thread personal t-lease
 //  3 waiting  Reschedule the dentist                  front@dentist.example              -1d      -1h        thread school t-dentist
-//  4 blocked  Renew the passport                      -                                  +20d     -          doc doc-1
+//  4 blocked  Renew the passport                      -                                  +20d     -          doc 1
 //  5 done     Send the thank-you note to Prof. Lee    -                                  -        -          -
 //  6 dropped  Find a cheaper phone plan               -                                  -        -          -
 //  7 open     (a long title, no due time)             -                                  -        -          event school ev-1
@@ -21,7 +21,8 @@ import { appendDelegationEvent, createDelegation, markChecked, updateDelegation,
 // order: by dueAt, and 8 last because it has no due time (2 and 8 come in by their follow-up times). listWaiting gives
 // 2, 3, 8. delegation 2 has one nudge draft (nudge 1, gmail draft d-nudge-1, follow-up -1d), nudgeCount 1, its next
 // follow-up at +1d, and the history created, link_added, follow_up_checked, nudge_drafted, note. delegation 4 has the
-// history created, link_added, updated (nextStep), status (open -> blocked). 5 closed two days ago and 6 five days ago.
+// history created, link_added, updated (nextStep), status (open -> blocked), and the last two are tainted. 5 closed two days ago and 6 five days ago.
+// the doc link of 4 is doc 1, the trip plan of test/docs-seed.ts, whose checks hold the passport.
 // people with an active delegation: dana@landlord.example (2), front@dentist.example (3) and dana (8).
 
 export const LONG_TITLE =
@@ -106,11 +107,12 @@ export function seedDesk(db: Db, now: Date): void {
   );
 
   const passport = make(
-    { title: 'Renew the passport', details: 'The passport ends in March.', dueAt: iso(20 * D), links: [{ kind: 'doc', ref: 'doc-1', label: 'Passport checklist' }], createdBy: 'owner' },
+    { title: 'Renew the passport', details: 'The passport ends in March.', dueAt: iso(20 * D), links: [{ kind: 'doc', ref: '1', label: 'Passport checklist' }], createdBy: 'owner' },
     owner,
     -6 * D,
   );
-  change(passport, { status: 'blocked', nextStep: 'Sign the form and choose a photo' }, agent, -1 * D);
+  // the agent read a mail before this change, so its history rows are marked as written after outside text.
+  change(passport, { status: 'blocked', nextStep: 'Sign the form and choose a photo' }, { ...agent, tainted: true }, -1 * D);
 
   const thanks = make({ title: 'Send the thank-you note to Prof. Lee', createdBy: 'agent', sessionKey: 'main', runId: 'run-1' }, agent, -7 * D);
   change(thanks, { status: 'done', note: 'You sent it from Gmail.' }, agent, -2 * D);

@@ -104,6 +104,9 @@ function changeWords(field: string, change: unknown): string {
   return `${name}: ${valueWords(field, change.from)} → ${valueWords(field, change.to)}`;
 }
 
+// the title of the badge of a history row that the agent wrote after its session read outside text.
+const TAINT_TITLE = 'The agent wrote this after it read outside text, such as a mail, so the text can repeat that mail. Check it before you act on it.';
+
 function HistoryRow({ event }: { event: DelegationEvent }) {
   const label = (EVENT_LABEL as Record<string, string | undefined>)[event.kind] ?? String(event.kind);
   const actor = (ACTOR_LABEL as Record<string, string | undefined>)[event.actor] ?? null;
@@ -118,6 +121,11 @@ function HistoryRow({ event }: { event: DelegationEvent }) {
       <div className="desk-history-head">
         <span className="desk-history-kind">{label}</span>
         {actor ? <span className="desk-history-actor">{actor}</span> : null}
+        {event.tainted === true ? (
+          <Badge tone="warning" title={TAINT_TITLE}>
+            outside text
+          </Badge>
+        ) : null}
         <time className="desk-history-time" dateTime={event.createdAt}>
           {when(event.createdAt)}
         </time>
@@ -142,17 +150,19 @@ function LinkRow({ link }: { link: DelegationLink }) {
       </li>
     );
   }
-  if (link.kind === 'doc') {
+  // a doc link opens the doc by the href of the server. an old link whose ref is not the id of a doc has no href, so
+  // it shows as text, like a thread, and never as a link to a page that is not found.
+  if (link.kind === 'doc' && link.href) {
     return (
       <li className="desk-link">
-        <a href={`#/docs/${encodeURIComponent(link.ref)}`} title={link.label ? undefined : link.ref}>
+        <a href={`#/${link.href}`} title={link.label ? undefined : link.ref}>
           {link.label ?? `Doc ${link.ref.length > 12 ? `${link.ref.slice(0, 11)}…` : link.ref}`}
         </a>
       </li>
     );
   }
   // a mail thread and a calendar event have no page in the web app, so they show as text with their id.
-  const what = link.kind === 'thread' ? 'Mail thread' : link.kind === 'event' ? 'Calendar event' : String(link.kind);
+  const what = link.kind === 'thread' ? 'Mail thread' : link.kind === 'event' ? 'Calendar event' : link.kind === 'doc' ? 'Doc' : String(link.kind);
   return (
     <li className="desk-link">
       {link.label ? <span className="desk-link-label">{link.label}</span> : null}
