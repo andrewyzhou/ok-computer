@@ -8,6 +8,7 @@ import { headOf } from '../text.js';
 import { zonedToUtc } from '../time.js';
 import { defineTool, type Tool, type ToolOutput } from '../tools/registry.js';
 import type { GoogleAccounts, GoogleApis } from './accounts.js';
+import { isLink, listShownEvents, plainText, videoOf } from './calendar-events.js';
 import type { GoogleConfig } from './config.js';
 import { GoogleError, toGoogleError } from './errors.js';
 import { badAddress, bodyText, header, rawMessage } from './mime.js';
@@ -56,20 +57,6 @@ function attachmentsOf(part: gmail_v1.Schema$MessagePart | undefined, found: str
   return found;
 }
 
-// the text of an event description. a calendar app writes it in html, and the sender of an invitation writes it, so
-// each step takes linear time and the text stays untrusted.
-function plainText(html: string): string {
-  return html
-    .replace(/<br\s*\/?>|<\/p>|<\/li>/gi, ' ')
-    .replace(/<[^<>]*>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
-
 // a person on an event: the name when google has one, and the address.
 const personOf = (person: { email?: string | null; displayName?: string | null }) =>
   person.displayName ? `${person.displayName} <${person.email ?? 'no address'}>` : (person.email ?? 'someone');
@@ -77,14 +64,6 @@ const personOf = (person: { email?: string | null; displayName?: string | null }
 // google names the answers needsAction, accepted, tentative and declined. the line uses words.
 const ANSWER: Record<string, string> = { needsAction: 'not answered', accepted: 'accepted', tentative: 'maybe', declined: 'declined' };
 const answerOf = (status: string | null | undefined) => ANSWER[status ?? 'needsAction'] ?? status ?? 'not answered';
-
-// the video link of an event: a meet link, or the video entry point of another conference tool.
-// a zoom invitation often puts its link in the location, so a location that is a link counts as the video link.
-const isLink = (text: string | null | undefined) => /^https?:\/\/\S+$/i.test((text ?? '').trim());
-const videoOf = (event: calendar_v3.Schema$Event) =>
-  event.hangoutLink ??
-  event.conferenceData?.entryPoints?.find((point) => point.entryPointType === 'video')?.uri ??
-  (isLink(event.location) ? event.location!.trim() : undefined);
 
 // a meeting with many guests gets a count of the answers. a list of six names out of 46 tells the owner nothing.
 const MANY_GUESTS = 8;
@@ -152,19 +131,6 @@ function eventDetail(event: calendar_v3.Schema$Event, label: string): string {
   return lines.join('\n');
 }
 
-// the calendars of an account that the owner shows in google calendar. the primary one comes first. a list that
-// fails gives the primary calendar alone, so a read still works.
-async function shownCalendars(apis: GoogleApis): Promise<Array<{ id: string; label: string | null }>> {
-  try {
-    const { data } = await apis.calendar.calendarList.list({ minAccessRole: 'reader', maxResults: 250 });
-    const others = (data.items ?? [])
-      .filter((each) => !each.primary && each.selected && !each.hidden && each.id)
-      .map((each) => ({ id: each.id!, label: cleanLine(each.summaryOverride ?? each.summary ?? each.id!, 60) }));
-    return [{ id: 'primary', label: null }, ...others];
-  } catch {
-    return [{ id: 'primary', label: null }];
-  }
-}
 export const GOOGLE = 'google';
 const name = (tool: string) => `${GOOGLE}__${tool}`;
 
@@ -419,26 +385,11 @@ export function createGoogleTools(deps: GoogleToolsDeps): Tool[] {
       untrustedOutput: 'calendar',
       run: async ({ account: which, from, to }, ctx) => {
         const output = await eachAccount(name('calendar_list_events'), which, 'calendar', async (apis, alias) => {
-          const calendars = await shownCalendars(apis);
-          const lists = await Promise.all(
-            calendars.map(async (calendar) => {
-              const { data } = await apis.calendar.events.list({ calendarId: calendar.id, timeMin: from, timeMax: to, singleEvents: true, orderBy: 'startTime', maxResults: 100 });
-              return (data.items ?? []).map((event) => ({ event, calendar }));
-            }),
-          );
-          // an invitation from a shared calendar is also on the primary one. the first copy, from the primary
-          // calendar, stays.
-          const seen = new Set<string>();
-          const used = new Set<(typeof calendars)[number]>();
-          const events = lists.flat().flatMap(({ event, calendar }) => {
-            const key = `${event.iCalUID ?? event.id}@${event.start?.dateTime ?? event.start?.date}`;
-            if (seen.has(key)) return [];
-            seen.add(key);
-            used.add(calendar);
-            return [eventLine(event, calendar.label ? `${alias}/${calendar.label}` : alias)];
-          });
+          // the calendar page of the today track reads the same events through listShownEvents.
+          const { events: found, used } = await listShownEvents(apis, from, to);
+          const events = found.map(({ event, calendar }) => eventLine(event, calendar.label ? `${alias}/${calendar.label}` : alias));
           // the id of each other calendar comes once, for calendar_get_event, and not on each line.
-          const legend = [...used].filter((each) => each.label);
+          const legend = used.filter((each) => each.label);
           return legend.length ? [...events, `[${alias}] calendar ids: ${legend.map((each) => `${each.label} = ${each.id}`).join('; ')}`] : events;
         });
         // the lines of all accounts sort by time, so a merged list reads as one day. google writes each start in the

@@ -7,6 +7,8 @@ import { buildStablePrompt } from './agent/system-prompt.js';
 import { createAlwaysAllow } from './approvals/always.js';
 import { approvalNote, createApprovalFlow, type ApprovalFlow } from './approvals/flow.js';
 import { expireApprovals, type Approval } from './approvals/store.js';
+import { installBrief } from './brief/install.js';
+import { createToday, type Today } from './brief/today.js';
 import type { ChannelAdapter } from './channels/types.js';
 import { isWebChannel, WEB, type WebChat } from './channels/web.js';
 import type { LoginCodes } from './dashboard/login.js';
@@ -129,6 +131,8 @@ export interface App {
   // the web chat of the dashboard. it exists when the web channel is one of the channels.
   chat?: WebChat;
   inbox?: Inbox;
+  // the morning brief and the calendar of the today pages (phase 6 t1). it works without a google block.
+  today: Today;
   sandbox: Pick<Sandbox, 'status'>;
   secretVault?: SecretVault;
 }
@@ -277,6 +281,22 @@ export function createApp(deps: AppDeps): App {
     : undefined;
   // the scheduler is created below. the tools call replan only after the start.
   const replan = () => scheduler.replan();
+  // the today track (phase 6 t1). its link is the one that /status and /dashboard give.
+  const today = createToday({
+    db,
+    clock,
+    logger,
+    timeZone: config.timeZone,
+    ...(google ? { google } : {}),
+    ...(inbox ? { inbox } : {}),
+    owner,
+    queue,
+    dashboardUrl: (deps.loginCodes && config.dashboard.publicUrl) || `http://127.0.0.1:${config.dashboard.port}`,
+    signal: shutdown.signal,
+    replan,
+    activeRuns,
+    ...ids,
+  });
   const builtIn = [
     nowTool,
     ...createGoalTools({ db, replan }),
@@ -290,6 +310,7 @@ export function createApp(deps: AppDeps): App {
     createResultReadTool({ db, blobs }),
     ...web.tools,
     ...sandbox.tools,
+    ...today.tools,
   ];
   // a profile names built-in tools and google tools. a name that this app does not have is left out.
   const registered = new Set([...builtIn, ...(google?.tools ?? [])].map((tool) => tool.name));
@@ -414,6 +435,7 @@ export function createApp(deps: AppDeps): App {
     workshop: createWorkshop({ db, clock, config, queue, agent, signal: shutdown.signal, ...ids }),
     ...(google ? { sourcePolls: { google: google.poll } } : {}),
     ...(inbox ? { inboxJobs: (job: Parameters<Inbox['runJob']>[0]) => inbox.runJob(job) } : {}),
+    brief: () => today.runBrief(),
     signal: shutdown.signal,
     ...ids,
   });
@@ -536,6 +558,7 @@ export function createApp(deps: AppDeps): App {
       syncPolls(db, entries, clock(), config.timeZone);
       syncGooglePoll(db, config, clock());
       if (inbox && installInboxJobs(db, config, clock())) logger.info('inbox jobs installed');
+      if (installBrief(db, config, clock())) logger.info('morning brief installed');
       // missed jobs can take minutes, so the start does not wait for them.
       if (deps.background !== false) void scheduler.start().catch((err: unknown) => logger.error('scheduler start failed', { err }));
       // a server can need many seconds to start, so the start does not wait. tool_search reads the stored catalog.
@@ -557,6 +580,7 @@ export function createApp(deps: AppDeps): App {
     integrations,
     ...(google ? { google } : {}),
     ...(inbox ? { inbox } : {}),
+    today,
     sandbox,
     ...(deps.secretVault ? { secretVault: deps.secretVault } : {}),
     // without compaction hooks the strategy only renders. it does not call a model or append an event.

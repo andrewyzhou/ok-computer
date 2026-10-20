@@ -61,6 +61,8 @@ describe('cli chat through the full loop', () => {
       'automations_delete',
       'automations_list',
       'automations_update',
+      'brief_read',
+      'brief_set_time',
       'browser_allow_domain',
       'browser_back',
       'browser_click',

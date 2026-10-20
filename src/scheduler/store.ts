@@ -25,6 +25,9 @@ export const payloadSchema = z.discriminatedUnion('type', [
   // a job of the inbox (phase 5 m8) that runs in code. it reads mail and makes model calls on the utility or batch slot,
   // and each change of mail or of the calendar goes through a tool that the owner approves.
   z.object({ type: z.literal('inbox'), job: z.enum(['newsletters', 'subscriptions', 'digest']) }),
+  // the morning brief of phase 6 t1. it runs in code, reads the calendars, the inbox digest, the delegations and the
+  // goals, stores the brief and sends the owner a short message. it changes nothing.
+  z.object({ type: z.literal('brief') }),
 ]);
 export type Payload = z.infer<typeof payloadSchema>;
 

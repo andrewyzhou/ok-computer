@@ -112,6 +112,29 @@ The waterfall (M1) gives a `sandbox` span with `ref.sandboxExecId` for each exec
 
 The default image is `okc-sandbox:1` (`SANDBOX_IMAGE` in `src/sandbox/limits.ts`), built from `sandbox/Dockerfile` by `npm run sandbox:image`. It runs as `1000:1000` with the home `/work`, the create request resets the entrypoint of its base (`Entrypoint: [""]`), and it holds the relay of the network mode at `/opt/okc/relay.mjs`. A change of what the image holds changes the tag in `limits.ts` and in the `sandbox:image` script together. The decisions are in DESIGN-NEXT 5.8.
 
+### Phase 6 T1: today (`src/dashboard/brief.ts`, `src/dashboard/calendar.ts`, `src/brief/`)
+
+The types are in `src/dashboard/brief-types.ts` and `src/dashboard/calendar-types.ts`, which import nothing. The plan is in [PHASE6-PLAN.md](PHASE6-PLAN.md) (T1).
+
+| Method | Path | Query / body | Response | Notes |
+|---|---|---|---|---|
+| GET | `/api/calendar` | `CalendarQuery`: `from` (a day, default today), `days` 1–14 (default 7) | `CalendarPage` | Every calendar that the owner shows on every account, read with the code of `calendar_list_events` (`src/google/calendar-events.ts`). The range is from midnight of `from` to midnight after the last day, in the time zone of the app. `proposals` are the calendar proposals in the state `proposed` that touch the range. `conflicts`, `travelGaps` and `invites` come from `src/brief/analyze.ts`, as in the brief. Without a `google` block the answer is `200` with `configured: false` and empty lists. An account that cannot be read is in `skipped` with one sentence, and the other accounts still show. `400` for a `from` that is not a date of the calendar. |
+| GET | `/api/briefs` | `cursor`, `limit` 1–100 (default 30) | `BriefsPage` | Cursor paging, newest first. `400` for a cursor that cannot be read. |
+| GET | `/api/briefs/latest` | none | `Brief` | `404 brief not found` when none exists yet. |
+| GET | `/api/briefs/day/:day` | none | `Brief` | The newest brief of the day. `400` for a day that is not a date of the calendar, `404 brief not found`. |
+| GET | `/api/briefs/:id` | none | `Brief` | `404 brief not found`. A row that cannot be read gives `500`. |
+| GET | `/api/brief/schedule` | none | `BriefSchedule` | The automation of the brief, and whether a brief builds now. |
+| PUT | `/api/brief/schedule` | `BriefScheduleRequest` `{ time }` | `BriefSchedule` | `time` is `HH:MM`, 00:00 to 23:59. Moves the brief and turns it on, and makes the automation again when the owner deleted it. `400` for a bad body. |
+| POST | `/api/brief/run` | `{}` | `202 { started: true }` | Builds and sends a brief now, like `POST /api/automations/:id/run`. `409` while a brief builds. It works without a `google` block (the brief then has no calendar). |
+
+- **The job.** The automation `brief: morning brief` runs at 07:30 every day in the time zone of the app, with the payload `{ type: 'brief' }`. The app makes it one time, and never puts a deleted one back at a start. The owner moves it by chat (`brief_set_time`), on the today page, or on the Automations page.
+- Each brief runs in code, without a model call, in the session `brief:<runId>`. Its first event is a `system_event` with the task, and a second one names the calendar and mail sources that it read, with their taint. When the digest job of the day runs at the same time, the brief waits for it, at most 10 minutes.
+- **Sources.** The calendar from the start of the day to 7 days later, the newest digest of the day (or of the day before), the calendar proposals in the state `proposed`, the delegations of the desk track when its module is there, and the goals of the day. A source that fails gives an empty section and a note in `sources`, and the brief still goes out.
+- **Rules.** A **conflict** is two events that overlap, both accepted or organized by the owner, not shown as free; two copies of one invitation (the same `uid` and start) are not a conflict. A **travel gap** is two timed events at different non-empty places where the second starts 0 to 14 minutes after the first ends. An **unanswered invitation** is an event whose owner's answer is `needsAction`, not organized by the owner, not cancelled and not over.
+- **Storage.** `025_brief.sql`: `briefs` (one row for each brief, append-only; the newest row of a day is the brief of the day) and `brief_deliveries` (one row for each try to send it, append-only).
+- **Delivery.** The short text is plain text of at most 700 characters, with the link `<dashboard>/#/today/<day>` on its last line, where the dashboard is the address that `/status` gives. It goes to the owner like every proactive message. The main session gets a copy as a wrapped `system_event` with the taint of the run, so the agent knows what the owner answers to.
+- **Tools.** `brief_read` (read; its output is untrusted, because it repeats event titles and mail subjects) and `brief_set_time` (write). Both are in the main session.
+
 ## 3. Event streams
 
 Both streams are SSE. With `DASHBOARD_TOKEN` set, they take `?token=` because `EventSource` sends no headers. The cookie also works. A stream sends `event: ready` with `{}` first. Then each message is an unnamed event whose data is one JSON value.
@@ -136,12 +159,13 @@ The routes stay in the hash (`#/<path>`). `web/src/routes.ts` holds the registry
 
 | Nav group | Item → route | Owner |
 |---|---|---|
-| Today | Overview → `#/` | core, M3 restyles |
-| Desk, Calendar, Docs, People | none in phase 5. The groups stay hidden until a view registers. | |
+| Today | Today → `#/today` (also the home page `#/`). Detail: `#/today/:day`, the brief of a day | Phase 6 T1 |
+| Calendar | Calendar → `#/calendar` (`?day=`, `?mode=week` or `day`, `?event=<key>` selects an event) | Phase 6 T1 |
+| Desk, Docs, People | none in phase 5. The groups stay hidden until a view registers. | |
 | Inbox | Digest → `#/inbox`, Newsletters → `#/inbox/newsletters`, Subscriptions → `#/inbox/subscriptions`, Drafts → `#/inbox/drafts`, Proposals → `#/inbox/proposals`. Detail: `#/inbox/digests/:id` | M8 |
 | Chats | Chats → `#/chats`. Detail: `#/chats/:key` (the `main@<id>` key, URL-encoded) | M4 |
 | Activity | Activity → `#/activity` (`?kind=` filters). Detail: `#/activity/:key` | M4 |
-| Agent | Goals `#/goals`, Memory `#/memory` (`?path=` selects a file), Automations `#/automations`, Signals `#/signals`, Approvals `#/approvals` | core |
+| Agent | Overview `#/overview` (the home page before phase 6), Goals `#/goals`, Memory `#/memory` (`?path=` selects a file), Automations `#/automations`, Signals `#/signals`, Approvals `#/approvals` | core |
 | Connections | Google `#/google`, Integrations `#/integrations` (detail `#/integrations/:id*`), Browser `#/browser` (detail `#/browser/:id*`) | core |
 | Dev | Runs `#/runs` (detail `#/runs/:id*`), Sessions `#/sessions` (detail `#/sessions/:sessionKey*`), Policy `#/policy`, Cost `#/cost`, Logs `#/logs`, Sandbox `#/sandbox`. Each of these six pages is devOnly. | core, M5 for Sandbox |
 | none | Search → `#/search?q=` (the full page behind ⌘K) | M4 |
@@ -163,6 +187,7 @@ Each team edits only its own files. A shared file gets only the change written h
 | M7 | `Dockerfile`, `compose.yaml`, `litestream.yml`, `.github/workflows/`, `docs/setup/aws.md`, `src/dashboard/deploy.ts`, `src/secrets/` (the file and aws backends) | `types.ts` (its section), `src/config/schema.ts` (`secrets`), the store choice in `src/app.ts` |
 | M8 | `src/db/migrations/019_inbox.sql`, `src/inbox/`, `src/dashboard/inbox.ts`, `web/src/views/inbox/` | `types.ts` (its section), the tool registration in `src/app.ts`, `src/google/` for new Gmail and Calendar calls |
 | M9 | `src/db/migrations/020_sandbox.sql`, `src/sandbox/`, `src/dashboard/sandbox.ts`, `sandbox/` (the image), `docs/setup/sandbox.md` | `types.ts` (its section), the tool registration in `src/app.ts` and its policy rule, `src/browser/proxy.ts` (the `EgressProxyOptions` with `allowHost` and the listen address; the browser team reviews it), `src/main.ts` (`sandbox: {}`), the `sandbox:image` script of `package.json`, `RISK_TEXT.exec` in `src/integrations/discovery.ts`, and `README.md` |
+| Phase 6 T1 | `src/db/migrations/025_brief.sql`, `src/brief/`, `src/google/calendar-events.ts`, `src/dashboard/brief.ts`, `calendar.ts`, `brief-types.ts`, `calendar-types.ts`, `web/src/views/today/`, `web/src/views/calendar/`, `test/seed-today.ts`, `test/fixtures/today-data.ts` | the `brief` payload in `src/scheduler/store.ts` and `jobs.ts`, the `today` key of `App` and of the `app` pick, the today lines and the tool line in `src/app.ts`, the two tool names in `MAIN_TOOLS`, two mount lines in `server.ts`, `calendar_list_events` in `src/google/tools.ts` (it reads through `calendar-events.ts`), the today lines in `test/seed.ts` |
 
 - **Route modules.** Each new module `src/dashboard/<area>.ts` exports `mount<Area>(server, deps)`. The stub exists already, and `server.ts` already mounts it with one line after the sign-in check and before the `/api/*` 404. A team fills its stub and does not edit those lines. A team that needs a new part of `App` adds one key to the `app` pick in `DashboardDeps`.
 - **Types.** Each team adds fields only in its own section of `types.ts`. A new shape that another team reads goes there too, and nothing in that file imports anything.

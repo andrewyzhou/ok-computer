@@ -11,6 +11,7 @@ import { createLogger, silentLogger } from '../src/observability/logger.js';
 import { setChecklist } from '../src/scheduler/heartbeat.js';
 import { handleIn } from '../src/tools/results.js';
 import { createTestApp } from './app-harness.js';
+import { fakeToday, seedBriefRows } from './seed-today.js';
 
 export const pdt = (time: string, day = '2026-10-12') => new Date(`${day}T${time}:00-07:00`).toISOString();
 
@@ -117,12 +118,15 @@ export async function seedDashboard(options: Partial<Pick<DashboardDeps, 'token'
   logger.warn('transient model error', { runId: 'run-3' });
   logger.error('model request failed', { runId: 'run-3' });
 
+  seedBriefRows(t.db);
+
   const dashboard = createDashboard({
     db: t.db,
     config: t.config,
     clock: t.clock,
     logger: silentLogger,
-    app: t.app,
+    // the today pages (phase 6 t1) read the fixture week and briefs of test/seed-today.ts.
+    app: { ...t.app, today: fakeToday() },
     webDir: join(t.dataDir, 'no-web'),
     ...options,
   });
