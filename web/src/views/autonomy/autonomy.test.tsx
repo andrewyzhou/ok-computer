@@ -70,10 +70,11 @@ describe('the autonomy page', () => {
     }
     expect(cardOf('Purchases').getByText('Money leaves your account, so you approve each payment.')).toBeTruthy();
     expect(inMain().getAllByRole('radiogroup')).toHaveLength(5);
-    // every domain is at its default level on a first run. a domain that can change says so, and a fixed one shows its
-    // level as a pill and no radio.
-    expect(inMain().getAllByText('Default level')).toHaveLength(5);
-    expect(cardOf('Purchases').queryByText('Default level')).toBeNull();
+    // every domain is at its default level on a first run. a domain that can change has the default tag, and a fixed
+    // one shows its level as a pill and no radio.
+    expect(inMain().getAllByText('Default')).toHaveLength(5);
+    expect(cardOf('Purchases').queryByText('Default')).toBeNull();
+    expect(inMain().getAllByText('Default review')).toHaveLength(3);
     expect(cardOf('Purchases').getByText('ask')).toBeTruthy();
     // a domain that can change shows its level once, in the radios.
     expect(cardOf('Mail drafts').queryByText('review')).toBeNull();
@@ -113,8 +114,8 @@ describe('the autonomy page', () => {
     await waitFor(() => expect(cardOf('Mail drafts').queryByRole('group', { name: /Confirm/ })).toBeNull());
     expect(posts(calls)).toEqual([{ method: 'POST', url: '/api/autonomy/mail_drafts', body: { level: 'auto', from: 'review' } }]);
     await waitFor(() => expect((cardOf('Mail drafts').getByRole('radio', { name: 'Auto' }) as HTMLInputElement).checked).toBe(true));
-    expect(cardOf('Mail drafts').queryByText('Default level')).toBeNull();
-    expect(cardOf('Mail drafts').getByText('Default: review')).toBeTruthy();
+    expect(cardOf('Mail drafts').queryByText('Default')).toBeNull();
+    expect(cardOf('Mail drafts').getByText('Default review')).toBeTruthy();
     // the history loads again after the change.
     await waitFor(() => expect(calls.filter((call) => call.method === 'GET' && call.url === '/api/autonomy')).toHaveLength(2));
     const table = within(await inMain().findByRole('table', { name: 'autonomy history' }));
@@ -161,8 +162,8 @@ describe('the autonomy page', () => {
     expect(rows[0]!.querySelector('time')?.getAttribute('title')).toBeTruthy();
     // the run link is for developer mode only.
     expect(table.queryByRole('link', { name: /run/ })).toBeNull();
-    expect(cardOf('Mail drafts').queryByText('Default level')).toBeNull();
-    expect(cardOf('Mail drafts').getByText('Default: review')).toBeTruthy();
+    expect(cardOf('Mail drafts').queryByText('Default')).toBeNull();
+    expect(cardOf('Mail drafts').getByText('Default review')).toBeTruthy();
     expect(cardOf('Mail drafts').getByText(/Changed/)).toBeTruthy();
     expect(inMain().queryByRole('button', { name: 'Show older' })).toBeNull();
   });

@@ -58,10 +58,24 @@ export function decisionLevel(row: { autonomyDomain: string | null; autonomyLeve
 
 // the text of a refusal of a raise or a lowering. a stale level means that another tab or a chat changed it, and the
 // page has already loaded the levels again, so the owner only has to choose again.
-export function changeError(message: string): string {
+export function changeError(message: string, devMode = false): string {
+  if (/\bSQLITE_(BUSY|CORRUPT|NOTADB)\b/.test(message)) return readError(message, devMode).text;
   const stale = /^.* is at (ask|review|auto) now, not at (ask|review|auto)\b/.exec(message);
   if (stale) return `The level changed in another tab or in chat. It is now ${stale[1]}. Choose again.`;
   return /[.!?]$/.test(message.trim()) ? message.trim() : `${message.trim()}.`;
+}
+
+// a failed read in plain words. a busy or damaged database says what the owner can do, and only developer mode adds
+// the raw text of the server. any other text stays as the server wrote it, and plain is false. retry is false when a
+// new try cannot help.
+export function readError(message: string, devMode: boolean): { text: string; plain: boolean; retry: boolean } {
+  const raw = message.trim();
+  const plain = (text: string, retry: boolean) => ({ text: devMode ? `${text} The server said: ${raw}` : text, plain: true, retry });
+  if (/\bSQLITE_BUSY\b/.test(raw)) return plain('The database is busy. Try again in a moment.', true);
+  if (/\bSQLITE_(CORRUPT|NOTADB)\b/.test(raw)) {
+    return plain('The database file is damaged, so it cannot be read. Check the logs in data/logs, or restore the database from a backup.', false);
+  }
+  return { text: raw, plain: false, retry: true };
 }
 
 export function LevelPill({ level }: { level: AutonomyLevel }) {
