@@ -134,14 +134,30 @@ export interface AutonomyContext {
   level: AutonomyLevel;
 }
 
-const notBuilt = (what: string) => new Error(`${what} is not built yet (phase 6 track T6)`);
+// the domain of each tool whose domain does not depend on its input.
+const FIXED_DOMAINS: Readonly<Record<string, AutonomyDomain>> = {
+  [GOOGLE('gmail_draft')]: 'mail_drafts',
+  inbox_draft_reply: 'mail_drafts',
+  [GOOGLE('gmail_label')]: 'mail_labels',
+  [GOOGLE('gmail_archive')]: 'mail_labels',
+  [GOOGLE('gmail_mark_read')]: 'mail_labels',
+  browser_submit: 'browser_submits',
+  [GOOGLE('gmail_unsubscribe')]: 'unsubscribes',
+  inbox_unsubscribe: 'unsubscribes',
+};
 
 // domainOf gives the domain of one call, or undefined for a call outside the ladder. the policy engine then decides
 // it as before. calendar_create_event is a hold without attendees and an event with guests with them. sandbox_exec is
 // in sandbox_network only with network access. the tools of the dashboard flows (inbox_archive_sender,
 // inbox_create_event, inbox_cancel_subscription) stay outside the ladder, because the dashboard asks the owner for each.
 export function domainOf(tool: string, input: unknown): AutonomyDomain | undefined {
-  void tool;
-  void input;
-  throw notBuilt('domainOf');
+  if (Object.hasOwn(FIXED_DOMAINS, tool)) return FIXED_DOMAINS[tool];
+  // an input that is not an object has no fields. the tool then fails its own check of the input.
+  const fields = input !== null && typeof input === 'object' ? (input as Record<string, unknown>) : {};
+  if (tool === GOOGLE('calendar_create_event')) {
+    // any guest gets an invitation, so a list with an item is an event with guests. a missing or empty list is a hold.
+    return Array.isArray(fields.attendees) && fields.attendees.length > 0 ? 'calendar_guests' : 'calendar_holds';
+  }
+  if (tool === 'sandbox_exec') return fields.network !== null && typeof fields.network === 'object' ? 'sandbox_network' : undefined;
+  return undefined;
 }
