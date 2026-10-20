@@ -110,7 +110,7 @@ describe('the command menu search', () => {
   it('shows grouped hits after typing, and opens a hit or all results', async () => {
     const calls = stubFetch(seeded.dashboard, { 'GET /api/search': answer });
     openApp('#/');
-    await inMain().findByText('Cost today');
+    await screen.findByRole('heading', { level: 1, name: 'Today' });
     fireEvent.keyDown(window, { key: 'k', metaKey: true });
     const menu = await screen.findByRole('dialog', { name: 'Command menu' });
     const input = within(menu).getByRole('combobox');
@@ -141,7 +141,7 @@ describe('the command menu search', () => {
   it('cuts a long text to 200 characters and shows an error of the server in the menu', async () => {
     const calls = stubFetch(seeded.dashboard, { 'GET /api/search': () => json({ error: 'the search index is not ready' }, 500) });
     openApp('#/');
-    await inMain().findByText('Cost today');
+    await screen.findByRole('heading', { level: 1, name: 'Today' });
     fireEvent.keyDown(window, { key: 'k', metaKey: true });
     const menu = await screen.findByRole('dialog', { name: 'Command menu' });
     fireEvent.change(within(menu).getByRole('combobox'), { target: { value: 'x'.repeat(250) } });

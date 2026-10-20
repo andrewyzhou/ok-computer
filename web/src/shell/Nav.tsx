@@ -1,20 +1,30 @@
 import type { Ref } from 'react';
 import { Icon } from '../icons';
-import type { NavSection, RouteDef } from '../routes';
+import { matchRoute, type NavSection, type RouteDef } from '../routes';
 import { SearchField } from '../ui';
 import { EXTENSIONS } from './extensions';
-import { GROUP_ICONS, routeHref } from './model';
+import { GROUP_ICONS, hashPath, routeHref } from './model';
+
+// the home page #/ has no nav group, so the shell gives it no current item. it shows the page of the nav item with
+// the same page key, today, so the rail and the nav mark that item.
+function withHome(current: RouteDef | undefined, sections: NavSection[]): RouteDef | undefined {
+  if (current || hashPath(location.hash) !== '') return current;
+  const home = matchRoute('')?.route.pageKey?.({});
+  if (home === undefined) return undefined;
+  return sections.flatMap((section) => section.items).find((item) => item.pageKey?.({}) === home);
+}
 
 // the rail has one icon for each nav group. it opens the first page of the group.
 export function Rail({ sections, current, onSearch }: { sections: NavSection[]; current: RouteDef | undefined; onSearch: () => void }) {
+  const here = withHome(current, sections);
   return (
     <div className="rail">
-      <a className="rail-brand" href="#/" aria-label="ok computer, overview">
+      <a className="rail-brand" href="#/" aria-label="ok computer, today">
         ok
       </a>
       <ul className="rail-list">
         {sections.map((section) => {
-          const active = current?.group === section.group;
+          const active = here?.group === section.group;
           return (
             <li key={section.group}>
               <a
@@ -61,6 +71,7 @@ export function Nav({
   // the panels of the view folders. a test gives its own.
   panels?: typeof PANELS;
 }) {
+  const here = withHome(current, sections);
   const needle = filter.trim().toLowerCase();
   const hasChats = panels.some((panel) => panel.group === 'chats');
   const shown = sections
@@ -95,7 +106,7 @@ export function Nav({
             {items.length ? (
               <ul className="nav-list">
                 {items.map((item) => {
-                  const active = current === item;
+                  const active = here === item;
                   return (
                     <li key={item.path}>
                       <a

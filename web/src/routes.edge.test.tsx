@@ -17,7 +17,11 @@ const stub = (path: string, extra: Partial<RouteDef> = {}): RouteDef => ({
 describe('the routes of the contract', () => {
   it('registers each route of section 4 with its group', () => {
     const want: Array<[string, string | null]> = [
-      ['', 'today'],
+      ['', null],
+      ['today', 'today'],
+      ['today/:day', null],
+      ['calendar', 'calendar'],
+      ['overview', 'agent'],
       ['inbox', 'inbox'],
       ['inbox/newsletters', 'inbox'],
       ['inbox/subscriptions', 'inbox'],
@@ -152,6 +156,23 @@ describe('matchRoute with typed and edited hashes', () => {
     expect(matchRoute('trace/')?.route.path).not.toBe('trace/:runId');
   });
 
+  it('opens the today page for each form of the home hash, a trailing slash and a bad day', () => {
+    for (const hash of ['', '#', '#/', '/', '#/today', '#/today/', 'today?x=1']) {
+      expect(matchRoute(hash)?.route.label, hash).toBe('Today');
+    }
+    expect(matchRoute('#/today/')?.route.path).toBe('today');
+    expect(matchRoute('#/today/not-a-day')?.route.path).toBe('today/:day');
+    expect(matchRoute('#/today/not-a-day')?.params).toEqual({ day: 'not-a-day' });
+    expect(matchRoute('today/2026-10-19/more')).toBeUndefined();
+  });
+
+  it('marks agent overview as the nav item of #/overview', () => {
+    const match = matchRoute('#/overview')!;
+    expect(navRoute(match.route, ROUTES)?.path).toBe('overview');
+    expect(navRoute(match.route, ROUTES)?.group).toBe('agent');
+    expect(navRoute(matchRoute('today/2026-10-19')!.route, ROUTES)?.path).toBe('today');
+  });
+
   it('keeps a question mark inside the query', () => {
     const match = matchRoute('search?q=what?&scope=runs');
     expect(match?.query.get('q')).toBe('what?');
@@ -172,7 +193,8 @@ describe('the nav order and the parents of detail pages', () => {
 
   it('lists the agent and connections pages in the order of the contract', () => {
     const labels = (group: string) => navSections(false).find((section) => section.group === group)?.items.map((route) => route.label);
-    expect(labels('agent')).toEqual(['Goals', 'Memory', 'Automations', 'Signals', 'Approvals']);
+    expect(labels('today')).toEqual(['Today']);
+    expect(labels('agent')).toEqual(['Overview', 'Goals', 'Memory', 'Automations', 'Signals', 'Approvals']);
     expect(labels('connections')).toEqual(['Google', 'Integrations', 'Browser']);
   });
 
@@ -184,6 +206,7 @@ describe('the nav order and the parents of detail pages', () => {
     expect(parent('activity/:key')).toBe('activity');
     expect(parent('sandbox/code/:execId')).toBe('sandbox');
     expect(parent('sandbox/browser/:taskId')).toBe('sandbox');
+    expect(parent('today/:day')).toBe('today');
     expect(parent('trace/:runId')).toBeUndefined();
     expect(navRoute(undefined, ROUTES)).toBeUndefined();
   });
