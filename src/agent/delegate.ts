@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { Slot } from '../config/schema.js';
 import { getRunDetail } from '../dashboard/queries.js';
 import type { Db } from '../db/index.js';
+import { DOC_READ_TOOLS } from '../docs/names.js';
 import { listEvents } from '../events/log.js';
 import { SUBAGENT_PREFIX, type TaintSource } from '../policy/policy.js';
 import { decisionForApproval, sessionTaint } from '../policy/store.js';
@@ -32,7 +33,7 @@ export const PROFILES = {
   },
   research: {
     description: "Searches the web and the owner's memory, and reports an answer with its sources.",
-    tools: ['web_search', 'web_fetch', 'memory_search', 'memory_get', 'result_read'],
+    tools: ['web_search', 'web_fetch', 'memory_search', 'memory_get', 'result_read', ...DOC_READ_TOOLS],
     slot: 'main',
     maxIterations: 20,
   },

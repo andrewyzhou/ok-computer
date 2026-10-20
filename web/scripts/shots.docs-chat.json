@@ -1,0 +1,1566 @@
+[
+  {
+    "name": "chat-docs-1440",
+    "hash": "#/chats/main%400",
+    "width": 1440,
+    "wait": ".doc-card-title",
+    "stubs": {
+      "GET /api/chats": {
+        "chats": [
+          {
+            "key": "main@0",
+            "kind": "main",
+            "sessionKey": "main",
+            "fromEventId": 1,
+            "toEventId": null,
+            "title": "plan a trip to Lisbon",
+            "channel": "telegram",
+            "preview": "Your trip plan is ready",
+            "firstAt": "2026-10-13T01:00:00.000Z",
+            "lastAt": "2026-10-13T01:30:00.000Z",
+            "runs": 4,
+            "costUsd": 0.0123,
+            "lastRunStatus": "completed",
+            "pendingApprovals": 0
+          }
+        ],
+        "nextCursor": null
+      },
+      "GET /api/chats/main%400/messages": {
+        "chat": {
+          "key": "main@0",
+          "kind": "main",
+          "sessionKey": "main",
+          "fromEventId": 1,
+          "toEventId": null,
+          "title": "plan a trip to Lisbon",
+          "channel": "telegram",
+          "preview": "Your trip plan is ready",
+          "firstAt": "2026-10-13T01:00:00.000Z",
+          "lastAt": "2026-10-13T01:30:00.000Z",
+          "runs": 4,
+          "costUsd": 0.0123,
+          "lastRunStatus": "completed",
+          "pendingApprovals": 0
+        },
+        "messages": [
+          {
+            "id": 1,
+            "role": "owner",
+            "runId": null,
+            "channel": null,
+            "text": "Plan a five day trip to Lisbon in November, and compare two laptops for me.",
+            "guarded": false,
+            "approvalId": null,
+            "createdAt": "2026-10-13T00:40:00.000Z"
+          },
+          {
+            "id": 2,
+            "role": "agent",
+            "runId": "run-1",
+            "channel": null,
+            "text": "Your trip plan is ready: http://127.0.0.1:4317/#/docs/1\nThe laptop comparison is here: http://127.0.0.1:4317/#/docs/2",
+            "guarded": false,
+            "approvalId": null,
+            "createdAt": "2026-10-13T00:45:00.000Z"
+          }
+        ],
+        "before": null
+      },
+      "GET /api/docs/1": {
+        "doc": {
+          "id": 1,
+          "title": "Trip plan: Lisbon",
+          "kind": "plan",
+          "author": "agent",
+          "tainted": false,
+          "version": 3,
+          "chars": 2361,
+          "comments": 2,
+          "sessionKey": "main",
+          "createdAt": "2026-10-10T16:00:00.000Z",
+          "updatedAt": "2026-10-13T00:45:00.000Z"
+        },
+        "version": {
+          "version": 3,
+          "title": "Trip plan: Lisbon",
+          "kind": "plan",
+          "author": "agent",
+          "note": "moved the hotel to Alfama and added packing",
+          "runId": "run-1",
+          "toolCallId": "call-doc-3",
+          "chars": 2361,
+          "taint": [],
+          "createdAt": "2026-10-13T00:45:00.000Z",
+          "body": "# Trip plan: Lisbon",
+          "links": [
+            {
+              "label": "The run that wrote it",
+              "href": "#/runs/run-1"
+            },
+            {
+              "label": "Hotel booking page",
+              "href": "https://hotel.example.com/alfama"
+            }
+          ]
+        },
+        "versions": [
+          {
+            "version": 3,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": "moved the hotel to Alfama and added packing",
+            "runId": "run-1",
+            "toolCallId": "call-doc-3",
+            "chars": 2361,
+            "taint": [],
+            "createdAt": "2026-10-13T00:45:00.000Z"
+          },
+          {
+            "version": 2,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": "added the held flights",
+            "runId": "run-1",
+            "toolCallId": "call-doc-2",
+            "chars": 1394,
+            "taint": [],
+            "createdAt": "2026-10-10T17:30:00.000Z"
+          },
+          {
+            "version": 1,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": null,
+            "runId": "run-1",
+            "toolCallId": "call-doc-1",
+            "chars": 1000,
+            "taint": [],
+            "createdAt": "2026-10-10T16:00:00.000Z"
+          }
+        ],
+        "comments": []
+      },
+      "GET /api/docs/2": {
+        "doc": {
+          "id": 2,
+          "title": "Laptop comparison",
+          "kind": "comparison",
+          "author": "agent",
+          "tainted": true,
+          "version": 1,
+          "chars": 120,
+          "comments": 0,
+          "sessionKey": "main",
+          "createdAt": "2026-10-12T15:00:00.000Z",
+          "updatedAt": "2026-10-12T15:00:00.000Z"
+        },
+        "version": {
+          "version": 1,
+          "title": "Laptop comparison",
+          "kind": "comparison",
+          "author": "agent",
+          "note": null,
+          "runId": "run-1",
+          "toolCallId": "call-doc-1",
+          "chars": 1000,
+          "taint": [
+            "web_fetch: https://reviews.example.com/laptops"
+          ],
+          "createdAt": "2026-10-12T15:00:00.000Z",
+          "body": "# Laptop comparison\n\n| Model | Price |\n| --- | ---: |\n| Air 13 | $1,099 |\n\n**Pick:** the Air 13.",
+          "links": []
+        },
+        "versions": [
+          {
+            "version": 1,
+            "title": "Laptop comparison",
+            "kind": "comparison",
+            "author": "agent",
+            "note": null,
+            "runId": "run-1",
+            "toolCallId": "call-doc-1",
+            "chars": 1000,
+            "taint": [
+              "web_fetch: https://reviews.example.com/laptops"
+            ],
+            "createdAt": "2026-10-12T15:00:00.000Z"
+          }
+        ],
+        "comments": []
+      }
+    }
+  },
+  {
+    "name": "chat-docs-missing-1440",
+    "hash": "#/chats/main%400",
+    "width": 1440,
+    "wait": ".doc-card.is-missing",
+    "stubs": {
+      "GET /api/chats": {
+        "chats": [
+          {
+            "key": "main@0",
+            "kind": "main",
+            "sessionKey": "main",
+            "fromEventId": 1,
+            "toEventId": null,
+            "title": "plan a trip to Lisbon",
+            "channel": "telegram",
+            "preview": "Your trip plan is ready",
+            "firstAt": "2026-10-13T01:00:00.000Z",
+            "lastAt": "2026-10-13T01:30:00.000Z",
+            "runs": 4,
+            "costUsd": 0.0123,
+            "lastRunStatus": "completed",
+            "pendingApprovals": 0
+          }
+        ],
+        "nextCursor": null
+      },
+      "GET /api/chats/main%400/messages": {
+        "chat": {
+          "key": "main@0",
+          "kind": "main",
+          "sessionKey": "main",
+          "fromEventId": 1,
+          "toEventId": null,
+          "title": "plan a trip to Lisbon",
+          "channel": "telegram",
+          "preview": "Your trip plan is ready",
+          "firstAt": "2026-10-13T01:00:00.000Z",
+          "lastAt": "2026-10-13T01:30:00.000Z",
+          "runs": 4,
+          "costUsd": 0.0123,
+          "lastRunStatus": "completed",
+          "pendingApprovals": 0
+        },
+        "messages": [
+          {
+            "id": 1,
+            "role": "owner",
+            "runId": null,
+            "channel": null,
+            "text": "Plan a five day trip to Lisbon in November, and compare two laptops for me.",
+            "guarded": false,
+            "approvalId": null,
+            "createdAt": "2026-10-13T00:40:00.000Z"
+          },
+          {
+            "id": 2,
+            "role": "agent",
+            "runId": "run-1",
+            "channel": null,
+            "text": "The old plan was http://127.0.0.1:4317/#/docs/99, and the new one is #/docs/1.",
+            "guarded": false,
+            "approvalId": null,
+            "createdAt": "2026-10-13T00:45:00.000Z"
+          }
+        ],
+        "before": null
+      },
+      "GET /api/docs/1": {
+        "doc": {
+          "id": 1,
+          "title": "Trip plan: Lisbon",
+          "kind": "plan",
+          "author": "agent",
+          "tainted": false,
+          "version": 3,
+          "chars": 2361,
+          "comments": 2,
+          "sessionKey": "main",
+          "createdAt": "2026-10-10T16:00:00.000Z",
+          "updatedAt": "2026-10-13T00:45:00.000Z"
+        },
+        "version": {
+          "version": 3,
+          "title": "Trip plan: Lisbon",
+          "kind": "plan",
+          "author": "agent",
+          "note": "moved the hotel to Alfama and added packing",
+          "runId": "run-1",
+          "toolCallId": "call-doc-3",
+          "chars": 2361,
+          "taint": [],
+          "createdAt": "2026-10-13T00:45:00.000Z",
+          "body": "# Trip plan: Lisbon",
+          "links": [
+            {
+              "label": "The run that wrote it",
+              "href": "#/runs/run-1"
+            },
+            {
+              "label": "Hotel booking page",
+              "href": "https://hotel.example.com/alfama"
+            }
+          ]
+        },
+        "versions": [
+          {
+            "version": 3,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": "moved the hotel to Alfama and added packing",
+            "runId": "run-1",
+            "toolCallId": "call-doc-3",
+            "chars": 2361,
+            "taint": [],
+            "createdAt": "2026-10-13T00:45:00.000Z"
+          },
+          {
+            "version": 2,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": "added the held flights",
+            "runId": "run-1",
+            "toolCallId": "call-doc-2",
+            "chars": 1394,
+            "taint": [],
+            "createdAt": "2026-10-10T17:30:00.000Z"
+          },
+          {
+            "version": 1,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": null,
+            "runId": "run-1",
+            "toolCallId": "call-doc-1",
+            "chars": 1000,
+            "taint": [],
+            "createdAt": "2026-10-10T16:00:00.000Z"
+          }
+        ],
+        "comments": []
+      },
+      "GET /api/docs/2": {
+        "doc": {
+          "id": 2,
+          "title": "Laptop comparison",
+          "kind": "comparison",
+          "author": "agent",
+          "tainted": true,
+          "version": 1,
+          "chars": 120,
+          "comments": 0,
+          "sessionKey": "main",
+          "createdAt": "2026-10-12T15:00:00.000Z",
+          "updatedAt": "2026-10-12T15:00:00.000Z"
+        },
+        "version": {
+          "version": 1,
+          "title": "Laptop comparison",
+          "kind": "comparison",
+          "author": "agent",
+          "note": null,
+          "runId": "run-1",
+          "toolCallId": "call-doc-1",
+          "chars": 1000,
+          "taint": [
+            "web_fetch: https://reviews.example.com/laptops"
+          ],
+          "createdAt": "2026-10-12T15:00:00.000Z",
+          "body": "# Laptop comparison\n\n| Model | Price |\n| --- | ---: |\n| Air 13 | $1,099 |\n\n**Pick:** the Air 13.",
+          "links": []
+        },
+        "versions": [
+          {
+            "version": 1,
+            "title": "Laptop comparison",
+            "kind": "comparison",
+            "author": "agent",
+            "note": null,
+            "runId": "run-1",
+            "toolCallId": "call-doc-1",
+            "chars": 1000,
+            "taint": [
+              "web_fetch: https://reviews.example.com/laptops"
+            ],
+            "createdAt": "2026-10-12T15:00:00.000Z"
+          }
+        ],
+        "comments": []
+      }
+    }
+  },
+  {
+    "name": "chat-docs-1440-dark",
+    "hash": "#/chats/main%400",
+    "width": 1440,
+    "dark": true,
+    "wait": ".doc-card-title",
+    "stubs": {
+      "GET /api/chats": {
+        "chats": [
+          {
+            "key": "main@0",
+            "kind": "main",
+            "sessionKey": "main",
+            "fromEventId": 1,
+            "toEventId": null,
+            "title": "plan a trip to Lisbon",
+            "channel": "telegram",
+            "preview": "Your trip plan is ready",
+            "firstAt": "2026-10-13T01:00:00.000Z",
+            "lastAt": "2026-10-13T01:30:00.000Z",
+            "runs": 4,
+            "costUsd": 0.0123,
+            "lastRunStatus": "completed",
+            "pendingApprovals": 0
+          }
+        ],
+        "nextCursor": null
+      },
+      "GET /api/chats/main%400/messages": {
+        "chat": {
+          "key": "main@0",
+          "kind": "main",
+          "sessionKey": "main",
+          "fromEventId": 1,
+          "toEventId": null,
+          "title": "plan a trip to Lisbon",
+          "channel": "telegram",
+          "preview": "Your trip plan is ready",
+          "firstAt": "2026-10-13T01:00:00.000Z",
+          "lastAt": "2026-10-13T01:30:00.000Z",
+          "runs": 4,
+          "costUsd": 0.0123,
+          "lastRunStatus": "completed",
+          "pendingApprovals": 0
+        },
+        "messages": [
+          {
+            "id": 1,
+            "role": "owner",
+            "runId": null,
+            "channel": null,
+            "text": "Plan a five day trip to Lisbon in November, and compare two laptops for me.",
+            "guarded": false,
+            "approvalId": null,
+            "createdAt": "2026-10-13T00:40:00.000Z"
+          },
+          {
+            "id": 2,
+            "role": "agent",
+            "runId": "run-1",
+            "channel": null,
+            "text": "Your trip plan is ready: http://127.0.0.1:4317/#/docs/1\nThe laptop comparison is here: http://127.0.0.1:4317/#/docs/2",
+            "guarded": false,
+            "approvalId": null,
+            "createdAt": "2026-10-13T00:45:00.000Z"
+          }
+        ],
+        "before": null
+      },
+      "GET /api/docs/1": {
+        "doc": {
+          "id": 1,
+          "title": "Trip plan: Lisbon",
+          "kind": "plan",
+          "author": "agent",
+          "tainted": false,
+          "version": 3,
+          "chars": 2361,
+          "comments": 2,
+          "sessionKey": "main",
+          "createdAt": "2026-10-10T16:00:00.000Z",
+          "updatedAt": "2026-10-13T00:45:00.000Z"
+        },
+        "version": {
+          "version": 3,
+          "title": "Trip plan: Lisbon",
+          "kind": "plan",
+          "author": "agent",
+          "note": "moved the hotel to Alfama and added packing",
+          "runId": "run-1",
+          "toolCallId": "call-doc-3",
+          "chars": 2361,
+          "taint": [],
+          "createdAt": "2026-10-13T00:45:00.000Z",
+          "body": "# Trip plan: Lisbon",
+          "links": [
+            {
+              "label": "The run that wrote it",
+              "href": "#/runs/run-1"
+            },
+            {
+              "label": "Hotel booking page",
+              "href": "https://hotel.example.com/alfama"
+            }
+          ]
+        },
+        "versions": [
+          {
+            "version": 3,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": "moved the hotel to Alfama and added packing",
+            "runId": "run-1",
+            "toolCallId": "call-doc-3",
+            "chars": 2361,
+            "taint": [],
+            "createdAt": "2026-10-13T00:45:00.000Z"
+          },
+          {
+            "version": 2,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": "added the held flights",
+            "runId": "run-1",
+            "toolCallId": "call-doc-2",
+            "chars": 1394,
+            "taint": [],
+            "createdAt": "2026-10-10T17:30:00.000Z"
+          },
+          {
+            "version": 1,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": null,
+            "runId": "run-1",
+            "toolCallId": "call-doc-1",
+            "chars": 1000,
+            "taint": [],
+            "createdAt": "2026-10-10T16:00:00.000Z"
+          }
+        ],
+        "comments": []
+      },
+      "GET /api/docs/2": {
+        "doc": {
+          "id": 2,
+          "title": "Laptop comparison",
+          "kind": "comparison",
+          "author": "agent",
+          "tainted": true,
+          "version": 1,
+          "chars": 120,
+          "comments": 0,
+          "sessionKey": "main",
+          "createdAt": "2026-10-12T15:00:00.000Z",
+          "updatedAt": "2026-10-12T15:00:00.000Z"
+        },
+        "version": {
+          "version": 1,
+          "title": "Laptop comparison",
+          "kind": "comparison",
+          "author": "agent",
+          "note": null,
+          "runId": "run-1",
+          "toolCallId": "call-doc-1",
+          "chars": 1000,
+          "taint": [
+            "web_fetch: https://reviews.example.com/laptops"
+          ],
+          "createdAt": "2026-10-12T15:00:00.000Z",
+          "body": "# Laptop comparison\n\n| Model | Price |\n| --- | ---: |\n| Air 13 | $1,099 |\n\n**Pick:** the Air 13.",
+          "links": []
+        },
+        "versions": [
+          {
+            "version": 1,
+            "title": "Laptop comparison",
+            "kind": "comparison",
+            "author": "agent",
+            "note": null,
+            "runId": "run-1",
+            "toolCallId": "call-doc-1",
+            "chars": 1000,
+            "taint": [
+              "web_fetch: https://reviews.example.com/laptops"
+            ],
+            "createdAt": "2026-10-12T15:00:00.000Z"
+          }
+        ],
+        "comments": []
+      }
+    }
+  },
+  {
+    "name": "chat-docs-missing-1440-dark",
+    "hash": "#/chats/main%400",
+    "width": 1440,
+    "dark": true,
+    "wait": ".doc-card.is-missing",
+    "stubs": {
+      "GET /api/chats": {
+        "chats": [
+          {
+            "key": "main@0",
+            "kind": "main",
+            "sessionKey": "main",
+            "fromEventId": 1,
+            "toEventId": null,
+            "title": "plan a trip to Lisbon",
+            "channel": "telegram",
+            "preview": "Your trip plan is ready",
+            "firstAt": "2026-10-13T01:00:00.000Z",
+            "lastAt": "2026-10-13T01:30:00.000Z",
+            "runs": 4,
+            "costUsd": 0.0123,
+            "lastRunStatus": "completed",
+            "pendingApprovals": 0
+          }
+        ],
+        "nextCursor": null
+      },
+      "GET /api/chats/main%400/messages": {
+        "chat": {
+          "key": "main@0",
+          "kind": "main",
+          "sessionKey": "main",
+          "fromEventId": 1,
+          "toEventId": null,
+          "title": "plan a trip to Lisbon",
+          "channel": "telegram",
+          "preview": "Your trip plan is ready",
+          "firstAt": "2026-10-13T01:00:00.000Z",
+          "lastAt": "2026-10-13T01:30:00.000Z",
+          "runs": 4,
+          "costUsd": 0.0123,
+          "lastRunStatus": "completed",
+          "pendingApprovals": 0
+        },
+        "messages": [
+          {
+            "id": 1,
+            "role": "owner",
+            "runId": null,
+            "channel": null,
+            "text": "Plan a five day trip to Lisbon in November, and compare two laptops for me.",
+            "guarded": false,
+            "approvalId": null,
+            "createdAt": "2026-10-13T00:40:00.000Z"
+          },
+          {
+            "id": 2,
+            "role": "agent",
+            "runId": "run-1",
+            "channel": null,
+            "text": "The old plan was http://127.0.0.1:4317/#/docs/99, and the new one is #/docs/1.",
+            "guarded": false,
+            "approvalId": null,
+            "createdAt": "2026-10-13T00:45:00.000Z"
+          }
+        ],
+        "before": null
+      },
+      "GET /api/docs/1": {
+        "doc": {
+          "id": 1,
+          "title": "Trip plan: Lisbon",
+          "kind": "plan",
+          "author": "agent",
+          "tainted": false,
+          "version": 3,
+          "chars": 2361,
+          "comments": 2,
+          "sessionKey": "main",
+          "createdAt": "2026-10-10T16:00:00.000Z",
+          "updatedAt": "2026-10-13T00:45:00.000Z"
+        },
+        "version": {
+          "version": 3,
+          "title": "Trip plan: Lisbon",
+          "kind": "plan",
+          "author": "agent",
+          "note": "moved the hotel to Alfama and added packing",
+          "runId": "run-1",
+          "toolCallId": "call-doc-3",
+          "chars": 2361,
+          "taint": [],
+          "createdAt": "2026-10-13T00:45:00.000Z",
+          "body": "# Trip plan: Lisbon",
+          "links": [
+            {
+              "label": "The run that wrote it",
+              "href": "#/runs/run-1"
+            },
+            {
+              "label": "Hotel booking page",
+              "href": "https://hotel.example.com/alfama"
+            }
+          ]
+        },
+        "versions": [
+          {
+            "version": 3,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": "moved the hotel to Alfama and added packing",
+            "runId": "run-1",
+            "toolCallId": "call-doc-3",
+            "chars": 2361,
+            "taint": [],
+            "createdAt": "2026-10-13T00:45:00.000Z"
+          },
+          {
+            "version": 2,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": "added the held flights",
+            "runId": "run-1",
+            "toolCallId": "call-doc-2",
+            "chars": 1394,
+            "taint": [],
+            "createdAt": "2026-10-10T17:30:00.000Z"
+          },
+          {
+            "version": 1,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": null,
+            "runId": "run-1",
+            "toolCallId": "call-doc-1",
+            "chars": 1000,
+            "taint": [],
+            "createdAt": "2026-10-10T16:00:00.000Z"
+          }
+        ],
+        "comments": []
+      },
+      "GET /api/docs/2": {
+        "doc": {
+          "id": 2,
+          "title": "Laptop comparison",
+          "kind": "comparison",
+          "author": "agent",
+          "tainted": true,
+          "version": 1,
+          "chars": 120,
+          "comments": 0,
+          "sessionKey": "main",
+          "createdAt": "2026-10-12T15:00:00.000Z",
+          "updatedAt": "2026-10-12T15:00:00.000Z"
+        },
+        "version": {
+          "version": 1,
+          "title": "Laptop comparison",
+          "kind": "comparison",
+          "author": "agent",
+          "note": null,
+          "runId": "run-1",
+          "toolCallId": "call-doc-1",
+          "chars": 1000,
+          "taint": [
+            "web_fetch: https://reviews.example.com/laptops"
+          ],
+          "createdAt": "2026-10-12T15:00:00.000Z",
+          "body": "# Laptop comparison\n\n| Model | Price |\n| --- | ---: |\n| Air 13 | $1,099 |\n\n**Pick:** the Air 13.",
+          "links": []
+        },
+        "versions": [
+          {
+            "version": 1,
+            "title": "Laptop comparison",
+            "kind": "comparison",
+            "author": "agent",
+            "note": null,
+            "runId": "run-1",
+            "toolCallId": "call-doc-1",
+            "chars": 1000,
+            "taint": [
+              "web_fetch: https://reviews.example.com/laptops"
+            ],
+            "createdAt": "2026-10-12T15:00:00.000Z"
+          }
+        ],
+        "comments": []
+      }
+    }
+  },
+  {
+    "name": "chat-docs-390",
+    "hash": "#/chats/main%400",
+    "width": 390,
+    "wait": ".doc-card-title",
+    "stubs": {
+      "GET /api/chats": {
+        "chats": [
+          {
+            "key": "main@0",
+            "kind": "main",
+            "sessionKey": "main",
+            "fromEventId": 1,
+            "toEventId": null,
+            "title": "plan a trip to Lisbon",
+            "channel": "telegram",
+            "preview": "Your trip plan is ready",
+            "firstAt": "2026-10-13T01:00:00.000Z",
+            "lastAt": "2026-10-13T01:30:00.000Z",
+            "runs": 4,
+            "costUsd": 0.0123,
+            "lastRunStatus": "completed",
+            "pendingApprovals": 0
+          }
+        ],
+        "nextCursor": null
+      },
+      "GET /api/chats/main%400/messages": {
+        "chat": {
+          "key": "main@0",
+          "kind": "main",
+          "sessionKey": "main",
+          "fromEventId": 1,
+          "toEventId": null,
+          "title": "plan a trip to Lisbon",
+          "channel": "telegram",
+          "preview": "Your trip plan is ready",
+          "firstAt": "2026-10-13T01:00:00.000Z",
+          "lastAt": "2026-10-13T01:30:00.000Z",
+          "runs": 4,
+          "costUsd": 0.0123,
+          "lastRunStatus": "completed",
+          "pendingApprovals": 0
+        },
+        "messages": [
+          {
+            "id": 1,
+            "role": "owner",
+            "runId": null,
+            "channel": null,
+            "text": "Plan a five day trip to Lisbon in November, and compare two laptops for me.",
+            "guarded": false,
+            "approvalId": null,
+            "createdAt": "2026-10-13T00:40:00.000Z"
+          },
+          {
+            "id": 2,
+            "role": "agent",
+            "runId": "run-1",
+            "channel": null,
+            "text": "Your trip plan is ready: http://127.0.0.1:4317/#/docs/1\nThe laptop comparison is here: http://127.0.0.1:4317/#/docs/2",
+            "guarded": false,
+            "approvalId": null,
+            "createdAt": "2026-10-13T00:45:00.000Z"
+          }
+        ],
+        "before": null
+      },
+      "GET /api/docs/1": {
+        "doc": {
+          "id": 1,
+          "title": "Trip plan: Lisbon",
+          "kind": "plan",
+          "author": "agent",
+          "tainted": false,
+          "version": 3,
+          "chars": 2361,
+          "comments": 2,
+          "sessionKey": "main",
+          "createdAt": "2026-10-10T16:00:00.000Z",
+          "updatedAt": "2026-10-13T00:45:00.000Z"
+        },
+        "version": {
+          "version": 3,
+          "title": "Trip plan: Lisbon",
+          "kind": "plan",
+          "author": "agent",
+          "note": "moved the hotel to Alfama and added packing",
+          "runId": "run-1",
+          "toolCallId": "call-doc-3",
+          "chars": 2361,
+          "taint": [],
+          "createdAt": "2026-10-13T00:45:00.000Z",
+          "body": "# Trip plan: Lisbon",
+          "links": [
+            {
+              "label": "The run that wrote it",
+              "href": "#/runs/run-1"
+            },
+            {
+              "label": "Hotel booking page",
+              "href": "https://hotel.example.com/alfama"
+            }
+          ]
+        },
+        "versions": [
+          {
+            "version": 3,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": "moved the hotel to Alfama and added packing",
+            "runId": "run-1",
+            "toolCallId": "call-doc-3",
+            "chars": 2361,
+            "taint": [],
+            "createdAt": "2026-10-13T00:45:00.000Z"
+          },
+          {
+            "version": 2,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": "added the held flights",
+            "runId": "run-1",
+            "toolCallId": "call-doc-2",
+            "chars": 1394,
+            "taint": [],
+            "createdAt": "2026-10-10T17:30:00.000Z"
+          },
+          {
+            "version": 1,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": null,
+            "runId": "run-1",
+            "toolCallId": "call-doc-1",
+            "chars": 1000,
+            "taint": [],
+            "createdAt": "2026-10-10T16:00:00.000Z"
+          }
+        ],
+        "comments": []
+      },
+      "GET /api/docs/2": {
+        "doc": {
+          "id": 2,
+          "title": "Laptop comparison",
+          "kind": "comparison",
+          "author": "agent",
+          "tainted": true,
+          "version": 1,
+          "chars": 120,
+          "comments": 0,
+          "sessionKey": "main",
+          "createdAt": "2026-10-12T15:00:00.000Z",
+          "updatedAt": "2026-10-12T15:00:00.000Z"
+        },
+        "version": {
+          "version": 1,
+          "title": "Laptop comparison",
+          "kind": "comparison",
+          "author": "agent",
+          "note": null,
+          "runId": "run-1",
+          "toolCallId": "call-doc-1",
+          "chars": 1000,
+          "taint": [
+            "web_fetch: https://reviews.example.com/laptops"
+          ],
+          "createdAt": "2026-10-12T15:00:00.000Z",
+          "body": "# Laptop comparison\n\n| Model | Price |\n| --- | ---: |\n| Air 13 | $1,099 |\n\n**Pick:** the Air 13.",
+          "links": []
+        },
+        "versions": [
+          {
+            "version": 1,
+            "title": "Laptop comparison",
+            "kind": "comparison",
+            "author": "agent",
+            "note": null,
+            "runId": "run-1",
+            "toolCallId": "call-doc-1",
+            "chars": 1000,
+            "taint": [
+              "web_fetch: https://reviews.example.com/laptops"
+            ],
+            "createdAt": "2026-10-12T15:00:00.000Z"
+          }
+        ],
+        "comments": []
+      }
+    }
+  },
+  {
+    "name": "chat-docs-missing-390",
+    "hash": "#/chats/main%400",
+    "width": 390,
+    "wait": ".doc-card.is-missing",
+    "stubs": {
+      "GET /api/chats": {
+        "chats": [
+          {
+            "key": "main@0",
+            "kind": "main",
+            "sessionKey": "main",
+            "fromEventId": 1,
+            "toEventId": null,
+            "title": "plan a trip to Lisbon",
+            "channel": "telegram",
+            "preview": "Your trip plan is ready",
+            "firstAt": "2026-10-13T01:00:00.000Z",
+            "lastAt": "2026-10-13T01:30:00.000Z",
+            "runs": 4,
+            "costUsd": 0.0123,
+            "lastRunStatus": "completed",
+            "pendingApprovals": 0
+          }
+        ],
+        "nextCursor": null
+      },
+      "GET /api/chats/main%400/messages": {
+        "chat": {
+          "key": "main@0",
+          "kind": "main",
+          "sessionKey": "main",
+          "fromEventId": 1,
+          "toEventId": null,
+          "title": "plan a trip to Lisbon",
+          "channel": "telegram",
+          "preview": "Your trip plan is ready",
+          "firstAt": "2026-10-13T01:00:00.000Z",
+          "lastAt": "2026-10-13T01:30:00.000Z",
+          "runs": 4,
+          "costUsd": 0.0123,
+          "lastRunStatus": "completed",
+          "pendingApprovals": 0
+        },
+        "messages": [
+          {
+            "id": 1,
+            "role": "owner",
+            "runId": null,
+            "channel": null,
+            "text": "Plan a five day trip to Lisbon in November, and compare two laptops for me.",
+            "guarded": false,
+            "approvalId": null,
+            "createdAt": "2026-10-13T00:40:00.000Z"
+          },
+          {
+            "id": 2,
+            "role": "agent",
+            "runId": "run-1",
+            "channel": null,
+            "text": "The old plan was http://127.0.0.1:4317/#/docs/99, and the new one is #/docs/1.",
+            "guarded": false,
+            "approvalId": null,
+            "createdAt": "2026-10-13T00:45:00.000Z"
+          }
+        ],
+        "before": null
+      },
+      "GET /api/docs/1": {
+        "doc": {
+          "id": 1,
+          "title": "Trip plan: Lisbon",
+          "kind": "plan",
+          "author": "agent",
+          "tainted": false,
+          "version": 3,
+          "chars": 2361,
+          "comments": 2,
+          "sessionKey": "main",
+          "createdAt": "2026-10-10T16:00:00.000Z",
+          "updatedAt": "2026-10-13T00:45:00.000Z"
+        },
+        "version": {
+          "version": 3,
+          "title": "Trip plan: Lisbon",
+          "kind": "plan",
+          "author": "agent",
+          "note": "moved the hotel to Alfama and added packing",
+          "runId": "run-1",
+          "toolCallId": "call-doc-3",
+          "chars": 2361,
+          "taint": [],
+          "createdAt": "2026-10-13T00:45:00.000Z",
+          "body": "# Trip plan: Lisbon",
+          "links": [
+            {
+              "label": "The run that wrote it",
+              "href": "#/runs/run-1"
+            },
+            {
+              "label": "Hotel booking page",
+              "href": "https://hotel.example.com/alfama"
+            }
+          ]
+        },
+        "versions": [
+          {
+            "version": 3,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": "moved the hotel to Alfama and added packing",
+            "runId": "run-1",
+            "toolCallId": "call-doc-3",
+            "chars": 2361,
+            "taint": [],
+            "createdAt": "2026-10-13T00:45:00.000Z"
+          },
+          {
+            "version": 2,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": "added the held flights",
+            "runId": "run-1",
+            "toolCallId": "call-doc-2",
+            "chars": 1394,
+            "taint": [],
+            "createdAt": "2026-10-10T17:30:00.000Z"
+          },
+          {
+            "version": 1,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": null,
+            "runId": "run-1",
+            "toolCallId": "call-doc-1",
+            "chars": 1000,
+            "taint": [],
+            "createdAt": "2026-10-10T16:00:00.000Z"
+          }
+        ],
+        "comments": []
+      },
+      "GET /api/docs/2": {
+        "doc": {
+          "id": 2,
+          "title": "Laptop comparison",
+          "kind": "comparison",
+          "author": "agent",
+          "tainted": true,
+          "version": 1,
+          "chars": 120,
+          "comments": 0,
+          "sessionKey": "main",
+          "createdAt": "2026-10-12T15:00:00.000Z",
+          "updatedAt": "2026-10-12T15:00:00.000Z"
+        },
+        "version": {
+          "version": 1,
+          "title": "Laptop comparison",
+          "kind": "comparison",
+          "author": "agent",
+          "note": null,
+          "runId": "run-1",
+          "toolCallId": "call-doc-1",
+          "chars": 1000,
+          "taint": [
+            "web_fetch: https://reviews.example.com/laptops"
+          ],
+          "createdAt": "2026-10-12T15:00:00.000Z",
+          "body": "# Laptop comparison\n\n| Model | Price |\n| --- | ---: |\n| Air 13 | $1,099 |\n\n**Pick:** the Air 13.",
+          "links": []
+        },
+        "versions": [
+          {
+            "version": 1,
+            "title": "Laptop comparison",
+            "kind": "comparison",
+            "author": "agent",
+            "note": null,
+            "runId": "run-1",
+            "toolCallId": "call-doc-1",
+            "chars": 1000,
+            "taint": [
+              "web_fetch: https://reviews.example.com/laptops"
+            ],
+            "createdAt": "2026-10-12T15:00:00.000Z"
+          }
+        ],
+        "comments": []
+      }
+    }
+  },
+  {
+    "name": "chat-docs-390-dark",
+    "hash": "#/chats/main%400",
+    "width": 390,
+    "dark": true,
+    "wait": ".doc-card-title",
+    "stubs": {
+      "GET /api/chats": {
+        "chats": [
+          {
+            "key": "main@0",
+            "kind": "main",
+            "sessionKey": "main",
+            "fromEventId": 1,
+            "toEventId": null,
+            "title": "plan a trip to Lisbon",
+            "channel": "telegram",
+            "preview": "Your trip plan is ready",
+            "firstAt": "2026-10-13T01:00:00.000Z",
+            "lastAt": "2026-10-13T01:30:00.000Z",
+            "runs": 4,
+            "costUsd": 0.0123,
+            "lastRunStatus": "completed",
+            "pendingApprovals": 0
+          }
+        ],
+        "nextCursor": null
+      },
+      "GET /api/chats/main%400/messages": {
+        "chat": {
+          "key": "main@0",
+          "kind": "main",
+          "sessionKey": "main",
+          "fromEventId": 1,
+          "toEventId": null,
+          "title": "plan a trip to Lisbon",
+          "channel": "telegram",
+          "preview": "Your trip plan is ready",
+          "firstAt": "2026-10-13T01:00:00.000Z",
+          "lastAt": "2026-10-13T01:30:00.000Z",
+          "runs": 4,
+          "costUsd": 0.0123,
+          "lastRunStatus": "completed",
+          "pendingApprovals": 0
+        },
+        "messages": [
+          {
+            "id": 1,
+            "role": "owner",
+            "runId": null,
+            "channel": null,
+            "text": "Plan a five day trip to Lisbon in November, and compare two laptops for me.",
+            "guarded": false,
+            "approvalId": null,
+            "createdAt": "2026-10-13T00:40:00.000Z"
+          },
+          {
+            "id": 2,
+            "role": "agent",
+            "runId": "run-1",
+            "channel": null,
+            "text": "Your trip plan is ready: http://127.0.0.1:4317/#/docs/1\nThe laptop comparison is here: http://127.0.0.1:4317/#/docs/2",
+            "guarded": false,
+            "approvalId": null,
+            "createdAt": "2026-10-13T00:45:00.000Z"
+          }
+        ],
+        "before": null
+      },
+      "GET /api/docs/1": {
+        "doc": {
+          "id": 1,
+          "title": "Trip plan: Lisbon",
+          "kind": "plan",
+          "author": "agent",
+          "tainted": false,
+          "version": 3,
+          "chars": 2361,
+          "comments": 2,
+          "sessionKey": "main",
+          "createdAt": "2026-10-10T16:00:00.000Z",
+          "updatedAt": "2026-10-13T00:45:00.000Z"
+        },
+        "version": {
+          "version": 3,
+          "title": "Trip plan: Lisbon",
+          "kind": "plan",
+          "author": "agent",
+          "note": "moved the hotel to Alfama and added packing",
+          "runId": "run-1",
+          "toolCallId": "call-doc-3",
+          "chars": 2361,
+          "taint": [],
+          "createdAt": "2026-10-13T00:45:00.000Z",
+          "body": "# Trip plan: Lisbon",
+          "links": [
+            {
+              "label": "The run that wrote it",
+              "href": "#/runs/run-1"
+            },
+            {
+              "label": "Hotel booking page",
+              "href": "https://hotel.example.com/alfama"
+            }
+          ]
+        },
+        "versions": [
+          {
+            "version": 3,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": "moved the hotel to Alfama and added packing",
+            "runId": "run-1",
+            "toolCallId": "call-doc-3",
+            "chars": 2361,
+            "taint": [],
+            "createdAt": "2026-10-13T00:45:00.000Z"
+          },
+          {
+            "version": 2,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": "added the held flights",
+            "runId": "run-1",
+            "toolCallId": "call-doc-2",
+            "chars": 1394,
+            "taint": [],
+            "createdAt": "2026-10-10T17:30:00.000Z"
+          },
+          {
+            "version": 1,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": null,
+            "runId": "run-1",
+            "toolCallId": "call-doc-1",
+            "chars": 1000,
+            "taint": [],
+            "createdAt": "2026-10-10T16:00:00.000Z"
+          }
+        ],
+        "comments": []
+      },
+      "GET /api/docs/2": {
+        "doc": {
+          "id": 2,
+          "title": "Laptop comparison",
+          "kind": "comparison",
+          "author": "agent",
+          "tainted": true,
+          "version": 1,
+          "chars": 120,
+          "comments": 0,
+          "sessionKey": "main",
+          "createdAt": "2026-10-12T15:00:00.000Z",
+          "updatedAt": "2026-10-12T15:00:00.000Z"
+        },
+        "version": {
+          "version": 1,
+          "title": "Laptop comparison",
+          "kind": "comparison",
+          "author": "agent",
+          "note": null,
+          "runId": "run-1",
+          "toolCallId": "call-doc-1",
+          "chars": 1000,
+          "taint": [
+            "web_fetch: https://reviews.example.com/laptops"
+          ],
+          "createdAt": "2026-10-12T15:00:00.000Z",
+          "body": "# Laptop comparison\n\n| Model | Price |\n| --- | ---: |\n| Air 13 | $1,099 |\n\n**Pick:** the Air 13.",
+          "links": []
+        },
+        "versions": [
+          {
+            "version": 1,
+            "title": "Laptop comparison",
+            "kind": "comparison",
+            "author": "agent",
+            "note": null,
+            "runId": "run-1",
+            "toolCallId": "call-doc-1",
+            "chars": 1000,
+            "taint": [
+              "web_fetch: https://reviews.example.com/laptops"
+            ],
+            "createdAt": "2026-10-12T15:00:00.000Z"
+          }
+        ],
+        "comments": []
+      }
+    }
+  },
+  {
+    "name": "chat-docs-missing-390-dark",
+    "hash": "#/chats/main%400",
+    "width": 390,
+    "dark": true,
+    "wait": ".doc-card.is-missing",
+    "stubs": {
+      "GET /api/chats": {
+        "chats": [
+          {
+            "key": "main@0",
+            "kind": "main",
+            "sessionKey": "main",
+            "fromEventId": 1,
+            "toEventId": null,
+            "title": "plan a trip to Lisbon",
+            "channel": "telegram",
+            "preview": "Your trip plan is ready",
+            "firstAt": "2026-10-13T01:00:00.000Z",
+            "lastAt": "2026-10-13T01:30:00.000Z",
+            "runs": 4,
+            "costUsd": 0.0123,
+            "lastRunStatus": "completed",
+            "pendingApprovals": 0
+          }
+        ],
+        "nextCursor": null
+      },
+      "GET /api/chats/main%400/messages": {
+        "chat": {
+          "key": "main@0",
+          "kind": "main",
+          "sessionKey": "main",
+          "fromEventId": 1,
+          "toEventId": null,
+          "title": "plan a trip to Lisbon",
+          "channel": "telegram",
+          "preview": "Your trip plan is ready",
+          "firstAt": "2026-10-13T01:00:00.000Z",
+          "lastAt": "2026-10-13T01:30:00.000Z",
+          "runs": 4,
+          "costUsd": 0.0123,
+          "lastRunStatus": "completed",
+          "pendingApprovals": 0
+        },
+        "messages": [
+          {
+            "id": 1,
+            "role": "owner",
+            "runId": null,
+            "channel": null,
+            "text": "Plan a five day trip to Lisbon in November, and compare two laptops for me.",
+            "guarded": false,
+            "approvalId": null,
+            "createdAt": "2026-10-13T00:40:00.000Z"
+          },
+          {
+            "id": 2,
+            "role": "agent",
+            "runId": "run-1",
+            "channel": null,
+            "text": "The old plan was http://127.0.0.1:4317/#/docs/99, and the new one is #/docs/1.",
+            "guarded": false,
+            "approvalId": null,
+            "createdAt": "2026-10-13T00:45:00.000Z"
+          }
+        ],
+        "before": null
+      },
+      "GET /api/docs/1": {
+        "doc": {
+          "id": 1,
+          "title": "Trip plan: Lisbon",
+          "kind": "plan",
+          "author": "agent",
+          "tainted": false,
+          "version": 3,
+          "chars": 2361,
+          "comments": 2,
+          "sessionKey": "main",
+          "createdAt": "2026-10-10T16:00:00.000Z",
+          "updatedAt": "2026-10-13T00:45:00.000Z"
+        },
+        "version": {
+          "version": 3,
+          "title": "Trip plan: Lisbon",
+          "kind": "plan",
+          "author": "agent",
+          "note": "moved the hotel to Alfama and added packing",
+          "runId": "run-1",
+          "toolCallId": "call-doc-3",
+          "chars": 2361,
+          "taint": [],
+          "createdAt": "2026-10-13T00:45:00.000Z",
+          "body": "# Trip plan: Lisbon",
+          "links": [
+            {
+              "label": "The run that wrote it",
+              "href": "#/runs/run-1"
+            },
+            {
+              "label": "Hotel booking page",
+              "href": "https://hotel.example.com/alfama"
+            }
+          ]
+        },
+        "versions": [
+          {
+            "version": 3,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": "moved the hotel to Alfama and added packing",
+            "runId": "run-1",
+            "toolCallId": "call-doc-3",
+            "chars": 2361,
+            "taint": [],
+            "createdAt": "2026-10-13T00:45:00.000Z"
+          },
+          {
+            "version": 2,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": "added the held flights",
+            "runId": "run-1",
+            "toolCallId": "call-doc-2",
+            "chars": 1394,
+            "taint": [],
+            "createdAt": "2026-10-10T17:30:00.000Z"
+          },
+          {
+            "version": 1,
+            "title": "Trip plan: Lisbon",
+            "kind": "plan",
+            "author": "agent",
+            "note": null,
+            "runId": "run-1",
+            "toolCallId": "call-doc-1",
+            "chars": 1000,
+            "taint": [],
+            "createdAt": "2026-10-10T16:00:00.000Z"
+          }
+        ],
+        "comments": []
+      },
+      "GET /api/docs/2": {
+        "doc": {
+          "id": 2,
+          "title": "Laptop comparison",
+          "kind": "comparison",
+          "author": "agent",
+          "tainted": true,
+          "version": 1,
+          "chars": 120,
+          "comments": 0,
+          "sessionKey": "main",
+          "createdAt": "2026-10-12T15:00:00.000Z",
+          "updatedAt": "2026-10-12T15:00:00.000Z"
+        },
+        "version": {
+          "version": 1,
+          "title": "Laptop comparison",
+          "kind": "comparison",
+          "author": "agent",
+          "note": null,
+          "runId": "run-1",
+          "toolCallId": "call-doc-1",
+          "chars": 1000,
+          "taint": [
+            "web_fetch: https://reviews.example.com/laptops"
+          ],
+          "createdAt": "2026-10-12T15:00:00.000Z",
+          "body": "# Laptop comparison\n\n| Model | Price |\n| --- | ---: |\n| Air 13 | $1,099 |\n\n**Pick:** the Air 13.",
+          "links": []
+        },
+        "versions": [
+          {
+            "version": 1,
+            "title": "Laptop comparison",
+            "kind": "comparison",
+            "author": "agent",
+            "note": null,
+            "runId": "run-1",
+            "toolCallId": "call-doc-1",
+            "chars": 1000,
+            "taint": [
+              "web_fetch: https://reviews.example.com/laptops"
+            ],
+            "createdAt": "2026-10-12T15:00:00.000Z"
+          }
+        ],
+        "comments": []
+      }
+    }
+  }
+]
