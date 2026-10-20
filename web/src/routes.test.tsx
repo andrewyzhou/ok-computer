@@ -3,7 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { seedDashboard } from '../../test/seed';
 import './testing';
-import { buildRoutes, CORE_ROUTES, matchRoute, navSections, ROUTES, type RouteDef } from './routes';
+import { buildRoutes, CORE_ROUTES, matchRoute, navSections, pageKeyOf, ROUTES, type RouteDef } from './routes';
 
 vi.stubGlobal('EventSource', class {});
 afterEach(() => cleanup());
@@ -36,6 +36,24 @@ describe('the route registry', () => {
     expect(matchRoute('nowhere')).toBeUndefined();
   });
 
+  it('opens the today page at the home hash, with the page key of #/today', () => {
+    const home = matchRoute('')!;
+    const today = matchRoute('today')!;
+    const day = matchRoute('today/2026-10-19')!;
+    expect(home.route.label).toBe('Today');
+    expect(home.route.group).toBeNull();
+    expect(today.route.group).toBe('today');
+    expect(pageKeyOf(home)).toBe(pageKeyOf(today));
+    expect(pageKeyOf(day)).toBe(pageKeyOf(today));
+    expect(home.route).not.toBe(CORE_ROUTES.find((route) => route.path === ''));
+  });
+
+  it('moves the overview to the agent group', () => {
+    const match = matchRoute('overview')!;
+    expect(match.route.label).toBe('Overview');
+    expect(match.route.group).toBe('agent');
+  });
+
   it('prefers fixed segments and reads the query', () => {
     const routes = [...CORE_ROUTES, stub('runs/:id/trace')];
     expect(matchRoute('runs/run-1/trace', routes)?.route.path).toBe('runs/:id/trace');
@@ -58,6 +76,15 @@ describe('the route registry', () => {
     expect(dev(false)).toBeUndefined();
     expect(navSections(false).map((s) => s.group)).toEqual(['today', 'inbox', 'calendar', 'chats', 'activity', 'agent', 'connections']);
     expect(navSections(true).map((s) => s.group)).toEqual(['today', 'inbox', 'calendar', 'chats', 'activity', 'agent', 'connections', 'dev']);
+    expect(navSections(false).find((s) => s.group === 'today')?.items.map((r) => r.path)).toEqual(['today']);
+    expect(navSections(false).find((s) => s.group === 'agent')?.items[0]?.label).toBe('Overview');
+  });
+
+  it('builds the registry with one route for the home page, today, calendar and overview', () => {
+    // buildRoutes throws when two views share a path, so the registry that this file imports shows that none do.
+    for (const path of ['', 'today', 'today/:day', 'calendar', 'overview']) {
+      expect(ROUTES.filter((route) => route.path === path), path).toHaveLength(1);
+    }
   });
 
   it('renders a core detail page with its param', async () => {

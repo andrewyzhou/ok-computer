@@ -22,13 +22,35 @@ afterEach(() => cleanup());
 const nav = () => within(screen.getByRole('navigation', { name: 'pages' }));
 
 describe('the shell', () => {
-  it('shows the overview with its stats, goals, heartbeat and next automations', async () => {
+  it('opens the today page at the home hash and marks today in the nav and the rail', async () => {
     openApp('#/');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Today' })).toBeTruthy();
+    expect(nav().getByRole('link', { name: 'Today' }).getAttribute('aria-current')).toBe('page');
+    expect(nav().getByRole('link', { name: 'Today' }).getAttribute('href')).toBe('#/today');
+    expect(nav().getByRole('link', { name: 'Overview' }).getAttribute('aria-current')).toBeNull();
+    const rail = within(screen.getByRole('navigation', { name: 'sections' }));
+    expect(rail.getByRole('link', { name: 'Today' }).getAttribute('aria-current')).toBe('true');
+    expect(rail.getByRole('link', { name: 'ok computer, today' }).getAttribute('href')).toBe('#/');
+    expect(nav().getByRole('link', { name: 'ok computer' }).getAttribute('href')).toBe('#/');
+  });
+
+  it('marks today in the nav for the page of a day', async () => {
+    openApp('#/today/2026-10-19');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Today' })).toBeTruthy();
+    expect(nav().getByRole('link', { name: 'Today' }).getAttribute('aria-current')).toBe('page');
+  });
+
+  it('shows the overview with its stats, goals, heartbeat and next automations under agent', async () => {
+    openApp('#/overview');
     expect(await inMain().findByText('Cost today')).toBeTruthy();
     expect(inMain().getByText('check-in: finish essay')).toBeTruthy();
     expect(inMain().getByText('Blob store')).toBeTruthy();
     expect(inMain().getByText('remind me when a goal eta is less than one hour away')).toBeTruthy();
     expect(screen.getByRole('heading', { level: 1, name: 'Overview' })).toBeTruthy();
+    expect(nav().getByRole('link', { name: 'Overview' }).getAttribute('aria-current')).toBe('page');
+    expect(nav().getByRole('link', { name: 'Today' }).getAttribute('aria-current')).toBeNull();
+    const rail = within(screen.getByRole('navigation', { name: 'sections' }));
+    expect(rail.getByRole('link', { name: 'Agent' }).getAttribute('aria-current')).toBe('true');
   });
 
   it('builds the nav from the routes, marks the current page and hides the dev pages until developer mode', async () => {
@@ -69,7 +91,7 @@ describe('the shell', () => {
 
   it('opens the command menu with the keyboard and goes to the chosen page', async () => {
     setPrefs({ devMode: true });
-    openApp('#/');
+    openApp('#/overview');
     await inMain().findByText('Cost today');
     fireEvent.keyDown(window, { key: 'k', metaKey: true });
     const menu = await screen.findByRole('dialog', { name: 'Command menu' });
@@ -81,8 +103,22 @@ describe('the shell', () => {
     expect(screen.queryByRole('dialog', { name: 'Command menu' })).toBeNull();
   });
 
-  it('turns developer mode on with the keyboard and the status bar, and keeps it in local storage', async () => {
+  it('lists the today, calendar and overview pages in the command menu', async () => {
     openApp('#/');
+    await screen.findByRole('heading', { level: 1, name: 'Today' });
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    const menu = await screen.findByRole('dialog', { name: 'Command menu' });
+    const options = within(menu)
+      .getAllByRole('option')
+      .map((option) => option.textContent ?? '');
+    for (const label of ['Today', 'Calendar', 'Overview']) expect(options.some((text) => text.includes(label)), label).toBe(true);
+    fireEvent.change(within(menu).getByRole('combobox'), { target: { value: 'overview' } });
+    fireEvent.keyDown(within(menu).getByRole('combobox'), { key: 'Enter' });
+    await waitFor(() => expect(location.hash).toBe('#/overview'));
+  });
+
+  it('turns developer mode on with the keyboard and the status bar, and keeps it in local storage', async () => {
+    openApp('#/overview');
     await inMain().findByText('Cost today');
     const toggle = screen.getByRole('button', { name: 'Developer mode' });
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
@@ -95,7 +131,7 @@ describe('the shell', () => {
   });
 
   it('changes the theme from the status bar', async () => {
-    openApp('#/');
+    openApp('#/overview');
     await inMain().findByText('Cost today');
     const theme = () => screen.getByRole('button', { name: /^Theme:/ });
     expect(document.documentElement.dataset.theme).toBeUndefined();
@@ -115,7 +151,7 @@ describe('the shell', () => {
   });
 
   it('shows the selected row of a list in the details panel', async () => {
-    openApp('#/');
+    openApp('#/overview');
     const name = await inMain().findByText('check-in: finish essay');
     const details = within(screen.getByRole('complementary', { name: 'details' }));
     expect(details.getByRole('heading', { name: 'Today' })).toBeTruthy();
@@ -129,6 +165,7 @@ describe('the shell', () => {
   it('says when a page does not exist', async () => {
     openApp('#/nowhere');
     expect(await inMain().findByText('This page does not exist.')).toBeTruthy();
+    expect(inMain().getByRole('link', { name: 'Go to today' }).getAttribute('href')).toBe('#/');
   });
 });
 
