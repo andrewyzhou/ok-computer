@@ -1,9 +1,9 @@
+import { useEffect } from 'react';
 import type { DraftState, DraftView } from '../../../../src/dashboard/types';
 import { useApi } from '../../api';
-import { time } from '../../format';
 import type { RouteProps } from '../../routes';
 import { DetailsPanel, EmptyState, Facts, FilterBar, Page, Skeleton, Table, Tabs, type Column, type Tone } from '../../ui';
-import { accountColumn, AccountBelowMd, LoadMore, RunLink, StateBadge, setHashQuery, usePaged, withQuery } from './shared';
+import { accountColumn, AccountBelowMd, Breakable, ErrorBox, LoadMore, minuteTime, RunLink, StateBadge, setHashQuery, usePaged, withQuery } from './shared';
 import './inbox.css';
 
 // the draft replies that the digest job wrote into the mail drafts of an account. the app never sends a draft: the
@@ -21,8 +21,19 @@ const TABS: Array<{ id: DraftState; label: string }> = [
 const STATE_TONE: Record<DraftState, Tone> = { drafted: 'info', discarded: 'muted', sent_by_owner: 'good' };
 const STATE_LABEL: Record<DraftState, string> = { drafted: 'drafted', discarded: 'discarded', sent_by_owner: 'sent by you' };
 
+// the first recipient on one line, and the count of the others. the whole list is in the title and in the details.
+function Recipients({ to }: { to: string[] }) {
+  if (!to.length) return <span className="muted">no one</span>;
+  return (
+    <span className="inbox-to" title={to.join(', ')}>
+      <span className="inbox-to-first">{to[0]}</span>
+      {to.length > 1 ? <span className="muted"> +{to.length - 1}</span> : null}
+    </span>
+  );
+}
+
 const COLUMNS: Array<Column<DraftView>> = [
-  { key: 'to', header: 'To', wrap: true, cell: (draft) => draft.to.join(', ') || <span className="muted">no one</span> },
+  { key: 'to', header: 'To', cell: (draft) => <Recipients to={draft.to} /> },
   // below md the account column is hidden, so the account shows under the subject.
   {
     key: 'subject',
@@ -36,7 +47,7 @@ const COLUMNS: Array<Column<DraftView>> = [
     ),
   },
   accountColumn<DraftView>(),
-  { key: 'created', header: 'Created', align: 'end', hideBelow: 'sm', cell: (draft) => time(draft.createdAt) },
+  { key: 'created', header: 'Created', align: 'end', hideBelow: 'sm', cell: (draft) => minuteTime(draft.createdAt) },
 ];
 
 function DraftFacts({ draft }: { draft: DraftView }) {
@@ -46,12 +57,12 @@ function DraftFacts({ draft }: { draft: DraftView }) {
         layout="stacked"
         items={[
           { label: 'State', value: <StateBadge value={draft.state} tones={STATE_TONE} labels={STATE_LABEL} /> },
-          { label: 'To', value: draft.to.join(', ') || <span className="muted">no one</span> },
+          { label: 'To', value: draft.to.length ? <Breakable text={draft.to.join(', ')} /> : <span className="muted">no one</span> },
           { label: 'Subject', value: draft.subject },
-          { label: 'Account', value: draft.account },
+          { label: 'Account', value: <Breakable text={draft.account} /> },
           { label: 'Thread', value: <code>{draft.threadId}</code> },
           draft.inReplyTo ? { label: 'In reply to', value: <code>{draft.inReplyTo}</code> } : null,
-          { label: 'Created', value: time(draft.createdAt) },
+          { label: 'Created', value: minuteTime(draft.createdAt) },
           { label: 'Run', value: <RunLink runId={draft.runId} /> },
         ]}
       />
@@ -78,6 +89,12 @@ export function DraftsPage({ query }: RouteProps) {
   const single = useApi<DraftView>(lookup);
   const draft = listed ?? single.data;
   const select = (id: string | null) => setHashQuery(PATH, query, { id });
+  // a link from the digest or the brief names only the id. a draft that the owner sent or discarded is in another
+  // tab, so the page opens the tab of the draft, and the list then shows the selected row.
+  const otherTab = !query.get('state') && single.data !== undefined && single.data.state !== tab ? single.data.state : null;
+  useEffect(() => {
+    if (otherTab) setHashQuery(PATH, query, { state: otherTab });
+  }, [otherTab, query]);
 
   return (
     <Page
@@ -90,24 +107,27 @@ export function DraftsPage({ query }: RouteProps) {
       }
     >
       {paged.error ? (
-        <p className="error-box">Could not load: {paged.error}</p>
+        <ErrorBox error={paged.error} onRetry={paged.reload} />
       ) : paged.data === undefined ? (
         <Skeleton lines={5} />
       ) : (
         <>
-          <Table
-            label="drafts"
-            columns={COLUMNS}
-            rows={drafts}
-            rowKey={(each) => String(each.id)}
-            selected={selectedId}
-            onSelect={(each) => select(String(each.id) === selectedId ? null : String(each.id))}
-            empty={
-              <EmptyState icon="draft" title={tab === 'drafted' ? 'No drafts yet.' : `No drafts are ${STATE_LABEL[tab]}.`}>
-                {tab === 'drafted' ? 'The digest writes a draft reply for mail that needs one.' : null}
-              </EmptyState>
-            }
-          />
+          {/* the creation time is in the details panel too, so a narrow table drops it. */}
+          <div className="inbox-table inbox-table-drop-last">
+            <Table
+              label="drafts"
+              columns={COLUMNS}
+              rows={drafts}
+              rowKey={(each) => String(each.id)}
+              selected={selectedId}
+              onSelect={(each) => select(String(each.id) === selectedId ? null : String(each.id))}
+              empty={
+                <EmptyState icon="draft" title={tab === 'drafted' ? 'No drafts yet.' : `No drafts are ${STATE_LABEL[tab]}.`}>
+                  {tab === 'drafted' ? 'The digest writes a draft reply for mail that needs one.' : null}
+                </EmptyState>
+              }
+            />
+          </div>
           <LoadMore paged={paged} label="Load older" />
         </>
       )}

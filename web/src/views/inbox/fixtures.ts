@@ -400,3 +400,9 @@ export const fiveProposals: CalendarProposalView[] = [
   proposal(34, { account: 'yurun', kind: 'other', title: 'Reply to Sam', sourceSubject: 'Dinner next week?' }),
   proposal(35, { account: 'hkn', kind: 'other', title: 'Chapter meeting', sourceSubject: 'Meeting notes' }),
 ];
+
+// the answer of /api/google when the integration is set up and an account is signed in. the inbox pages show their
+// first step instead of an empty list without it, so each test of a page that has data gives this answer.
+export const googleReady = {
+  'GET /api/google': () => ({ configured: true, accounts: ACCOUNTS.map((alias) => ({ alias, status: 'ok' })) }),
+};

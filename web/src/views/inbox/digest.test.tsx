@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedDashboard } from '../../../../test/seed';
 import { FakeEventSource, inMain, installEventSource, json, openApp, stubFetch } from '../../testing';
 import { setPrefs } from '../../shell/prefs';
-import { digest, digests, fiveDigest, olderDigests } from './fixtures';
+import { digest, digests, fiveDigest, olderDigests, googleReady } from './fixtures';
 
 installEventSource();
 
@@ -25,7 +25,7 @@ const pastDigests = {
 
 describe('the inbox digest', () => {
   it('lists the inbox group in the nav with its five pages in order', async () => {
-    stubFetch(seeded.dashboard, { 'GET /api/inbox/digests/latest': () => digest, ...pastDigests });
+    stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/digests/latest': () => digest, ...pastDigests });
     openApp('#/inbox');
     await inMain().findByText('Office hours moved to Thursday');
     const nav = within(screen.getByRole('navigation', { name: 'pages' }));
@@ -35,7 +35,7 @@ describe('the inbox digest', () => {
   });
 
   it('shows the sections of the latest digest with their counts, the links and the short text', async () => {
-    stubFetch(seeded.dashboard, { 'GET /api/inbox/digests/latest': () => digest, ...pastDigests });
+    stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/digests/latest': () => digest, ...pastDigests });
     openApp('#/inbox');
     const main = inMain();
     await main.findByText('Office hours moved to Thursday');
@@ -53,7 +53,7 @@ describe('the inbox digest', () => {
   });
 
   it('lists the past digests in the details panel and loads the next page with the cursor', async () => {
-    const calls = stubFetch(seeded.dashboard, { 'GET /api/inbox/digests/latest': () => digest, ...pastDigests });
+    const calls = stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/digests/latest': () => digest, ...pastDigests });
     openApp('#/inbox');
     await inMain().findByText('Office hours moved to Thursday');
     const panel = within(document.querySelector('.details') as HTMLElement);
@@ -66,7 +66,7 @@ describe('the inbox digest', () => {
   });
 
   it('shows an empty state when there is no digest yet, and runs the digest job now', async () => {
-    const calls = stubFetch(seeded.dashboard, {
+    const calls = stubFetch(seeded.dashboard, { ...googleReady,
       'GET /api/inbox/digests/latest': () => json({ error: 'digest not found' }, 404),
       'GET /api/inbox/digests': () => ({ digests: [], nextCursor: null }),
       'POST /api/inbox/run': () => json({ started: true }, 202),
@@ -81,7 +81,7 @@ describe('the inbox digest', () => {
 
   it('loads the page again when a run ends', async () => {
     let made = false;
-    stubFetch(seeded.dashboard, {
+    stubFetch(seeded.dashboard, { ...googleReady,
       'GET /api/inbox/digests/latest': () => (made ? digest : json({ error: 'digest not found' }, 404)),
       ...pastDigests,
     });
@@ -93,7 +93,7 @@ describe('the inbox digest', () => {
   });
 
   it('shows a past digest by its id with a crumb to the latest, and an empty state for an unknown id', async () => {
-    stubFetch(seeded.dashboard, {
+    stubFetch(seeded.dashboard, { ...googleReady,
       'GET /api/inbox/digests/:id': ({ params }) => (params.id === '7' ? digest : json({ error: 'digest not found' }, 404)),
       ...pastDigests,
     });
@@ -107,7 +107,7 @@ describe('the inbox digest', () => {
   });
 
   it('shows the coverage of each account: read, hidden, the capped warning and the account it could not read', async () => {
-    stubFetch(seeded.dashboard, { 'GET /api/inbox/digests/latest': () => fiveDigest, ...pastDigests });
+    stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/digests/latest': () => fiveDigest, ...pastDigests });
     openApp('#/inbox');
     const main = inMain();
     const strip = within(await main.findByRole('list', { name: 'accounts in this digest' }));
@@ -130,13 +130,13 @@ describe('the inbox digest', () => {
 
   it('says one mail in the hidden line when one mail is hidden', async () => {
     const one = { ...fiveDigest, stats: { accounts: [{ ...fiveDigest.stats!.accounts[0]!, hidden: 1 }], droppedDates: 0 } };
-    stubFetch(seeded.dashboard, { 'GET /api/inbox/digests/latest': () => one, ...pastDigests });
+    stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/digests/latest': () => one, ...pastDigests });
     openApp('#/inbox');
     expect(await inMain().findByText('1 automated or list mail hidden')).toBeTruthy();
   });
 
   it('shows no coverage and no error for a digest of phase 5 without stats', async () => {
-    stubFetch(seeded.dashboard, { 'GET /api/inbox/digests/latest': () => digest, ...pastDigests });
+    stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/digests/latest': () => digest, ...pastDigests });
     openApp('#/inbox');
     const main = inMain();
     await main.findByText('Office hours moved to Thursday');
@@ -148,15 +148,15 @@ describe('the inbox digest', () => {
 
   it('marks an automated deadline, bill or package, and never a mail that needs a reply', async () => {
     const replyFromMachine = { ...fiveDigest, items: [{ ...fiveDigest.items[0]!, mail: 'automated' as const }, ...fiveDigest.items.slice(1)] };
-    stubFetch(seeded.dashboard, { 'GET /api/inbox/digests/latest': () => replyFromMachine, ...pastDigests });
+    stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/digests/latest': () => replyFromMachine, ...pastDigests });
     openApp('#/inbox');
     const main = inMain();
     await main.findByText('Dues for the fall term');
-    expect(within(main.getByRole('list', { name: 'Needs a reply' })).queryByText('automated')).toBeNull();
+    expect(within(main.getByRole('list', { name: 'Needs a reply' })).queryByText('automated mail')).toBeNull();
     const deadlines = within(main.getByRole('list', { name: 'Deadlines' }));
-    expect(within(deadlines.getByText('Course site').closest('li')!).getByText('automated')).toBeTruthy();
-    expect(within(deadlines.getByText('Club treasurer').closest('li')!).queryByText('automated')).toBeNull();
-    expect(within(main.getByRole('list', { name: 'Bills' })).getByText('automated')).toBeTruthy();
-    expect(within(main.getByRole('list', { name: 'Packages' })).getByText('automated')).toBeTruthy();
+    expect(within(deadlines.getByText('Course site').closest('li')!).getByText('automated mail')).toBeTruthy();
+    expect(within(deadlines.getByText('Club treasurer').closest('li')!).queryByText('automated mail')).toBeNull();
+    expect(within(main.getByRole('list', { name: 'Bills' })).getByText('automated mail')).toBeTruthy();
+    expect(within(main.getByRole('list', { name: 'Packages' })).getByText('automated mail')).toBeTruthy();
   });
 });

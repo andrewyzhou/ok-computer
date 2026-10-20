@@ -1,8 +1,9 @@
 import { useState, type ReactNode } from 'react';
+import type { GooglePage } from '../../../../src/dashboard/google-types';
 import type { ApprovalRow, InboxActionResponse, InboxJob, StreamMessage } from '../../../../src/dashboard/types';
 import { api, send, useApi, type Loaded } from '../../api';
 import { time } from '../../format';
-import { ApprovalCard, Badge, Button, type Column, type Tone } from '../../ui';
+import { ApprovalCard, Badge, Button, ButtonLink, EmptyState, type Column, type Tone } from '../../ui';
 
 // the parts that the five inbox views share: the reload rule, the hash query, the paging of a list, the money of a
 // row, the run of a job and the approval that an action waits for.
@@ -108,6 +109,64 @@ export function StateBadge({ value, tones, labels }: { value: string; tones: Rec
   return <Badge tone={tones[value] ?? 'muted'}>{labels?.[value] ?? value.replace(/_/g, ' ')}</Badge>;
 }
 
+// a time to the minute, for example "Oct 19, 06:00". seconds are noise for a deadline, a sweep or a draft, and
+// format.ts keeps the time zone to itself, so this cuts them off its time.
+export function minuteTime(iso: string | null | undefined): string {
+  return time(iso).replace(/(\d{2}:\d{2}):\d{2}$/, '$1');
+}
+
+// a long address or link as text that a line can break after "@", ".", "/" and "?", and not in the middle of a word.
+export function Breakable({ text }: { text: string }) {
+  // the parts stay text nodes of one element, so the element still holds the whole text for a search or a copy.
+  const parts = text.split(/(?<=[@./?&=-])/);
+  return <span className="inbox-breakable">{parts.flatMap((part, index) => (index ? [<wbr key={index} />, part] : [part]))}</span>;
+}
+
+// whether the inbox jobs can read mail: the google integration is set up, and an account is signed in. the pages show
+// a first step instead of an empty list when they cannot. accounts are the aliases of the config, for the account
+// filters, so a filter offers each account also before a job found a row for it.
+export interface InboxSetup {
+  state: 'loading' | 'ready' | 'missing';
+  accounts: string[];
+}
+
+export function useInboxSetup(): InboxSetup {
+  const google = useApi<GooglePage>('/api/google');
+  if (google.data === undefined) return { state: google.error === undefined ? 'loading' : 'ready', accounts: [] };
+  const accounts = google.data.accounts.map((each) => each.alias);
+  const signedIn = google.data.accounts.some((each) => each.status === 'ok');
+  return { state: google.data.configured && signedIn ? 'ready' : 'missing', accounts };
+}
+
+// the first step of a page that has nothing to show because no google account can be read.
+export function ConnectGoogle({ what }: { what: string }) {
+  return (
+    <EmptyState
+      icon="google"
+      title="Connect a Google account to read your mail."
+      action={
+        <ButtonLink href="#/google" size="sm" variant="secondary">
+          Connect Google
+        </ButtonLink>
+      }
+    >
+      {what} The inbox jobs start once an account is signed in.
+    </EmptyState>
+  );
+}
+
+// a failed load with a way to try again. the text is the error of the request.
+export function ErrorBox({ error, onRetry }: { error: string; onRetry: () => void }) {
+  return (
+    <div className="error-box inbox-error">
+      <p>Could not load: {error}</p>
+      <Button size="sm" variant="secondary" icon="refresh" onClick={onRetry}>
+        Retry
+      </Button>
+    </div>
+  );
+}
+
 // the account of a row, as the api names it. the owner has more than one account, so each row says which one it came
 // from, also when only one account is configured. a long name is cut with an ellipsis, and the title holds all of it.
 export function AccountBadge({ account }: { account: string }) {
@@ -166,7 +225,7 @@ export function LastRun({ label, last }: { label: string; last: { runId: string 
   if (!last) return <span>No {label} yet.</span>;
   return (
     <span>
-      Last {label} {time(last.at)}
+      Last {label} {minuteTime(last.at)}
       {last.runId ? (
         <>
           {' · '}
@@ -180,7 +239,7 @@ export function LastRun({ label, last }: { label: string; last: { runId: string 
 // a button that runs the automation of a job now. the answer is 202, and the page loads again when the run ends,
 // because a run sends a stream message. it is the main action of an inbox page, and every page gives it the same
 // outline style.
-export function RunJob({ job, label, note }: { job: InboxJob; label: string; note?: string }) {
+export function RunJob({ job, label, note, disabled }: { job: InboxJob; label: string; note?: string; disabled?: boolean }) {
   const [state, setState] = useState<{ busy: boolean; done?: boolean; error?: string }>({ busy: false });
   const run = () => {
     setState({ busy: true });
@@ -189,9 +248,11 @@ export function RunJob({ job, label, note }: { job: InboxJob; label: string; not
       (err: Error) => setState({ busy: false, error: err.message }),
     );
   };
+  // the server answers 503 when the app has no google integration. the owner gets the step that fixes it.
+  const noGoogle = state.error !== undefined && /google integration/i.test(state.error);
   return (
     <span className="inbox-run">
-      <Button variant="secondary" size="sm" icon="refresh" busy={state.busy} onClick={run}>
+      <Button variant="secondary" size="sm" icon="refresh" busy={state.busy} disabled={disabled} title={disabled ? 'Connect a Google account first.' : undefined} onClick={run}>
         {label}
       </Button>
       {state.done ? (
@@ -199,7 +260,11 @@ export function RunJob({ job, label, note }: { job: InboxJob; label: string; not
           {note ?? 'Started.'}
         </span>
       ) : null}
-      {state.error ? (
+      {noGoogle ? (
+        <span role="alert" className="error-text">
+          The inbox jobs need a Google account. <a href="#/google">Connect one</a> first.
+        </span>
+      ) : state.error ? (
         <span role="alert" className="error-text">
           {state.error}
         </span>

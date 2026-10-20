@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedDashboard } from '../../../../test/seed';
 import { inMain, installEventSource, json, openApp, stubFetch, type StubRoutes } from '../../testing';
 import { setPrefs } from '../../shell/prefs';
-import { fiveSubscriptionsPage, subscriptionsPage } from './fixtures';
+import { fiveSubscriptionsPage, subscriptionsPage, googleReady } from './fixtures';
 
 installEventSource();
 
@@ -25,7 +25,7 @@ async function open(routes: StubRoutes = {}, hash = '#/inbox/subscriptions') {
     ...subscriptionsPage,
     subscriptions: subscriptionsPage.subscriptions.map((row) => (row.approvalId === null ? row : { ...row, approvalId: seeded.pendingApprovalId })),
   };
-  const calls = stubFetch(seeded.dashboard, { 'GET /api/inbox/subscriptions': () => page, ...routes });
+  const calls = stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/subscriptions': () => page, ...routes });
   openApp(hash);
   await inMain().findByText('Streamly');
   return calls;
@@ -111,7 +111,7 @@ describe('the subscriptions', () => {
 
   describe('with the confidence of phase 6', () => {
     async function openFive() {
-      stubFetch(seeded.dashboard, { 'GET /api/inbox/subscriptions': () => fiveSubscriptionsPage });
+      stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/subscriptions': () => fiveSubscriptionsPage });
       openApp('#/inbox/subscriptions');
       await inMain().findByText('Streamly');
     }
@@ -173,7 +173,7 @@ describe('the subscriptions', () => {
 
     it('explains an empty table when every row has confidence 0', async () => {
       const once = { ...fiveSubscriptionsPage, subscriptions: fiveSubscriptionsPage.subscriptions.filter((row) => row.confidence === 0), monthlyTotals: [] };
-      stubFetch(seeded.dashboard, { 'GET /api/inbox/subscriptions': () => once });
+      stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/subscriptions': () => once });
       openApp('#/inbox/subscriptions');
       expect(await inMain().findByText('No repeating charges found.')).toBeTruthy();
       fireEvent.click(screen.getByRole('checkbox', { name: /Show rows with no repeating charge/ }));

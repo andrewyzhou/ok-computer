@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedDashboard } from '../../../../test/seed';
 import { inMain, installEventSource, openApp, stubFetch } from '../../testing';
 import { setPrefs } from '../../shell/prefs';
-import { fiveDigest, fiveDigests, fiveDrafts, fiveProposals, fiveSendersPage, fiveSubscriptionsPage } from './fixtures';
+import { fiveDigest, fiveDigests, fiveDrafts, fiveProposals, fiveSendersPage, fiveSubscriptionsPage, googleReady } from './fixtures';
 
 // the owner has five accounts, so each list says which account each row came from. a table shows the account in its
 // own column from 1100px up, and as a badge under the name below that width, where the column is hidden. jsdom does
@@ -109,7 +109,7 @@ describe('the account of each row', () => {
 
   it('still shows the account when only one account is configured', async () => {
     const one = { ...fiveSendersPage, accounts: ['a06'], senders: fiveSendersPage.senders.slice(0, 1) };
-    stubFetch(seeded.dashboard, { ...routes, 'GET /api/inbox/senders': () => one });
+    stubFetch(seeded.dashboard, { ...googleReady, ...routes, 'GET /api/inbox/senders': () => one });
     openApp('#/inbox/newsletters');
     await inMain().findByText('Weekly Deals');
     expect(accountsOf(inMain().getByRole('table', { name: 'newsletter senders' }))).toEqual({ wide: ['a06'], narrow: ['a06'] });

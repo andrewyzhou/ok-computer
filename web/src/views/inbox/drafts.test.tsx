@@ -5,7 +5,7 @@ import type { DraftView } from '../../../../src/dashboard/types';
 import { seedDashboard } from '../../../../test/seed';
 import { inMain, installEventSource, openApp, stubFetch } from '../../testing';
 import { setPrefs } from '../../shell/prefs';
-import { draft, drafts } from './fixtures';
+import { draft, drafts, googleReady } from './fixtures';
 
 installEventSource();
 
@@ -28,12 +28,13 @@ const details = () => within(document.querySelector('.details') as HTMLElement);
 
 describe('the drafts', () => {
   it('lists the drafted replies and switches the tab by state', async () => {
-    const calls = stubFetch(seeded.dashboard, {
+    const calls = stubFetch(seeded.dashboard, { ...googleReady,
       'GET /api/inbox/drafts': ({ query }) => (query.get('state') === 'discarded' ? [draft(9, { subject: 'Re: an old question', state: 'discarded' })] : drafts),
     });
     openApp('#/inbox/drafts');
     expect(await inMain().findByText('Re: Dinner next week?')).toBeTruthy();
-    expect(inMain().getByText('ta@school.example.edu, staff@school.example.edu')).toBeTruthy();
+    // the table shows the first recipient and the count of the others. the title holds the whole list.
+    expect(inMain().getByTitle('ta@school.example.edu, staff@school.example.edu').textContent).toBe('ta@school.example.edu +1');
     const tabs = within(screen.getByRole('tablist', { name: 'draft state' }));
     expect(tabs.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Drafted', 'Discarded', 'Sent by you']);
     fireEvent.click(tabs.getByRole('tab', { name: 'Discarded' }));
@@ -44,7 +45,7 @@ describe('the drafts', () => {
   });
 
   it('pages with before until a page has fewer rows than the limit', async () => {
-    const calls = stubFetch(seeded.dashboard, { 'GET /api/inbox/drafts': ({ query }) => (query.get('before') === '151' ? older : full) });
+    const calls = stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/drafts': ({ query }) => (query.get('before') === '151' ? older : full) });
     openApp('#/inbox/drafts');
     await inMain().findByText('Re: thread 200');
     fireEvent.click(inMain().getByRole('button', { name: 'Load older' }));
@@ -54,7 +55,7 @@ describe('the drafts', () => {
   });
 
   it('selects the draft of ?id= and shows its body, its run and the note that it is never sent', async () => {
-    stubFetch(seeded.dashboard, { 'GET /api/inbox/drafts': () => drafts });
+    stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/drafts': () => drafts });
     openApp('#/inbox/drafts?id=41');
     await inMain().findByText('Re: Dinner next week?');
     expect(await details().findByText(/Thursday at 3 pm works for me/)).toBeTruthy();
@@ -68,26 +69,28 @@ describe('the drafts', () => {
   });
 
   it('loads the draft of ?id= by its id when the list does not have it, as for a sent draft that a digest links to', async () => {
-    const calls = stubFetch(seeded.dashboard, {
+    const calls = stubFetch(seeded.dashboard, { ...googleReady,
       'GET /api/inbox/drafts': () => drafts,
       'GET /api/inbox/drafts/:id': () => draft(7, { subject: 'Re: an answered question', state: 'sent_by_owner', body: 'I sent this one myself.' }),
     });
     openApp('#/inbox/drafts?id=7');
     await inMain().findByText('Re: Dinner next week?');
     expect(await details().findByText('I sent this one myself.')).toBeTruthy();
-    expect(details().getByText('sent by you')).toBeTruthy();
+    expect(await details().findByText('sent by you')).toBeTruthy();
     expect(calls.some((call) => call.url === '/api/inbox/drafts/7')).toBe(true);
+    // the link named only the id, so the page opens the tab of the draft.
+    await waitFor(() => expect(location.hash).toBe('#/inbox/drafts?id=7&state=sent_by_owner'));
   });
 
   it('says so when no draft has the id of ?id=', async () => {
-    stubFetch(seeded.dashboard, { 'GET /api/inbox/drafts': () => drafts });
+    stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/drafts': () => drafts });
     openApp('#/inbox/drafts?id=7');
     await inMain().findByText('Re: Dinner next week?');
     expect(await details().findByText('Draft #7 was not found.')).toBeTruthy();
   });
 
   it('shows an empty state for a tab with no drafts', async () => {
-    stubFetch(seeded.dashboard, { 'GET /api/inbox/drafts': () => [] });
+    stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/drafts': () => [] });
     openApp('#/inbox/drafts?state=sent_by_owner');
     expect(await inMain().findByText('No drafts are sent by you.')).toBeTruthy();
   });
