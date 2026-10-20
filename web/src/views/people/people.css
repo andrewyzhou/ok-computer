@@ -1,0 +1,231 @@
+/* the classes of the people views and of the person chip. each name starts with people- or person-, and each color
+   and size comes from the tokens of styles.css, so the dark theme reaches these parts too. */
+
+.people-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 9rem;
+  overflow-wrap: anywhere;
+}
+.people-name-main {
+  font-weight: 500;
+  color: var(--ink);
+}
+.people-nowrap {
+  white-space: nowrap;
+}
+/* the organization of a person without a name shows under the address only on a phone, where its own column is
+   hidden. */
+.people-narrow {
+  display: none;
+}
+
+.people-search {
+  flex: 1 1 260px;
+  max-width: 340px;
+  min-width: 0;
+}
+.people-search .search-field {
+  width: 100%;
+}
+.people-search input {
+  flex: 1;
+  min-width: 0;
+}
+
+.people-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: var(--space-4);
+}
+
+.people-backfill {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+}
+.people-backfill li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.people-account {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.people-profile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+.people-profile .section-head {
+  margin-bottom: 8px;
+}
+/* the section under the facts draws the rule, so the last fact leaves out its own. */
+.people-profile .facts-stacked .fact:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.people-emails {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.people-emails li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.people-email {
+  overflow-wrap: anywhere;
+}
+
+.people-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.people-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule);
+  min-width: 0;
+}
+.people-list li:first-child {
+  padding-top: 0;
+}
+.people-list li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.people-item-title,
+.people-note-text {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.people-note-text {
+  white-space: pre-wrap;
+}
+.people-none {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.people-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border-top: 1px solid var(--rule);
+  padding-top: 14px;
+}
+.people-form p {
+  margin: 0;
+}
+.people-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.people-field > span:first-child {
+  font-size: 13px;
+  font-weight: 600;
+}
+.people-field textarea {
+  resize: vertical;
+  min-height: 72px;
+  color: var(--ink);
+  background: var(--bg);
+}
+.people-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* the person chip: a small avatar with the initials, and the name. a chip that is no person has the same look and
+   no hover. */
+.person-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  vertical-align: middle;
+  padding: 2px 9px 2px 2px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-pill);
+  background: var(--bg-raised);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  text-decoration: none;
+}
+a.person-chip:hover {
+  background: var(--bg-hover);
+  border-color: var(--rule-strong);
+  color: var(--ink);
+  text-decoration: none;
+}
+a.person-chip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.person-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.person-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg-sunken);
+  color: var(--ink-2);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.person-chip-md {
+  gap: 8px;
+  padding: 3px 12px 3px 3px;
+  font-size: var(--text-md);
+}
+.person-chip-md .person-avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 11px;
+}
+
+@media (max-width: 759.98px) {
+  .people-narrow {
+    display: inline;
+  }
+  .people-name {
+    min-width: 0;
+  }
+  .people-search {
+    flex-basis: 100%;
+    max-width: none;
+  }
+}
