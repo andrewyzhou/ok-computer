@@ -98,38 +98,6 @@ export function liveDatabaseReason(dbPath: string, check: LiveCheck): string | n
   return null;
 }
 
-// forward gives a view of a client object that reads each property from the real one. the gmail client of the sdk is
-// frozen, and a proxy must give back the real value of a frozen property, so the guard of readonly.ts cannot wrap the
-// client itself and fails on the first call. the view has no own properties, so the guard can wrap it, and every call
-// still goes through the guard. a method runs on its real object.
-export function forward<T extends object>(target: T): T {
-  return new Proxy(Object.create(null) as T, {
-    get(_view, key) {
-      const value: unknown = Reflect.get(target, key, target);
-      if (typeof key === 'symbol') return value;
-      if (typeof value === 'function') return (...args: unknown[]) => (value as (...input: unknown[]) => unknown).apply(target, args);
-      if (value !== null && typeof value === 'object') return forward(value);
-      return value;
-    },
-  });
-}
-
-// forwarded gives the accounts with the apis of each run as views of forward, for readOnlyGoogle.
-export function forwarded(accounts: GoogleAccounts): GoogleAccounts {
-  return {
-    aliases: accounts.aliases,
-    run: (alias, fn) => accounts.run(alias, (apis) => fn({ gmail: forward(apis.gmail), calendar: forward(apis.calendar) })),
-    unavailable: (alias) => accounts.unavailable(alias),
-    alertPending: () => accounts.alertPending(),
-    saveClient: (file) => accounts.saveClient(file),
-    hasClient: () => accounts.hasClient(),
-    beginSignIn: (alias) => accounts.beginSignIn(alias),
-    finishSignIn: (state, code) => accounts.finishSignIn(state, code),
-    importToken: (alias, input) => accounts.importToken(alias, input),
-    close: () => accounts.close(),
-  };
-}
-
 // the tool caller of the check. each call is refused before the policy, recorded by its tool name, and reported to the
 // job as an error with no effect, so the job goes on without a draft or a proposal.
 export function dryCaller(refused: string[]): ToolCaller {
@@ -213,7 +181,7 @@ export function dryContext(options: DryOptions): DryContext {
       trace: createRequestTrace({ db, blobs, logger, clock }),
       onNeedsAuth: async () => false,
     });
-  const google = readOnlyGoogle(forwarded(accounts));
+  const google = readOnlyGoogle(accounts);
 
   let slots: SlotRunner = modelsOff;
   if (options.slots) slots = options.slots;

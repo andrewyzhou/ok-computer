@@ -190,9 +190,8 @@ function block(title: string, lines: readonly Line[]): string {
 
 const count = (each: { listed: number; limit: number; capped: boolean }) => `${each.listed} of ${each.limit}${each.capped ? ' (capped)' : ''}`;
 
-// the state of a job without metrics: its package has not built it, its check failed, or the run left it out.
+// the state of a job without metrics: its check failed, or the run left it out.
 function missing(report: EvalReport, job: string): string {
-  if (report.failures.some((each) => each === `${job}: not built yet`)) return 'not built yet';
   if (report.failures.some((each) => each.startsWith(`${job}: `))) return 'failed, see the failures';
   return 'not run';
 }

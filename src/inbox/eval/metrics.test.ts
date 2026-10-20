@@ -124,7 +124,7 @@ describe('failuresOf', () => {
 
 describe('formatReport', () => {
   it('prints one aligned block for each job', () => {
-    const text = formatReport({ ...report(), subscriptions: null, failures: ['subscriptions: not built yet', 'school: the account could not be read'] });
+    const text = formatReport({ ...report(), subscriptions: null, failures: ['subscriptions: the check failed: a receipt broke it', 'school: the account could not be read'] });
     expect(text).toMatchInlineSnapshot(`
       "inbox quality check
         at            2026-10-20T14:00:00.000Z
@@ -153,7 +153,7 @@ describe('formatReport', () => {
         kind accuracy                n/a
 
       subscriptions
-        not built yet
+        failed, see the failures
 
       newsletters
         messages            640
@@ -184,7 +184,7 @@ describe('formatReport', () => {
         tools   inbox_draft_reply x2
 
       failures
-        subscriptions: not built yet
+        subscriptions: the check failed: a receipt broke it
         school: the account could not be read"
     `);
   });

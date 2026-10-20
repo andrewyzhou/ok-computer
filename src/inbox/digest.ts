@@ -42,7 +42,7 @@ export const MAX = 250;
 // the model reads this many mails in one call.
 const BATCH = 10;
 // the model reads the start of each body only.
-const BODY_LIMIT = 3000;
+export const BODY_LIMIT = 3000;
 // the digest proposes calendar events for the deadlines of the next 60 days.
 const PROPOSAL_DAYS = 60;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -53,8 +53,11 @@ const FOOTER = 'The dashboard has the rest: #/inbox';
 
 const SECTIONS: readonly DigestSection[] = ['needs_reply', 'deadlines', 'bills', 'packages'];
 
+// the name of the digest tool. the quality check reads the due dates of the model from its calls.
+export const DIGEST_TOOL = 'digest_items';
+
 const TOOL = itemsTool(
-  'digest_items',
+  DIGEST_TOOL,
   'Report the mails that the owner must act on today, one item per section of a mail.',
   {
     section: { type: 'string', enum: [...SECTIONS] },

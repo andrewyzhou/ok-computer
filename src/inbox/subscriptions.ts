@@ -48,7 +48,7 @@ const BATCH = 10;
 const BODY_CHARS = 4000;
 // the oldest receipt that a scan reads, also when the search gives an older one. 400 days hold two charges of a
 // yearly plan, whose gap can be up to 380 days, and the search of RECEIPT_QUERY asks for the same window.
-const MAX_AGE_DAYS = 400;
+export const MAX_AGE_DAYS = 400;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TOOL = 'record_charges';
 

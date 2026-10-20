@@ -72,6 +72,28 @@ describe('readOnlyApis', () => {
     }).toThrow(ReadOnlyRefused);
   });
 
+  it('works on clients whose objects cannot be written or configured, as in the sdk', async () => {
+    const calls: string[] = [];
+    const messages = Object.freeze({
+      list: function (this: unknown) {
+        calls.push('list');
+        return Promise.resolve({ data: { self: this === messages } });
+      },
+      modify: () => calls.push('modify'),
+    });
+    const users = {};
+    Object.defineProperty(users, 'messages', { value: messages, writable: false, configurable: false, enumerable: true });
+    const gmail = {};
+    Object.defineProperty(gmail, 'users', { value: users, writable: false, configurable: false, enumerable: true });
+    const real = { gmail: Object.freeze(gmail), calendar: Object.freeze({ events: Object.freeze({ list: () => Promise.resolve({}) }) }) };
+    const apis = readOnlyApis(real as unknown as GoogleApis);
+    const listed = (await apis.gmail.users.messages.list({ userId: 'me' })) as unknown as { data: { self: boolean } };
+    expect(listed.data.self).toBe(true);
+    expect('messages' in apis.gmail.users).toBe(true);
+    expect(() => apis.gmail.users.messages.modify({ userId: 'me', id: 'x' })).toThrow(ReadOnlyRefused);
+    expect(calls).toEqual(['list']);
+  });
+
   it('lists only calls that read', () => {
     for (const call of READ_CALLS) expect(call).toMatch(/\.(list|get|getProfile|query)$/);
   });

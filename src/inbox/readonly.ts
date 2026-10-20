@@ -36,10 +36,14 @@ export class ReadOnlyRefused extends Error {
 
 // guard wraps one object of a client. a method is looked up by its path from the client, so a call is allowed only
 // when its whole path is on the list. the method runs on the real object, so the client keeps its own state.
+// the proxy has an empty object of its own as its target and reads the real object through a closure. the sdk
+// defines some of its objects, like gmail.users, as properties that cannot be written or configured, and a proxy
+// of the real object would have to return those values unwrapped, so it would throw on the first read.
 function guard<T extends object>(target: T, path: string, refused: string[]): T {
-  return new Proxy(target, {
-    get(object, key) {
-      const value: unknown = Reflect.get(object, key, object);
+  const shadow = Object.create(null) as T;
+  return new Proxy(shadow, {
+    get(_shadow, key) {
+      const value: unknown = Reflect.get(target, key, target);
       if (typeof key === 'symbol') return value;
       const at = `${path}.${key}`;
       if (typeof value === 'function') {
@@ -48,16 +52,22 @@ function guard<T extends object>(target: T, path: string, refused: string[]): T 
             refused.push(at);
             throw new ReadOnlyRefused(at);
           }
-          return (value as (...input: unknown[]) => unknown).apply(object, args);
+          return (value as (...input: unknown[]) => unknown).apply(target, args);
         };
       }
       if (value !== null && typeof value === 'object') return guard(value, at, refused);
       return value;
     },
+    has(_shadow, key) {
+      return Reflect.has(target, key);
+    },
     set() {
       throw new ReadOnlyRefused(`a change of ${path}`);
     },
     defineProperty() {
+      throw new ReadOnlyRefused(`a change of ${path}`);
+    },
+    deleteProperty() {
       throw new ReadOnlyRefused(`a change of ${path}`);
     },
   });

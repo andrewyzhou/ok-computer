@@ -13,40 +13,27 @@ import type { FakeMessage } from '../../../test/fake-google.js';
 import { CORPUS, OWNER, TIME_ZONE } from '../testdata/corpus.js';
 import { mailMessage } from '../testdata/build.js';
 import { formatReport } from './metrics.js';
+import { MAX as DIGEST_MAX } from '../digest.js';
 import { runInboxEval, setSleepForTests, type EvalJob } from './run.js';
 
 // the check of the quality check: the corpus delivered to the five accounts of a fake google, read through the dry
 // context on a copy of a database. no request leaves the machine.
 
-// the functions of the other work packages. a function that is not built yet falls back to a small stand-in here, so
-// the test covers the check before and after those packages merge. a job in stub keeps its function unbuilt.
-const flags = vi.hoisted(() => ({ stub: new Set<string>() }));
-const notBuilt = (name: string) => new Error(`not built: ${name} (test)`);
+// the functions of the jobs run as they are. a job in broken throws from one of its functions, so a test can check
+// that the error of one job stops only that job.
+const flags = vi.hoisted(() => ({ broken: new Set<string>() }));
 
-// sync runs the real function, or the stand-in while the real one is not built.
-function sync<T>(job: string, name: string, real: () => T, fallback: () => T): T {
-  if (flags.stub.has(job)) throw notBuilt(name);
-  try {
-    return real();
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith('not built:')) return fallback();
-    throw err;
-  }
+// sync runs the real function, or throws while its job is broken.
+function sync<T>(job: string, name: string, real: () => T): T {
+  if (flags.broken.has(job)) throw new Error(`${name} broke for the test`);
+  return real();
 }
-const domainOf = (from: string) => fromAddress(from)?.split('@')[1] ?? null;
 
 vi.mock('../classify.js', async (importOriginal) => {
   const real = await importOriginal<typeof import('../classify.js')>();
   return {
     ...real,
-    classifyMail: (message: gmail_v1.Schema$Message, owner: ReadonlySet<string>) =>
-      sync('digest', 'classifyMail', () => real.classifyMail(message, owner), () => {
-        const from = fromAddress(header(message, 'From')) ?? '';
-        const list = Boolean(header(message, 'List-Id') || header(message, 'List-Unsubscribe'));
-        const automated = /^(no-?reply|notifications?|alerts?|receipts?|billing|news)@/i.test(from) || Boolean(header(message, 'Auto-Submitted'));
-        const direct = header(message, 'To').toLowerCase().split(/[,\s<>]+/).some((each) => owner.has(each));
-        return { kind: list ? ('list' as const) : automated ? ('automated' as const) : ('person' as const), direct, fromOwner: owner.has(from), reasons: [] };
-      }),
+    classifyMail: (message: gmail_v1.Schema$Message, owner: ReadonlySet<string>) => sync('digest', 'classifyMail', () => real.classifyMail(message, owner)),
   };
 });
 
@@ -54,7 +41,7 @@ vi.mock('../deadlines.js', async (importOriginal) => {
   const real = await importOriginal<typeof import('../deadlines.js')>();
   return {
     ...real,
-    findDates: (text: string, sentAt: string, timeZone: string) => sync('deadlines', 'findDates', () => real.findDates(text, sentAt, timeZone), () => []),
+    findDates: (text: string, sentAt: string, timeZone: string) => sync('deadlines', 'findDates', () => real.findDates(text, sentAt, timeZone)),
   };
 });
 
@@ -62,46 +49,15 @@ vi.mock('../receipts.js', async (importOriginal) => {
   const real = await importOriginal<typeof import('../receipts.js')>();
   return {
     ...real,
-    amountsIn: (text: string) =>
-      sync('subscriptions', 'amountsIn', () => real.amountsIn(text), () =>
-        [...text.matchAll(/\$(\d+(?:\.\d{2})?)/g)].map((match) => ({ amount: Number(match[1]), currency: 'USD', text: match[0], total: false })),
-      ),
-    statedCadenceOf: (text: string) =>
-      sync('subscriptions', 'statedCadenceOf', () => real.statedCadenceOf(text), () => (/month/i.test(text) ? 'monthly' : /year|annual/i.test(text) ? 'yearly' : null)),
-    receiptKindOf: (subject: string, text: string) =>
-      sync('subscriptions', 'receiptKindOf', () => real.receiptKindOf(subject, text), () => {
-        const words = `${subject} ${text}`;
-        return /refund/i.test(words) ? 'refund' : /shipped|order|due/i.test(words) ? 'order' : /receipt|charged|payment|renew/i.test(words) ? 'charge' : 'other';
-      }),
-    merchantOf: (input: { model: string; from: string; subject: string }) =>
-      sync('subscriptions', 'merchantOf', () => real.merchantOf(input), () => {
-        const name = input.model || domainOf(input.from) || 'unknown';
-        return { merchant: name, key: name.toLowerCase().replace(/[^a-z0-9]/g, ''), domain: domainOf(input.from) };
-      }),
-    judgeSubscription: (charges: Parameters<typeof real.judgeSubscription>[0]) =>
-      sync('subscriptions', 'judgeSubscription', () => real.judgeSubscription(charges), () => ({
-        cadence: charges.length > 1 ? ('monthly' as const) : ('unknown' as const),
-        cadenceSource: charges.length > 1 ? ('gaps' as const) : ('none' as const),
-        nextChargeAt: null,
-        confidence: charges.length > 1 ? 0.8 : 0.3,
-        reasons: [],
-        subscription: charges.length > 1 || charges.some((each) => each.recurring),
-      })),
+    amountsIn: (text: string) => sync('subscriptions', 'amountsIn', () => real.amountsIn(text)),
   };
 });
 
 vi.mock('../senders.js', async (importOriginal) => {
   const real = await importOriginal<typeof import('../senders.js')>();
-  const newsletters = await import('../newsletters.js');
   return {
     ...real,
-    senderIdentityOf: (message: gmail_v1.Schema$Message) =>
-      sync('newsletters', 'senderIdentityOf', () => real.senderIdentityOf(message), () => {
-        const sender = newsletters.senderOf(message);
-        return sender ? { ...sender, fromDomain: sender.fromAddress.split('@')[1]! } : undefined;
-      }),
-    unsubscribeChoiceOf: (message: gmail_v1.Schema$Message) =>
-      sync('newsletters', 'unsubscribeChoiceOf', () => real.unsubscribeChoiceOf(message), () => newsletters.unsubscribeOf(message)),
+    senderIdentityOf: (message: gmail_v1.Schema$Message) => sync('newsletters', 'senderIdentityOf', () => real.senderIdentityOf(message)),
   };
 });
 
@@ -137,7 +93,7 @@ let config: Config;
 let root: string;
 
 beforeEach(async () => {
-  flags.stub.clear();
+  flags.broken.clear();
   root = mkdtempSync(join(tmpdir(), 'okc-eval-run-'));
   // the live database of this test: the check must never touch it.
   live = openDb(join(root, 'live.sqlite'));
@@ -212,7 +168,7 @@ describe('runInboxEval', () => {
     for (const each of report.accounts) {
       const delivered = CORPUS.filter((mail) => mail.account === each.alias).length;
       expect(each).toMatchObject({ read: true, error: null });
-      expect(each.digest).toEqual({ listed: delivered, limit: 100, capped: false });
+      expect(each.digest).toEqual({ listed: delivered, limit: DIGEST_MAX, capped: false });
       expect(each.subscriptions.listed).toBe(delivered);
       expect(each.newsletters.listed).toBe(delivered);
       expect(each.htmlOnly).not.toBeNull();
@@ -222,7 +178,7 @@ describe('runInboxEval', () => {
     expect(report.subscriptions?.receipts).toBe(CORPUS.length);
     expect(report.newsletters?.senders).toBeGreaterThan(0);
     expect(report.deadlines?.mails).toBe(CORPUS.length);
-    expect(report.failures.filter((each) => each.endsWith('not built yet'))).toEqual([]);
+    expect(report.failures).toEqual([]);
     expect(report.commit).toBe('test');
     expect(report.models.utility?.length).toBeGreaterThan(0);
     // the text of the report holds no address and no subject of the corpus.
@@ -240,13 +196,13 @@ describe('runInboxEval', () => {
     expect(report.newsletters?.messages).toBeGreaterThan(0);
   });
 
-  it.each(ALL)('gives null and a "not built yet" failure when a function of %s is a stub', async (job) => {
-    flags.stub.add(job);
+  it.each(ALL)('gives null and a failure for %s when one of its functions throws, and runs the other jobs', async (job) => {
+    flags.broken.add(job);
     const report = await run();
     expect(report[job]).toBeNull();
-    expect(report.failures).toContain(`${job}: not built yet`);
+    expect(report.failures.some((each) => each.startsWith(`${job}: the check failed: `) && each.includes('broke for the test'))).toBe(true);
     for (const other of ALL.filter((each) => each !== job)) expect(report[other]).not.toBeNull();
-    expect(formatReport(report)).toContain(`${job}\n  not built yet`);
+    expect(formatReport(report)).toContain(`${job}\n  failed, see the failures`);
   });
 
   it('makes no call that google refuses', async () => {
@@ -275,9 +231,9 @@ describe('runInboxEval', () => {
     const report = await run(['digest', 'subscriptions', 'deadlines'], { models: true, slots });
     expect(snapshot(live)).toEqual(before);
     // the professor wrote one mail to the owner and one to the course list. the fake model puts both in needs_reply, and
-    // the check catches the list mail.
-    expect(report.digest).toMatchObject({ models: true, needsReply: 2, items: 2, automatedInNeedsReply: 1, needsReplyFirst: true });
-    expect(report.failures).toContain('digest: 1 needs-reply items come from mail that no person wrote (the bar is 0).');
+    // the digest drops the list mail, so the bar holds.
+    expect(report.digest).toMatchObject({ models: true, needsReply: 1, items: 1, automatedInNeedsReply: 0, needsReplyFirst: true });
+    expect(report.failures.filter((each) => each.includes('needs-reply items come from mail that no person wrote'))).toEqual([]);
     expect(report.deadlines).toMatchObject({ models: true, given: 2 });
     expect(report.subscriptions?.models).toBe(true);
     expect(report.refusedGoogle).toEqual([]);
@@ -301,7 +257,7 @@ describe('runInboxEval', () => {
       }),
     );
     const report = await run(['digest', 'deadlines'], { models: true, slots: fakeModel(), labelsPath });
-    expect(report.digest).toMatchObject({ labelled: 2, needsReplyRecall: 1, needsReplyPrecision: 0.5, kindAccuracy: 1 });
+    expect(report.digest).toMatchObject({ labelled: 2, needsReplyRecall: 1, needsReplyPrecision: 1, kindAccuracy: 1 });
     expect(report.deadlines?.dueAccuracy).not.toBeNull();
 
     const inside = join(root, 'repo', 'labels.json');

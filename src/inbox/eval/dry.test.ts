@@ -10,7 +10,7 @@ import { callTool } from '../actions.js';
 import { DRAFT_TOOL } from '../drafts.js';
 import { startRun } from '../run.js';
 import { ReadOnlyRefused, readOnlyGoogle } from '../readonly.js';
-import { dryContext, forwarded, liveDatabaseReason, MODELS_OFF, repoRoots, type DryContext } from './dry.js';
+import { dryContext, liveDatabaseReason, MODELS_OFF, repoRoots, type DryContext } from './dry.js';
 
 const CLIENT = 'fake-client.apps.googleusercontent.com';
 
@@ -150,8 +150,8 @@ describe('the dry context', () => {
   });
 });
 
-describe('the forwarded view', () => {
-  it('lets the read-only guard wrap a frozen client, runs a read on its own object and still refuses a write', async () => {
+describe('the read-only view of the check', () => {
+  it('wraps a frozen client, runs a read on its own object and still refuses a write', async () => {
     const calls: string[] = [];
     const messages = {
       list(this: unknown) {
@@ -167,7 +167,7 @@ describe('the forwarded view', () => {
     const gmail = Object.freeze({ users: Object.freeze({ messages: Object.freeze(messages) }) });
     const calendar = Object.freeze({ events: Object.freeze({ list: () => Promise.resolve({ data: {} }) }) });
     const accounts: GoogleAccounts = { ...offline, run: (_alias, fn) => fn({ gmail, calendar } as never) };
-    const view = readOnlyGoogle(forwarded(accounts));
+    const view = readOnlyGoogle(accounts);
     await view.accounts.run('a06', (apis) => apis.gmail.users.messages.list({ userId: 'me' }));
     await expect(view.accounts.run('a06', (apis) => apis.gmail.users.messages.modify({ userId: 'me', id: 'm1' }))).rejects.toBeInstanceOf(ReadOnlyRefused);
     expect(calls).toEqual(['list on its object']);

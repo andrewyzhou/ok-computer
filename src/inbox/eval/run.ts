@@ -21,13 +21,13 @@ import { errorText } from '../../tools/registry.js';
 import { ownerAddresses } from '../accounts.js';
 import { classifyMail } from '../classify.js';
 import { checkDue, findDates } from '../deadlines.js';
-import { DIGEST_QUERY, MAX as DIGEST_MAX, runDigest } from '../digest.js';
+import { BODY_LIMIT as DIGEST_BODY, DIGEST_QUERY, DIGEST_TOOL, MAX as DIGEST_MAX, runDigest } from '../digest.js';
 import { getMessages, listMessages, receivedAt, type MessageRef } from '../gmail.js';
-import { MAX as SWEEP_MAX, SWEEP_QUERY } from '../newsletters.js';
+import { MAX as SWEEP_MAX, SIGNED, SWEEP_HEADERS, SWEEP_QUERY } from '../newsletters.js';
 import { amountsIn, judgeSubscription, merchantOf, receiptKindOf, statedCadenceOf, type ChargeFact, type Merchant, type ReceiptKind, type StatedCadence } from '../receipts.js';
 import { runJob } from '../run.js';
 import { senderIdentityOf, unsubscribeChoiceOf } from '../senders.js';
-import { cadenceOf, MAX as RECEIPT_MAX, RECEIPT_QUERY, scanSubscriptions } from '../subscriptions.js';
+import { cadenceOf, MAX as RECEIPT_MAX, MAX_AGE_DAYS as RECEIPT_DAYS, RECEIPT_QUERY, scanSubscriptions } from '../subscriptions.js';
 import { dryContext, repoRoots } from './dry.js';
 import { labelKey, loadLabels, type Labels } from './labels.js';
 import {
@@ -80,23 +80,9 @@ export interface EvalSeams {
   commit?: string | null;
 }
 
-// a function of a work package that is not built yet throws an error with this start.
-const NOT_BUILT = 'not built:';
-const isNotBuilt = (err: unknown) => err instanceof Error && err.message.startsWith(NOT_BUILT);
-
-// the oldest receipt that the subscription scan reads, as in subscriptions.ts.
-const RECEIPT_DAYS = 400;
 const DAY_MS = 24 * 60 * 60 * 1000;
-// the start of a mail that the digest model reads, as in digest.ts. findDates reads the same part.
-const DIGEST_BODY = 3000;
-// the headers that the sweep reads, as in newsletters.ts.
-const SWEEP_HEADERS = ['From', 'List-Id', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'Date', 'Authentication-Results', 'DKIM-Signature'];
-// the headers that a dkim signature must cover for each way to unsubscribe, as in newsletters.ts.
-const SIGNED: Record<'one_click' | 'https', string[]> = { one_click: ['List-Unsubscribe', 'List-Unsubscribe-Post'], https: ['List-Unsubscribe'] };
-// the name of the digest tool, as in digest.ts. the check reads the due dates of the model from its calls.
-const DIGEST_TOOL = 'digest_items';
 
-type JobState = { ok: true } | { ok: false; notBuilt: true } | { ok: false; notBuilt: false; error: string };
+type JobState = { ok: true } | { ok: false; error: string };
 
 // the facts of one mail of the digest, from classifyMail.
 interface MailFact {
@@ -262,19 +248,18 @@ async function evaluate(options: EvalOptions, config: Config, dry: ReturnType<ty
   const failures: string[] = [];
 
   const states = new Map<EvalJob, JobState>(options.jobs.map((job) => [job, { ok: true }]));
-  // guard runs one step of a job. a function that is not built yet stops that job, and any other error stops it with
-  // its text, so one job never stops the report.
+  // guard runs one step of a job. an error stops that job with its text, so one job never stops the report.
   const guard = (job: EvalJob, step: () => void) => {
     if (!states.get(job)?.ok) return;
     try {
       step();
     } catch (err) {
-      states.set(job, isNotBuilt(err) ? { ok: false, notBuilt: true } : { ok: false, notBuilt: false, error: short(err) });
+      states.set(job, { ok: false, error: short(err) });
     }
   };
 
   const mails = new Map<string, MailFact>();
-  // the keys of every mail that the digest read, also when classifyMail is not built.
+  // the keys of every mail that the digest read, also when classifyMail fails.
   const digestKeys = new Set<string>();
   let mailCount = 0;
   const dates = { mails: 0, mentions: 0, withDates: 0 };
@@ -433,7 +418,7 @@ async function evaluate(options: EvalOptions, config: Config, dry: ReturnType<ty
     });
     const state = states.get(job)!;
     if (!state.ok) {
-      failures.push(state.notBuilt ? `${job}: not built yet` : `${job}: the check failed: ${state.error}`);
+      failures.push(`${job}: the check failed: ${state.error}`);
       return null;
     }
     return value;

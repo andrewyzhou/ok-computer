@@ -2,7 +2,7 @@ import type { gmail_v1 } from '@googleapis/gmail';
 import { z } from 'zod';
 import { toGoogleError } from '../google/errors.js';
 import { badAddress, bodyText, fromAddress, header, rawMessage } from '../google/mime.js';
-import { failed } from '../google/send.js';
+import { failed } from '../google/failed.js';
 import { requestContext } from '../google/trace.js';
 import { cleanLine } from '../signals/store.js';
 import { headOf } from '../text.js';

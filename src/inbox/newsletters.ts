@@ -4,7 +4,7 @@ import type { SenderState, UnsubscribeMethod } from '../dashboard/types.js';
 import type { Db } from '../db/index.js';
 import { toGoogleError } from '../google/errors.js';
 import { fromAddress as parseFrom, header } from '../google/mime.js';
-import { failed } from '../google/send.js';
+import { failed } from '../google/failed.js';
 import { requestContext } from '../google/trace.js';
 import { planUnsubscribe, unsubscribeTargets, verifyUnsubscribeHeaders } from '../google/unsubscribe.js';
 import { redact } from '../observability/redact.js';
@@ -35,7 +35,7 @@ const GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 const STILL_COMES = 'mail still comes more than 7 days after the unsubscribe';
 
 // the sweep reads the dkim headers too, so it takes the link of a sender from a message whose link is signed.
-const SWEEP_HEADERS = ['From', 'List-Id', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'Date', 'Authentication-Results', 'DKIM-Signature'];
+export const SWEEP_HEADERS = ['From', 'List-Id', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'Date', 'Authentication-Results', 'DKIM-Signature'];
 const CHECK_HEADERS = ['From', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'Authentication-Results', 'DKIM-Signature'];
 
 // the system labels of gmail. an archive must not add one, because the trash and spam hide mail, and the others
@@ -75,7 +75,7 @@ function belongsTo(identity: SenderIdentity, row: SenderRecord): boolean {
 }
 
 // the headers that a dkim signature must cover for each way to unsubscribe.
-const SIGNED: Record<'one_click' | 'https', string[]> = { one_click: ['List-Unsubscribe', 'List-Unsubscribe-Post'], https: ['List-Unsubscribe'] };
+export const SIGNED: Record<'one_click' | 'https', string[]> = { one_click: ['List-Unsubscribe', 'List-Unsubscribe-Post'], https: ['List-Unsubscribe'] };
 
 // true when the unsubscribe header of the message is signed by the domain of its sender, so a forger did not write
 // it. a mailto or no link is never used, so it needs no check.

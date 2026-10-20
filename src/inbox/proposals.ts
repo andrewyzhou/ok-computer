@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { CalendarProposalView } from '../dashboard/types.js';
 import { getSetting, setSetting } from '../db/settings.js';
 import { toGoogleError } from '../google/errors.js';
-import { failed } from '../google/send.js';
+import { failed } from '../google/failed.js';
 import { requestContext } from '../google/trace.js';
 import { cleanLine } from '../signals/store.js';
 import { headOf } from '../text.js';

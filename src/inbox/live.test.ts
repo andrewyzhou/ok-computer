@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/index.js';
 import { inboxAccounts, ownerAddresses } from './accounts.js';
-import { checkDue, parseDue } from './deadlines.js';
 import { getDigest, getProposal, listSubscriptions } from './views.js';
 
-// the scaffold of phase 6 t2: the columns of 026_inbox_live.sql, the views that read them, the account helpers, and
-// the due check seam, which keeps the behavior of phase 5 until the deadlines package builds the strict check.
+// the ground of phase 6 t2: the columns of 026_inbox_live.sql, the views that read them and the account helpers. the
+// due check has its own tests in deadlines.test.ts.
 
 const NOW = '2026-10-19T14:00:00.000Z';
 
@@ -66,17 +65,5 @@ describe('the account helpers', () => {
       { alias: 'hkn', email: null },
     ]);
     expect([...ownerAddresses(db, config)].sort()).toEqual(['owner.a06@example.com', 'owner@school.example.edu']);
-  });
-});
-
-describe('checkDue before the deadlines package', () => {
-  const base = { text: 'due friday', sentAt: NOW, timeZone: 'America/Los_Angeles' };
-  it('keeps the parsed due time of the model and its words', () => {
-    expect(checkDue({ ...base, dueAt: '2026-10-24', dueText: ' due friday ' })).toEqual({ ok: true, due: { ...parseDue('2026-10-24', base.timeZone)!, dueText: 'due friday' } });
-  });
-
-  it('drops a missing or bad due time', () => {
-    expect(checkDue({ ...base, dueAt: null, dueText: null })).toEqual({ ok: false, why: 'no_date' });
-    expect(checkDue({ ...base, dueAt: 'friday', dueText: null })).toEqual({ ok: false, why: 'bad_form' });
   });
 });
