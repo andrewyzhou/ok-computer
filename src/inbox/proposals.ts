@@ -31,6 +31,16 @@ const HORIZON_MS = 365 * DAY_MS;
 const DEFAULT_LENGTH_MS = 30 * 60 * 1000;
 const TITLE_LIMIT = 200;
 const DESCRIPTION_LIMIT = 2000;
+const DUE_TEXT_LIMIT = 200;
+
+// the description of the event and of the approval card. the words of the mail that state the date go last, so the
+// owner sees the evidence of the date before approving. the description is cut first, so the words always fit.
+export function cardDescription(description: string | null | undefined, dueText: string | null): string | null {
+  const words = dueText ? `The mail says: "${dueText}"` : '';
+  if (!words) return description ? headOf(description, DESCRIPTION_LIMIT) : null;
+  if (!description) return words;
+  return `${headOf(description, DESCRIPTION_LIMIT - words.length - 2)}\n\n${words}`;
+}
 
 // the titles of two events are the same when they differ only in case and spaces.
 const sameTitle = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -128,7 +138,8 @@ export async function proposeEvent(ctx: InboxContext, run: JobRun, p: ProposalIn
     return null;
   }
 
-  const description = p.description ? headOf(p.description, DESCRIPTION_LIMIT) : null;
+  const dueText = (p.dueText && cleanLine(p.dueText, DUE_TEXT_LIMIT)) || null;
+  const description = cardDescription(p.description, dueText);
   const inserted = ctx.db
     .prepare(
       `INSERT INTO inbox_proposals (account, calendarId, kind, title, startAt, endAt, allDay, description, sourceMessageId, sourceSubject, dueText, dedupeKey, state, runId, createdAt)
@@ -144,7 +155,7 @@ export async function proposeEvent(ctx: InboxContext, run: JobRun, p: ProposalIn
       description,
       p.sourceMessageId,
       p.sourceSubject === null ? null : cleanLine(p.sourceSubject, 500),
-      p.dueText ? cleanLine(p.dueText, 200) : null,
+      dueText,
       dedupeKey,
       run.runId,
       now.toISOString(),
