@@ -10,6 +10,14 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4" />
     </>
   ),
+  overview: (
+    <>
+      <rect x="4" y="4" width="7" height="9" rx="1.5" />
+      <rect x="13" y="4" width="7" height="5" rx="1.5" />
+      <rect x="13" y="11" width="7" height="9" rx="1.5" />
+      <rect x="4" y="15" width="7" height="5" rx="1.5" />
+    </>
+  ),
   desk: <path d="M3 9h18M5 9v10M19 9v10M9 9v4h6V9M7 5h10l2 4H5z" />,
   inbox: (
     <>
