@@ -372,6 +372,7 @@ function TimedBlock({
     width: `calc(${block.width * 100}% - 3px)`,
     zIndex: selected ? 900 : layer,
     '--title-lines': Math.max(1, roomLines - 1),
+    '--block-lines': Math.max(1, roomLines),
   } as CSSProperties;
   return (
     <button

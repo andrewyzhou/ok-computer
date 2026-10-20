@@ -1,7 +1,8 @@
-import type { BriefContent, BriefDelegation, BriefItem, BriefSection, BriefSectionKind, BriefSources } from '../dashboard/brief-types.js';
+import type { BriefContent, BriefDelegation, BriefItem, BriefSection, BriefSectionKind, BriefSource, BriefSources } from '../dashboard/brief-types.js';
 import type { CalendarEvent } from '../dashboard/calendar-types.js';
 import type { BriefInbox, BriefInboxItem } from '../dashboard/inbox-types.js';
 import type { CalendarProposalView, GoalRow } from '../dashboard/types.js';
+import { DONE_SUBJECT } from '../inbox/deadlines.js';
 import { cleanLine } from '../signals/store.js';
 import { addDays, localDay, localTime, zonedToUtc } from '../time.js';
 import { byStart, dedupeCopies, eventsOfDay, findConflicts, findTravelGaps, unansweredInvites } from './analyze.js';
@@ -74,15 +75,14 @@ export function buildBrief(input: BriefInput): BriefContent {
   const byKey = new Map(events.map((event) => [event.key, event]));
 
   const deadlines = deadlineItems(input, events, clock);
-  const deadlineIds = new Set(deadlines.map((item) => item.id));
-  const inbox = input.inbox ? inboxSection(input.inbox, deadlineIds, clock) : null;
+  const inbox = input.inbox ? inboxSection(input.inbox, deadlines.threads, clock) : null;
 
   const sections: BriefSection[] = [
     daySection(events, input.sources, clock),
     section('conflicts', conflictItems(events, byKey, clock)),
     section('travel', travelItems(events, byKey, clock)),
     section('invites', inviteItems(events, input.now, clock)),
-    section('deadlines', deadlines),
+    section('deadlines', deadlines.items),
     inbox ? section('inbox', inbox.items, inbox.note) : section('inbox', [], input.sources.calendar !== 'off' ? NO_DIGEST : null),
     section('delegations', delegationItems(input.delegations ?? [], clock)),
     section('goals', goalItems(input.goals, clock)),
@@ -127,7 +127,8 @@ function dayNote(today: CalendarEvent[], sources: BriefSources, clock: BriefCloc
     const first = firstTimed(today, clock);
     const count = plural(today.length, 'event', 'events');
     if (!first) note = `${count}.`;
-    else note = today.length === 1 ? `${count}, at ${hhmm(first.startAt, clock)}.` : `${count}, the first at ${hhmm(first.startAt, clock)}.`;
+    else if (today.length === 1) note = `${count}, at ${hhmm(first.event.startAt, clock)}.`;
+    else note = `${count}, the ${first.earliest ? 'first' : 'next'} at ${hhmm(first.event.startAt, clock)}.`;
   }
   if (sources.calendar === 'partial') {
     // an account that was not read at all, then each calendar that was read only in part, with its reason.
@@ -140,10 +141,12 @@ function dayNote(today: CalendarEvent[], sources: BriefSources, clock: BriefCloc
 
 // the first timed event that starts on the day at or after the time of the build, so a brief at 07:30 does not point
 // at a sleep block from midnight. when nothing starts later, it is the first timed event that starts on the day. an
-// event from the night before that runs into the day is never the first event of the day.
-function firstTimed(today: CalendarEvent[], clock: BriefClock): CalendarEvent | undefined {
+// event from the night before that runs into the day is never the first event of the day. earliest is false when an
+// event of the day starts before it, so the note says "the next" and not "the first".
+function firstTimed(today: CalendarEvent[], clock: BriefClock): { event: CalendarEvent; earliest: boolean } | undefined {
   const timed = today.filter((event) => !event.allDay && Date.parse(event.startAt) >= clock.dayStart);
-  return timed.find((event) => Date.parse(event.startAt) >= clock.now) ?? timed[0];
+  const event = timed.find((each) => Date.parse(each.startAt) >= clock.now) ?? timed[0];
+  return event ? { event, earliest: event === timed[0] } : undefined;
 }
 
 function conflictItems(events: CalendarEvent[], byKey: Map<string, CalendarEvent>, clock: BriefClock): BriefItem[] {
@@ -188,15 +191,39 @@ interface Deadline {
   sortAt: number;
 }
 
-function deadlineItems(input: BriefInput, events: CalendarEvent[], clock: BriefClock): BriefItem[] {
+// the deadlines of the week, and the ids of the threads that they cover, so the inbox section does not show those
+// threads again.
+function deadlineItems(input: BriefInput, events: CalendarEvent[], clock: BriefClock): { items: BriefItem[]; threads: Set<string> } {
   const found: Deadline[] = [];
+  const threads = new Set<string>();
   const inWindow = (start: number, end: number) => start < clock.windowEnd && end > clock.dayStart;
 
+  // a proposal that waits for the owner, in the window. a proposal that an older digest made of a mail that confirms a
+  // thing the owner already did, such as a submitted form, is no deadline (see DONE_SUBJECT).
+  const proposals = new Map<number, { proposal: CalendarProposalView; span: NonNullable<ReturnType<typeof proposalSpan>> }>();
+  for (const proposal of input.proposals) {
+    if (proposal.state !== 'proposed') continue;
+    if (proposal.sourceSubject !== null && DONE_SUBJECT.test(proposal.sourceSubject.trim())) continue;
+    const span = proposalSpan(proposal, clock);
+    if (!span || !inWindow(span.start, span.end)) continue;
+    proposals.set(proposal.id, { proposal, span });
+  }
+
+  // a deadline of the digest that made a proposal of the list is one item with that proposal, so the week does not
+  // count it twice.
+  const fromInbox = new Set<number>();
   if (input.inbox) {
     for (const each of input.inbox.deadlines) {
+      const id = `thread:${each.account}:${each.threadId}`;
+      if (each.proposalId !== null && proposals.has(each.proposalId)) {
+        fromInbox.add(each.proposalId);
+        threads.add(id);
+        continue;
+      }
       if (!each.dueAt) continue;
       const due = dueOf(each.dueAt, clock);
       if (!due || !inWindow(due.start, due.end)) continue;
+      threads.add(id);
       found.push({
         item: threadItem(input.inbox.digestId, each, digestTitle(each), `Due ${due.when} · from the inbox`, due.at, toneOf(due.end, clock)),
         sortAt: due.start,
@@ -216,15 +243,12 @@ function deadlineItems(input: BriefInput, events: CalendarEvent[], clock: BriefC
     found.push({ item: eventItem(event, event.title, location ? `${when} · ${location}` : when, toneOf(dueBy, clock)), sortAt: start });
   }
 
-  for (const proposal of input.proposals) {
-    if (proposal.state !== 'proposed') continue;
-    const span = proposalSpan(proposal, clock);
-    if (!span || !inWindow(span.start, span.end)) continue;
+  for (const { proposal, span } of proposals.values()) {
     found.push({
       item: {
         id: `proposal:${proposal.id}`,
         title: proposal.title,
-        detail: `${span.when} · proposed, waiting for your approval`,
+        detail: `${span.when} · ${fromInbox.has(proposal.id) ? 'from the inbox, ' : ''}proposed, waiting for your approval`,
         at: span.at,
         account: proposal.account,
         tone: toneOf(span.dueBy, clock),
@@ -234,7 +258,8 @@ function deadlineItems(input: BriefInput, events: CalendarEvent[], clock: BriefC
     });
   }
 
-  return found.sort((a, b) => a.sortAt - b.sortAt || (a.item.id < b.item.id ? -1 : a.item.id > b.item.id ? 1 : 0)).map((each) => each.item);
+  const items = found.sort((a, b) => a.sortAt - b.sortAt || (a.item.id < b.item.id ? -1 : a.item.id > b.item.id ? 1 : 0)).map((each) => each.item);
+  return { items, threads };
 }
 
 // a due time of the digest: a date alone is due at the end of that day, and a time is due at that time.
@@ -281,11 +306,11 @@ function toneOf(dueBy: number, clock: BriefClock): BriefItem['tone'] {
   return null;
 }
 
-function inboxSection(inbox: BriefInbox, deadlineIds: Set<string>, clock: BriefClock): { items: BriefItem[]; note: string } {
+function inboxSection(inbox: BriefInbox, deadlineThreads: Set<string>, clock: BriefClock): { items: BriefItem[]; note: string } {
   const replies: BriefItem[] = [];
   const bills: BriefItem[] = [];
   const packages: BriefItem[] = [];
-  const seen = new Set(deadlineIds);
+  const seen = new Set(deadlineThreads);
   // each thread shows once: a thread that is a deadline stays in the deadlines, and a later section skips a thread
   // that an earlier one has.
   const fresh = (each: BriefInboxItem) => {
@@ -322,16 +347,16 @@ function digestTitle(item: Pick<BriefInboxItem, 'summary' | 'subject'>): string 
   return cleanLine(item.summary || item.subject, 300);
 }
 
+// an item of the digest. it opens its draft when it has one, else its proposal, else the digest, as the link of
+// BriefInboxItem does. the id stays the thread, so a thread shows once in the brief.
 function threadItem(digestId: number, each: BriefInboxItem, title: string, detail: string | null, at: string | null, tone: BriefItem['tone']): BriefItem {
-  return {
-    id: `thread:${each.account}:${each.threadId}`,
-    title,
-    detail,
-    at,
-    account: each.account,
-    tone,
-    source: { kind: 'thread', account: each.account, threadId: each.threadId, digestId },
-  };
+  const source: BriefSource =
+    each.draftId !== null
+      ? { kind: 'draft', draftId: each.draftId }
+      : each.proposalId !== null
+        ? { kind: 'proposal', proposalId: each.proposalId }
+        : { kind: 'thread', account: each.account, threadId: each.threadId, digestId };
+  return { id: `thread:${each.account}:${each.threadId}`, title, detail, at, account: each.account, tone, source };
 }
 
 function formatAmount(amount: number, currency: string | null): string {
@@ -355,7 +380,7 @@ function delegationItems(delegations: BriefDelegation[], clock: BriefClock): Bri
       const onDay = (at: number) => at >= clock.dayStart && at < clock.dayEnd;
       const parts: string[] = [];
       if (each.waitingOn) parts.push(`Waiting on ${each.waitingOn}`);
-      if (Number.isFinite(due)) parts.push(`due ${onDay(due) ? 'today' : dayWord(localDay(new Date(due), clock.timeZone), clock)}`);
+      if (Number.isFinite(due)) parts.push(`due ${onDay(due) ? 'today' : dayWord(localDay(new Date(due), clock.timeZone), clock).replace(/^Tomorrow$/, 'tomorrow')}`);
       if (Number.isFinite(followUp) && onDay(followUp)) parts.push('Follow up today');
       const detail = parts.length ? capitalize(parts.join(' · ')) : null;
       let tone: BriefItem['tone'] = null;
@@ -413,9 +438,13 @@ function hhmm(iso: string, clock: BriefClock): string {
   return localTime(new Date(iso), clock.timeZone);
 }
 
-// 'Today' for the day of the brief, and the short weekday for another day.
+// 'Today' and 'Tomorrow', the short weekday for the rest of the week, and a short date (for example Tue, Oct 27) for
+// a day a week or more after the day of the brief and for a day before it, so a weekday never names two days.
 function dayWord(day: string, clock: BriefClock): string {
-  return day === clock.day ? 'Today' : weekdayOf(day);
+  if (day === clock.day) return 'Today';
+  if (day === addDays(clock.day, 1)) return 'Tomorrow';
+  if (day > clock.day && day < addDays(clock.day, 7)) return weekdayOf(day);
+  return new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
 }
 
 function weekdayOf(day: string): string {
@@ -473,7 +502,8 @@ export function briefText(content: BriefContent, link: string): string {
 }
 
 // the line about the events of the day. the title of the first event is the only outside text of the message. the
-// first event is the first one that starts at or after the time of the build, as on the page.
+// first event is the first one that starts at or after the time of the build, as on the page, and the line calls it the
+// next one when an event of the day starts before it.
 function dayLine(content: BriefContent): string {
   const day = content.sections.find((each) => each.kind === 'day');
   const items = day?.items ?? [];
@@ -487,5 +517,5 @@ function dayLine(content: BriefContent): string {
   const events = plural(items.length, 'event', 'events');
   if (!timed) return `${events}.`;
   const title = cleanLine(timed.title, 60);
-  return `${events}, first at ${localTime(new Date(timed.at!), content.timeZone)} ${title}.`;
+  return `${events}, ${timed === startsOnDay[0] ? 'first' : 'next'} at ${localTime(new Date(timed.at!), content.timeZone)} ${title}.`;
 }

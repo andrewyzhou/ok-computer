@@ -91,7 +91,7 @@ export function CalendarPage({ query }: RouteProps) {
       <div className="error-box cal-error" role="alert">
         <p>Could not load the calendar: {data.error}</p>
         <Button size="sm" icon="refresh" onClick={data.reload}>
-          Retry
+          Try again
         </Button>
       </div>
     );
@@ -113,7 +113,7 @@ export function CalendarPage({ query }: RouteProps) {
         </ul>
         <div className="cal-error-actions">
           <Button size="sm" icon="refresh" onClick={data.reload}>
-            Retry
+            Try again
           </Button>
           <ButtonLink size="sm" href="#/google">
             Open the Google page

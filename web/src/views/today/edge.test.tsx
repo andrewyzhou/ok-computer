@@ -153,7 +153,7 @@ describe('the today page at its edges', () => {
     expect((await main.findByRole('alert')).textContent).toBe('time must be HH:MM, 00:00 to 23:59');
     fireEvent.change(input, { target: { value: '08:00' } });
     fireEvent.click(main.getByRole('button', { name: 'Save' }));
-    expect(await main.findByText('Brief at 08:00 each day · next Tue 13 Oct')).toBeTruthy();
+    expect(await main.findByText('Brief at 08:00 each day · next Tue, Oct 13')).toBeTruthy();
     expect(calls.filter((call) => call.method === 'PUT').map((call) => call.body)).toEqual([{ time: '06:00' }, { time: '08:00' }]);
     expect(main.queryByLabelText('Time of the brief')).toBeNull();
   });
@@ -166,7 +166,7 @@ describe('the today page at its edges', () => {
     expect(await main.findByText('The brief is off.')).toBeTruthy();
     fireEvent.click(main.getByRole('button', { name: 'Turn on' }));
     fireEvent.click(main.getByRole('button', { name: 'Save' }));
-    expect(await main.findByText('Brief at 07:30 each day · next Tue 13 Oct')).toBeTruthy();
+    expect(await main.findByText('Brief at 07:30 each day · next Tue, Oct 13')).toBeTruthy();
   });
 
   it('says that a hash with a bad day is not a day, and asks the server nothing for it', async () => {

@@ -182,6 +182,8 @@ const eventItem = (key: string, title: string, detail: string | null, tone: 'inf
   return { id: `event:${key}`, title, detail, at: found.allDay ? found.startDay : found.startAt, account: found.account, tone, source: { kind: 'event' as const, key, day: found.startDay } };
 };
 
+// the brief of the fixture day, as buildBrief gives it on the input of src/brief/build.test.ts, which checks that each
+// item is the same. the inbox items come from a digest (id 1) where the reply to dana has draft 5.
 export const BRIEF_CONTENT: BriefContent = {
   day: TODAY_DAY,
   timeZone: TODAY_TZ,
@@ -191,7 +193,7 @@ export const BRIEF_CONTENT: BriefContent = {
     {
       kind: 'day',
       title: 'Schedule',
-      note: '10 events, the first at 09:00.',
+      note: '10 events, the next at 09:00.',
       items: [
         eventItem('personal/primary/birthday', "Mom's birthday", 'All day'),
         eventItem('personal/primary/run', 'Run with Sam', '07:00 to 07:45 · Memorial Glade'),
@@ -231,9 +233,9 @@ export const BRIEF_CONTENT: BriefContent = {
       title: 'Deadlines this week',
       note: null,
       items: [
-        { id: 'thread:school:t-essay', title: 'Essay draft for HIST 7B', detail: 'Due Tue 23:59 · from the inbox', at: at('2026-10-13', '23:59'), account: 'school', tone: 'warning', source: { kind: 'thread', account: 'school', threadId: 't-essay', digestId: 1 } },
+        { id: 'thread:school:t-essay', title: 'Essay draft for HIST 7B', detail: 'Due Tomorrow 23:59 · from the inbox', at: at('2026-10-13', '23:59'), account: 'school', tone: null, source: { kind: 'thread', account: 'school', threadId: 't-essay', digestId: 1 } },
         { id: 'proposal:7', title: 'Problem set 4 due', detail: 'Wed · proposed, waiting for your approval', at: '2026-10-14', account: 'school', tone: null, source: { kind: 'proposal', proposalId: 7 } },
-        eventItem(`school/${CLASS}/hw3`, 'Homework 3 due', 'Thu · CS 189'),
+        eventItem(`school/${CLASS}/hw3`, 'Homework 3 due', 'Thu'),
       ],
     },
     {
@@ -241,10 +243,10 @@ export const BRIEF_CONTENT: BriefContent = {
       title: 'Inbox',
       note: '2 need a reply, 1 bill, 1 package.',
       items: [
-        { id: 'thread:personal:t-landlord', title: 'Reply to Dana about the lease', detail: 'A draft is in Gmail Drafts', at: null, account: 'personal', tone: 'warning', source: { kind: 'thread', account: 'personal', threadId: 't-landlord', digestId: 1 } },
+        { id: 'thread:personal:t-landlord', title: 'Reply to Dana about the lease', detail: 'A draft is in Gmail Drafts', at: null, account: 'personal', tone: 'warning', source: { kind: 'draft', draftId: 5 } },
         { id: 'thread:school:t-ta', title: 'Answer the TA about section swap', detail: null, at: null, account: 'school', tone: 'warning', source: { kind: 'thread', account: 'school', threadId: 't-ta', digestId: 1 } },
-        { id: 'thread:personal:t-power', title: 'Electric bill, $64.20', detail: 'Due Fri', at: at('2026-10-16', '23:59'), account: 'personal', tone: null, source: { kind: 'thread', account: 'personal', threadId: 't-power', digestId: 1 } },
-        { id: 'thread:personal:t-box', title: 'Package from the bookstore', detail: 'Arrives today', at: null, account: 'personal', tone: null, source: { kind: 'thread', account: 'personal', threadId: 't-box', digestId: 1 } },
+        { id: 'thread:personal:t-power', title: 'Electric bill, $64.20', detail: 'Due Fri 23:59', at: at('2026-10-16', '23:59'), account: 'personal', tone: null, source: { kind: 'thread', account: 'personal', threadId: 't-power', digestId: 1 } },
+        { id: 'thread:personal:t-box', title: 'Package from the bookstore', detail: 'Arrives today', at: at(D, '00:00'), account: 'personal', tone: null, source: { kind: 'thread', account: 'personal', threadId: 't-box', digestId: 1 } },
       ],
     },
     {
@@ -275,7 +277,7 @@ export const BRIEF_FULL: Brief = {
   createdAt: TODAY_NOW,
   shortText: [
     'Brief for Mon 12 Oct',
-    '10 events, first at 09:00 Lab meeting.',
+    '10 events, next at 09:00 Lab meeting.',
     '1 conflict, 1 tight move, 2 invitations to answer.',
     '3 deadlines this week. Inbox: 2 need a reply, 1 bill, 1 package.',
     '2 delegations, 2 goals.',

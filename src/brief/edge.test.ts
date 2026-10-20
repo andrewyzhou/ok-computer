@@ -376,8 +376,9 @@ describe('the findings of the review of the today track', () => {
     const sleep = ev('sleep', '2026-10-12T00:00:00-07:00', '2026-10-12T07:00:00-07:00', { title: 'sleep' });
     const run = ev('run', '2026-10-12T07:30:00-07:00', '2026-10-12T08:00:00-07:00', { title: 'exercise' });
     const brief = buildBrief(input({ events: [sleep, run] }));
-    expect(sectionOf(brief, 'day')!.note).toBe('2 events, the first at 07:30.');
-    expect(briefText(brief, LINK).split('\n')[1]).toBe('2 events, first at 07:30 exercise.');
+    // the sleep block starts earlier on the day, so the run is the next event and not the first.
+    expect(sectionOf(brief, 'day')!.note).toBe('2 events, the next at 07:30.');
+    expect(briefText(brief, LINK).split('\n')[1]).toBe('2 events, next at 07:30 exercise.');
     // a brief built late in the day, after every event, still names the first one of the day.
     const late = buildBrief(input({ events: [sleep, run], now: new Date('2026-10-12T20:00:00-07:00') }));
     expect(sectionOf(late, 'day')!.note).toBe('2 events, the first at 00:00.');

@@ -196,6 +196,29 @@ describe('findConflicts', () => {
     expect(findConflicts([p, later])).toHaveLength(1);
   });
 
+  it('does not count the owner\'s own block for an invitation at the same time and place', () => {
+    // the real shape: the owner's block "61a lab (scholars)" and the lab invitation run 15:30 to 17:00 at one place,
+    // written two ways.
+    const block = ev('block', '2026-10-12T22:30:00Z', '2026-10-13T00:00:00Z', { title: '61a lab (scholars)', location: 'VLSB' });
+    const lab = ev('lab', '2026-10-12T22:30:00Z', '2026-10-13T00:00:00Z', { ...accepted, title: '[CS61A] 122L', location: 'Valley Life Sciences Building' });
+    expect(findConflicts([block, lab])).toEqual([]);
+    // a block with no place is the same commitment as the invitation too.
+    expect(findConflicts([{ ...block, location: null }, lab])).toEqual([]);
+    // a third event that overlaps both makes one conflict, with the invitation.
+    const other = ev('other', '2026-10-12T23:00:00Z', '2026-10-12T23:30:00Z', accepted);
+    expect(findConflicts([block, lab, other]).map((each) => `${each.a}|${each.b}`)).toEqual(['personal/primary/lab|personal/primary/other']);
+  });
+
+  it('counts two events with the same time at two places, and two meetings with the same time and no place', () => {
+    const block = ev('block', '2026-10-12T22:30:00Z', '2026-10-13T00:00:00Z', { location: 'Soda Hall' });
+    const lab = ev('lab', '2026-10-12T22:30:00Z', '2026-10-13T00:00:00Z', { ...accepted, location: 'Evans Hall' });
+    expect(findConflicts([block, lab])).toHaveLength(1);
+    const call = ev('call', '2026-10-12T22:30:00Z', '2026-10-13T00:00:00Z', { ...accepted, organizer: 'sam@example.com' });
+    expect(findConflicts([call, { ...lab, location: null }])).toHaveLength(1);
+    // the same place at another end is another commitment.
+    expect(findConflicts([{ ...block, location: 'VLSB', endAt: '2026-10-12T23:30:00.000Z' }, { ...lab, location: 'VLSB' }])).toHaveLength(1);
+  });
+
   it('does not count events that show as free, all-day events, or events the owner did not accept', () => {
     const held = ev('held', '2026-10-12T09:00:00Z', '2026-10-12T10:00:00Z');
     const free = ev('free', '2026-10-12T09:00:00Z', '2026-10-12T10:00:00Z', { showsAsFree: true });
@@ -256,6 +279,16 @@ describe('findTravelGaps', () => {
     const p = ev('p', at('10:05'), at('11:00'), { uid: 'same', location: 'Wheeler' });
     const s = { ...p, key: 'school/primary/s', account: 'school' };
     expect(findTravelGaps([a, p, s])).toHaveLength(1);
+  });
+
+  it('gives one gap to the owner\'s block and the invitation that start at the same time and place', () => {
+    // the real shape: after "Pre-HM Dinner" the owner's own block and the invitation start at one time at one place.
+    const dinner = ev('dinner', at('17:00'), at('18:00'), { title: 'Pre-HM Dinner', location: 'Crossroads' });
+    const block = ev('block', at('18:05'), at('20:00'), { title: 'HM', location: 'Cory Hall 540AB' });
+    const invite = ev('invite', at('18:05'), at('20:00'), { title: 'HM meeting', location: 'Cory 540AB', answer: 'accepted', organizerSelf: false, organizer: 'hm@example.com' });
+    const gaps = findTravelGaps([dinner, block, invite]);
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]).toMatchObject({ from: dinner.key, to: invite.key, gapMinutes: 5 });
   });
 
   it('skips all-day events', () => {

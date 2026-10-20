@@ -315,7 +315,7 @@ describe('the calendar states', () => {
     expect(alert.getByText('personal needs a new sign-in on the Google page.')).toBeTruthy();
     expect(alert.getByText('Google did not answer for school.')).toBeTruthy();
     const before = calendarCalls(calls).length;
-    fireEvent.click(alert.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(alert.getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(calendarCalls(calls).length).toBe(before + 1));
   });
 
@@ -346,7 +346,7 @@ describe('the calendar states', () => {
     const calls = await openWeek((request) => (fail ? json({ error: 'the calendar failed' }, 500) : pageFor(request)));
     expect(await inMain().findByText('Could not load the calendar: the calendar failed')).toBeTruthy();
     fail = false;
-    fireEvent.click(inMain().getByRole('button', { name: 'Retry' }));
+    fireEvent.click(inMain().getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(block('school/primary/advisor')).toBeTruthy());
     expect(calendarCalls(calls).length).toBe(2);
   });

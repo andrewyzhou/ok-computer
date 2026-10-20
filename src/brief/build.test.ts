@@ -105,10 +105,19 @@ describe('buildBrief', () => {
     }
   });
 
+  it('gives the brief of the shared fixture, item by item', () => {
+    // the web tests, the route tests and the screenshots show BRIEF_FULL, so it must be what the builder makes.
+    const content = buildBrief(input());
+    for (const section of BRIEF_FULL.content.sections) expect(sectionOf(content, section.kind), section.kind).toEqual(section);
+    expect(content).toEqual(BRIEF_FULL.content);
+    expect(briefText(content, LINK)).toBe(BRIEF_FULL.shortText);
+  });
+
   it('describes the events of the day', () => {
     const day = sectionOf(buildBrief(input()), 'day')!;
-    // the brief is built at 07:30, so the run that started at 07:00 is not the first event.
-    expect(day.note).toBe('10 events, the first at 09:00.');
+    // the brief is built at 07:30, so the note names the lab meeting, and calls it the next event, because the run
+    // started at 07:00.
+    expect(day.note).toBe('10 events, the next at 09:00.');
     const byId = new Map(day.items.map((item) => [item.id, item]));
     expect(byId.get('event:personal/primary/birthday')).toMatchObject({ detail: 'All day', at: TODAY_DAY, tone: null });
     expect(byId.get('event:personal/primary/run')).toMatchObject({
@@ -150,9 +159,76 @@ describe('buildBrief', () => {
   it('gives the deadlines of the week from mail, the calendar and proposals', () => {
     const items = sectionOf(buildBrief(input()), 'deadlines')!.items;
     expect(items).toMatchObject([
-      { id: 'thread:school:t-essay', detail: 'Due Tue 23:59 · from the inbox', tone: null, source: { kind: 'thread', account: 'school', threadId: 't-essay', digestId: 1 } },
+      { id: 'thread:school:t-essay', detail: 'Due Tomorrow 23:59 · from the inbox', tone: null, source: { kind: 'thread', account: 'school', threadId: 't-essay', digestId: 1 } },
       { id: 'proposal:7', at: '2026-10-14', detail: 'Wed · proposed, waiting for your approval', tone: null, source: { kind: 'proposal', proposalId: 7 } },
       { id: 'event:school/cs189@group.calendar.google.com/hw3', at: '2026-10-15', detail: 'Thu', tone: null },
+    ]);
+  });
+
+  it('opens the draft or the proposal of a digest item, else the digest', () => {
+    const digest: InboxDigest = {
+      ...DIGEST,
+      items: [
+        digestItem({ section: 'needs_reply', account: 'personal', threadId: 't-draft', summary: 'Reply with a draft', draftId: 5, proposalId: 8 }),
+        digestItem({ section: 'needs_reply', account: 'school', threadId: 't-plain', summary: 'Reply without a draft' }),
+        digestItem({ section: 'deadlines', account: 'school', threadId: 't-proposed', summary: 'Form due', dueAt: at('2026-10-14', '17:00'), proposalId: 8 }),
+      ],
+    };
+    const content = buildBrief(input({ inbox: inboxOf(digest), proposals: [], events: [] }));
+    const sources = new Map(content.sections.flatMap((section) => section.items).map((item) => [item.id, item.source]));
+    expect(sources.get('thread:personal:t-draft')).toEqual({ kind: 'draft', draftId: 5 });
+    expect(sources.get('thread:school:t-plain')).toEqual({ kind: 'thread', account: 'school', threadId: 't-plain', digestId: 1 });
+    // the proposal of this deadline is not in the list (it was decided), so the deadline stays and opens the proposal.
+    expect(sources.get('thread:school:t-proposed')).toEqual({ kind: 'proposal', proposalId: 8 });
+  });
+
+  it('shows a deadline of the digest and its proposal as one item', () => {
+    const digest: InboxDigest = {
+      ...DIGEST,
+      items: [digestItem({ section: 'deadlines', account: 'school', threadId: 't-mt3', summary: 'CS 61A Midterm 3', dueAt: at('2026-10-14', '20:00'), proposalId: 8 })],
+    };
+    const proposals = [proposal({ id: 8, title: 'CS 61A Midterm 3', startAt: at('2026-10-14', '20:00'), endAt: at('2026-10-14', '22:00'), allDay: false })];
+    const content = buildBrief(input({ inbox: inboxOf(digest), proposals, events: [] }));
+    expect(sectionOf(content, 'deadlines')!.items).toEqual([
+      {
+        id: 'proposal:8',
+        title: 'CS 61A Midterm 3',
+        detail: 'Wed 20:00 · from the inbox, proposed, waiting for your approval',
+        at: at('2026-10-14', '20:00'),
+        account: 'school',
+        tone: null,
+        source: { kind: 'proposal', proposalId: 8 },
+      },
+    ]);
+    expect(briefText(content, LINK)).toContain('1 deadline this week.');
+  });
+
+  it('leaves out a proposal made of a mail that confirms a thing the owner did', () => {
+    const proposals = [
+      proposal({ id: 2, title: 'CS 61A MT3 proctoring preferences form due', startAt: TODAY_DAY, sourceSubject: 'Thanks for filling out CS 61A MT3 proctoring preferences' }),
+      proposal({ id: 7, title: 'Problem set 4 due', startAt: '2026-10-14', sourceSubject: 'Problem set 4 is out' }),
+    ];
+    const items = sectionOf(buildBrief(input({ inbox: null, proposals, events: [] })), 'deadlines')!.items;
+    expect(items.map((item) => item.id)).toEqual(['proposal:7']);
+  });
+
+  it('names a day of the next week and a day before the brief by its date', () => {
+    const digest: InboxDigest = {
+      ...DIGEST,
+      items: [
+        digestItem({ section: 'deadlines', account: 'school', threadId: 't-today', summary: 'Due today', dueAt: at(TODAY_DAY, '20:00') }),
+        digestItem({ section: 'deadlines', account: 'school', threadId: 't-tomorrow', summary: 'Due tomorrow', dueAt: at('2026-10-13', '07:15') }),
+        digestItem({ section: 'deadlines', account: 'school', threadId: 't-sun', summary: 'Due sunday', dueAt: '2026-10-18' }),
+        // the same weekday a week later is in the window of the brief, and must not read as today.
+        digestItem({ section: 'deadlines', account: 'school', threadId: 't-week', summary: 'Due next monday', dueAt: at('2026-10-19', '20:00') }),
+      ],
+    };
+    const items = sectionOf(buildBrief(input({ inbox: inboxOf(digest), proposals: [], events: [] })), 'deadlines')!.items;
+    expect(items.map((item) => item.detail)).toEqual([
+      'Due Today 20:00 · from the inbox',
+      'Due Tomorrow 07:15 · from the inbox',
+      'Due Sun · from the inbox',
+      'Due Mon, Oct 19 20:00 · from the inbox',
     ]);
   });
 
@@ -214,7 +290,7 @@ describe('buildBrief', () => {
     expect(items.map((item) => [item.id, item.detail, item.tone])).toEqual([
       ['delegation:3', 'Waiting on the travel office · due Wed', null],
       ['delegation:4', 'Follow up today', 'warning'],
-      ['delegation:5', 'Waiting on Sam · due Sun', 'critical'],
+      ['delegation:5', 'Waiting on Sam · due Sun, Oct 11', 'critical'],
       ['delegation:6', 'Due today · Follow up today', 'warning'],
     ]);
     expect(items[0]!.source).toEqual({ kind: 'delegation', delegationId: 3 });
@@ -243,12 +319,12 @@ describe('buildBrief', () => {
     const failed = buildBrief(input({ events: [], sources: { calendar: 'failed', skipped: [{ account: 'personal', reason: 'x' }], digest: null, desk: true } }));
     expect(sectionOf(failed, 'day')!.note).toBe('The calendars could not be read.');
     const partial = buildBrief(input({ sources: { calendar: 'partial', skipped: [{ account: 'school', reason: 'x' }], digest: null, desk: true } }));
-    expect(sectionOf(partial, 'day')!.note).toBe('10 events, the first at 09:00. The calendar of school could not be read.');
+    expect(sectionOf(partial, 'day')!.note).toBe('10 events, the next at 09:00. The calendar of school could not be read.');
     // one calendar of an account that was read in part gives its own reason.
     const cut = buildBrief(
       input({ sources: { calendar: 'partial', skipped: [{ account: 'school', calendarId: 'c', reason: 'school: Only the first 1000 events of the calendar c are shown.' }], digest: null, desk: true } }),
     );
-    expect(sectionOf(cut, 'day')!.note).toBe('10 events, the first at 09:00. school: Only the first 1000 events of the calendar c are shown.');
+    expect(sectionOf(cut, 'day')!.note).toBe('10 events, the next at 09:00. school: Only the first 1000 events of the calendar c are shown.');
   });
 
   it('shows one invitation on two accounts once in each section', () => {
@@ -278,7 +354,7 @@ describe('briefText', () => {
     expect(lines[0]).toBe('Brief for Mon 12 Oct');
     expect(lines.at(-1)).toBe(LINK);
     expect(lines.slice(1, -1)).toEqual([
-      '10 events, first at 09:00 Lab meeting.',
+      '10 events, next at 09:00 Lab meeting.',
       '1 conflict, 1 tight move, 2 invitations to answer.',
       '3 deadlines this week. Inbox: 2 need a reply, 1 bill, 1 package.',
       '2 delegations, 2 goals.',
@@ -296,7 +372,7 @@ describe('briefText', () => {
     const events = TODAY_EVENTS.map((event) => (event.eventId === 'lab' ? { ...event, title: long } : event));
     const text = briefText(buildBrief(input({ events })), LINK);
     expect(text.length).toBeLessThanOrEqual(SHORT_TEXT_LIMIT);
-    expect(text.split('\n')[1]).toBe(`10 events, first at 09:00 ${'x'.repeat(60)}.`);
+    expect(text.split('\n')[1]).toBe(`10 events, next at 09:00 ${'x'.repeat(60)}.`);
     expect(text).not.toContain('Dentist');
   });
 
@@ -308,6 +384,6 @@ describe('briefText', () => {
     expect(lines[0]).toBe('Brief for Mon 12 Oct');
     expect(lines.at(-1)).toBe(link);
     expect(lines.length).toBeLessThan(6);
-    expect(lines[1]).toBe('10 events, first at 09:00 Lab meeting.');
+    expect(lines[1]).toBe('10 events, next at 09:00 Lab meeting.');
   });
 });

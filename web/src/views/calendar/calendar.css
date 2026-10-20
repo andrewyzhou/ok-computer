@@ -349,8 +349,12 @@ button.cal-dayhead-button:hover {
 }
 .cal-block.is-short {
   flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 5px;
+  align-content: flex-start;
+  /* the time wraps to a second row when it does not fit next to the title, and the gap pushes that row out of the
+     block, so a short block never shows a time cut in half. */
+  gap: 40px 5px;
   padding-top: 1px;
   padding-bottom: 1px;
 }
@@ -363,8 +367,28 @@ button.cal-dayhead-button:hover {
   min-width: 0;
 }
 .cal-block.is-short .cal-block-time {
-  flex: 1 1 0;
-  min-width: 0;
+  flex: none;
+}
+/* a block that shares a narrow week column has no room for the time, and an ellipsis left only a few letters of the
+   title. such a block shows the title alone, broken at words over the lines that fit, and the time stays in the
+   tooltip and the details panel. */
+.cal-block {
+  container: cal-block / inline-size;
+}
+@container cal-block (max-width: 90px) {
+  .cal-block .cal-block-time,
+  .cal-block.is-short .cal-block-time {
+    display: none;
+  }
+  .cal-block .cal-block-title,
+  .cal-block.is-short .cal-block-title {
+    display: block;
+    white-space: normal;
+    text-overflow: clip;
+    -webkit-line-clamp: none;
+    line-clamp: none;
+    max-height: calc(var(--block-lines, 1) * 14px);
+  }
 }
 .cal-bar {
   position: relative;
