@@ -1,9 +1,10 @@
 import type { gmail_v1 } from '@googleapis/gmail';
 import { z } from 'zod';
 import { withoutLiveLinks } from '../approvals/flow.js';
+import type { DigestAccountStats, DigestStats, MailKind } from '../dashboard/inbox-types.js';
 import type { DigestItem, DigestSection, InboxDigest } from '../dashboard/types.js';
 import { appendEvent } from '../events/log.js';
-import { bodyText, fromAddress, header } from '../google/mime.js';
+import { header } from '../google/mime.js';
 import { sessionTaint } from '../policy/store.js';
 import { MAIN_SESSION } from '../sessions/router.js';
 import { cleanLine } from '../signals/store.js';
@@ -11,12 +12,15 @@ import { headOf } from '../text.js';
 import { localDay } from '../time.js';
 import { errorText } from '../tools/registry.js';
 import { wrapIfTainted } from '../tools/untrusted.js';
+import { ownerAddresses } from './accounts.js';
 import { settleApprovals } from './actions.js';
+import { classifyMail, type MailClass } from './classify.js';
 import type { InboxContext, JobRun } from './context.js';
 import { checkDue } from './deadlines.js';
 import { checkDrafts, draftReply } from './drafts.js';
 import { extractItems, itemsTool } from './extract.js';
 import { getMessages, listMessages, receivedAt } from './gmail.js';
+import { mailText } from './mailtext.js';
 import { proposeEvent } from './proposals.js';
 import { mailSource, markRead } from './run.js';
 
@@ -29,8 +33,11 @@ export { parseDue } from './deadlines.js';
 
 // the mail of the last two days in the inbox, without the promotions and the social tabs.
 export const DIGEST_QUERY = 'in:inbox newer_than:2d -category:promotions -category:social';
-// the most messages that one account gives to one digest.
-export const MAX = 100;
+// the most messages that one account gives to one digest. on the owner's real mail the school account listed 110
+// messages in two days on a monday, over the old limit of 100, and the other accounts listed 6 to 21. 250 holds more
+// than twice the busiest account, so a busy week of a course is still read whole, and capped in the stats says when it
+// is not.
+export const MAX = 250;
 
 // the model reads this many mails in one call.
 const BATCH = 10;
@@ -45,9 +52,6 @@ const TEXT_LIMIT = 1000;
 const FOOTER = 'The dashboard has the rest: #/inbox';
 
 const SECTIONS: readonly DigestSection[] = ['needs_reply', 'deadlines', 'bills', 'packages'];
-
-// the senders that nobody reads the answers of. a mail of a list is not a person who waits for an answer either.
-const NO_REPLY = /^(no-?reply|do-?not-?reply|notifications?)@/i;
 
 const TOOL = itemsTool(
   'digest_items',
@@ -100,6 +104,7 @@ const SYSTEM = [
 
 interface Found {
   item: DigestItem;
+  mail: MailClass;
   allDay: boolean;
   course: boolean;
   title: string | null;
@@ -126,24 +131,42 @@ export async function runDigest(ctx: InboxContext, run: JobRun): Promise<{ note?
   }
   markRead(ctx, run, available.map(mailSource), 'inbox_digest');
 
+  const owner = ownerAddresses(ctx.db, ctx.googleConfig);
   const accounts: string[] = [];
   const found: Found[] = [];
+  // one entry for each configured account, in the order of the config. an account that was not read keeps its reason.
+  const stats: DigestStats = { accounts: [], droppedDates: 0 };
+  const statsOf = new Map<string, DigestAccountStats>();
+  for (const alias of ctx.google.accounts.aliases) {
+    const entry: DigestAccountStats = { alias, listed: 0, read: 0, capped: false, person: 0, list: 0, automated: 0, hidden: 0, error: ctx.google.accounts.unavailable(alias) ?? null };
+    stats.accounts.push(entry);
+    statsOf.set(alias, entry);
+  }
   for (const alias of available) {
+    const entry = statsOf.get(alias)!;
     let messages: gmail_v1.Schema$Message[];
     try {
       messages = await ctx.google.accounts.run(alias, async (apis) => {
         const refs = await listMessages(apis, DIGEST_QUERY, MAX);
+        entry.listed = refs.length;
+        entry.capped = refs.length >= MAX;
         return getMessages(apis, refs.map((each) => each.id), { format: 'full' });
       });
     } catch (err) {
       ctx.logger.warn('the inbox digest could not read an account', { runId: run.runId, account: alias, err });
       notes.push(`The mail of ${alias} could not be read: ${errorText(err)}`);
+      entry.error = cleanLine(errorText(err), 300) || 'the mail could not be read';
       continue;
     }
     accounts.push(alias);
+    entry.read = messages.length;
+    const classes = messages.map((message) => classifyMail(message, owner));
+    for (const each of classes) entry[each.kind] += 1;
+    // a mail of a list or a machine is hidden unless it gives a deadline, a bill or a package item.
+    const shown = new Set<number>();
     for (let start = 0; start < messages.length; start += BATCH) {
       const batch = messages.slice(start, start + BATCH);
-      const inputs = batch.map((message, index) => ({ id: start + index, text: inputText(message) }));
+      const inputs = batch.map((message, index) => ({ id: start + index, text: inputText(message, classes[start + index]!) }));
       const texts = new Map(inputs.map((each) => [each.id, each.text]));
       const result = await extractItems<Omit<Item, 'id'>>(ctx.slots, {
         slot: 'utility',
@@ -160,18 +183,28 @@ export async function runDigest(ctx: InboxContext, run: JobRun): Promise<{ note?
       if (result.aborted) throw new Error('the digest stopped, because the model call was aborted');
       if (result.error) {
         notes.push(`A batch of the mail of ${alias} was not sorted: ${result.error}`);
+        // the mail of a batch that was not sorted is not counted as hidden. the note says that it was not sorted.
+        for (let id = start; id < start + batch.length; id++) shown.add(id);
         continue;
       }
       for (const [id, items] of result.items) {
         const message = messages[id]!;
+        const mail = classes[id]!;
         const seen = new Set<DigestSection>();
         for (const each of items) {
           if (seen.has(each.section)) continue;
           seen.add(each.section);
-          found.push(itemOf(ctx, alias, message, each, texts.get(id) ?? ''));
+          // the code, not the model, decides who waits for a reply. only a person who is not the owner can, so a
+          // notification, a receipt, a list mail or a mail whose text asks to be put there never is.
+          if (each.section === 'needs_reply' && (mail.kind !== 'person' || mail.fromOwner)) continue;
+          const kept = itemOf(ctx, alias, message, mail, each, texts.get(id) ?? '');
+          if (kept.dropped) stats.droppedDates += 1;
+          found.push(kept);
+          shown.add(id);
         }
       }
     }
+    entry.hidden = classes.filter((each, id) => each.kind !== 'person' && !shown.has(id)).length;
   }
   // a digest that could read no account fails, as the sweep does. it saves no digest, so the dashboard never shows an
   // empty digest after an outage, and the scheduler counts the failure.
@@ -180,7 +213,7 @@ export async function runDigest(ctx: InboxContext, run: JobRun): Promise<{ note?
   const now = ctx.clock();
   for (const each of found) {
     const { item, message } = each;
-    if (item.section === 'needs_reply' && wantsDraft(message)) {
+    if (item.section === 'needs_reply' && wantsDraft(each.mail)) {
       try {
         item.draftId = await draftReply(ctx, run, { account: item.account, messageId: item.messageId, threadId: item.threadId });
       } catch (err) {
@@ -213,12 +246,16 @@ export async function runDigest(ctx: InboxContext, run: JobRun): Promise<{ note?
     }
   }
 
-  const items = sortItems(found.map((each) => each.item));
+  const facts = new Map(found.map((each) => [each.item, { direct: each.mail.direct, at: Number(each.message.internalDate) || 0 }]));
+  const items = sortItems(
+    found.map((each) => each.item),
+    facts,
+  );
   const day = localDay(now, ctx.timeZone);
   const shortText = shortTextOf({ items, day }, ctx.timeZone);
   const row = ctx.db
-    .prepare('INSERT INTO inbox_digests (day, runId, createdAt, accounts, shortText, items, notified) VALUES (?, ?, ?, ?, ?, ?, 0)')
-    .run(day, run.runId, now.toISOString(), JSON.stringify(accounts), shortText, JSON.stringify(items));
+    .prepare('INSERT INTO inbox_digests (day, runId, createdAt, accounts, shortText, items, notified, stats) VALUES (?, ?, ?, ?, ?, ?, 0, ?)')
+    .run(day, run.runId, now.toISOString(), JSON.stringify(accounts), shortText, JSON.stringify(items), JSON.stringify(stats));
 
   // an empty digest stays on the dashboard, and the owner gets no message about it.
   if (items.length) {
@@ -237,16 +274,21 @@ export async function runDigest(ctx: InboxContext, run: JobRun): Promise<{ note?
   return notes.length ? { note: notes.join(' ') } : {};
 }
 
-// the text of one mail for the model: the headers that say who wrote it and when, and the start of the body.
-function inputText(message: gmail_v1.Schema$Message): string {
-  return `From: ${header(message, 'From')}\nSubject: ${header(message, 'Subject')}\nDate: ${receivedAt(message)}\n\n${headOf(bodyText(message.payload), BODY_LIMIT)}`;
+// the text of one mail for the model: the headers that say who wrote it and when, the kind that the code gave it, and
+// the start of the body with the lines of its html. the kind is data for the model too, and the code checks the
+// sections against it after the call.
+function inputText(message: gmail_v1.Schema$Message, mail: MailClass): string {
+  const kind: MailKind = mail.kind;
+  return `From: ${header(message, 'From')}\nSubject: ${header(message, 'Subject')}\nDate: ${receivedAt(message)}\nKind: ${kind}\n\n${mailText(message, BODY_LIMIT).text}`;
 }
 
 // the account, the ids, the sender and the subject come from the mail headers, so a model cannot change who wrote a
 // mail. the model gives only the section, the summary and the facts of a bill or a deadline.
-function itemOf(ctx: InboxContext, account: string, message: gmail_v1.Schema$Message, raw: Omit<Item, 'id'>, text: string): Found {
+function itemOf(ctx: InboxContext, account: string, message: gmail_v1.Schema$Message, mail: MailClass, raw: Omit<Item, 'id'>, text: string): Found & { dropped: boolean } {
   const checked = checkDue({ dueAt: raw.dueAt, dueText: raw.dueText, text, sentAt: receivedAt(message), timeZone: ctx.timeZone });
   const due = checked.ok ? checked.due : null;
+  // a due time that the model gave and the check dropped is counted, because the mail does not state that date.
+  const dropped = !checked.ok && checked.why !== 'no_date';
   const bill = raw.section === 'bills';
   const messageId = message.id ?? '';
   return {
@@ -263,7 +305,10 @@ function itemOf(ctx: InboxContext, account: string, message: gmail_v1.Schema$Mes
       currency: bill ? (raw.currency ?? null) : null,
       draftId: null,
       proposalId: null,
+      mail: mail.kind,
     },
+    mail,
+    dropped,
     allDay: due?.allDay ?? false,
     course: raw.course === true,
     title: raw.title ? cleanLine(raw.title, 120) : null,
@@ -272,11 +317,10 @@ function itemOf(ctx: InboxContext, account: string, message: gmail_v1.Schema$Mes
   };
 }
 
-// a draft is for a person. a no-reply sender, a sender without a plain address, and the mail of a list get none.
-function wantsDraft(message: gmail_v1.Schema$Message): boolean {
-  const address = fromAddress(header(message, 'From'));
-  if (!address || NO_REPLY.test(address)) return false;
-  return !header(message, 'List-Id') && !header(message, 'List-Unsubscribe');
+// a draft is for a person who wrote to the owner. a machine, a list, the owner's own mail and a mail where the owner
+// is only in cc get none. drafts.ts checks the same again before it writes.
+function wantsDraft(mail: MailClass): boolean {
+  return mail.kind === 'person' && !mail.fromOwner && mail.direct;
 }
 
 // a due time that has not passed and is at most 60 days away. an all-day due date counts until its day ends.
@@ -286,11 +330,24 @@ function soon(dueAt: string, allDay: boolean, now: Date, timeZone: string): bool
   return future && at <= now.getTime() + PROPOSAL_DAYS * DAY_MS;
 }
 
-// the items in the order of the sections, then by due time, with the items without a due time last.
-export function sortItems(items: DigestItem[]): DigestItem[] {
+// the facts of the mail of a needs_reply item that its order needs: an owner address in To, and the time gmail got it.
+export interface ReplyOrder {
+  direct: boolean;
+  at: number;
+}
+
+// the items in the order of the sections. needs_reply holds the mail to the owner first, then the copies, each newest
+// first. the other sections go by due time, with the items without a due time last. a caller without the facts of the
+// mail gives none, and its needs_reply items keep their order.
+export function sortItems(items: DigestItem[], facts: ReadonlyMap<DigestItem, ReplyOrder> = new Map()): DigestItem[] {
   const rank = (section: DigestSection) => SECTIONS.indexOf(section);
   const due = (item: DigestItem) => (item.dueAt ? Date.parse(item.dueAt) : Number.POSITIVE_INFINITY);
-  return [...items].sort((a, b) => rank(a.section) - rank(b.section) || due(a) - due(b));
+  const reply = (a: DigestItem, b: DigestItem) => {
+    const x = facts.get(a);
+    const y = facts.get(b);
+    return Number(y?.direct ?? false) - Number(x?.direct ?? false) || (y?.at ?? 0) - (x?.at ?? 0);
+  };
+  return [...items].sort((a, b) => rank(a.section) - rank(b.section) || (a.section === 'needs_reply' ? reply(a, b) : due(a) - due(b)));
 }
 
 const COUNT: Record<DigestSection, (n: number) => string> = {
