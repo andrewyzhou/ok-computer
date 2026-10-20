@@ -1,2 +1,278 @@
 /* the details panel and the form of the desk. the work package "details panel and form" owns this file. use the
    tokens of styles.css only, so the light and the dark theme both work. */
+
+/* the details panel */
+
+.desk-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.desk-block {
+  min-width: 0;
+}
+.desk-subhead {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.desk-next {
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.desk-pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+.desk-links,
+.desk-nudges,
+.desk-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.desk-link {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.desk-link + .desk-link {
+  border-top: 1px solid var(--rule);
+}
+.desk-link-label {
+  color: var(--ink);
+}
+.desk-link-meta {
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.desk-link code,
+.desk-history code {
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.desk-nudge {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  min-width: 0;
+}
+.desk-nudge + .desk-nudge {
+  border-top: 1px solid var(--rule);
+}
+.desk-nudge .facts-columns {
+  gap: 4px 14px;
+  font-size: var(--text-sm);
+}
+.desk-quiet {
+  padding: 10px 12px;
+  background: var(--bg-sunken);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+.desk-note {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.desk-history-row {
+  position: relative;
+  padding: 8px 0 8px 16px;
+  min-width: 0;
+}
+/* a thin line with a dot for each row, so the history reads as one timeline. */
+.desk-history-row::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--rule);
+}
+.desk-history-row::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 15px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1px solid var(--rule-strong);
+  box-sizing: border-box;
+}
+.desk-history-row:first-child::before {
+  top: 15px;
+}
+.desk-history-row:last-child::before {
+  bottom: calc(100% - 15px);
+}
+.desk-history-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+.desk-history-kind {
+  font-weight: 600;
+  color: var(--ink);
+}
+.desk-history-actor {
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+.desk-history-time {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.desk-history-text,
+.desk-history-summary,
+.desk-history-run {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+.desk-history-text {
+  color: var(--ink-2);
+  white-space: pre-wrap;
+}
+.desk-history-summary,
+.desk-history-run {
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.desk-note-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: var(--space-4);
+}
+
+.desk-detail-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.desk-detail-error p {
+  margin: 0;
+}
+
+/* the form */
+
+.desk-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.desk-form-error {
+  overflow-wrap: anywhere;
+}
+.desk-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.desk-field-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.desk-label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.desk-field input,
+.desk-field textarea,
+.desk-note-form textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  color: var(--ink);
+}
+.desk-field input {
+  height: 34px;
+}
+.desk-field textarea,
+.desk-note-form textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+.desk-field input:focus-visible,
+.desk-field textarea:focus-visible,
+.desk-note-form textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.desk-field.is-invalid input,
+.desk-field.is-invalid textarea,
+.desk-note-form textarea[aria-invalid='true'] {
+  border-color: var(--critical);
+}
+.desk-field-error {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--critical-ink);
+}
+.desk-hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.desk-counter {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.desk-counter.is-over {
+  color: var(--critical-ink);
+  font-weight: 600;
+}
+
+/* a group of fields that belong together, such as the two parts of waiting on. the panel is narrow, so they stack. a
+   date and its time share one row. */
+.desk-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+.desk-when {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 6px;
+}
+.desk-form .select {
+  align-self: flex-start;
+}
+.desk-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-top: var(--space-1);
+}
