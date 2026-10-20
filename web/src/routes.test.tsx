@@ -56,8 +56,10 @@ describe('the route registry', () => {
     const dev = (on: boolean) => navSections(on, routes).find((s) => s.group === 'dev')?.items.map((r) => r.label);
     expect(dev(true)).toEqual(['Runs', 'Sessions', 'Policy', 'Cost', 'Logs', 'Sandbox']);
     expect(dev(false)).toBeUndefined();
-    expect(navSections(false).map((s) => s.group)).toEqual(['today', 'inbox', 'chats', 'activity', 'agent', 'connections']);
-    expect(navSections(true).map((s) => s.group)).toEqual(['today', 'inbox', 'chats', 'activity', 'agent', 'connections', 'dev']);
+    // the groups of phase 6 show when their view registers, so the list holds the core groups in the order of the nav.
+    const core = (groups: string[]) => groups.filter((group) => ['today', 'inbox', 'chats', 'activity', 'agent', 'connections', 'dev'].includes(group));
+    expect(core(navSections(false).map((s) => s.group))).toEqual(['today', 'inbox', 'chats', 'activity', 'agent', 'connections']);
+    expect(core(navSections(true).map((s) => s.group))).toEqual(['today', 'inbox', 'chats', 'activity', 'agent', 'connections', 'dev']);
   });
 
   it('renders a core detail page with its param', async () => {

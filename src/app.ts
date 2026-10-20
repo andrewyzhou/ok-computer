@@ -29,6 +29,7 @@ import { appendToDailyNote, sessionExcerpt } from './memory/daily.js';
 import { createMemoryTools } from './memory/tools.js';
 import { createGoogle, syncGooglePoll, type Google } from './google/google.js';
 import { createInbox, installInboxJobs, type Inbox } from './inbox/inbox.js';
+import { createPeopleTools, peopleToolsFor } from './people/tools.js';
 import type { GoogleEndpoints } from './google/accounts.js';
 import { finishDigest, noteFailedDigest, signalDigest, type Digest } from './signals/digest.js';
 import { sessionProfile, type IntegrationEntry } from './integrations/config.js';
@@ -243,6 +244,7 @@ export function createApp(deps: AppDeps): App {
     ...sandbox.toolsFor(sessionKey),
     ...integrations.allowedNames(sessionKey),
     ...(google?.toolNames(sessionProfile(sessionKey)) ?? []),
+    ...(config.google ? peopleToolsFor(config.google, sessionProfile(sessionKey)) : []),
   ];
 
   const approvals = createApprovalFlow({
@@ -308,6 +310,7 @@ export function createApp(deps: AppDeps): App {
       ...integrations.tools,
       ...(google?.tools ?? []),
       ...(inbox?.tools ?? []),
+      ...(google ? createPeopleTools({ db }) : []),
     ],
     logger,
     integrations.find,
