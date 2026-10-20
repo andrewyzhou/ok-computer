@@ -83,7 +83,7 @@ describe('the seeded people', () => {
     expect(byId.get(2)).toMatchObject({ organization: null, mailCount: 2, meetingCount: 0, firstContactAt: at('10-10'), lastContactAt: at('10-16'), nextMeetingAt: null });
     expect(byId.get(3)).toMatchObject({
       name: 'Priya',
-      organization: 'Berkeley',
+      organization: 'Northgate',
       mailCount: 1,
       meetingCount: 1,
       firstContactAt: at('10-01'),
@@ -306,7 +306,7 @@ describe('searchPeople', () => {
     expect(ids('  RAMAN ')).toEqual([3]);
     expect(ids('k.OSEI')).toEqual([4]);
     expect(ids('fabrikam')).toEqual([4]);
-    expect(ids('berkeley')).toEqual([3]);
+    expect(ids('northgate')).toEqual([3]);
     expect(ids('gmail.com')).toEqual([1, 2]);
     expect(ids('nobody')).toEqual([]);
     expect(searchPeople(db, { q: 'nobody', limit: 10 }, PEOPLE_NOW)).toEqual({ people: [], next: null, total: 0 });

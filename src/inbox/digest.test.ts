@@ -614,27 +614,27 @@ describe('the kind of each mail', () => {
   });
 
   it('writes one stats entry for each of the five accounts, also for one that was not read', async () => {
-    h = await createInboxHarness({ accounts: ['a06', 'yurun', 'a581', 'school', 'hkn'] });
-    h.google.db.prepare("UPDATE google_accounts SET status = 'needs_auth' WHERE alias = 'hkn'").run();
-    // the first read of the job is the list of a06, so only a06 fails.
+    h = await createInboxHarness({ accounts: ['personal', 'work', 'side', 'school', 'club'] });
+    h.google.db.prepare("UPDATE google_accounts SET status = 'needs_auth' WHERE alias = 'club'").run();
+    // the first read of the job is the list of personal, so only personal fails.
     h.google.fake.fault({ route: 'GET /gmail/v1/users/me/messages', status: 400, times: 1 });
-    h.google.fake.deliver('yurun', mail('m-y', 'Ana <ana@friends.example>', 'Hello yurun', { to: ownerOf('yurun') }));
+    h.google.fake.deliver('work', mail('m-y', 'Ana <ana@friends.example>', 'Hello work', { to: ownerOf('work') }));
     h.google.fake.deliver('school', mail('m-s', 'Course <no-reply@lms.school.example>', 'Grades posted', { to: ownerOf('school') }));
-    h.script.push(answer({ 'Hello yurun': reply('Ana says hello.') }), answer({}));
+    h.script.push(answer({ 'Hello work': reply('Ana says hello.') }), answer({}));
     const result = await h.run('digest');
     expect(result.status).toBe('completed');
-    expect(result.error).toContain('The mail of a06 could not be read');
+    expect(result.error).toContain('The mail of personal could not be read');
     const [digest] = digests(h);
-    expect(digest!.accounts).toEqual(['yurun', 'a581', 'school']);
+    expect(digest!.accounts).toEqual(['work', 'side', 'school']);
     const stats = digest!.stats!;
-    expect(stats.accounts.map((each) => each.alias)).toEqual(['a06', 'yurun', 'a581', 'school', 'hkn']);
-    expect(stats.accounts[0]).toMatchObject({ alias: 'a06', read: 0, error: expect.any(String) });
+    expect(stats.accounts.map((each) => each.alias)).toEqual(['personal', 'work', 'side', 'school', 'club']);
+    expect(stats.accounts[0]).toMatchObject({ alias: 'personal', read: 0, error: expect.any(String) });
     expect(stats.accounts[0]!.error!.length).toBeGreaterThan(0);
-    expect(stats.accounts[1]).toEqual({ alias: 'yurun', listed: 1, read: 1, capped: false, person: 1, list: 0, automated: 0, hidden: 0, error: null });
-    expect(stats.accounts[2]).toMatchObject({ alias: 'a581', read: 0, error: null });
+    expect(stats.accounts[1]).toEqual({ alias: 'work', listed: 1, read: 1, capped: false, person: 1, list: 0, automated: 0, hidden: 0, error: null });
+    expect(stats.accounts[2]).toMatchObject({ alias: 'side', read: 0, error: null });
     expect(stats.accounts[3]).toEqual({ alias: 'school', listed: 1, read: 1, capped: false, person: 0, list: 0, automated: 1, hidden: 1, error: null });
-    expect(stats.accounts[4]).toMatchObject({ alias: 'hkn', read: 0, error: expect.stringContaining('sign in again') });
-    expect(digest!.items.map((each) => [each.account, each.mail])).toEqual([['yurun', 'person']]);
+    expect(stats.accounts[4]).toMatchObject({ alias: 'club', read: 0, error: expect.stringContaining('sign in again') });
+    expect(digest!.items.map((each) => [each.account, each.mail])).toEqual([['work', 'person']]);
   });
 
   it('gives the model the lines of an html-only person mail', async () => {

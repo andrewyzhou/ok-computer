@@ -58,10 +58,10 @@ describe('the account of each row', () => {
     const table = inMain().getByRole('table', { name: 'newsletter senders' });
     expect(within(table).getByRole('columnheader', { name: 'Account' }).className).toContain('hide-below-md');
     // the same list in two accounts stays two rows, each with its own account.
-    expect(accountsOf(table)).toEqual({ wide: ['a06', 'yurun', 'school', 'a581', 'hkn'], narrow: ['a06', 'yurun', 'school', 'a581', 'hkn'] });
+    expect(accountsOf(table)).toEqual({ wide: ['personal', 'work', 'school', 'side', 'club'], narrow: ['personal', 'work', 'school', 'side', 'club'] });
     fireEvent.click(within(table).getByText('Chapter news'));
     const panel = within(document.querySelector('.details') as HTMLElement);
-    expect(panel.getByText('Account').nextElementSibling?.textContent).toBe('hkn');
+    expect(panel.getByText('Account').nextElementSibling?.textContent).toBe('club');
   });
 
   it('labels each subscription with its account at both widths', async () => {
@@ -69,12 +69,12 @@ describe('the account of each row', () => {
     openApp('#/inbox/subscriptions');
     await inMain().findByText('Streamly');
     const table = inMain().getByRole('table', { name: 'subscriptions' });
-    expect(accountsOf(table)).toEqual({ wide: ['a06', 'yurun', 'a581'], narrow: ['a06', 'yurun', 'a581'] });
+    expect(accountsOf(table)).toEqual({ wide: ['personal', 'work', 'side'], narrow: ['personal', 'work', 'side'] });
     fireEvent.click(inMain().getByRole('checkbox', { name: /Show rows with no repeating charge/ }));
-    expect(accountsOf(table).narrow).toEqual(['a06', 'yurun', 'a581', 'school', 'hkn']);
+    expect(accountsOf(table).narrow).toEqual(['personal', 'work', 'side', 'school', 'club']);
     fireEvent.click(within(table).getByText('Gym Plus'));
     const panel = within(document.querySelector('.details') as HTMLElement);
-    expect(panel.getByText('Account').nextElementSibling?.textContent).toBe('a581');
+    expect(panel.getByText('Account').nextElementSibling?.textContent).toBe('side');
   });
 
   it('labels each draft with its account at both widths, and keeps the account in the details', async () => {
@@ -82,10 +82,10 @@ describe('the account of each row', () => {
     openApp('#/inbox/drafts');
     await inMain().findByText('Re: Meeting notes');
     const table = inMain().getByRole('table', { name: 'drafts' });
-    expect(accountsOf(table)).toEqual({ wide: ['yurun', 'school', 'a581', 'a06', 'hkn'], narrow: ['yurun', 'school', 'a581', 'a06', 'hkn'] });
+    expect(accountsOf(table)).toEqual({ wide: ['work', 'school', 'side', 'personal', 'club'], narrow: ['work', 'school', 'side', 'personal', 'club'] });
     fireEvent.click(within(table).getByText('Re: Meeting notes'));
     const panel = within(document.querySelector('.details') as HTMLElement);
-    expect((await panel.findByText('Account')).nextElementSibling?.textContent).toBe('hkn');
+    expect((await panel.findByText('Account')).nextElementSibling?.textContent).toBe('club');
   });
 
   it('labels each proposal with its account, and keeps the account in the details', async () => {
@@ -93,10 +93,10 @@ describe('the account of each row', () => {
     openApp('#/inbox/proposals');
     await inMain().findByText('Chapter meeting');
     const items = [...inMain().getByRole('list', { name: 'calendar proposals' }).querySelectorAll(':scope > li')];
-    expect(items.map((item) => item.querySelector('.inbox-account')?.textContent)).toEqual(['school', 'a581', 'a06', 'yurun', 'hkn']);
+    expect(items.map((item) => item.querySelector('.inbox-account')?.textContent)).toEqual(['school', 'side', 'personal', 'work', 'club']);
     fireEvent.click(within(inMain().getByTestId('proposal-35')).getByRole('button', { name: 'Chapter meeting' }));
     const panel = within(document.querySelector('.details') as HTMLElement);
-    expect((await panel.findByText('Account')).nextElementSibling?.textContent).toBe('hkn');
+    expect((await panel.findByText('Account')).nextElementSibling?.textContent).toBe('club');
   });
 
   it('labels each digest item with its account', async () => {
@@ -104,14 +104,14 @@ describe('the account of each row', () => {
     openApp('#/inbox');
     await inMain().findByText('Dues for the fall term');
     const accounts = [...document.querySelectorAll('main .inbox-items .inbox-account')].map((badge) => badge.textContent);
-    expect(accounts).toEqual(['school', 'yurun', 'school', 'a581', 'a06', 'a06']);
+    expect(accounts).toEqual(['school', 'work', 'school', 'side', 'personal', 'personal']);
   });
 
   it('still shows the account when only one account is configured', async () => {
-    const one = { ...fiveSendersPage, accounts: ['a06'], senders: fiveSendersPage.senders.slice(0, 1) };
+    const one = { ...fiveSendersPage, accounts: ['personal'], senders: fiveSendersPage.senders.slice(0, 1) };
     stubFetch(seeded.dashboard, { ...googleReady, ...routes, 'GET /api/inbox/senders': () => one });
     openApp('#/inbox/newsletters');
     await inMain().findByText('Weekly Deals');
-    expect(accountsOf(inMain().getByRole('table', { name: 'newsletter senders' }))).toEqual({ wide: ['a06'], narrow: ['a06'] });
+    expect(accountsOf(inMain().getByRole('table', { name: 'newsletter senders' }))).toEqual({ wide: ['personal'], narrow: ['personal'] });
   });
 });

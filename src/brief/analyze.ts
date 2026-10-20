@@ -152,10 +152,10 @@ const initialsOf = (text: string) =>
     .join('');
 
 // true when two locations name the same place, as people write one place in more than one way. the places are the
-// same when the normalized texts are equal or one holds the other ('cory hall' and 'cory hall, berkeley'), when they
-// share a street address ('the gateway, 2300 hearst ave' and '2300 hearst ave, berkeley, ca'), when the first parts
-// start with the same word that is not a common one ('cory 540ab' and 'cory hall'), or when one first part is the
-// initials of the other ('vlsb' and 'valley life sciences building').
+// same when the normalized texts are equal or one holds the other ('elm hall' and 'elm hall, rivertown'), when they
+// share a street address ('the annex, 100 maple ave' and '100 maple ave, rivertown, ca'), when the first parts
+// start with the same word that is not a common one ('elm 210b' and 'elm hall'), or when one first part is the
+// initials of the other ('rsb' and 'river science building').
 export function samePlace(a: string, b: string): boolean {
   const x = normalizeLocation(a);
   const y = normalizeLocation(b);

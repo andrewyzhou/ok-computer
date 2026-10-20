@@ -111,17 +111,17 @@ describe('the inbox digest', () => {
     openApp('#/inbox');
     const main = inMain();
     const strip = within(await main.findByRole('list', { name: 'accounts in this digest' }));
-    expect(strip.getAllByRole('listitem').map((item) => item.querySelector('.inbox-account')?.textContent)).toEqual(['a06', 'yurun', 'a581', 'school', 'hkn']);
-    const a06 = within(main.getByTestId('coverage-a06'));
-    expect(a06.getByText('64 read')).toBeTruthy();
-    expect(a06.getByText('58 hidden')).toBeTruthy();
-    expect(a06.queryByText('more mail than the limit')).toBeNull();
+    expect(strip.getAllByRole('listitem').map((item) => item.querySelector('.inbox-account')?.textContent)).toEqual(['personal', 'work', 'side', 'school', 'club']);
+    const personal = within(main.getByTestId('coverage-personal'));
+    expect(personal.getByText('64 read')).toBeTruthy();
+    expect(personal.getByText('58 hidden')).toBeTruthy();
+    expect(personal.queryByText('more mail than the limit')).toBeNull();
     const school = within(main.getByTestId('coverage-school'));
     expect(school.getByText('100 of 240 read')).toBeTruthy();
     expect(school.getByText('more mail than the limit').getAttribute('title')).toBe('The digest read only the newest 100 of 240 messages.');
-    const hkn = within(main.getByTestId('coverage-hkn'));
-    expect(hkn.getByText('Not read: the sign-in of this account has expired')).toBeTruthy();
-    expect(hkn.queryByText(/read$/)).toBeNull();
+    const club = within(main.getByTestId('coverage-club'));
+    expect(club.getByText('Not read: the sign-in of this account has expired')).toBeTruthy();
+    expect(club.queryByText(/read$/)).toBeNull();
     // 58 + 9 + 7 + 80 + 0, and the one due date that the digest dropped.
     expect(main.getByText('154 automated or list mails hidden · 1 due date left out because the mail did not state it')).toBeTruthy();
     // the mail that needs a reply stays the first section, under the strip.

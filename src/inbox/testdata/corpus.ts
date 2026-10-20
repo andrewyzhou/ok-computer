@@ -14,11 +14,11 @@ import { mailMessage, type MailSpec } from './build.js';
 // digest are from 2026-10-19 (a monday) in America/Los_Angeles, so a weekday such as "friday" is 2026-10-24.
 
 export const OWNER: Record<string, string> = {
-  a06: 'owner.a06@example.com',
-  yurun: 'owner.yurun@example.com',
-  a581: 'owner.a581@example.com',
+  personal: 'owner.personal@example.com',
+  work: 'owner.work@example.com',
+  side: 'owner.side@example.com',
   school: 'owner@school.example.edu',
-  hkn: 'owner@club.school.example.edu',
+  club: 'owner@club.school.example.edu',
 };
 export const OWNER_ADDRESSES: ReadonlySet<string> = new Set(Object.values(OWNER));
 export const TIME_ZONE = 'America/Los_Angeles';
@@ -73,43 +73,43 @@ export const CORPUS: CorpusMail[] = [
   },
   {
     name: 'friend asks to rsvp by a date',
-    account: 'a06',
+    account: 'personal',
     spec: {
       id: 'c-rsvp',
-      headers: { From: '"Sam Lee" <sam.lee@mail.example.net>', To: OWNER.a06!, Subject: 'Dinner on the 30th?', Date: MON },
+      headers: { From: '"Sam Lee" <sam.lee@mail.example.net>', To: OWNER.personal!, Subject: 'Dinner on the 30th?', Date: MON },
       html: '<div dir="ltr">Hey!<div><br></div><div>We are doing dinner on Friday, October 30. Can you let me know by Oct 27 if you can make it?</div><div><br></div><div>Sam</div></div>',
     },
     expect: { kind: 'person', direct: true, needsReply: true, due: '2026-10-27' },
   },
   {
     name: 'person mail where the owner is only in cc',
-    account: 'yurun',
+    account: 'work',
     spec: {
       id: 'c-cc',
-      headers: { From: 'Alex Kim <alex@work.example.org>', To: 'team@work.example.org', Cc: OWNER.yurun!, Subject: 'Notes from today', Date: MON },
+      headers: { From: 'Alex Kim <alex@work.example.org>', To: 'team@work.example.org', Cc: OWNER.work!, Subject: 'Notes from today', Date: MON },
       plain: 'Team, the notes from today are below. Nothing is needed from anyone yet.\n\n1. The launch moves a week.\n2. The review is next month.',
     },
     expect: { kind: 'person', direct: false, needsReply: false },
   },
   {
     name: "the owner's own mail to self",
-    account: 'a581',
+    account: 'side',
     spec: {
       id: 'c-self',
-      headers: { From: OWNER.a581!, To: OWNER.a581!, Subject: 'note to self', Date: MON },
+      headers: { From: OWNER.side!, To: OWNER.side!, Subject: 'note to self', Date: MON },
       plain: 'Buy a new charger and call the bank about the card.',
     },
     expect: { needsReply: false },
   },
   {
     name: 'code host notification of a comment',
-    account: 'a06',
+    account: 'personal',
     spec: {
       id: 'c-code',
       headers: {
         From: 'Jordan <notifications@code-host.example>',
         To: 'org/repo <repo@noreply.code-host.example>',
-        Cc: `Mention <mention@noreply.code-host.example>, ${OWNER.a06}`,
+        Cc: `Mention <mention@noreply.code-host.example>, ${OWNER.personal}`,
         'Reply-To': 'org/repo <reply+ABC123@reply.code-host.example>',
         Subject: 'Re: [org/repo] Fix the parser (PR #42)',
         Date: MON,
@@ -126,10 +126,10 @@ export const CORPUS: CorpusMail[] = [
   },
   {
     name: 'security alert of the mail provider',
-    account: 'yurun',
+    account: 'work',
     spec: {
       id: 'c-security',
-      headers: { From: 'Accounts <no-reply@accounts.provider.example>', To: OWNER.yurun!, Subject: 'Security alert', Date: MON },
+      headers: { From: 'Accounts <no-reply@accounts.provider.example>', To: OWNER.work!, Subject: 'Security alert', Date: MON },
       html: '<html><head><style>.x{color:red}</style></head><body><table><tr><td><span style="display:none">A new sign-in&zwnj;&nbsp;&zwnj;&nbsp;</span>A new sign-in on a Mac</td></tr><tr><td>If this was you, you don&#39;t need to do anything.</td></tr><tr><td><a href="https://myaccount.provider.example/alert">Check activity</a></td></tr></table></body></html>',
     },
     expect: { kind: 'automated', direct: true, needsReply: false, section: null, due: null },
@@ -174,30 +174,30 @@ export const CORPUS: CorpusMail[] = [
   },
   {
     name: 'monthly plan receipt, html only',
-    account: 'a06',
+    account: 'personal',
     spec: {
       id: 'c-streamly-1',
-      headers: { From: 'Streamly <billing@streamly.example>', To: OWNER.a06!, Subject: 'Your Streamly receipt', Date: 'Sat, 3 Oct 2026 10:00:00 +0000' },
+      headers: { From: 'Streamly <billing@streamly.example>', To: OWNER.personal!, Subject: 'Your Streamly receipt', Date: 'Sat, 3 Oct 2026 10:00:00 +0000' },
       html: '<table><tr><td>Premium plan</td><td>$15.49/month</td></tr><tr><td><b>Total charged</b></td><td><b>$15.49</b></td></tr></table><p>Your plan renews on November 3, 2026. <a href="https://streamly.example/account/cancel">Manage or cancel</a></p>',
     },
     expect: { kind: 'automated', needsReply: false, receipt: { kind: 'charge', merchant: 'Streamly', amount: 15.49, currency: 'USD', cadence: 'monthly' } },
   },
   {
     name: 'monthly plan receipt of the month before',
-    account: 'a06',
+    account: 'personal',
     spec: {
       id: 'c-streamly-0',
-      headers: { From: 'Streamly <billing@streamly.example>', To: OWNER.a06!, Subject: 'Your Streamly receipt', Date: 'Thu, 3 Sep 2026 10:00:00 +0000' },
+      headers: { From: 'Streamly <billing@streamly.example>', To: OWNER.personal!, Subject: 'Your Streamly receipt', Date: 'Thu, 3 Sep 2026 10:00:00 +0000' },
       html: '<table><tr><td>Premium plan</td><td>$15.49/month</td></tr><tr><td><b>Total charged</b></td><td><b>$15.49</b></td></tr></table>',
     },
     expect: { receipt: { kind: 'charge', merchant: 'Streamly', amount: 15.49, currency: 'USD', cadence: 'monthly' } },
   },
   {
     name: 'yearly plan receipt in euro',
-    account: 'yurun',
+    account: 'work',
     spec: {
       id: 'c-notes-year',
-      headers: { From: 'Cloud Notes <hello@cloudnotes.example.eu>', To: OWNER.yurun!, Subject: 'Thanks for renewing', Date: 'Sun, 1 Mar 2026 09:00:00 +0100' },
+      headers: { From: 'Cloud Notes <hello@cloudnotes.example.eu>', To: OWNER.work!, Subject: 'Thanks for renewing', Date: 'Sun, 1 Mar 2026 09:00:00 +0100' },
       plain: 'Thanks for renewing Cloud Notes Pro.\n\nAmount: 96,00 €\nBilled annually. Your next renewal is on 1 March 2027.\n',
     },
     // a mail from hello@ with no other mark of a machine reads as a person, because a person of a small shop or a club
@@ -206,52 +206,52 @@ export const CORPUS: CorpusMail[] = [
   },
   {
     name: 'payment platform receipt for another merchant',
-    account: 'a581',
+    account: 'side',
     spec: {
       id: 'c-payflow',
-      headers: { From: 'PayFlow <service@payflow.example>', To: OWNER.a581!, Subject: 'Receipt for your payment to Gym Plus', Date: 'Mon, 5 Oct 2026 08:00:00 -0700' },
+      headers: { From: 'PayFlow <service@payflow.example>', To: OWNER.side!, Subject: 'Receipt for your payment to Gym Plus', Date: 'Mon, 5 Oct 2026 08:00:00 -0700' },
       html: '<p>You sent an automatic payment of <b>$42.00 USD</b> to Gym Plus.</p><p>This is a monthly automatic payment. You can stop it in your settings.</p>',
     },
     expect: { kind: 'automated', receipt: { kind: 'charge', merchant: 'Gym Plus', amount: 42, currency: 'USD', cadence: 'monthly' } },
   },
   {
     name: 'order that shipped',
-    account: 'a06',
+    account: 'personal',
     spec: {
       id: 'c-shipped',
-      headers: { From: 'Shop <ship-confirm@shop.example>', To: OWNER.a06!, Subject: 'Your order has shipped', Date: MON },
+      headers: { From: 'Shop <ship-confirm@shop.example>', To: OWNER.personal!, Subject: 'Your order has shipped', Date: MON },
       html: '<p>Your order #113-55 has shipped.</p><p>Order total: $23.80</p><p>Arriving Wednesday, October 21. <a href="https://shop.example/track/113-55">Track package</a></p>',
     },
     expect: { kind: 'automated', needsReply: false, section: 'packages', receipt: { kind: 'order' } },
   },
   {
     name: 'refund',
-    account: 'a06',
+    account: 'personal',
     spec: {
       id: 'c-refund',
-      headers: { From: 'Shop <returns@shop.example>', To: OWNER.a06!, Subject: 'Your refund was issued', Date: MON },
+      headers: { From: 'Shop <returns@shop.example>', To: OWNER.personal!, Subject: 'Your refund was issued', Date: MON },
       plain: "We've issued a refund of $12.00 to your card ending in 1234. It can take 5 to 10 days to show.",
     },
     expect: { kind: 'automated', needsReply: false, receipt: { kind: 'refund', amount: 12, currency: 'USD' } },
   },
   {
     name: 'utility bill that is due',
-    account: 'a581',
+    account: 'side',
     spec: {
       id: 'c-bill',
-      headers: { From: 'City Power <ebill@citypower.example>', To: OWNER.a581!, Subject: 'Your October statement is ready', Date: MON },
+      headers: { From: 'City Power <ebill@citypower.example>', To: OWNER.side!, Subject: 'Your October statement is ready', Date: MON },
       html: '<p>Your statement is ready.</p><table><tr><td>Amount due</td><td>$84.20</td></tr><tr><td>Due date</td><td>October 28, 2026</td></tr></table>',
     },
     expect: { kind: 'automated', needsReply: false, section: 'bills', due: '2026-10-28', receipt: { kind: 'order' } },
   },
   {
     name: 'newsletter of a mail platform',
-    account: 'hkn',
+    account: 'club',
     spec: {
       id: 'c-news-a',
       headers: {
         From: 'Daily Brief <news@dailybrief.example>',
-        To: OWNER.hkn!,
+        To: OWNER.club!,
         Subject: 'Today: the five things to know',
         Date: MON,
         'List-Id': '<a1b2c3.list-id.mailplatform.example>',
@@ -265,12 +265,12 @@ export const CORPUS: CorpusMail[] = [
   },
   {
     name: 'another sender with the same list id on another domain',
-    account: 'hkn',
+    account: 'club',
     spec: {
       id: 'c-news-b',
       headers: {
         From: 'Garden Club <hello@gardenclub.example.org>',
-        To: OWNER.hkn!,
+        To: OWNER.club!,
         Subject: 'October meeting',
         Date: MON,
         'List-Id': '<a1b2c3.list-id.mailplatform.example>',
@@ -283,12 +283,12 @@ export const CORPUS: CorpusMail[] = [
   },
   {
     name: 'ticket platform for one organiser',
-    account: 'a06',
+    account: 'personal',
     spec: {
       id: 'c-tickets-a',
       headers: {
         From: 'Jazz Night via Tickets <noreply@tickets.example>',
-        To: OWNER.a06!,
+        To: OWNER.personal!,
         Subject: 'Jazz Night: new dates',
         Date: MON,
         'List-Unsubscribe': '<https://tickets.example/unsubscribe/org/111>',
@@ -300,12 +300,12 @@ export const CORPUS: CorpusMail[] = [
   },
   {
     name: 'ticket platform for another organiser',
-    account: 'a06',
+    account: 'personal',
     spec: {
       id: 'c-tickets-b',
       headers: {
         From: 'Book Fair via Tickets <noreply@tickets.example>',
-        To: OWNER.a06!,
+        To: OWNER.personal!,
         Subject: 'Book Fair is next week',
         Date: MON,
         'List-Unsubscribe': '<https://tickets.example/unsubscribe/org/222>',

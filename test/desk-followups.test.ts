@@ -71,7 +71,7 @@ async function setup(steps: FakeStep[]) {
   const id = made.value.id;
   fake.deliver(
     'personal',
-    threadMessage({ id: 'm1', threadId: 't-lease', from: 'Andrew <personal@example.com>', to: 'dana@landlord.example', at: iso(-4 * D + 60_000), labelIds: ['SENT'], body: 'Could you send the lease renewal?' }),
+    threadMessage({ id: 'm1', threadId: 't-lease', from: 'Owner <personal@example.com>', to: 'dana@landlord.example', at: iso(-4 * D + 60_000), labelIds: ['SENT'], body: 'Could you send the lease renewal?' }),
   );
   return {
     t,

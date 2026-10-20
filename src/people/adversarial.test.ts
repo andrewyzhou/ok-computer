@@ -728,16 +728,16 @@ describe('the findings of the review', () => {
 
 describe('one human at two addresses', () => {
   const now = new Date('2026-10-18T16:00:00Z');
-  const school = { name: 'Berkeley', domain: 'berkeley.edu' };
+  const school = { name: 'Northgate', domain: 'northgate.edu' };
 
   it('attaches a new address to the one person with the same full name at the same organization', () => {
     const d = fresh();
-    const first = recordObservation(d, observation('jdoe@berkeley.edu', 'Jane Doe', {}, school), now)!;
-    const sub = recordObservation(d, observation('jdoe@hkn.eecs.berkeley.edu', 'jane doe', { externalId: 'm-2' }, school), now)!;
+    const first = recordObservation(d, observation('jdoe@northgate.edu', 'Jane Doe', {}, school), now)!;
+    const sub = recordObservation(d, observation('jdoe@club.cs.northgate.edu', 'jane doe', { externalId: 'm-2' }, school), now)!;
     expect(sub.personId).toBe(first.personId);
     expect(sub.createdPerson).toBe(false);
     const profile = getPerson(d, first.personId, now)!;
-    expect(profile.primaryEmail).toBe('jdoe@berkeley.edu');
+    expect(profile.primaryEmail).toBe('jdoe@northgate.edu');
     expect(profile.emails).toHaveLength(2);
     expect(profile.mailCount).toBe(2);
   });
@@ -752,11 +752,11 @@ describe('one human at two addresses', () => {
     expect(getPerson(d, one.personId, now)!.emails).toEqual(['mchen1@gmail.com']);
     expect(getPerson(d, other.personId, now)!.emails).toEqual(['mchen.other@gmail.com']);
     // a gmail address with the name of the one person at a company does not join that person either.
-    const work = recordObservation(d, observation('jdoe@berkeley.edu', 'Jane Doe', { externalId: 'm-3' }, school), now)!;
+    const work = recordObservation(d, observation('jdoe@northgate.edu', 'Jane Doe', { externalId: 'm-3' }, school), now)!;
     const personal = recordObservation(d, observation('jane.doe@gmail.com', 'Jane Doe', { externalId: 'm-4' }), now)!;
     expect(personal.createdPerson).toBe(true);
     expect(personal.personId).not.toBe(work.personId);
-    expect(getPerson(d, work.personId, now)!.emails).toEqual(['jdoe@berkeley.edu']);
+    expect(getPerson(d, work.personId, now)!.emails).toEqual(['jdoe@northgate.edu']);
     // and a company address does not join a person whose only address is at gmail.
     recordObservation(d, observation('ana.ruiz@gmail.com', 'Ana Ruiz', { externalId: 'm-5' }), now);
     expect(recordObservation(d, observation('ana.ruiz@acme.com', 'Ana Ruiz', { externalId: 'm-6' }, { name: 'Acme', domain: 'acme.com' }), now)!.createdPerson).toBe(true);

@@ -12,7 +12,7 @@ afterEach(async () => {
 });
 
 const NUDGE = 'Hi Dana,\n\nI wanted to check on the lease renewal. Could you let me know where it stands?\n\nThank you.';
-const OWNER = 'Andrew <personal@example.com>';
+const OWNER = 'Owner <personal@example.com>';
 const DANA = 'Dana Park <dana@landlord.example>';
 
 async function setup(options: Parameters<typeof createDeskHarness>[0] = {}) {

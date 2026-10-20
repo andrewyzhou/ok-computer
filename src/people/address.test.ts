@@ -53,7 +53,7 @@ describe('guessedName', () => {
 
 describe('isPersonalDomain', () => {
   const personal = ['gmail.com', 'GoogleMail.com', 'yahoo.com', 'yahoo.co.uk', 'yahoo.fr', 'gmx.de', 'gmx.net', 'yandex.ru', 'outlook.com', 'hotmail.co.uk', 'live.com', 'icloud.com', 'me.com', 'mac.com', 'aol.com', 'proton.me', 'protonmail.com', 'pm.me', 'mail.com', 'qq.com', '163.com', '126.com', 'fastmail.com', 'hey.com', 'zoho.com', 'msn.com'];
-  const work = ['acme.com', 'berkeley.edu', 'mail.google.com', 'yahooinc.com', 'live.berkeley.edu', 'outlook.acme.com', 'gmail.acme.com'];
+  const work = ['acme.com', 'northgate.edu', 'mail.google.com', 'yahooinc.com', 'live.northgate.edu', 'outlook.acme.com', 'gmail.acme.com'];
   for (const domain of personal) it(`counts ${domain} as personal`, () => expect(isPersonalDomain(domain)).toBe(true));
   for (const domain of work) it(`does not count ${domain} as personal`, () => expect(isPersonalDomain(domain)).toBe(false));
 });
@@ -62,14 +62,14 @@ describe('organizationOf', () => {
   const cases: Array<[string, { name: string; domain: string } | null]> = [
     ['acme.com', { name: 'Acme', domain: 'acme.com' }],
     ['mail.eu.acme.com', { name: 'Acme', domain: 'acme.com' }],
-    ['eecs.berkeley.edu', { name: 'Berkeley', domain: 'berkeley.edu' }],
+    ['cs.northgate.edu', { name: 'Northgate', domain: 'northgate.edu' }],
     ['foo.co.uk', { name: 'Foo', domain: 'foo.co.uk' }],
     ['mail.foo.co.uk', { name: 'Foo', domain: 'foo.co.uk' }],
     ['cs.ox.ac.uk', { name: 'Ox', domain: 'ox.ac.uk' }],
     ['ACME-Labs.com', { name: 'Acme Labs', domain: 'acme-labs.com' }],
-    ['hudson-trading.com', { name: 'Hudson Trading', domain: 'hudson-trading.com' }],
+    ['globex-labs.com', { name: 'Globex Labs', domain: 'globex-labs.com' }],
     ['a--b.com', { name: 'A B', domain: 'a--b.com' }],
-    ['toyota.co.jp', { name: 'Toyota', domain: 'toyota.co.jp' }],
+    ['acme.co.jp', { name: 'Acme', domain: 'acme.co.jp' }],
     ['gmail.com', null],
     ['yahoo.co.uk', null],
     ['co.uk', null],

@@ -104,20 +104,20 @@ describe('readOnlyGoogle', () => {
     const calls: string[] = [];
     const real = fakeApis(calls);
     const accounts = {
-      aliases: ['a06', 'school'],
+      aliases: ['personal', 'school'],
       unavailable: (alias: string) => (alias === 'school' ? 'school needs a sign-in' : undefined),
       run: <T>(_alias: string, fn: (apis: GoogleApis) => Promise<T>) => fn(real),
       hasClient: async () => true,
       close: async () => {},
     } as unknown as GoogleAccounts;
     const google = readOnlyGoogle(accounts);
-    expect(google.accounts.aliases).toEqual(['a06', 'school']);
+    expect(google.accounts.aliases).toEqual(['personal', 'school']);
     expect(google.accounts.unavailable('school')).toBe('school needs a sign-in');
-    await expect(google.accounts.run('a06', (apis) => apis.gmail.users.messages.modify({ userId: 'me', id: 'x' }))).rejects.toThrow(ReadOnlyRefused);
-    await google.accounts.run('a06', (apis) => apis.gmail.users.messages.list({ userId: 'me' }));
+    await expect(google.accounts.run('personal', (apis) => apis.gmail.users.messages.modify({ userId: 'me', id: 'x' }))).rejects.toThrow(ReadOnlyRefused);
+    await google.accounts.run('personal', (apis) => apis.gmail.users.messages.list({ userId: 'me' }));
     expect(await google.oneClick('https://x.example/u')).toMatchObject({ ok: false, sent: false, refused: true });
-    await expect(google.accounts.beginSignIn('a06')).rejects.toThrow(ReadOnlyRefused);
-    await expect(google.accounts.importToken('a06', { refreshToken: 'r', clientId: 'c' })).rejects.toThrow(ReadOnlyRefused);
+    await expect(google.accounts.beginSignIn('personal')).rejects.toThrow(ReadOnlyRefused);
+    await expect(google.accounts.importToken('personal', { refreshToken: 'r', clientId: 'c' })).rejects.toThrow(ReadOnlyRefused);
     expect(calls).toEqual(['list']);
     expect(google.refused).toEqual(['gmail.users.messages.modify', 'oneClick https://x.example/u', 'beginSignIn', 'importToken']);
   });

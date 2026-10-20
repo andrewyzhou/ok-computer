@@ -8,7 +8,7 @@ import { DIGEST_CORPUS } from './testdata/digest-corpus.js';
 const base = (headers: Record<string, string> = {}, extra: Partial<MailSpec> = {}) =>
   mailMessage({
     id: 'm1',
-    headers: { From: 'Sam Lee <sam@mail.example.net>', To: OWNER.a06!, Subject: 'Lunch?', Date: 'Mon, 19 Oct 2026 07:12:00 -0700', ...headers },
+    headers: { From: 'Sam Lee <sam@mail.example.net>', To: OWNER.personal!, Subject: 'Lunch?', Date: 'Mon, 19 Oct 2026 07:12:00 -0700', ...headers },
     plain: 'Lunch on Wednesday?',
     ...extra,
   });
@@ -128,16 +128,16 @@ describe('classifyMail signals one at a time', () => {
   });
 
   it('is direct only when an owner address is in To, case-blind', () => {
-    expect(kindOf({ To: `"Owner, The" <${OWNER.a06!.toUpperCase()}>` }).direct).toBe(true);
+    expect(kindOf({ To: `"Owner, The" <${OWNER.personal!.toUpperCase()}>` }).direct).toBe(true);
     expect(kindOf({ To: `a@x.example; ${OWNER.school}` }).direct).toBe(true);
-    expect(kindOf({ To: 'a@x.example', Cc: OWNER.a06! }).direct).toBe(false);
+    expect(kindOf({ To: 'a@x.example', Cc: OWNER.personal! }).direct).toBe(false);
     expect(kindOf({ To: 'a@x.example' }).direct).toBe(false);
     expect(kindOf({ To: '' }).direct).toBe(false);
   });
 
   it('is from the owner for any owner address, case-blind, and only for From', () => {
-    expect(kindOf({ From: `Me <${OWNER.hkn!.toUpperCase()}>` }).fromOwner).toBe(true);
-    expect(kindOf({ Sender: OWNER.hkn!, 'Reply-To': OWNER.hkn! }).fromOwner).toBe(false);
+    expect(kindOf({ From: `Me <${OWNER.club!.toUpperCase()}>` }).fromOwner).toBe(true);
+    expect(kindOf({ Sender: OWNER.club!, 'Reply-To': OWNER.club! }).fromOwner).toBe(false);
   });
 
   it('never reads the body', () => {

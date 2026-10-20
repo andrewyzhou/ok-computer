@@ -9,7 +9,7 @@ function report(): EvalReport {
     models: { utility: ['provider/small-model'], batch: ['provider/small-model', 'provider/other-model'] },
     accounts: [
       {
-        alias: 'a06',
+        alias: 'personal',
         read: true,
         error: null,
         digest: { listed: 34, limit: 100, capped: false },
@@ -137,8 +137,8 @@ describe('formatReport', () => {
         slot batch    provider/small-model, provider/other-model
 
       accounts
-        a06     digest 34 of 100, subscriptions 500 of 500 (capped), newsletters 812 of 2000, html only 41.3%
-        school  digest 0 of 100, subscriptions 0 of 500, newsletters 0 of 2000, html only n/a, not read: the account needs a new sign-in
+        personal  digest 34 of 100, subscriptions 500 of 500 (capped), newsletters 812 of 2000, html only 41.3%
+        school    digest 0 of 100, subscriptions 0 of 500, newsletters 0 of 2000, html only n/a, not read: the account needs a new sign-in
 
       digest
         models                    on
@@ -207,9 +207,9 @@ describe('formatReport', () => {
     expect(formatReport(base)).not.toContain('merchants');
     const named = formatReport({
       ...base,
-      subscriptions: { ...base.subscriptions!, merchants: [{ account: 'a06', merchant: 'Streamly', amount: 15.49, currency: 'USD', cadence: 'monthly', confidence: 0.9 }] },
+      subscriptions: { ...base.subscriptions!, merchants: [{ account: 'personal', merchant: 'Streamly', amount: 15.49, currency: 'USD', cadence: 'monthly', confidence: 0.9 }] },
     });
-    expect(named).toMatch(/ {2}merchants\n {4}a06 Streamly {2}15\.49 USD, monthly, 90%/);
+    expect(named).toMatch(/ {2}merchants\n {4}personal Streamly {2}15\.49 USD, monthly, 90%/);
   });
 
   it('never prints a subject, a from header, an address or a link', () => {

@@ -48,7 +48,7 @@ describe('mailObservations', () => {
     const result = mailObservations('personal', mail.inbound!, OWNER);
     expect(people(result.observations)).toEqual([
       ['jane.doe@mail.eu.acme.com', 'Doe, Jane', 'from', 'Acme'],
-      ['bob@berkeley.edu', 'Bob Stone', 'to', 'Berkeley'],
+      ['bob@northgate.edu', 'Bob Stone', 'to', 'Northgate'],
       ['carol@gmail.com', 'Carol Diaz', 'cc', null],
     ]);
     expect(result.skipped).toEqual({ owner: 1 });
@@ -71,7 +71,7 @@ describe('mailObservations', () => {
     const result = mailObservations('personal', mail.outbound!, OWNER);
     expect(people(result.observations)).toEqual([
       ['jane.doe@mail.eu.acme.com', 'Jane Doe', 'to', 'Acme'],
-      ['bob@berkeley.edu', null, 'cc', 'Berkeley'],
+      ['bob@northgate.edu', null, 'cc', 'Northgate'],
     ]);
     expect(result.observations.every((each) => each.contact.direction === 'out')).toBe(true);
     expect(result.skipped).toEqual({ owner: 1, no_reply: 1 });
@@ -113,7 +113,7 @@ describe('eventObservations', () => {
     const result = eventObservations('personal', [events.meeting!], OWNER, TZ);
     expect(people(result.observations)).toEqual([
       ['jane.doe@acme.com', 'Jane Doe', 'organizer', 'Acme'],
-      ['bob@berkeley.edu', null, 'attendee', 'Berkeley'],
+      ['bob@northgate.edu', null, 'attendee', 'Northgate'],
       ['carol@gmail.com', 'Carol Diaz', 'attendee', null],
     ]);
     expect(result.skipped).toEqual({ owner: 1, calendar_resource: 1 });

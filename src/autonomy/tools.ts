@@ -6,7 +6,7 @@ import { sessionTaint } from '../policy/store.js';
 import { MAIN_SESSION } from '../sessions/router.js';
 import { defineTool, type Tool } from '../tools/registry.js';
 
-// the chat tools of the trust ladder (docs/PHASE6-PLAN.md, track T6). autonomy_levels reads the level of each domain,
+// the chat tools of the trust ladder (docs/DESIGN-NEXT.md 13.6). autonomy_levels reads the level of each domain,
 // and autonomy_lower lowers one when the owner asks for it in chat. no tool can raise a level: only the owner can, on
 // the dashboard. the names are in MAIN_TOOLS (src/sessions/router.ts), so only an owner chat has them.
 export const LEVELS_TOOL = 'autonomy_levels';

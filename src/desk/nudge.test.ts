@@ -19,7 +19,7 @@ async function setup() {
   h.deliver('personal', {
     id: 'm1',
     threadId: 't-lease',
-    from: 'Andrew <personal@example.com>',
+    from: 'Owner <personal@example.com>',
     to: 'Dana Park <dana@landlord.example>',
     cc: '"Lee, Sam" <sam@landlord.example>',
     at: iso(h, -4 * D),
