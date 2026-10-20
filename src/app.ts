@@ -7,6 +7,7 @@ import { buildStablePrompt } from './agent/system-prompt.js';
 import { createAlwaysAllow } from './approvals/always.js';
 import { approvalNote, createApprovalFlow, type ApprovalFlow } from './approvals/flow.js';
 import { expireApprovals, type Approval } from './approvals/store.js';
+import { createAutonomyTools } from './autonomy/tools.js';
 import type { ChannelAdapter } from './channels/types.js';
 import { isWebChannel, WEB, type WebChat } from './channels/web.js';
 import type { LoginCodes } from './dashboard/login.js';
@@ -288,6 +289,7 @@ export function createApp(deps: AppDeps): App {
     ...createSkillTools({ skillsDir: config.paths.skills }),
     createSkillWriteTool({ skillsDir: config.paths.skills }),
     createResultReadTool({ db, blobs }),
+    ...createAutonomyTools({ db }),
     ...web.tools,
     ...sandbox.tools,
   ];

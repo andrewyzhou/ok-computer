@@ -20,8 +20,8 @@ export function recordDecision(db: Db, record: DecisionRecord, now: Date): numbe
   const row = db
     .prepare(
       `INSERT INTO policy_decisions (runId, toolCallId, toolName, decision, rule, reason, reviewerModelCallId,
-         reviewerVerdict, reviewerReason, approvalId, taint, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+         reviewerVerdict, reviewerReason, approvalId, taint, autonomyDomain, autonomyLevel, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
     )
     .get(
       record.runId,
@@ -35,6 +35,9 @@ export function recordDecision(db: Db, record: DecisionRecord, now: Date): numbe
       redacted(record.review?.reason),
       record.approvalId ?? null,
       record.taint.length ? JSON.stringify(record.taint) : null,
+      // the domain of the trust ladder and the level that applied. a call outside the ladder keeps null in both.
+      record.autonomy?.domain ?? null,
+      record.autonomy?.level ?? null,
       now.toISOString(),
     );
   return Number(row!.id);

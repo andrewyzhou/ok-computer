@@ -7,6 +7,8 @@ import type { BlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
 import { redact, redactedJson } from '../observability/redact.js';
 import { decide, reviewCallOf, SUBAGENT_PREFIX, type ReviewResult, type Reviewer, type Risk, type Rule, type TaintSource } from '../policy/policy.js';
+import { domainOf, type AutonomyDomain, type AutonomyLevel } from '../policy/autonomy.js';
+import { levelOf } from '../policy/autonomy-store.js';
 import { decisionOfApproval, recordDecision, sessionTaint, updateDecision, urlSeen } from '../policy/store.js';
 import type { RunQueue } from '../sessions/queue.js';
 import type { Clock } from '../time.js';
@@ -45,6 +47,8 @@ export interface ToolCallerDeps {
   clock: Clock;
   timeZone: string;
   newHandle?: () => string;
+  // the level of a domain of the trust ladder. the default reads the database, and a test can give its own.
+  autonomyLevel?: (domain: AutonomyDomain) => AutonomyLevel;
 }
 
 export interface ToolCaller {
@@ -130,6 +134,7 @@ export const abandonedText = (name: string) =>
 //   better than a second action, which the model can try when it does not see the first result.
 export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
   const { db, blobs, tools, clock, logger } = deps;
+  const autonomyLevel = deps.autonomyLevel ?? ((domain: AutonomyDomain) => levelOf(db, domain));
 
   // the preview cuts the text, and a secret that the cut splits no longer matches the redaction. so the redaction
   // comes first. the model sees the redacted text in each later request anyway, because the events are redacted.
@@ -285,6 +290,10 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
     // an input that makes a call external, for example an invitation, always asks the owner. an allow rule on the tool
     // was written for its usual risk.
     const alwaysApprove = tool.needsApproval === true || (tool.riskFor !== undefined && risk === 'external');
+    // the level of the domain of the call is read here, before the tool acts. a read that fails throws, so the call
+    // takes the path of a failed policy check and does not run.
+    const domain = domainOf(tool.name, input);
+    const autonomy = domain ? { domain, level: autonomyLevel(domain) } : undefined;
     const verdict = decide(
       {
         tool: tool.name,
@@ -294,6 +303,7 @@ export function createToolCaller(deps: ToolCallerDeps): ToolCaller {
         sessionKey: ctx.sessionKey,
         taint: sources,
         seen: (url) => urlSeen(db, ctx.sessionKey, url),
+        ...(autonomy ? { autonomy } : {}),
       },
       deps.rules,
     );

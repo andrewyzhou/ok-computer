@@ -1,0 +1,3802 @@
+{
+  "a gmail draft | owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_draft changes data, so a reviewer checks it first"
+  },
+  "a gmail draft | owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__gmail_draft"
+  },
+  "a gmail draft | owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__gmail_draft"
+  },
+  "a gmail draft | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_draft"
+  },
+  "a gmail draft | owner chat | deny args": {
+    "decision": "deny",
+    "rule": "test#deny-args",
+    "reason": "the policy rule test#deny-args denies google__gmail_draft"
+  },
+  "a gmail draft | automation | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_draft changes data, so a reviewer checks it first"
+  },
+  "a gmail draft | automation | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__gmail_draft"
+  },
+  "a gmail draft | automation | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__gmail_draft"
+  },
+  "a gmail draft | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_draft"
+  },
+  "a gmail draft | automation | deny args": {
+    "decision": "deny",
+    "rule": "test#deny-args",
+    "reason": "the policy rule test#deny-args denies google__gmail_draft"
+  },
+  "a gmail draft | sub-agent | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_draft changes data, so a reviewer checks it first"
+  },
+  "a gmail draft | sub-agent | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__gmail_draft"
+  },
+  "a gmail draft | sub-agent | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__gmail_draft"
+  },
+  "a gmail draft | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_draft"
+  },
+  "a gmail draft | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "test#deny-args",
+    "reason": "the policy rule test#deny-args denies google__gmail_draft"
+  },
+  "a gmail draft | tainted owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_draft changes data, so a reviewer checks it first"
+  },
+  "a gmail draft | tainted owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__gmail_draft"
+  },
+  "a gmail draft | tainted owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__gmail_draft"
+  },
+  "a gmail draft | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_draft"
+  },
+  "a gmail draft | tainted owner chat | deny args": {
+    "decision": "deny",
+    "rule": "test#deny-args",
+    "reason": "the policy rule test#deny-args denies google__gmail_draft"
+  },
+  "an inbox draft reply | owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "inbox_draft_reply changes data, so a reviewer checks it first"
+  },
+  "an inbox draft reply | owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows inbox_draft_reply"
+  },
+  "an inbox draft reply | owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows inbox_draft_reply"
+  },
+  "an inbox draft reply | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_draft_reply"
+  },
+  "an inbox draft reply | owner chat | deny args": {
+    "decision": "deny",
+    "rule": "test#deny-args",
+    "reason": "the policy rule test#deny-args denies inbox_draft_reply"
+  },
+  "an inbox draft reply | automation | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "inbox_draft_reply changes data, so a reviewer checks it first"
+  },
+  "an inbox draft reply | automation | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows inbox_draft_reply"
+  },
+  "an inbox draft reply | automation | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows inbox_draft_reply"
+  },
+  "an inbox draft reply | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_draft_reply"
+  },
+  "an inbox draft reply | automation | deny args": {
+    "decision": "deny",
+    "rule": "test#deny-args",
+    "reason": "the policy rule test#deny-args denies inbox_draft_reply"
+  },
+  "an inbox draft reply | sub-agent | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "inbox_draft_reply changes data, so a reviewer checks it first"
+  },
+  "an inbox draft reply | sub-agent | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows inbox_draft_reply"
+  },
+  "an inbox draft reply | sub-agent | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows inbox_draft_reply"
+  },
+  "an inbox draft reply | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_draft_reply"
+  },
+  "an inbox draft reply | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "test#deny-args",
+    "reason": "the policy rule test#deny-args denies inbox_draft_reply"
+  },
+  "an inbox draft reply | tainted owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "inbox_draft_reply changes data, so a reviewer checks it first"
+  },
+  "an inbox draft reply | tainted owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows inbox_draft_reply"
+  },
+  "an inbox draft reply | tainted owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows inbox_draft_reply"
+  },
+  "an inbox draft reply | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_draft_reply"
+  },
+  "an inbox draft reply | tainted owner chat | deny args": {
+    "decision": "deny",
+    "rule": "test#deny-args",
+    "reason": "the policy rule test#deny-args denies inbox_draft_reply"
+  },
+  "a gmail label | owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_label changes data, so a reviewer checks it first"
+  },
+  "a gmail label | owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__gmail_label"
+  },
+  "a gmail label | owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__gmail_label"
+  },
+  "a gmail label | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_label"
+  },
+  "a gmail label | owner chat | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_label changes data, so a reviewer checks it first"
+  },
+  "a gmail label | automation | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_label changes data, so a reviewer checks it first"
+  },
+  "a gmail label | automation | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__gmail_label"
+  },
+  "a gmail label | automation | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__gmail_label"
+  },
+  "a gmail label | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_label"
+  },
+  "a gmail label | automation | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_label changes data, so a reviewer checks it first"
+  },
+  "a gmail label | sub-agent | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_label changes data, so a reviewer checks it first"
+  },
+  "a gmail label | sub-agent | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__gmail_label"
+  },
+  "a gmail label | sub-agent | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__gmail_label"
+  },
+  "a gmail label | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_label"
+  },
+  "a gmail label | sub-agent | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_label changes data, so a reviewer checks it first"
+  },
+  "a gmail label | tainted owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_label changes data, so a reviewer checks it first"
+  },
+  "a gmail label | tainted owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__gmail_label"
+  },
+  "a gmail label | tainted owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__gmail_label"
+  },
+  "a gmail label | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_label"
+  },
+  "a gmail label | tainted owner chat | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_label changes data, so a reviewer checks it first"
+  },
+  "a gmail archive | owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_archive changes data, so a reviewer checks it first"
+  },
+  "a gmail archive | owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__gmail_archive"
+  },
+  "a gmail archive | owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__gmail_archive"
+  },
+  "a gmail archive | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_archive"
+  },
+  "a gmail archive | owner chat | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_archive changes data, so a reviewer checks it first"
+  },
+  "a gmail archive | automation | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_archive changes data, so a reviewer checks it first"
+  },
+  "a gmail archive | automation | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__gmail_archive"
+  },
+  "a gmail archive | automation | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__gmail_archive"
+  },
+  "a gmail archive | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_archive"
+  },
+  "a gmail archive | automation | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_archive changes data, so a reviewer checks it first"
+  },
+  "a gmail archive | sub-agent | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_archive changes data, so a reviewer checks it first"
+  },
+  "a gmail archive | sub-agent | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__gmail_archive"
+  },
+  "a gmail archive | sub-agent | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__gmail_archive"
+  },
+  "a gmail archive | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_archive"
+  },
+  "a gmail archive | sub-agent | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_archive changes data, so a reviewer checks it first"
+  },
+  "a gmail archive | tainted owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_archive changes data, so a reviewer checks it first"
+  },
+  "a gmail archive | tainted owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__gmail_archive"
+  },
+  "a gmail archive | tainted owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__gmail_archive"
+  },
+  "a gmail archive | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_archive"
+  },
+  "a gmail archive | tainted owner chat | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_archive changes data, so a reviewer checks it first"
+  },
+  "a gmail mark read | owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_mark_read changes data, so a reviewer checks it first"
+  },
+  "a gmail mark read | owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__gmail_mark_read"
+  },
+  "a gmail mark read | owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__gmail_mark_read"
+  },
+  "a gmail mark read | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_mark_read"
+  },
+  "a gmail mark read | owner chat | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_mark_read changes data, so a reviewer checks it first"
+  },
+  "a gmail mark read | automation | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_mark_read changes data, so a reviewer checks it first"
+  },
+  "a gmail mark read | automation | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__gmail_mark_read"
+  },
+  "a gmail mark read | automation | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__gmail_mark_read"
+  },
+  "a gmail mark read | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_mark_read"
+  },
+  "a gmail mark read | automation | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_mark_read changes data, so a reviewer checks it first"
+  },
+  "a gmail mark read | sub-agent | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_mark_read changes data, so a reviewer checks it first"
+  },
+  "a gmail mark read | sub-agent | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__gmail_mark_read"
+  },
+  "a gmail mark read | sub-agent | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__gmail_mark_read"
+  },
+  "a gmail mark read | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_mark_read"
+  },
+  "a gmail mark read | sub-agent | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_mark_read changes data, so a reviewer checks it first"
+  },
+  "a gmail mark read | tainted owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_mark_read changes data, so a reviewer checks it first"
+  },
+  "a gmail mark read | tainted owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__gmail_mark_read"
+  },
+  "a gmail mark read | tainted owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__gmail_mark_read"
+  },
+  "a gmail mark read | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_mark_read"
+  },
+  "a gmail mark read | tainted owner chat | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__gmail_mark_read changes data, so a reviewer checks it first"
+  },
+  "a calendar hold | owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__calendar_create_event changes data, so a reviewer checks it first"
+  },
+  "a calendar hold | owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__calendar_create_event"
+  },
+  "a calendar hold | owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__calendar_create_event"
+  },
+  "a calendar hold | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_create_event"
+  },
+  "a calendar hold | owner chat | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__calendar_create_event changes data, so a reviewer checks it first"
+  },
+  "a calendar hold | automation | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__calendar_create_event changes data, so a reviewer checks it first"
+  },
+  "a calendar hold | automation | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__calendar_create_event"
+  },
+  "a calendar hold | automation | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__calendar_create_event"
+  },
+  "a calendar hold | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_create_event"
+  },
+  "a calendar hold | automation | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__calendar_create_event changes data, so a reviewer checks it first"
+  },
+  "a calendar hold | sub-agent | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__calendar_create_event changes data, so a reviewer checks it first"
+  },
+  "a calendar hold | sub-agent | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__calendar_create_event"
+  },
+  "a calendar hold | sub-agent | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__calendar_create_event"
+  },
+  "a calendar hold | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_create_event"
+  },
+  "a calendar hold | sub-agent | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__calendar_create_event changes data, so a reviewer checks it first"
+  },
+  "a calendar hold | tainted owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__calendar_create_event changes data, so a reviewer checks it first"
+  },
+  "a calendar hold | tainted owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__calendar_create_event"
+  },
+  "a calendar hold | tainted owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__calendar_create_event"
+  },
+  "a calendar hold | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_create_event"
+  },
+  "a calendar hold | tainted owner chat | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__calendar_create_event changes data, so a reviewer checks it first"
+  },
+  "a calendar hold with an empty guest list | owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__calendar_create_event changes data, so a reviewer checks it first"
+  },
+  "a calendar hold with an empty guest list | owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__calendar_create_event"
+  },
+  "a calendar hold with an empty guest list | owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__calendar_create_event"
+  },
+  "a calendar hold with an empty guest list | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_create_event"
+  },
+  "a calendar hold with an empty guest list | owner chat | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__calendar_create_event changes data, so a reviewer checks it first"
+  },
+  "a calendar hold with an empty guest list | automation | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__calendar_create_event changes data, so a reviewer checks it first"
+  },
+  "a calendar hold with an empty guest list | automation | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__calendar_create_event"
+  },
+  "a calendar hold with an empty guest list | automation | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__calendar_create_event"
+  },
+  "a calendar hold with an empty guest list | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_create_event"
+  },
+  "a calendar hold with an empty guest list | automation | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__calendar_create_event changes data, so a reviewer checks it first"
+  },
+  "a calendar hold with an empty guest list | sub-agent | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__calendar_create_event changes data, so a reviewer checks it first"
+  },
+  "a calendar hold with an empty guest list | sub-agent | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__calendar_create_event"
+  },
+  "a calendar hold with an empty guest list | sub-agent | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__calendar_create_event"
+  },
+  "a calendar hold with an empty guest list | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_create_event"
+  },
+  "a calendar hold with an empty guest list | sub-agent | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__calendar_create_event changes data, so a reviewer checks it first"
+  },
+  "a calendar hold with an empty guest list | tainted owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__calendar_create_event changes data, so a reviewer checks it first"
+  },
+  "a calendar hold with an empty guest list | tainted owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows google__calendar_create_event"
+  },
+  "a calendar hold with an empty guest list | tainted owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows google__calendar_create_event"
+  },
+  "a calendar hold with an empty guest list | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_create_event"
+  },
+  "a calendar hold with an empty guest list | tainted owner chat | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "google__calendar_create_event changes data, so a reviewer checks it first"
+  },
+  "a calendar event with guests | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_create_event always needs the owner's approval"
+  },
+  "a calendar event with guests | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_create_event always needs the owner's approval"
+  },
+  "a calendar event with guests | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_create_event always needs the owner's approval"
+  },
+  "a calendar event with guests | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_create_event"
+  },
+  "a calendar event with guests | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_create_event always needs the owner's approval"
+  },
+  "a calendar event with guests | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_create_event always needs the owner's approval"
+  },
+  "a calendar event with guests | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_create_event always needs the owner's approval"
+  },
+  "a calendar event with guests | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_create_event always needs the owner's approval"
+  },
+  "a calendar event with guests | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_create_event"
+  },
+  "a calendar event with guests | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_create_event always needs the owner's approval"
+  },
+  "a calendar event with guests | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_create_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar event with guests | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_create_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar event with guests | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_create_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar event with guests | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_create_event"
+  },
+  "a calendar event with guests | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_create_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar event with guests | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_create_event always needs the owner's approval"
+  },
+  "a calendar event with guests | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_create_event always needs the owner's approval"
+  },
+  "a calendar event with guests | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_create_event always needs the owner's approval"
+  },
+  "a calendar event with guests | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_create_event"
+  },
+  "a calendar event with guests | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_create_event always needs the owner's approval"
+  },
+  "a browser submit | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a browser submit | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a browser submit | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a browser submit | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a browser submit | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a browser submit | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a browser submit | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a browser submit | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a browser submit | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a browser submit | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a browser submit | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a browser submit | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a browser submit | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a browser submit | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a browser submit | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a browser submit | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a browser submit | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a browser submit | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a browser submit | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a browser submit | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout submit | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout submit | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout submit | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout submit | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a checkout submit | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout submit | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout submit | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout submit | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout submit | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a checkout submit | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout submit | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a checkout submit | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a checkout submit | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a checkout submit | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a checkout submit | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a checkout submit | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout submit | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout submit | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout submit | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a checkout submit | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a card form submit | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a card form submit | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a card form submit | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a card form submit | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a card form submit | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a card form submit | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a card form submit | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a card form submit | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a card form submit | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a card form submit | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a card form submit | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a card form submit | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a card form submit | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a card form submit | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a card form submit | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a card form submit | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a card form submit | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a card form submit | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a card form submit | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a card form submit | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a script button outside a form | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a script button outside a form | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a script button outside a form | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a script button outside a form | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a script button outside a form | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a script button outside a form | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a script button outside a form | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a script button outside a form | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a script button outside a form | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a script button outside a form | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a script button outside a form | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a script button outside a form | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a script button outside a form | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a script button outside a form | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a script button outside a form | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a script button outside a form | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a script button outside a form | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a script button outside a form | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a script button outside a form | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a script button outside a form | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a room booking | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a room booking | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a room booking | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a room booking | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a room booking | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a room booking | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a room booking | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a room booking | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a room booking | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a reservation | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a reservation | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a reservation | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a reservation | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a reservation | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a reservation | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a reservation | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a reservation | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a reservation | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a checkout with a plural path | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a checkout with a plural path | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a checkout with a plural path | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a checkout with a plural path | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a checkout with a plural path | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a checkout with a plural path | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a checkout with a plural path | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a checkout with a plural path | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a checkout with a plural path | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a last step that confirms | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a last step that confirms | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a last step that confirms | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a last step that confirms | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a last step that confirms | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a last step that confirms | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a last step that confirms | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a last step that confirms | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a last step that confirms | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a flight booking | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a flight booking | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a flight booking | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a flight booking | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a flight booking | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a flight booking | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a flight booking | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a flight booking | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a flight booking | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "event tickets | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "event tickets | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "event tickets | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "event tickets | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "event tickets | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "event tickets | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "event tickets | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "event tickets | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "event tickets | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a submit that the agent marks as a purchase | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a submit that the agent marks as a purchase | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a submit that the agent marks as a purchase | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a submit that the agent marks as a purchase | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a submit that the agent marks as a purchase | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a submit that the agent marks as a purchase | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_submit always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a submit that the agent marks as a purchase | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a submit that the agent marks as a purchase | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_submit"
+  },
+  "a submit that the agent marks as a purchase | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_submit always needs the owner's approval"
+  },
+  "a gmail unsubscribe | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_unsubscribe always needs the owner's approval"
+  },
+  "a gmail unsubscribe | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_unsubscribe always needs the owner's approval"
+  },
+  "a gmail unsubscribe | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_unsubscribe always needs the owner's approval"
+  },
+  "a gmail unsubscribe | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_unsubscribe"
+  },
+  "a gmail unsubscribe | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_unsubscribe always needs the owner's approval"
+  },
+  "a gmail unsubscribe | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_unsubscribe always needs the owner's approval"
+  },
+  "a gmail unsubscribe | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_unsubscribe always needs the owner's approval"
+  },
+  "a gmail unsubscribe | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_unsubscribe always needs the owner's approval"
+  },
+  "a gmail unsubscribe | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_unsubscribe"
+  },
+  "a gmail unsubscribe | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_unsubscribe always needs the owner's approval"
+  },
+  "a gmail unsubscribe | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__gmail_unsubscribe always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a gmail unsubscribe | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__gmail_unsubscribe always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a gmail unsubscribe | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__gmail_unsubscribe always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a gmail unsubscribe | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_unsubscribe"
+  },
+  "a gmail unsubscribe | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__gmail_unsubscribe always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a gmail unsubscribe | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_unsubscribe always needs the owner's approval"
+  },
+  "a gmail unsubscribe | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_unsubscribe always needs the owner's approval"
+  },
+  "a gmail unsubscribe | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_unsubscribe always needs the owner's approval"
+  },
+  "a gmail unsubscribe | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_unsubscribe"
+  },
+  "a gmail unsubscribe | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_unsubscribe always needs the owner's approval"
+  },
+  "an inbox unsubscribe | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_unsubscribe always needs the owner's approval"
+  },
+  "an inbox unsubscribe | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_unsubscribe always needs the owner's approval"
+  },
+  "an inbox unsubscribe | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_unsubscribe always needs the owner's approval"
+  },
+  "an inbox unsubscribe | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_unsubscribe"
+  },
+  "an inbox unsubscribe | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_unsubscribe always needs the owner's approval"
+  },
+  "an inbox unsubscribe | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_unsubscribe always needs the owner's approval"
+  },
+  "an inbox unsubscribe | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_unsubscribe always needs the owner's approval"
+  },
+  "an inbox unsubscribe | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_unsubscribe always needs the owner's approval"
+  },
+  "an inbox unsubscribe | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_unsubscribe"
+  },
+  "an inbox unsubscribe | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_unsubscribe always needs the owner's approval"
+  },
+  "an inbox unsubscribe | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "inbox_unsubscribe always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an inbox unsubscribe | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "inbox_unsubscribe always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an inbox unsubscribe | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "inbox_unsubscribe always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an inbox unsubscribe | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_unsubscribe"
+  },
+  "an inbox unsubscribe | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "inbox_unsubscribe always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an inbox unsubscribe | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_unsubscribe always needs the owner's approval"
+  },
+  "an inbox unsubscribe | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_unsubscribe always needs the owner's approval"
+  },
+  "an inbox unsubscribe | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_unsubscribe always needs the owner's approval"
+  },
+  "an inbox unsubscribe | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_unsubscribe"
+  },
+  "an inbox unsubscribe | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_unsubscribe always needs the owner's approval"
+  },
+  "code with network access | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "sandbox_exec always needs the owner's approval"
+  },
+  "code with network access | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "sandbox_exec always needs the owner's approval"
+  },
+  "code with network access | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "sandbox_exec always needs the owner's approval"
+  },
+  "code with network access | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies sandbox_exec"
+  },
+  "code with network access | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "sandbox_exec always needs the owner's approval"
+  },
+  "code with network access | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "sandbox_exec always needs the owner's approval"
+  },
+  "code with network access | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "sandbox_exec always needs the owner's approval"
+  },
+  "code with network access | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "sandbox_exec always needs the owner's approval"
+  },
+  "code with network access | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies sandbox_exec"
+  },
+  "code with network access | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "sandbox_exec always needs the owner's approval"
+  },
+  "code with network access | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "sandbox_exec always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "code with network access | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "sandbox_exec always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "code with network access | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "sandbox_exec always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "code with network access | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies sandbox_exec"
+  },
+  "code with network access | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "sandbox_exec always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "code with network access | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "sandbox_exec always needs the owner's approval"
+  },
+  "code with network access | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "sandbox_exec always needs the owner's approval"
+  },
+  "code with network access | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "sandbox_exec always needs the owner's approval"
+  },
+  "code with network access | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies sandbox_exec"
+  },
+  "code with network access | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "sandbox_exec always needs the owner's approval"
+  },
+  "code without network access | owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:exec",
+    "reason": "sandbox_exec runs code in the sandbox, so a reviewer checks it first"
+  },
+  "code without network access | owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows sandbox_exec"
+  },
+  "code without network access | owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows sandbox_exec"
+  },
+  "code without network access | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies sandbox_exec"
+  },
+  "code without network access | owner chat | deny args": {
+    "decision": "review",
+    "rule": "risk:exec",
+    "reason": "sandbox_exec runs code in the sandbox, so a reviewer checks it first"
+  },
+  "code without network access | automation | builtin": {
+    "decision": "review",
+    "rule": "risk:exec",
+    "reason": "sandbox_exec runs code in the sandbox, so a reviewer checks it first"
+  },
+  "code without network access | automation | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows sandbox_exec"
+  },
+  "code without network access | automation | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows sandbox_exec"
+  },
+  "code without network access | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies sandbox_exec"
+  },
+  "code without network access | automation | deny args": {
+    "decision": "review",
+    "rule": "risk:exec",
+    "reason": "sandbox_exec runs code in the sandbox, so a reviewer checks it first"
+  },
+  "code without network access | sub-agent | builtin": {
+    "decision": "review",
+    "rule": "risk:exec",
+    "reason": "sandbox_exec runs code in the sandbox, so a reviewer checks it first"
+  },
+  "code without network access | sub-agent | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows sandbox_exec"
+  },
+  "code without network access | sub-agent | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows sandbox_exec"
+  },
+  "code without network access | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies sandbox_exec"
+  },
+  "code without network access | sub-agent | deny args": {
+    "decision": "review",
+    "rule": "risk:exec",
+    "reason": "sandbox_exec runs code in the sandbox, so a reviewer checks it first"
+  },
+  "code without network access | tainted owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:exec",
+    "reason": "sandbox_exec runs code in the sandbox, so a reviewer checks it first"
+  },
+  "code without network access | tainted owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows sandbox_exec"
+  },
+  "code without network access | tainted owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows sandbox_exec"
+  },
+  "code without network access | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies sandbox_exec"
+  },
+  "code without network access | tainted owner chat | deny args": {
+    "decision": "review",
+    "rule": "risk:exec",
+    "reason": "sandbox_exec runs code in the sandbox, so a reviewer checks it first"
+  },
+  "a calendar update | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_update_event"
+  },
+  "a calendar update | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_update_event"
+  },
+  "a calendar update | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_update_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar update | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_update_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar update | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_update_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar update | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_update_event"
+  },
+  "a calendar update | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_update_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar update | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_update_event"
+  },
+  "a calendar update | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with guests | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with guests | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with guests | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with guests | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_update_event"
+  },
+  "a calendar update with guests | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with guests | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with guests | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with guests | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with guests | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_update_event"
+  },
+  "a calendar update with guests | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with guests | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_update_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar update with guests | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_update_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar update with guests | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_update_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar update with guests | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_update_event"
+  },
+  "a calendar update with guests | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_update_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar update with guests | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with guests | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with guests | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with guests | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_update_event"
+  },
+  "a calendar update with guests | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with an empty guest list | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with an empty guest list | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with an empty guest list | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with an empty guest list | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_update_event"
+  },
+  "a calendar update with an empty guest list | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with an empty guest list | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with an empty guest list | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with an empty guest list | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with an empty guest list | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_update_event"
+  },
+  "a calendar update with an empty guest list | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with an empty guest list | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_update_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar update with an empty guest list | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_update_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar update with an empty guest list | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_update_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar update with an empty guest list | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_update_event"
+  },
+  "a calendar update with an empty guest list | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_update_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar update with an empty guest list | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with an empty guest list | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with an empty guest list | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar update with an empty guest list | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_update_event"
+  },
+  "a calendar update with an empty guest list | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_update_event always needs the owner's approval"
+  },
+  "a calendar delete | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_delete_event always needs the owner's approval"
+  },
+  "a calendar delete | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_delete_event always needs the owner's approval"
+  },
+  "a calendar delete | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_delete_event always needs the owner's approval"
+  },
+  "a calendar delete | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_delete_event"
+  },
+  "a calendar delete | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_delete_event always needs the owner's approval"
+  },
+  "a calendar delete | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_delete_event always needs the owner's approval"
+  },
+  "a calendar delete | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_delete_event always needs the owner's approval"
+  },
+  "a calendar delete | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_delete_event always needs the owner's approval"
+  },
+  "a calendar delete | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_delete_event"
+  },
+  "a calendar delete | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_delete_event always needs the owner's approval"
+  },
+  "a calendar delete | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_delete_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar delete | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_delete_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar delete | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_delete_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar delete | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_delete_event"
+  },
+  "a calendar delete | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__calendar_delete_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a calendar delete | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_delete_event always needs the owner's approval"
+  },
+  "a calendar delete | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_delete_event always needs the owner's approval"
+  },
+  "a calendar delete | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_delete_event always needs the owner's approval"
+  },
+  "a calendar delete | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__calendar_delete_event"
+  },
+  "a calendar delete | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__calendar_delete_event always needs the owner's approval"
+  },
+  "a gmail send | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_send always needs the owner's approval"
+  },
+  "a gmail send | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_send always needs the owner's approval"
+  },
+  "a gmail send | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_send always needs the owner's approval"
+  },
+  "a gmail send | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_send"
+  },
+  "a gmail send | owner chat | deny args": {
+    "decision": "deny",
+    "rule": "test#deny-args",
+    "reason": "the policy rule test#deny-args denies google__gmail_send"
+  },
+  "a gmail send | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_send always needs the owner's approval"
+  },
+  "a gmail send | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_send always needs the owner's approval"
+  },
+  "a gmail send | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_send always needs the owner's approval"
+  },
+  "a gmail send | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_send"
+  },
+  "a gmail send | automation | deny args": {
+    "decision": "deny",
+    "rule": "test#deny-args",
+    "reason": "the policy rule test#deny-args denies google__gmail_send"
+  },
+  "a gmail send | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__gmail_send always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a gmail send | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__gmail_send always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a gmail send | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "google__gmail_send always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a gmail send | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_send"
+  },
+  "a gmail send | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "test#deny-args",
+    "reason": "the policy rule test#deny-args denies google__gmail_send"
+  },
+  "a gmail send | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_send always needs the owner's approval"
+  },
+  "a gmail send | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_send always needs the owner's approval"
+  },
+  "a gmail send | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "google__gmail_send always needs the owner's approval"
+  },
+  "a gmail send | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies google__gmail_send"
+  },
+  "a gmail send | tainted owner chat | deny args": {
+    "decision": "deny",
+    "rule": "test#deny-args",
+    "reason": "the policy rule test#deny-args denies google__gmail_send"
+  },
+  "an inbox archive of a sender | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_archive_sender always needs the owner's approval"
+  },
+  "an inbox archive of a sender | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_archive_sender always needs the owner's approval"
+  },
+  "an inbox archive of a sender | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_archive_sender always needs the owner's approval"
+  },
+  "an inbox archive of a sender | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_archive_sender"
+  },
+  "an inbox archive of a sender | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_archive_sender always needs the owner's approval"
+  },
+  "an inbox archive of a sender | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_archive_sender always needs the owner's approval"
+  },
+  "an inbox archive of a sender | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_archive_sender always needs the owner's approval"
+  },
+  "an inbox archive of a sender | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_archive_sender always needs the owner's approval"
+  },
+  "an inbox archive of a sender | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_archive_sender"
+  },
+  "an inbox archive of a sender | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_archive_sender always needs the owner's approval"
+  },
+  "an inbox archive of a sender | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "inbox_archive_sender always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an inbox archive of a sender | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "inbox_archive_sender always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an inbox archive of a sender | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "inbox_archive_sender always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an inbox archive of a sender | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_archive_sender"
+  },
+  "an inbox archive of a sender | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "inbox_archive_sender always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an inbox archive of a sender | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_archive_sender always needs the owner's approval"
+  },
+  "an inbox archive of a sender | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_archive_sender always needs the owner's approval"
+  },
+  "an inbox archive of a sender | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_archive_sender always needs the owner's approval"
+  },
+  "an inbox archive of a sender | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_archive_sender"
+  },
+  "an inbox archive of a sender | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_archive_sender always needs the owner's approval"
+  },
+  "an inbox event from a proposal | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_create_event always needs the owner's approval"
+  },
+  "an inbox event from a proposal | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_create_event always needs the owner's approval"
+  },
+  "an inbox event from a proposal | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_create_event always needs the owner's approval"
+  },
+  "an inbox event from a proposal | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_create_event"
+  },
+  "an inbox event from a proposal | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_create_event always needs the owner's approval"
+  },
+  "an inbox event from a proposal | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_create_event always needs the owner's approval"
+  },
+  "an inbox event from a proposal | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_create_event always needs the owner's approval"
+  },
+  "an inbox event from a proposal | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_create_event always needs the owner's approval"
+  },
+  "an inbox event from a proposal | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_create_event"
+  },
+  "an inbox event from a proposal | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_create_event always needs the owner's approval"
+  },
+  "an inbox event from a proposal | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "inbox_create_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an inbox event from a proposal | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "inbox_create_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an inbox event from a proposal | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "inbox_create_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an inbox event from a proposal | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_create_event"
+  },
+  "an inbox event from a proposal | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "inbox_create_event always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an inbox event from a proposal | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_create_event always needs the owner's approval"
+  },
+  "an inbox event from a proposal | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_create_event always needs the owner's approval"
+  },
+  "an inbox event from a proposal | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_create_event always needs the owner's approval"
+  },
+  "an inbox event from a proposal | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_create_event"
+  },
+  "an inbox event from a proposal | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_create_event always needs the owner's approval"
+  },
+  "an inbox cancel of a subscription | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_cancel_subscription always needs the owner's approval"
+  },
+  "an inbox cancel of a subscription | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_cancel_subscription always needs the owner's approval"
+  },
+  "an inbox cancel of a subscription | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_cancel_subscription always needs the owner's approval"
+  },
+  "an inbox cancel of a subscription | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_cancel_subscription"
+  },
+  "an inbox cancel of a subscription | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_cancel_subscription always needs the owner's approval"
+  },
+  "an inbox cancel of a subscription | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_cancel_subscription always needs the owner's approval"
+  },
+  "an inbox cancel of a subscription | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_cancel_subscription always needs the owner's approval"
+  },
+  "an inbox cancel of a subscription | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_cancel_subscription always needs the owner's approval"
+  },
+  "an inbox cancel of a subscription | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_cancel_subscription"
+  },
+  "an inbox cancel of a subscription | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_cancel_subscription always needs the owner's approval"
+  },
+  "an inbox cancel of a subscription | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "inbox_cancel_subscription always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an inbox cancel of a subscription | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "inbox_cancel_subscription always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an inbox cancel of a subscription | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "inbox_cancel_subscription always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an inbox cancel of a subscription | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_cancel_subscription"
+  },
+  "an inbox cancel of a subscription | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "inbox_cancel_subscription always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an inbox cancel of a subscription | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_cancel_subscription always needs the owner's approval"
+  },
+  "an inbox cancel of a subscription | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_cancel_subscription always needs the owner's approval"
+  },
+  "an inbox cancel of a subscription | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_cancel_subscription always needs the owner's approval"
+  },
+  "an inbox cancel of a subscription | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies inbox_cancel_subscription"
+  },
+  "an inbox cancel of a subscription | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "inbox_cancel_subscription always needs the owner's approval"
+  },
+  "a browser allow domain | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_allow_domain always needs the owner's approval"
+  },
+  "a browser allow domain | owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_allow_domain always needs the owner's approval"
+  },
+  "a browser allow domain | owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_allow_domain always needs the owner's approval"
+  },
+  "a browser allow domain | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_allow_domain"
+  },
+  "a browser allow domain | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_allow_domain always needs the owner's approval"
+  },
+  "a browser allow domain | automation | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_allow_domain always needs the owner's approval"
+  },
+  "a browser allow domain | automation | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_allow_domain always needs the owner's approval"
+  },
+  "a browser allow domain | automation | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_allow_domain always needs the owner's approval"
+  },
+  "a browser allow domain | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_allow_domain"
+  },
+  "a browser allow domain | automation | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_allow_domain always needs the owner's approval"
+  },
+  "a browser allow domain | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_allow_domain always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a browser allow domain | sub-agent | allow all": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_allow_domain always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a browser allow domain | sub-agent | allow tool": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_allow_domain always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a browser allow domain | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_allow_domain"
+  },
+  "a browser allow domain | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "browser_allow_domain always needs the owner's approval, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "a browser allow domain | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_allow_domain always needs the owner's approval"
+  },
+  "a browser allow domain | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_allow_domain always needs the owner's approval"
+  },
+  "a browser allow domain | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_allow_domain always needs the owner's approval"
+  },
+  "a browser allow domain | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_allow_domain"
+  },
+  "a browser allow domain | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "tool",
+    "reason": "browser_allow_domain always needs the owner's approval"
+  },
+  "a browser click | owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "browser_click changes data, so a reviewer checks it first"
+  },
+  "a browser click | owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows browser_click"
+  },
+  "a browser click | owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows browser_click"
+  },
+  "a browser click | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_click"
+  },
+  "a browser click | owner chat | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "browser_click changes data, so a reviewer checks it first"
+  },
+  "a browser click | automation | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "browser_click changes data, so a reviewer checks it first"
+  },
+  "a browser click | automation | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows browser_click"
+  },
+  "a browser click | automation | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows browser_click"
+  },
+  "a browser click | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_click"
+  },
+  "a browser click | automation | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "browser_click changes data, so a reviewer checks it first"
+  },
+  "a browser click | sub-agent | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "browser_click changes data, so a reviewer checks it first"
+  },
+  "a browser click | sub-agent | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows browser_click"
+  },
+  "a browser click | sub-agent | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows browser_click"
+  },
+  "a browser click | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_click"
+  },
+  "a browser click | sub-agent | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "browser_click changes data, so a reviewer checks it first"
+  },
+  "a browser click | tainted owner chat | builtin": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "browser_click changes data, so a reviewer checks it first"
+  },
+  "a browser click | tainted owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows browser_click"
+  },
+  "a browser click | tainted owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows browser_click"
+  },
+  "a browser click | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies browser_click"
+  },
+  "a browser click | tainted owner chat | deny args": {
+    "decision": "review",
+    "rule": "risk:write",
+    "reason": "browser_click changes data, so a reviewer checks it first"
+  },
+  "a web fetch | owner chat | builtin": {
+    "decision": "allow",
+    "rule": "risk:read",
+    "reason": "web_fetch only reads"
+  },
+  "a web fetch | owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows web_fetch"
+  },
+  "a web fetch | owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows web_fetch"
+  },
+  "a web fetch | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies web_fetch"
+  },
+  "a web fetch | owner chat | deny args": {
+    "decision": "allow",
+    "rule": "risk:read",
+    "reason": "web_fetch only reads"
+  },
+  "a web fetch | automation | builtin": {
+    "decision": "allow",
+    "rule": "risk:read",
+    "reason": "web_fetch only reads"
+  },
+  "a web fetch | automation | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows web_fetch"
+  },
+  "a web fetch | automation | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows web_fetch"
+  },
+  "a web fetch | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies web_fetch"
+  },
+  "a web fetch | automation | deny args": {
+    "decision": "allow",
+    "rule": "risk:read",
+    "reason": "web_fetch only reads"
+  },
+  "a web fetch | sub-agent | builtin": {
+    "decision": "allow",
+    "rule": "risk:read",
+    "reason": "web_fetch only reads"
+  },
+  "a web fetch | sub-agent | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows web_fetch"
+  },
+  "a web fetch | sub-agent | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows web_fetch"
+  },
+  "a web fetch | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies web_fetch"
+  },
+  "a web fetch | sub-agent | deny args": {
+    "decision": "allow",
+    "rule": "risk:read",
+    "reason": "web_fetch only reads"
+  },
+  "a web fetch | tainted owner chat | builtin": {
+    "decision": "review",
+    "rule": "exfiltration",
+    "reason": "the session read untrusted content (gmail: a mail from news@example.com), and web_fetch sends a url that can carry data (https://example.com/a?q=1): it has a query or a fragment, so a reviewer checks it first"
+  },
+  "a web fetch | tainted owner chat | allow all": {
+    "decision": "review",
+    "rule": "exfiltration",
+    "reason": "the session read untrusted content (gmail: a mail from news@example.com), and web_fetch sends a url that can carry data (https://example.com/a?q=1): it has a query or a fragment, so a reviewer checks it first"
+  },
+  "a web fetch | tainted owner chat | allow tool": {
+    "decision": "review",
+    "rule": "exfiltration",
+    "reason": "the session read untrusted content (gmail: a mail from news@example.com), and web_fetch sends a url that can carry data (https://example.com/a?q=1): it has a query or a fragment, so a reviewer checks it first"
+  },
+  "a web fetch | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies web_fetch"
+  },
+  "a web fetch | tainted owner chat | deny args": {
+    "decision": "review",
+    "rule": "exfiltration",
+    "reason": "the session read untrusted content (gmail: a mail from news@example.com), and web_fetch sends a url that can carry data (https://example.com/a?q=1): it has a query or a fragment, so a reviewer checks it first"
+  },
+  "a web search | owner chat | builtin": {
+    "decision": "allow",
+    "rule": "risk:read",
+    "reason": "web_search only reads"
+  },
+  "a web search | owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows web_search"
+  },
+  "a web search | owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows web_search"
+  },
+  "a web search | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies web_search"
+  },
+  "a web search | owner chat | deny args": {
+    "decision": "allow",
+    "rule": "risk:read",
+    "reason": "web_search only reads"
+  },
+  "a web search | automation | builtin": {
+    "decision": "allow",
+    "rule": "risk:read",
+    "reason": "web_search only reads"
+  },
+  "a web search | automation | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows web_search"
+  },
+  "a web search | automation | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows web_search"
+  },
+  "a web search | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies web_search"
+  },
+  "a web search | automation | deny args": {
+    "decision": "allow",
+    "rule": "risk:read",
+    "reason": "web_search only reads"
+  },
+  "a web search | sub-agent | builtin": {
+    "decision": "allow",
+    "rule": "risk:read",
+    "reason": "web_search only reads"
+  },
+  "a web search | sub-agent | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows web_search"
+  },
+  "a web search | sub-agent | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows web_search"
+  },
+  "a web search | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies web_search"
+  },
+  "a web search | sub-agent | deny args": {
+    "decision": "allow",
+    "rule": "risk:read",
+    "reason": "web_search only reads"
+  },
+  "a web search | tainted owner chat | builtin": {
+    "decision": "review",
+    "rule": "exfiltration",
+    "reason": "the session read untrusted content (gmail: a mail from news@example.com), and web_search sends a search query (weather), so a reviewer checks it first"
+  },
+  "a web search | tainted owner chat | allow all": {
+    "decision": "review",
+    "rule": "exfiltration",
+    "reason": "the session read untrusted content (gmail: a mail from news@example.com), and web_search sends a search query (weather), so a reviewer checks it first"
+  },
+  "a web search | tainted owner chat | allow tool": {
+    "decision": "review",
+    "rule": "exfiltration",
+    "reason": "the session read untrusted content (gmail: a mail from news@example.com), and web_search sends a search query (weather), so a reviewer checks it first"
+  },
+  "a web search | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies web_search"
+  },
+  "a web search | tainted owner chat | deny args": {
+    "decision": "review",
+    "rule": "exfiltration",
+    "reason": "the session read untrusted content (gmail: a mail from news@example.com), and web_search sends a search query (weather), so a reviewer checks it first"
+  },
+  "a memory write | owner chat | builtin": {
+    "decision": "allow",
+    "rule": "builtin:memory_write",
+    "reason": "the tool changes only local data"
+  },
+  "a memory write | owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows memory_write"
+  },
+  "a memory write | owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows memory_write"
+  },
+  "a memory write | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies memory_write"
+  },
+  "a memory write | owner chat | deny args": {
+    "decision": "allow",
+    "rule": "builtin:memory_write",
+    "reason": "the tool changes only local data"
+  },
+  "a memory write | automation | builtin": {
+    "decision": "allow",
+    "rule": "builtin:memory_write",
+    "reason": "the tool changes only local data"
+  },
+  "a memory write | automation | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows memory_write"
+  },
+  "a memory write | automation | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows memory_write"
+  },
+  "a memory write | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies memory_write"
+  },
+  "a memory write | automation | deny args": {
+    "decision": "allow",
+    "rule": "builtin:memory_write",
+    "reason": "the tool changes only local data"
+  },
+  "a memory write | sub-agent | builtin": {
+    "decision": "allow",
+    "rule": "builtin:memory_write",
+    "reason": "the tool changes only local data"
+  },
+  "a memory write | sub-agent | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows memory_write"
+  },
+  "a memory write | sub-agent | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows memory_write"
+  },
+  "a memory write | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies memory_write"
+  },
+  "a memory write | sub-agent | deny args": {
+    "decision": "allow",
+    "rule": "builtin:memory_write",
+    "reason": "the tool changes only local data"
+  },
+  "a memory write | tainted owner chat | builtin": {
+    "decision": "allow",
+    "rule": "builtin:memory_write",
+    "reason": "the tool changes only local data"
+  },
+  "a memory write | tainted owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows memory_write"
+  },
+  "a memory write | tainted owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows memory_write"
+  },
+  "a memory write | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies memory_write"
+  },
+  "a memory write | tainted owner chat | deny args": {
+    "decision": "allow",
+    "rule": "builtin:memory_write",
+    "reason": "the tool changes only local data"
+  },
+  "a message to the owner | owner chat | builtin": {
+    "decision": "allow",
+    "rule": "builtin:message_owner",
+    "reason": "the tool changes only local data"
+  },
+  "a message to the owner | owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows message_owner"
+  },
+  "a message to the owner | owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows message_owner"
+  },
+  "a message to the owner | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies message_owner"
+  },
+  "a message to the owner | owner chat | deny args": {
+    "decision": "allow",
+    "rule": "builtin:message_owner",
+    "reason": "the tool changes only local data"
+  },
+  "a message to the owner | automation | builtin": {
+    "decision": "allow",
+    "rule": "builtin:message_owner",
+    "reason": "the tool changes only local data"
+  },
+  "a message to the owner | automation | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows message_owner"
+  },
+  "a message to the owner | automation | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows message_owner"
+  },
+  "a message to the owner | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies message_owner"
+  },
+  "a message to the owner | automation | deny args": {
+    "decision": "allow",
+    "rule": "builtin:message_owner",
+    "reason": "the tool changes only local data"
+  },
+  "a message to the owner | sub-agent | builtin": {
+    "decision": "allow",
+    "rule": "builtin:message_owner",
+    "reason": "the tool changes only local data"
+  },
+  "a message to the owner | sub-agent | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows message_owner"
+  },
+  "a message to the owner | sub-agent | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows message_owner"
+  },
+  "a message to the owner | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies message_owner"
+  },
+  "a message to the owner | sub-agent | deny args": {
+    "decision": "allow",
+    "rule": "builtin:message_owner",
+    "reason": "the tool changes only local data"
+  },
+  "a message to the owner | tainted owner chat | builtin": {
+    "decision": "allow",
+    "rule": "builtin:message_owner",
+    "reason": "the tool changes only local data"
+  },
+  "a message to the owner | tainted owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows message_owner"
+  },
+  "a message to the owner | tainted owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows message_owner"
+  },
+  "a message to the owner | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies message_owner"
+  },
+  "a message to the owner | tainted owner chat | deny args": {
+    "decision": "allow",
+    "rule": "builtin:message_owner",
+    "reason": "the tool changes only local data"
+  },
+  "an integration write | owner chat | builtin": {
+    "decision": "approve",
+    "rule": "risk:external",
+    "reason": "slack_send_message sends data off the pc or changes an account, so the owner must approve it"
+  },
+  "an integration write | owner chat | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows slack_send_message"
+  },
+  "an integration write | owner chat | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows slack_send_message"
+  },
+  "an integration write | owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies slack_send_message"
+  },
+  "an integration write | owner chat | deny args": {
+    "decision": "approve",
+    "rule": "risk:external",
+    "reason": "slack_send_message sends data off the pc or changes an account, so the owner must approve it"
+  },
+  "an integration write | automation | builtin": {
+    "decision": "approve",
+    "rule": "risk:external",
+    "reason": "slack_send_message sends data off the pc or changes an account, so the owner must approve it"
+  },
+  "an integration write | automation | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows slack_send_message"
+  },
+  "an integration write | automation | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows slack_send_message"
+  },
+  "an integration write | automation | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies slack_send_message"
+  },
+  "an integration write | automation | deny args": {
+    "decision": "approve",
+    "rule": "risk:external",
+    "reason": "slack_send_message sends data off the pc or changes an account, so the owner must approve it"
+  },
+  "an integration write | sub-agent | builtin": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "slack_send_message sends data off the pc or changes an account, so the owner must approve it, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an integration write | sub-agent | allow all": {
+    "decision": "allow",
+    "rule": "test#allow-all",
+    "reason": "the policy rule test#allow-all allows slack_send_message"
+  },
+  "an integration write | sub-agent | allow tool": {
+    "decision": "allow",
+    "rule": "test#allow-tool",
+    "reason": "the policy rule test#allow-tool allows slack_send_message"
+  },
+  "an integration write | sub-agent | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies slack_send_message"
+  },
+  "an integration write | sub-agent | deny args": {
+    "decision": "deny",
+    "rule": "subagent",
+    "reason": "slack_send_message sends data off the pc or changes an account, so the owner must approve it, but the research sub-agent (run run-9) cannot ask the owner. Report this call to the parent agent, so that the parent agent makes it"
+  },
+  "an integration write | tainted owner chat | builtin": {
+    "decision": "approve",
+    "rule": "taint",
+    "reason": "the session read untrusted content (gmail: a mail from news@example.com), so an external action needs the owner's approval"
+  },
+  "an integration write | tainted owner chat | allow all": {
+    "decision": "approve",
+    "rule": "taint",
+    "reason": "the session read untrusted content (gmail: a mail from news@example.com), so an external action needs the owner's approval"
+  },
+  "an integration write | tainted owner chat | allow tool": {
+    "decision": "approve",
+    "rule": "taint",
+    "reason": "the session read untrusted content (gmail: a mail from news@example.com), so an external action needs the owner's approval"
+  },
+  "an integration write | tainted owner chat | deny tool": {
+    "decision": "deny",
+    "rule": "test#deny-tool",
+    "reason": "the policy rule test#deny-tool denies slack_send_message"
+  },
+  "an integration write | tainted owner chat | deny args": {
+    "decision": "approve",
+    "rule": "taint",
+    "reason": "the session read untrusted content (gmail: a mail from news@example.com), so an external action needs the owner's approval"
+  }
+}

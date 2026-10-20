@@ -160,6 +160,19 @@ describe('the developer pages load against the seeded database', () => {
     await expect.poll(() => tools()).toEqual(['browser_type']);
   });
 
+  it('shows the level of the trust ladder that applied to a decision', async () => {
+    seeded.t.db
+      .prepare(
+        `INSERT INTO policy_decisions (runId, toolCallId, toolName, decision, rule, reason, autonomyDomain, autonomyLevel, createdAt)
+         VALUES ('run-1', 'call-draft', 'google__gmail_draft', 'allow', 'autonomy:mail_drafts', 'the owner set mail drafts to auto', 'mail_drafts', 'auto', '2026-10-13T01:41:00.000Z')`,
+      )
+      .run();
+    open('#/policy');
+    expect(await screen.findByText('level: auto (mail drafts)')).toBeTruthy();
+    // a decision outside the ladder shows no level.
+    expect(screen.getAllByText(/^level: /)).toHaveLength(1);
+  });
+
   it('shows the cost by day, slot and model', async () => {
     open('#/cost');
     expect(await screen.findByText('Cost by day')).toBeTruthy();

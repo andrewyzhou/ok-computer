@@ -39,6 +39,7 @@ import {
   sessionEvents,
   toMcpMessage,
 } from './queries.js';
+import { mountAutonomy } from './autonomy.js';
 import { googleRoutes } from './google.js';
 import { integrationDetail, summaryOf } from './integrations.js';
 import { createSessions, LOCAL_SESSION_MS, LOGIN_PAGE, REMOTE_SESSION_MS, type LoginCodes } from './login.js';
@@ -371,6 +372,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
   mountDeploy(server, deps);
   mountInbox(server, deps);
   mountSandbox(server, deps);
+  mountAutonomy(server, deps);
 
   server.all('/api/*', (c) => notFound(c, 'api route'));
   if (existsSync(join(webDir, 'index.html'))) {

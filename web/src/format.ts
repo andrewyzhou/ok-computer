@@ -18,6 +18,22 @@ export function time(iso: string | null | undefined): string {
   }).format(new Date(iso));
 }
 
+// a day and a time without seconds, for example "Oct 11, 15:00", with the year when it is not the year of now.
+export function minuteTime(iso: string, now = Date.now()): string {
+  const year = (at: Date | number) => new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric' }).format(at);
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '-';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    ...(year(date) === year(now) ? {} : { year: 'numeric' }),
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(date);
+}
+
 export function clock(iso: string | null | undefined): string {
   if (!iso) return '-';
   return new Intl.DateTimeFormat('en-US', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(

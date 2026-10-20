@@ -117,7 +117,7 @@ describe('the trace waterfall', () => {
     expect(raw.textContent).toContain('"role":"user"');
     const body = (await (await fetch('/api/model-calls/1')).json()) as { request: unknown };
     expect(raw.textContent).toBe(JSON.stringify(body.request));
-    expect(inspector().getByText(/28 tools offered/)).toBeTruthy();
+    expect(inspector().getByText(/30 tools offered/)).toBeTruthy();
     expect(screen.getByTestId('span-model:1').closest('tr')!.getAttribute('aria-current')).toBe('true');
   });
 
@@ -134,6 +134,21 @@ describe('the trace waterfall', () => {
     expect(inspector().getByText('The model saw the raw result unchanged.')).toBeTruthy();
     expect(inspector().getAllByText(/#1 finish essay/).length).toBe(2);
     expect(inspector().getByText(/"finish essay"/)).toBeTruthy();
+  });
+
+  it('shows the level of the trust ladder on the policy decision of a tool call', async () => {
+    seeded.t.db
+      .prepare("UPDATE policy_decisions SET autonomyDomain = 'mail_drafts', autonomyLevel = 'review' WHERE id = (SELECT policyDecisionId FROM tool_calls WHERE toolCallId = 'call-goals')")
+      .run();
+    openApp('#/trace/run-1/tool%3A1');
+    expect(await (await panel()).findByText('review (mail drafts)')).toBeTruthy();
+    expect(inspector().getByText('Autonomy level')).toBeTruthy();
+  });
+
+  it('shows no level for a decision outside the trust ladder', async () => {
+    openApp('#/trace/run-1/tool%3A1');
+    expect(await (await panel()).findByText(/builtin:goals_set/)).toBeTruthy();
+    expect(inspector().queryByText('Autonomy level')).toBeNull();
   });
 
   it('says that a raw result was not stored when the blob is missing', async () => {

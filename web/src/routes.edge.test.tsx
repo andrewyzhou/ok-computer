@@ -172,7 +172,7 @@ describe('the nav order and the parents of detail pages', () => {
 
   it('lists the agent and connections pages in the order of the contract', () => {
     const labels = (group: string) => navSections(false).find((section) => section.group === group)?.items.map((route) => route.label);
-    expect(labels('agent')).toEqual(['Goals', 'Memory', 'Automations', 'Signals', 'Approvals']);
+    expect(labels('agent')).toEqual(['Goals', 'Memory', 'Automations', 'Signals', 'Approvals', 'Autonomy']);
     expect(labels('connections')).toEqual(['Google', 'Integrations', 'Browser']);
   });
 

@@ -280,6 +280,23 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000, r
     expect(posts()).toEqual([expect.objectContaining({ path: '/send', body: 'msg=hi' })]);
   });
 
+  // the policy reads only the input of the call, which names the visible fields. a saved-card checkout whose visible
+  // part looked like a sign-up went to the reviewer alone at a raised level of browser submits (review probe).
+  it('sends nothing when the hidden fields make a purchase of a call that is not marked as one', async () => {
+    const h = harness();
+    const url = site.url('shop.test', '/welcome');
+    await h.run('browser_open', { url });
+    site.hits.length = 0;
+    const posts = () => site.hitsOn('shop.test').filter((hit) => hit.method === 'POST');
+    const plain = await h.run('browser_submit', { url, button: 'Sign up', fields: { email: 'ana@example.com' } });
+    expect(plain).toMatchObject({ isError: true, content: expect.stringContaining('looks like a purchase') });
+    expect(plain.content).toContain('purchase: true');
+    expect(posts()).toEqual([]);
+    const marked = await h.run('browser_submit', { url, button: 'Sign up', fields: { email: 'ana@example.com' }, purchase: true });
+    expect(marked.isError).toBe(false);
+    expect(posts()).toEqual([expect.objectContaining({ path: '/send' })]);
+  });
+
   // the gate let data out only while the click ran, and the tool said "sent" also when the page sent nothing.
   it.each([
     ['a script post at the click', 'sync', '/api/order'],
@@ -386,7 +403,11 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000, r
     const page = await h.run('browser_open', { url });
     await h.run('browser_type', { ref: refOf(page.content, /textbox "City"/), element: 'City', text: 'Zürich 日' });
     site.hits.length = 0;
-    const out = await h.run('browser_submit', { url, button: 'Save', fields: { city: 'Zürich 日' } });
+    // the form goes to /buy, so the whole form looks like a purchase, and a call without the mark sends nothing.
+    const plain = await h.run('browser_submit', { url, button: 'Save', fields: { city: 'Zürich 日' } });
+    expect(plain).toMatchObject({ isError: true, content: expect.stringContaining('looks like a purchase') });
+    expect(site.hits.filter((hit) => hit.method === 'POST')).toEqual([]);
+    const out = await h.run('browser_submit', { url, button: 'Save', fields: { city: 'Zürich 日' }, purchase: true });
     expect(out.isError, out.content).toBe(false);
     const posts = site.hits.filter((hit) => hit.method === 'POST');
     expect(posts).toHaveLength(1);
@@ -542,7 +563,8 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000, r
     const disabled = await h.run('browser_submit', { url, button: 'Send disabled', fields: { amount: '5' } });
     expect(disabled).toMatchObject({ isError: true, content: expect.stringContaining('the form now has these fields: {}') });
     expect(site.hitsOn('shop.test').filter((hit) => hit.method === 'POST')).toEqual([]);
-    const sent = await h.run('browser_submit', { url, button: 'Send dup', fields: { to: ['alice@example.com', 'mallory@evil.example'] } });
+    // the forms of the fixture go to /buy, so a call that sends one is marked as a purchase.
+    const sent = await h.run('browser_submit', { url, button: 'Send dup', fields: { to: ['alice@example.com', 'mallory@evil.example'] }, purchase: true });
     expect(sent.isError).toBe(false);
     expect(site.hitsOn('shop.test').filter((hit) => hit.method === 'POST')).toEqual([expect.objectContaining({ body: 'to=mallory%40evil.example&to=alice%40example.com' })]);
     // the other two encodings of a form also match the check, also with a new line in a value and an empty file field.
@@ -552,7 +574,7 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000, r
     ] as const) {
       const out = await h.run('browser_open', { url });
       expect(out.isError).toBe(false);
-      expect(await h.run('browser_submit', { url, button, fields })).toMatchObject({ isError: false, content: expect.stringContaining('Order placed') });
+      expect(await h.run('browser_submit', { url, button, fields, purchase: true })).toMatchObject({ isError: false, content: expect.stringContaining('Order placed') });
     }
     expect(site.hitsOn('shop.test').filter((hit) => hit.method === 'POST')).toHaveLength(3);
   });
@@ -653,15 +675,15 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000, r
     const posts = () => site.hitsOn('shop.test').filter((hit) => hit.method === 'POST');
     await h.run('browser_open', { url });
     site.hits.length = 0;
-    expect((await h.run('browser_submit', { url, button: 'Go', fields: { note: 'hello' } })).isError).toBe(false);
+    expect((await h.run('browser_submit', { url, button: 'Go', fields: { note: 'hello' }, purchase: true })).isError).toBe(false);
     // an image button without a name sends x and y.
     await h.run('browser_open', { url });
-    expect((await h.run('browser_submit', { url, button: 'Order', fields: { item: 'pen' } })).isError).toBe(false);
+    expect((await h.run('browser_submit', { url, button: 'Order', fields: { item: 'pen' }, purchase: true })).isError).toBe(false);
     expect(posts().map((hit) => hit.body)).toEqual([expect.stringMatching(/^note=hello&go\.x=\d+&go\.y=\d+$/), expect.stringMatching(/^item=pen&x=\d+&y=\d+$/)]);
     for (const injected of ['INJECTED', '12']) {
       await h.run('browser_open', { url: `${url}#${injected}` });
       site.hits.length = 0;
-      const out = await h.run('browser_submit', { url: `${url}#${injected}`, button: 'Go', fields: { note: 'hello' } });
+      const out = await h.run('browser_submit', { url: `${url}#${injected}`, button: 'Go', fields: { note: 'hello' }, purchase: true });
       expect(out.content).toContain('the page changed the form after the check');
       expect(posts()).toEqual([]);
     }
@@ -673,11 +695,11 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000, r
     const posts = () => site.hitsOn('shop.test').filter((hit) => hit.method === 'POST');
     await h.run('browser_open', { url });
     site.hits.length = 0;
-    expect((await h.run('browser_submit', { url, button: 'Send', fields: { note: 'hello', f: '' } })).isError).toBe(false);
+    expect((await h.run('browser_submit', { url, button: 'Send', fields: { note: 'hello', f: '' }, purchase: true })).isError).toBe(false);
     expect(posts()).toHaveLength(1);
     await h.run('browser_open', { url: `${url}#x` });
     site.hits.length = 0;
-    const out = await h.run('browser_submit', { url: `${url}#x`, button: 'Send', fields: { note: 'hello', f: '' } });
+    const out = await h.run('browser_submit', { url: `${url}#x`, button: 'Send', fields: { note: 'hello', f: '' }, purchase: true });
     expect(out.content).toContain('the page changed the form after the check');
     expect(posts()).toEqual([]);
   });

@@ -48,7 +48,7 @@ const DESCRIPTION =
   'The code is one program: bash runs it with bash -c, python with python3 -c, node with node -e. ' +
   `The working directory is ${WORK_DIR}. It is kept for this task (until the owner starts a new chat with /new), so a later call can use the files of an earlier call. ` +
   `It is emptied when it grows over ${mb(SCRATCH_BYTES)} MB. ` +
-  'The container has no network, unless network.allow names the hosts that the code may reach through a proxy. The owner then approves each such call. ' +
+  'The container has no network, unless network.allow names the hosts that the code may reach through a proxy. Each such call then waits for a check: the owner approves it, or a reviewer checks it when the owner raised the level of code with network access. ' +
   'Put files into /work with files: give content for a text file, or blob for the hash of a file from an earlier sandbox_exec result. ' +
   'collect names files or folders under /work to return after the code ends, and each returned file gets a blob hash. ' +
   'A text file is stored with secrets (keys, tokens) masked, so a text blob passed back in holds the masked text. To keep exact bytes across calls, leave the file in /work. ' +

@@ -22,6 +22,7 @@ import { GoogleRequests } from '../../pages/Google';
 import { ApprovalCard, ButtonLink, CodeBlock, Facts, Section, Segmented, Status } from '../../ui';
 import { BlobCode, BlobOnDemand, ExecSummary, LoadRow } from '../sandbox/parts';
 import { runOfSpan, traceHref } from './tree';
+import { decisionLevel } from '../autonomy/parts';
 
 // the inspectors of the details panel, one for each kind of span. each loads the full row through the endpoint of its
 // kind. an error shows in the panel, and the waterfall stays.
@@ -213,6 +214,8 @@ function PolicyFacts({ policy, spans, runId }: { policy: PolicyDecisionRow; span
           ),
         },
         { label: 'Reason', value: policy.reason },
+        // the level of the trust ladder that applied, so the owner sees which level let a call run without approval.
+        decisionLevel(policy) !== null && { label: 'Autonomy level', value: decisionLevel(policy) },
         policy.reviewerVerdict !== null && {
           label: 'Reviewer',
           value: (

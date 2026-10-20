@@ -56,6 +56,10 @@ export interface PolicyDecisionRow {
   approvalStatus: string | null;
   // the untrusted sources that the session had read when the policy decided.
   taint: Array<{ source: string; toolName: string; runId: string | null; toolCallId: string; at: string }>;
+  // the domain of the trust ladder and the level that applied to the call. both are null for a call outside the
+  // ladder and for a decision from before the ladder.
+  autonomyDomain: string | null;
+  autonomyLevel: string | null;
   createdAt: string;
   // the model call of the reviewer. the run timeline shows it here, inside the tool call that it checked.
   reviewerCall?: ModelCallRow;

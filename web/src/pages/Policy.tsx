@@ -5,6 +5,7 @@ import { Load, Status } from '../components';
 import { time } from '../format';
 import type { RouteProps } from '../routes';
 import { ButtonLink, DetailsPanel, EmptyState, Facts, FilterBar, Page, Section, Select, Table, type Column } from '../ui';
+import { decisionLevel } from '../views/autonomy/parts';
 import { runHref, sessionHref } from './Runs';
 import './dev.css';
 
@@ -24,7 +25,17 @@ const DECISION_COLUMNS: Array<Column<PolicyListRow>> = [
       </span>
     ),
   },
-  { key: 'rule', header: 'Rule', cell: (row) => <code className="dev-id">{row.rule}</code>, hideBelow: 'md' },
+  {
+    key: 'rule',
+    header: 'Rule',
+    cell: (row) => (
+      <>
+        <code className="dev-id">{row.rule}</code>
+        {decisionLevel(row) ? <div className="muted small">level: {decisionLevel(row)}</div> : null}
+      </>
+    ),
+    hideBelow: 'md',
+  },
   {
     key: 'reason',
     header: 'Reason',
@@ -77,6 +88,7 @@ function DecisionPanel({ row, onClose }: { row: PolicyListRow; onClose: () => vo
           { label: 'Time', value: time(row.createdAt) },
           { label: 'Decision', value: <Status value={row.decision} /> },
           { label: 'Rule', value: <code className="dev-id">{row.rule}</code> },
+          decisionLevel(row) !== null && { label: 'Autonomy level', value: decisionLevel(row) },
           { label: 'Reason', value: row.reason },
           row.reviewerVerdict
             ? {
