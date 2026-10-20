@@ -3,7 +3,7 @@ import type { DocDetail, DocLink } from '../../../../src/dashboard/docs-types';
 import { useApi } from '../../api';
 import type { RouteProps } from '../../routes';
 import { useShell } from '../../shell/context';
-import { Badge, Button, ButtonLink, DetailsPanel, isNotFound, NotFound, Page, Skeleton } from '../../ui';
+import { Badge, Button, ButtonLink, DetailsPanel, EmptyState, isNotFound, Page, Skeleton } from '../../ui';
 import { DocComments } from './Comments';
 import { DiffView } from './DiffView';
 import { DocAnchor, Markdown, withoutTitle } from './Markdown';
@@ -23,6 +23,22 @@ const TAINT_SHOWN = 5;
 // the shell already starts the breadcrumb with the docs group, which links to the list. a crumb of the list here
 // would read Docs / Docs.
 const NO_CRUMBS: never[] = [];
+
+// the page of a doc or a version that is not there, with a button to the next step, as the empty states of the other
+// views have.
+function Missing({ what, href, label }: { what: 'doc' | 'version'; href: string; label: string }) {
+  return (
+    <EmptyState
+      icon="docs"
+      title={`This ${what} does not exist.`}
+      action={
+        <ButtonLink href={href} size="sm">
+          {label}
+        </ButtonLink>
+      }
+    />
+  );
+}
 
 // a query value that is a positive whole number, else undefined. null means that the query does not have it.
 function versionOf(value: string | null): number | undefined | null {
@@ -104,9 +120,7 @@ export function DocPage({ params, query }: RouteProps) {
   if (id === undefined)
     return (
       <Page title="Doc" crumbs={NO_CRUMBS}>
-        <NotFound icon="docs" what="doc">
-          <a href="#/docs">Go to the docs</a>
-        </NotFound>
+        <Missing what="doc" href="#/docs" label="Go to the docs" />
       </Page>
     );
 
@@ -114,9 +128,7 @@ export function DocPage({ params, query }: RouteProps) {
     const missingVersion = asked === undefined || /version/i.test(loaded.error ?? '');
     return (
       <Page title="Doc" crumbs={NO_CRUMBS}>
-        <NotFound icon="docs" what={missingVersion ? 'version' : 'doc'}>
-          {missingVersion ? <a href={docHref(id)}>Read the newest version</a> : <a href="#/docs">Go to the docs</a>}
-        </NotFound>
+        {missingVersion ? <Missing what="version" href={docHref(id)} label="Read the newest version" /> : <Missing what="doc" href="#/docs" label="Go to the docs" />}
       </Page>
     );
   }
@@ -124,7 +136,7 @@ export function DocPage({ params, query }: RouteProps) {
   if (loaded.error)
     return (
       <Page title="Doc" crumbs={NO_CRUMBS}>
-        <ErrorBlock what="the doc" error={loaded.error} onRetry={loaded.reload} />
+        <ErrorBlock what="the doc" error={loaded.error} onRetry={loaded.reload} back={{ href: '#/docs', label: 'Back to docs' }} />
       </Page>
     );
 

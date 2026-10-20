@@ -17,6 +17,9 @@ const TYPE_DELAY_MS = 250;
 // a burst of stream messages gives one reload, not one for each message.
 const RELOAD_DELAY_MS = 300;
 const PAGE_SIZE = 30;
+// a search has no paging, so it asks for the most hits that the server gives. a full answer can leave docs out, and
+// the page says so.
+const SEARCH_LIMIT = 100;
 // the server takes a q of at most 200 characters.
 const MAX_QUERY = 200;
 // the width where the table gives way to cards. it matches the sm breakpoint of styles.css.
@@ -88,7 +91,7 @@ function useDocs(q: string, kind: KindValue) {
       const want = reload && old.key === key && !q ? old.pages.reduce((sum, page) => sum + page.docs.length, 0) : 0;
       setState((now) => ({ ...now, loading: key, ...(now.key === key ? {} : { more: { busy: false } }) }));
       const load = async (): Promise<DocsPage[]> => {
-        const pages = [await api<DocsPage>(docsApi({ ...query, limit: PAGE_SIZE }))];
+        const pages = [await api<DocsPage>(docsApi({ ...query, limit: q ? SEARCH_LIMIT : PAGE_SIZE }))];
         let rows = pages[0]!.docs.length;
         while (rows < want && pages.at(-1)!.nextCursor) {
           const next = await api<DocsPage>(docsApi({ ...query, cursor: pages.at(-1)!.nextCursor!, limit: PAGE_SIZE }));
@@ -281,7 +284,14 @@ export function DocsListPage({ query }: RouteProps) {
   const filtered = Boolean(q || kind);
   const rows = list.rows;
   // the first run has no count, because its empty state says it all.
-  const subtitle = !list.fresh || list.error || (!rows.length && !filtered) ? undefined : q ? 'Search results' : `${plural(rows.length, 'doc')}${list.more ? ' so far' : ''}`;
+  const subtitle =
+    !list.fresh || list.error || (!rows.length && !filtered)
+      ? undefined
+      : q
+        ? rows.length >= SEARCH_LIMIT
+          ? `Showing the first ${SEARCH_LIMIT} matches. Narrow the search to see the rest.`
+          : plural(rows.length, 'match', 'matches')
+        : `${plural(rows.length, 'doc')}${list.more ? ' so far' : ''}`;
 
   // the first run has no docs and no filter, so the filters would filter nothing. they show once a doc exists.
   const firstRun = list.fresh && !list.error && !rows.length && !filtered && !list.more;

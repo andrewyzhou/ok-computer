@@ -69,7 +69,7 @@ describe('the docs list', () => {
     const calls = stubFetch(seeded.dashboard, { 'GET /api/docs': ({ query }) => (query.get('kind') ? emptyDocsPage : docsPage) });
     openApp('#/docs?kind=brief&q=zebra');
     expect(await inMain().findByText('No docs match')).toBeTruthy();
-    expect(queryOf(docsQueries(calls)[0]!)).toEqual({ q: 'zebra', kind: 'brief', limit: '30' });
+    expect(queryOf(docsQueries(calls)[0]!)).toEqual({ q: 'zebra', kind: 'brief', limit: '100' });
     fireEvent.click(inMain().getByRole('button', { name: 'Clear filters' }));
     await waitFor(() => expect(location.hash).toBe('#/docs'));
     expect(await inMain().findByText('Trip plan: Lisbon')).toBeTruthy();
@@ -130,15 +130,22 @@ describe('the docs list', () => {
   it('shows search results with highlighted snippets', async () => {
     const calls = stubFetch(seeded.dashboard, { 'GET /api/docs': ({ query }) => (query.get('q') ? searchPage : docsPage) });
     openApp('#/docs?q=alfama');
-    expect(await inMain().findByText('Search results')).toBeTruthy();
+    expect(await inMain().findByText('1 match')).toBeTruthy();
     await findRow('Trip plan: Lisbon');
     // the marks are offsets into the snippet, and the text between them is a mark element.
     const [start, end] = searchPage.docs[0]!.marks[0]!;
     const mark = table().getByText(searchPage.docs[0]!.snippet!.slice(start, end));
     expect(mark.tagName).toBe('MARK');
     expect(mark.parentElement!.textContent).toBe('…The hotel moved to Alfama, closer to the walks…');
-    expect(queryOf(docsQueries(calls)[0]!)).toEqual({ q: 'alfama', limit: '30' });
+    expect(queryOf(docsQueries(calls)[0]!)).toEqual({ q: 'alfama', limit: '100' });
     expect(inMain().queryByRole('button', { name: 'Load more' })).toBeNull();
+  });
+
+  it('says that a search that fills its limit can leave docs out', async () => {
+    const full = { ...searchPage, docs: Array.from({ length: 100 }, (_, index) => docItem(index + 1, { title: `Note ${index + 1}` })) };
+    stubFetch(seeded.dashboard, { 'GET /api/docs': ({ query }) => (query.get('q') ? full : docsPage) });
+    openApp('#/docs?q=note');
+    expect(await inMain().findByText('Showing the first 100 matches. Narrow the search to see the rest.')).toBeTruthy();
   });
 
   it('types a search into the hash after a pause, and keeps the focus in the box', async () => {
@@ -156,7 +163,7 @@ describe('the docs list', () => {
     await waitFor(() => expect(location.hash).toBe('#/docs?q=alfama'));
     // the first change of the search adds one entry, and the next ones replace it.
     expect(history.length).toBe(length + 1);
-    expect(await inMain().findByText('Search results')).toBeTruthy();
+    expect(await inMain().findByText('1 match')).toBeTruthy();
     await waitFor(() => expect(table().queryByText('Laptop comparison')).toBeNull());
     expect(document.activeElement).toBe(box);
     const texts = docsQueries(calls).map((query) => query.get('q'));

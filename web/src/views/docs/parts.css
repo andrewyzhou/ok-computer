@@ -5,3 +5,8 @@
   flex-direction: column;
   gap: var(--space-3);
 }
+.docs-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
