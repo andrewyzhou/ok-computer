@@ -17,7 +17,7 @@ import { ownerAddresses } from './accounts.js';
 import { settleApprovals } from './actions.js';
 import { classifyMail, type MailClass } from './classify.js';
 import type { InboxContext, JobRun } from './context.js';
-import { checkDue } from './deadlines.js';
+import { checkDue, DONE_SUBJECT } from './deadlines.js';
 import { checkDrafts, draftReply } from './drafts.js';
 import { extractItems, itemsTool } from './extract.js';
 import { getMessages, listMessages, readError, receivedAt } from './gmail.js';
@@ -358,9 +358,6 @@ function mayWaitForReply(mail: MailClass): boolean {
   if (mail.fromOwner) return false;
   return mail.kind === 'person' || (mail.kind === 'list' && mail.discussion);
 }
-
-// the subjects of the mail that confirms a thing the owner already did.
-const DONE_SUBJECT = /^(?:thanks for filling out|thank you for filling out|your response to|we received your (?:response|submission)|your submission (?:to|for|has been))\b/i;
 
 // a due time that passed: an all-day one when its day is before today, a timed one when its time is before now.
 function pastDue(dueAt: string, allDay: boolean, now: Date, timeZone: string): boolean {

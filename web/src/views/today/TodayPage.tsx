@@ -100,25 +100,36 @@ export function TodayPage({ params }: RouteProps) {
     );
   };
 
+  // on a narrow screen the header button says "Brief now", so it does not read as a reload of the page. a screen
+  // reader hears the whole label.
   const runButton = (variant: 'primary' | 'secondary') => (
-    <Button variant={variant} size="sm" icon="refresh" title="Make a brief now" busy={run.phase === 'busy' || run.phase === 'building'} onClick={runNow}>
-      {variant === 'secondary' ? <span className="today-action-label">Make a brief now</span> : 'Make a brief now'}
+    <Button variant={variant} size="sm" icon="refresh" aria-label="Make a brief now" busy={run.phase === 'busy' || run.phase === 'building'} onClick={runNow}>
+      {variant === 'secondary' ? (
+        <>
+          <span className="today-label-long" aria-hidden="true">
+            Make a brief now
+          </span>
+          <span className="today-label-short" aria-hidden="true">
+            Brief now
+          </span>
+        </>
+      ) : (
+        'Make a brief now'
+      )}
     </Button>
   );
 
-  // the labels of the header actions fold on a narrow screen, so the header keeps the icons. a screen reader still
-  // hears each label.
   const actions = valid ? (
     <>
       {runButton('secondary')}
-      <ButtonLink href={calendarHash(day)} size="sm" variant="ghost" icon="calendar" title="Calendar">
-        <span className="today-action-label">Calendar</span>
+      <ButtonLink href={calendarHash(day)} size="sm" variant="ghost" icon="calendar">
+        Calendar
       </ButtonLink>
     </>
   ) : undefined;
 
-  // another day than today is a brief of that day, so its page is not called today.
-  const title = day === today ? 'Today' : 'Brief';
+  // the page is today in the nav and the crumbs, so it keeps that title on each day, and the subtitle names the day.
+  const title = 'Today';
   if (meta.error) return <Page title="Today" crumbs={[]}><p className="error-box">Could not load: {meta.error}</p></Page>;
   if (day === null || today === null) return <Page title="Today" crumbs={[]}><Skeleton lines={6} /></Page>;
   if (!valid)
@@ -142,17 +153,32 @@ export function TodayPage({ params }: RouteProps) {
       <div className="today-page">
         <div className="today-bar">
           <DayNav day={day} today={today} />
-          <ScheduleLine schedule={scheduleData} error={schedule.error} timeZone={timeZone} onSaved={schedule.reload} />
+          {schedule.error ? null : <ScheduleLine schedule={scheduleData} timeZone={timeZone} onSaved={schedule.reload} />}
         </div>
+        {schedule.error ? (
+          <div className="error-box today-error" role="alert">
+            <span>Could not load the time of the brief: {schedule.error}</span>
+            <Button size="sm" icon="refresh" onClick={schedule.reload}>
+              Try again
+            </Button>
+          </div>
+        ) : null}
         <RunNote run={run} />
         {missing ? (
           <EmptyMissing day={day} today={today} first={first} latest={latest} schedule={scheduleData} timeZone={timeZone} button={runButton('primary')} />
         ) : brief.error ? (
           <div className="error-box today-error" role="alert">
             <span>Could not load the brief: {brief.error}</span>
-            <Button size="sm" onClick={reload}>
-              Retry
-            </Button>
+            <span className="today-error-actions">
+              <Button size="sm" icon="refresh" onClick={reload}>
+                Try again
+              </Button>
+              {day === today ? (
+                <Button size="sm" variant="ghost" busy={run.phase === 'busy' || run.phase === 'building'} onClick={runNow}>
+                  Make a brief now
+                </Button>
+              ) : null}
+            </span>
           </div>
         ) : data ? (
           <>

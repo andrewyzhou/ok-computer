@@ -44,7 +44,7 @@ describe('brief tools', () => {
     expect(lines[0]).toBe('Brief of 2026-10-12, built 07:30.');
     expect(lines).toContain('- Run with Sam: 07:00 to 07:45 · Memorial Glade [event personal/primary/run]');
     expect(lines).toContain('- Advisor 1:1 overlaps Dentist: 14:15 to 14:30 [event school/primary/advisor]');
-    expect(lines).toContain('- Essay draft for HIST 7B: Due Tue 23:59 · from the inbox [thread school/t-essay]');
+    expect(lines).toContain('- Essay draft for HIST 7B: Due Tomorrow 23:59 · from the inbox [thread school/t-essay]');
     expect(lines).toContain('- Problem set 4 due: Wed · proposed, waiting for your approval [proposal 7]');
     expect(lines).toContain('- Get the refund from the airline: Follow up today [delegation 4]');
     expect(lines).toContain('- gym [goal 2]');

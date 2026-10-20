@@ -37,7 +37,9 @@ describe('the today page', () => {
     expect(main.getByText('Monday, October 12')).toBeTruthy();
     const titles = main.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent);
     expect(titles).toEqual(BRIEF_FULL.content.sections.map((section) => section.title));
-    expect(main.getByText('10 events, the first at 09:00.')).toBeTruthy();
+    expect(main.getByText('10 events, the next at 09:00.')).toBeTruthy();
+    // the reply with a draft opens the draft, as the link of the digest item does.
+    expect(within(main.getByRole('list', { name: 'Inbox' })).getByRole('link', { name: /Reply to Dana/ }).getAttribute('href')).toBe('#/inbox/drafts?id=5');
     expect(main.getByText('2 need a reply, 1 bill, 1 package.')).toBeTruthy();
     for (const section of BRIEF_FULL.content.sections) {
       const list = within(main.getByRole('list', { name: section.title }));
@@ -60,7 +62,7 @@ describe('the today page', () => {
     stubFetch(null, routes());
     openApp('#/today/2026-10-12');
     const main = inMain();
-    expect(await main.findByText('Brief at 07:30 each day · next Tue 13 Oct')).toBeTruthy();
+    expect(await main.findByText('Brief at 07:30 each day · next Tue, Oct 13')).toBeTruthy();
     expect(await main.findByText('Sent to Telegram at 07:30')).toBeTruthy();
     fireEvent.click(main.getByText('Message'));
     expect(main.getByText(/Brief for Mon 12 Oct/).tagName).toBe('PRE');
@@ -91,8 +93,9 @@ describe('the today page', () => {
     fireEvent.keyDown(item, { key: 'Enter' });
     const panel = details();
     expect(await panel.findByText('A draft is in Gmail Drafts')).toBeTruthy();
-    expect(panel.getByText('mail thread')).toBeTruthy();
-    expect(panel.getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('#/inbox/digests/1');
+    // the reply has a draft, so the item opens the draft.
+    expect(panel.getByText('draft reply')).toBeTruthy();
+    expect(panel.getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('#/inbox/drafts?id=5');
     expect(panel.queryByRole('link', { name: 'Day view' })).toBeNull();
   });
 
@@ -186,25 +189,27 @@ describe('the today page', () => {
     expect(main.getByText('Run with Sam')).toBeTruthy();
   });
 
-  it('shows an error with a retry that loads the brief again', async () => {
+  it('shows an error with a try again that loads the brief again, and a button that makes a brief', async () => {
     let fail = true;
     stubFetch(null, routes({ 'GET /api/briefs/day/:day': () => (fail ? json({ error: 'the brief row could not be read' }, 500) : BRIEF_FULL) }));
     openApp('#/today/2026-10-12');
     const main = inMain();
     const alert = await main.findByRole('alert');
     expect(alert.textContent).toContain('the brief row could not be read');
+    expect(within(alert).getByRole('button', { name: 'Make a brief now' })).toBeTruthy();
     fail = false;
-    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
     expect(await main.findByText('Run with Sam')).toBeTruthy();
     expect(main.queryByRole('alert')).toBeNull();
   });
 
-  it('names a past day as a brief, and links to the latest brief', async () => {
+  it('keeps the title today on a past day, with the day as the subtitle, and links to the latest brief', async () => {
     stubFetch(null, routes());
     openApp('#/today/2026-10-01');
     const main = inMain();
     expect(await main.findByText('There is no brief for Thursday, October 1.')).toBeTruthy();
-    expect(screen.getByRole('heading', { level: 1, name: 'Brief' })).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 1, name: 'Today' })).toBeTruthy();
+    expect(main.getByText('Thursday, October 1')).toBeTruthy();
     expect((await main.findByRole('link', { name: 'Open the latest brief' })).getAttribute('href')).toBe('#/today/2026-10-12');
   });
 
@@ -220,9 +225,13 @@ describe('the today page', () => {
   it('shows a schedule that could not load as an error', async () => {
     stubFetch(null, routes({ 'GET /api/brief/schedule': () => json({ error: 'the schedule is gone' }, 500) }));
     openApp('#/today/2026-10-12');
-    const line = await inMain().findByText(/Could not load the schedule/);
-    expect(line.className).toContain('error-text');
-    expect(line.getAttribute('role')).toBe('alert');
+    const main = inMain();
+    const alert = await main.findByRole('alert');
+    expect(alert.textContent).toContain('Could not load the time of the brief: the schedule is gone');
+    // the day bar stays, so the owner can still move between days.
+    expect(main.getByRole('navigation', { name: 'days' })).toBeTruthy();
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
+    expect(await main.findByRole('alert')).toBeTruthy();
   });
 
   it('says at the top when the message did not reach the owner, with the page of the channel', async () => {

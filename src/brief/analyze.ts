@@ -68,13 +68,39 @@ export function meeting(event: CalendarEvent): boolean {
   return event.guests.some((guest) => !guest.self) || !event.organizerSelf;
 }
 
+// true when two events are one commitment: the same start and end at the same place (see samePlace). the owner blocks
+// out the time of an invitation with an event of his own, often at the place written another way or with no place,
+// so an event of the owner alone and another event with the same start and end are one commitment too when one of
+// them names no place.
+export function sameCommitment(a: CalendarEvent, b: CalendarEvent): boolean {
+  if (startOf(a) !== startOf(b) || endOf(a) !== endOf(b)) return false;
+  const placeA = realPlace(a.location);
+  const placeB = realPlace(b.location);
+  if (placeA && placeB) return samePlace(a.location!, b.location!);
+  return !meeting(a) || !meeting(b);
+}
+
+// one event for each commitment (see sameCommitment), in the order of the list, which is sorted by start. of the
+// events of one commitment it keeps the first meeting with other people, else the first event, so a conflict with a
+// third event is not lost to the owner's own block.
+function oneCommitment(events: CalendarEvent[]): CalendarEvent[] {
+  const kept: CalendarEvent[] = [];
+  for (const event of events) {
+    const at = kept.findIndex((other) => sameCommitment(other, event));
+    if (at === -1) kept.push(event);
+    else if (!meeting(kept[at]!) && meeting(event)) kept[at] = event;
+  }
+  return kept;
+}
+
 // each pair of committed events that overlap, where at least one of the two is a meeting with other people. two
 // events overlap when one starts before the other ends; an event that starts when the other ends does not, and an
 // event of no length is a point in time that overlaps nothing. copies of one invitation on two accounts (the same
-// uid and start) count as one event, so they make one conflict with a third event and none with each other. a is the
-// event that starts first (then the lower key), and the list is sorted by startAt.
+// uid and start) count as one event, so they make one conflict with a third event and none with each other, and so do
+// the events of one commitment (see sameCommitment). a is the event that starts first (then the lower key), and the
+// list is sorted by startAt.
 export function findConflicts(events: CalendarEvent[]): CalendarConflict[] {
-  const held = dedupeCopies(events.filter((event) => committed(event) && endOf(event) > startOf(event)).sort(byStart));
+  const held = oneCommitment(dedupeCopies(events.filter((event) => committed(event) && endOf(event) > startOf(event)).sort(byStart)));
   const conflicts: CalendarConflict[] = [];
   for (let i = 0; i < held.length; i++) {
     const a = held[i]!;
@@ -155,13 +181,16 @@ const ownersMove = (event: CalendarEvent) => event.organizerSelf || event.answer
 // the travel gaps: for each timed event at a place, the events at a place that come right after it (the first start
 // at or after its end), when they start 0 to 14 minutes after it ends at another place (see samePlace). the events are
 // not cancelled, not declined, not shown as free, are the owner's move (see ownersMove), and have a location that
-// names a place (see realPlace). copies of one invitation count once, and each later event has at most one
-// gap: the one from the event that ends last before it.
+// names a place (see realPlace). copies of one invitation count once, the events of one commitment (see
+// sameCommitment) count once, and each later event has at most one gap: the one from the event that ends last before
+// it.
 export function findTravelGaps(events: CalendarEvent[]): TravelGap[] {
-  const placed = dedupeCopies(
-    events
-      .filter((event) => !event.allDay && visible(event) && !event.showsAsFree && ownersMove(event) && realPlace(event.location))
-      .sort(byStart),
+  const placed = oneCommitment(
+    dedupeCopies(
+      events
+        .filter((event) => !event.allDay && visible(event) && !event.showsAsFree && ownersMove(event) && realPlace(event.location))
+        .sort(byStart),
+    ),
   );
   const best = new Map<string, TravelGap>();
   for (const a of placed) {

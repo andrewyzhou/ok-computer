@@ -31,12 +31,14 @@ export function addDays(day: string, count: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-// a short day of an instant in a time zone, for example Tue 13 Oct.
+// a short day of an instant in a time zone, for example Tue, Oct 13, in the month and day order of the rest of the
+// app.
 export function shortDate(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(iso));
+  return new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(iso));
 }
 
-// the time of an item: a day alone for an all-day item, else the day and the clock, for example Mon 12 Oct, 07:00.
+// the time of an item: a day alone for an all-day item, else the day and the clock, for example Mon 12 Oct, 07:00, as
+// the details panel of the calendar page shows it.
 export function itemTime(at: string, timeZone: string): string {
   if (DAY.test(at)) return longDay(at);
   return new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(
@@ -315,12 +317,12 @@ export function Delivery({ brief }: { brief: Brief }) {
   );
 }
 
-// the line of the automation, with a small form that moves it. a move also turns the brief on.
-export function ScheduleLine({ schedule, error, timeZone, onSaved }: { schedule: BriefSchedule | undefined; error: string | undefined; timeZone: string; onSaved: () => void }) {
+// the line of the automation, with a small form that moves it. a move also turns the brief on. the page shows a
+// schedule that could not be read under the day bar, with a button to try again.
+export function ScheduleLine({ schedule, timeZone, onSaved }: { schedule: BriefSchedule | undefined; timeZone: string; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState('');
   const [state, setState] = useState<{ busy: boolean; error?: string }>({ busy: false });
-  if (error) return <p className="today-schedule error-text" role="alert">Could not load the schedule: {error}</p>;
   if (!schedule) return <p className="today-schedule muted">Loading the schedule…</p>;
   const open = () => {
     setValue(schedule.time ?? '07:30');

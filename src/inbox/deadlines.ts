@@ -1,5 +1,9 @@
 import { addDays, localDay, zonedToUtc } from '../time.js';
 
+// the subjects of the mail that confirms a thing the owner already did. such a mail sets the owner no deadline, so the
+// digest makes no deadline of it and the brief leaves out a proposal that an older digest made of it.
+export const DONE_SUBJECT = /^(?:thanks for filling out|thank you for filling out|your response to|we received your (?:response|submission)|your submission (?:to|for|has been))\b/i;
+
 // the due dates of the digest. the model reads a mail and gives a due time and the words of the mail that state it.
 // the code keeps a due time only when those words are in the mail and name the same day, so a deadline never holds a
 // date that the mail does not state. a time is kept only when the words state one, else the deadline is all day.
