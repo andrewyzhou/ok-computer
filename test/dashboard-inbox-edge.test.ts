@@ -109,6 +109,11 @@ describe('the inbox answers against the contract', () => {
     const subscriptions = await get<SubscriptionsPage>(dashboard, '/api/inbox/subscriptions');
     expect(Object.keys(subscriptions).sort()).toEqual(['lastScan', 'monthlyTotals', 'subscriptions']);
     for (const each of subscriptions.subscriptions) {
+      expect(Object.keys(each).sort()).toEqual(
+        ['account', 'amount', 'approvalId', 'browserTaskId', 'cadence', 'cadenceSource', 'cancelUrl', 'confidence', 'currency', 'id', 'lastChargeAt', 'merchant', 'nextChargeAt', 'reasons', 'sourceMessageId', 'sourceMessageIds', 'sourceSubject', 'state', 'updatedAt'].sort(),
+      );
+      expect(['stated', 'gaps', 'both', 'none']).toContain(each.cadenceSource);
+      expect(each.reasons.every((reason) => typeof reason === 'string')).toBe(true);
       expect(Array.isArray(each.sourceMessageIds)).toBe(true);
       expect(each.sourceMessageIds[0] ?? each.sourceMessageId).toBe(each.sourceMessageId);
       expect(each.confidence).toBeGreaterThanOrEqual(0);
@@ -118,6 +123,16 @@ describe('the inbox answers against the contract', () => {
     for (const each of digests.digests) expect(Object.keys(each).sort()).toEqual(['createdAt', 'day', 'id', 'items', 'runId']);
     const latest = await get<InboxDigest>(dashboard, '/api/inbox/digests/latest');
     expect(Object.keys(latest).sort()).toEqual(['accounts', 'createdAt', 'day', 'id', 'items', 'runId', 'shortText', 'stats']);
+    for (const each of latest.stats!.accounts) {
+      expect(Object.keys(each).sort()).toEqual(['alias', 'automated', 'capped', 'error', 'hidden', 'list', 'listed', 'person', 'read'].sort());
+      // the hidden mail is mail that a machine or a list sent, and the read mail is never more than the listed mail.
+      expect(each.hidden).toBeLessThanOrEqual(each.list + each.automated);
+      expect(each.read).toBeLessThanOrEqual(each.listed);
+      expect(each.person + each.list + each.automated).toBe(each.read);
+    }
+    for (const each of latest.items) expect(['person', 'list', 'automated']).toContain(each.mail);
+    const proposals = await get<CalendarProposalView[]>(dashboard, '/api/inbox/proposals');
+    for (const each of proposals) expect(each.dueText === null || typeof each.dueText === 'string').toBe(true);
     // the items keep the order of the sections.
     const order = ['needs_reply', 'deadlines', 'bills', 'packages'];
     const ranks = latest.items.map((each) => order.indexOf(each.section));

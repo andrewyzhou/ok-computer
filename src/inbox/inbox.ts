@@ -13,6 +13,7 @@ import { createDraftTools } from './drafts.js';
 import { createNewsletterTools, keepSender, requestArchive, requestUnsubscribe, sweepNewsletters } from './newsletters.js';
 import { createProposalTools } from './proposals.js';
 import { runJob } from './run.js';
+import { DIGEST_EXPR, moveDigestBeforeBrief } from './schedule.js';
 import { createSubscriptionTools, ignoreSubscription, requestCancel, scanSubscriptions } from './subscriptions.js';
 
 // the inbox jobs of phase 5 m8 on the owner's google accounts. app.ts makes this object when the config has a google
@@ -65,9 +66,10 @@ export function createInbox(deps: InboxDeps): Inbox {
 }
 
 // the automation of each job. the owner can change the time or turn a job off on the automations page, and the app
-// never puts it back. the times are in the time zone of the app.
-const JOBS: Array<{ job: InboxJob; name: string; expr: string; slot: 'utility' | 'batch' }> = [
-  { job: 'digest', name: 'inbox: daily digest', expr: '30 7 * * *', slot: 'utility' },
+// never puts it back. the times are in the time zone of the app. the digest runs at 07:00, before the morning brief at
+// 07:30. schedule.ts imports this module, so the list is made when it is used and not when the module loads.
+const jobs = (): Array<{ job: InboxJob; name: string; expr: string; slot: 'utility' | 'batch' }> => [
+  { job: 'digest', name: 'inbox: daily digest', expr: DIGEST_EXPR, slot: 'utility' },
   { job: 'newsletters', name: 'inbox: newsletter sweep', expr: '0 9 * * 6', slot: 'utility' },
   { job: 'subscriptions', name: 'inbox: subscription finder', expr: '0 10 * * 0', slot: 'batch' },
 ];
@@ -75,10 +77,12 @@ const JOBS: Array<{ job: InboxJob; name: string; expr: string; slot: 'utility' |
 const INSTALLED = 'inbox_jobs_installed';
 
 // installInboxJobs makes the automations one time, as the goals routine does. a job whose automation the owner
-// deleted does not come back.
+// deleted does not come back. on each start it first moves a digest of phase 5 from 07:30 to 07:00, one time. it gives
+// true only when it installed the automations now.
 export function installInboxJobs(db: Db, config: Pick<Config, 'timeZone'>, now: Date): boolean {
+  moveDigestBeforeBrief(db, config, now);
   if (getSetting(db, INSTALLED)) return false;
-  for (const each of JOBS) {
+  for (const each of jobs()) {
     if (inboxAutomation(db, each.job)) continue;
     const created = createAutomation(
       db,
