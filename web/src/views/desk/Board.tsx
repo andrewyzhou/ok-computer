@@ -66,7 +66,9 @@ function Card({ delegation, selected, onSelect, now }: { delegation: Delegation;
   return (
     <li>
       <button type="button" className="desk-card" aria-pressed={selected} onClick={() => onSelect(delegation.id)}>
-        <span className="desk-card-title desk-clamp">{delegation.title}</span>
+        <span className="desk-card-title desk-clamp" title={delegation.title}>
+          {delegation.title}
+        </span>
         {person ? (
           <span className="desk-card-person">
             <Pill icon="people" className="desk-person">
@@ -128,16 +130,19 @@ export function Board({ board, selectedId, onSelect, now = new Date() }: BoardPr
   const counts = closed.map((column) => `${column.total} ${STATUS_LABEL[column.status].toLowerCase()}`).join(', ');
   return (
     <div className={`desk-board desk-board-${board.columns.length === 1 ? 'one' : 'all'}`}>
+      {/* the button comes before the columns, so the owner sees that done and dropped are folded without a scroll. */}
+      {foldable ? (
+        <div className="desk-closed-bar">
+          <Button variant="ghost" size="sm" className="desk-closed-toggle" aria-expanded={showClosed} onClick={() => setShowClosed((open) => !open)}>
+            {showClosed ? 'Hide done and dropped' : `Show done and dropped (${counts})`}
+          </Button>
+        </div>
+      ) : null}
       <div className="desk-columns">
         {board.columns.map((column) => (
           <Column key={column.status} column={column} selectedId={selectedId} onSelect={onSelect} now={now} folded={folded} />
         ))}
       </div>
-      {foldable ? (
-        <Button variant="ghost" size="sm" className="desk-closed-toggle" aria-expanded={showClosed} onClick={() => setShowClosed((open) => !open)}>
-          {showClosed ? 'Hide done and dropped' : `Show done and dropped (${counts})`}
-        </Button>
-      ) : null}
     </div>
   );
 }

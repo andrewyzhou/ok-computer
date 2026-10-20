@@ -57,6 +57,8 @@ CREATE INDEX delegation_links_ref ON delegation_links (kind, account, ref);
 -- here in the same transaction. kind names what happened (DelegationEventKind in src/dashboard/desk-types.ts). actor
 -- is agent, owner or system (the follow-up job). text is a short line for the owner, and data is json with the
 -- fields of the change, for example { "from": "open", "to": "waiting" }. runId and toolCallId point to the trace.
+-- tainted is 1 when the session that wrote the row had read outside text, for example mail, at that time. it is
+-- kept at write time, so a later reset of the session does not make the text of the row look like the owner's.
 CREATE TABLE delegation_events (
   id INTEGER PRIMARY KEY,
   delegationId INTEGER NOT NULL REFERENCES delegations (id),
@@ -66,6 +68,7 @@ CREATE TABLE delegation_events (
   data TEXT NOT NULL DEFAULT '{}',
   runId TEXT,
   toolCallId TEXT,
+  tainted INTEGER NOT NULL DEFAULT 0,
   createdAt TEXT NOT NULL
 );
 CREATE INDEX delegation_events_of ON delegation_events (delegationId, id);

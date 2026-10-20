@@ -97,7 +97,7 @@ describe('delegation_create', () => {
     const t = setup();
     await t.call('delegation_create', { title: 'Book the Denver flights' });
     const again = await t.call('delegation_create', { title: '  book the DENVER flights ' });
-    expect(again).toEqual({ content: `Already on the desk as #1 "Book the Denver flights" (open). ${link(1)}` });
+    expect(again).toEqual({ content: `Already on the desk as #1 "Book the Denver flights" (open). Nothing new was given, so nothing changed. ${link(1)}` });
     expect(t.db.prepare('SELECT count(*) AS n FROM delegations').get()!.n).toBe(1);
 
     // a closed delegation with the title does not block a new one.
@@ -342,5 +342,72 @@ describe('the desk instructions', () => {
     expect(DESK_INSTRUCTIONS).toContain('delegation_done');
     expect(DESK_INSTRUCTIONS).toContain('On your desk as #12 "Book the Denver flights"');
     expect(DESK_INSTRUCTIONS).toContain('never tell the owner that a mail was sent');
+  });
+});
+
+describe('delegation_list by person', () => {
+  it('finds a closed delegation by a name with status all', async () => {
+    const { call } = setup();
+    await call('delegation_create', { title: 'Lease', waitingOn: { name: 'Dana Park', email: 'dana@landlord.example' } });
+    await call('delegation_done', { id: 1 });
+    expect((await call('delegation_list', { status: 'all', person: 'Dana' })).content).toContain('#1 done "Lease"');
+  });
+
+  it('finds every delegation of a name, with and without an email', async () => {
+    const { call } = setup();
+    await call('delegation_create', { title: 'Lease', waitingOn: { name: 'Dana', email: 'dana@landlord.example' } });
+    await call('delegation_create', { title: 'Parking', waitingOn: { name: 'Dana' } });
+    const out = (await call('delegation_list', { person: 'Dana' })).content;
+    expect(out).toContain('"Parking"');
+    expect(out).toContain('"Lease"');
+  });
+});
+
+describe('the desk tools and the owner', () => {
+  it('refuses to reopen a closed delegation through delegation_update', async () => {
+    const t = setup();
+    await t.call('delegation_create', { title: 'Renew the passport' });
+    await t.call('delegation_done', { id: 1, outcome: 'dropped' });
+    const out = await t.call('delegation_update', { id: 1, status: 'open' });
+    expect(out).toEqual({ content: '#1 "Renew the passport" is dropped, and only the owner can reopen it from the desk. Nothing changed.', isError: true });
+    expect(getDelegation(t.db, 1)!.status).toBe('dropped');
+    // a note on a closed delegation is still fine.
+    expect((await t.call('delegation_update', { id: 1, note: 'The old one is still valid.' })).isError).toBeUndefined();
+  });
+
+  it('says which fields of a repeated create were not saved', async () => {
+    const t = setup();
+    await t.call('delegation_create', { title: 'Book the Denver flights' });
+    const out = await t.call('delegation_create', { title: 'Book the Denver flights', dueAt: '2026-10-24', waitingOn: { name: 'Sam' } });
+    expect(out.isError).toBe(true);
+    expect(out.content).toContain('nothing was saved');
+    expect(out.content).toContain('These fields differ from it: waitingOn, dueAt.');
+    expect(out.content).toContain('delegation_update on #1');
+    expect(getDelegation(t.db, 1)).toMatchObject({ dueAt: null, waitingOn: null });
+  });
+
+  it('keeps the untrusted mark after a reset of the tainted session that wrote the row', async () => {
+    const t = setup();
+    appendEvent(
+      t.db,
+      { sessionKey: 'main', runId: 'run-1', type: 'tool_result', payload: { toolCallId: 'm1', name: 'gmail_read', content: 'mail', isError: false, untrustedSource: 'gmail:personal' } },
+      NOW,
+    );
+    await t.call('delegation_create', { title: 'Answer the lease mail' });
+    appendEvent(t.db, { sessionKey: 'main', runId: null, type: 'session_reset', payload: {} } as never, NOW);
+    expect((await t.call('delegation_list', {})).untrustedSource).toBe('desk');
+  });
+
+  it('marks the list as untrusted when another tainted session changed a clean row', async () => {
+    const t = setup();
+    await t.call('delegation_create', { title: 'Fix the heater' }, t.toolCtx('main'));
+    expect((await t.call('delegation_list', {})).untrustedSource).toBeUndefined();
+    appendEvent(
+      t.db,
+      { sessionKey: 'sub:1', runId: 'run-2', type: 'tool_result', payload: { toolCallId: 'm1', name: 'gmail_read', content: 'mail', isError: false, untrustedSource: 'gmail:personal' } },
+      NOW,
+    );
+    await t.call('delegation_update', { id: 1, nextStep: 'Call the number in the mail' }, t.toolCtx('sub:1', 'run-2'));
+    expect((await t.call('delegation_list', {})).untrustedSource).toBe('desk');
   });
 });

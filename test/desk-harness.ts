@@ -286,5 +286,5 @@ export async function createDeskHarness(options: { accounts?: string[]; google?:
 
 // markDue moves the follow-up time of a delegation to the given time, as a later follow-up does.
 export function markDue(h: DeskHarness, id: number, iso: string): void {
-  markChecked(h.google.db, id, { nextFollowUpAt: iso }, h.now());
+  markChecked(h.google.db, id, { expected: getDelegation(h.google.db, id)!.nextFollowUpAt, nextFollowUpAt: iso }, h.now());
 }

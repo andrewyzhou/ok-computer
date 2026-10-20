@@ -10,6 +10,7 @@ import type {
 import { useApi } from '../../api';
 import { time } from '../../format';
 import { Badge, Button, DetailsPanel, EmptyState, Facts, Section, Skeleton, isNotFound } from '../../ui';
+import { dueWords } from './Board';
 import { DelegationForm } from './DelegationForm';
 import { EVENT_LABEL, STATUS_LABEL, STATUS_TONE, detailPath, refreshDesk, updateDelegation } from './data';
 import './details.css';
@@ -22,6 +23,8 @@ export interface DelegationPanelProps {
   onClose: () => void;
   // a change on the panel calls this, so the board loads again.
   onChanged: () => void;
+  // the time zone of the app for the edit form (DeskBoard.timeZone).
+  timeZone?: string;
 }
 
 const NOTE_LIMIT = 2_000;
@@ -36,6 +39,12 @@ const LINK_KIND_LABEL: Record<string, string> = { run: 'Run', doc: 'Doc', thread
 const FIELD_LABEL: Record<string, string> = { title: 'title', details: 'details', nextStep: 'next step', dueAt: 'due', nextFollowUpAt: 'follow-up' };
 
 const ACTIVE: readonly DelegationStatus[] = ['open', 'waiting', 'blocked'];
+
+// the longest value of a change that the history shows. the full text is in the field itself.
+const CHANGE_CHARS = 60;
+
+// a time in the panel without its seconds, as the cards show them: Oct 8, 18:30.
+const when = (iso: string) => time(iso).replace(/(\d{2}:\d{2}):\d{2}$/, '$1');
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const text = (value: unknown): string | null => (typeof value === 'string' && value.trim() ? value : null);
@@ -56,9 +65,10 @@ export function eventSummary(event: Pick<DelegationEvent, 'kind' | 'data'>): str
     case 'status':
       return data.from === undefined && data.to === undefined ? null : `${statusWord(data.from)} → ${statusWord(data.to)}`;
     case 'updated': {
-      const changes = isRecord(data.changes) ? Object.keys(data.changes) : [];
-      if (!changes.length) return null;
-      return changes.map((field) => FIELD_LABEL[field] ?? field).join(', ');
+      const changes = isRecord(data.changes) ? data.changes : {};
+      const fields = Object.keys(changes);
+      if (!fields.length) return null;
+      return fields.map((field) => changeWords(field, changes[field])).join('; ');
     }
     case 'waiting_on':
       return text(data.name) ?? text(data.email) ?? 'No one';
@@ -78,6 +88,22 @@ export function eventSummary(event: Pick<DelegationEvent, 'kind' | 'data'>): str
   }
 }
 
+// the value of a changed field in words: a time without seconds, a text cut to CHANGE_CHARS, or none.
+function valueWords(field: string, value: unknown): string {
+  const words = text(value);
+  if (words === null) return 'none';
+  if ((field === 'dueAt' || field === 'nextFollowUpAt') && !Number.isNaN(Date.parse(words))) return when(words);
+  return words.length > CHANGE_CHARS ? `${words.slice(0, CHANGE_CHARS - 1)}…` : words;
+}
+
+// one change of an updated row, for example "Next step: Call the bank → Wait for the bank".
+function changeWords(field: string, change: unknown): string {
+  const label = FIELD_LABEL[field] ?? field;
+  const name = label.charAt(0).toUpperCase() + label.slice(1);
+  if (!isRecord(change) || !('from' in change || 'to' in change)) return name;
+  return `${name}: ${valueWords(field, change.from)} → ${valueWords(field, change.to)}`;
+}
+
 function HistoryRow({ event }: { event: DelegationEvent }) {
   const label = (EVENT_LABEL as Record<string, string | undefined>)[event.kind] ?? String(event.kind);
   const actor = (ACTOR_LABEL as Record<string, string | undefined>)[event.actor] ?? null;
@@ -93,7 +119,7 @@ function HistoryRow({ event }: { event: DelegationEvent }) {
         <span className="desk-history-kind">{label}</span>
         {actor ? <span className="desk-history-actor">{actor}</span> : null}
         <time className="desk-history-time" dateTime={event.createdAt}>
-          {time(event.createdAt)}
+          {when(event.createdAt)}
         </time>
       </div>
       {event.text ? <p className="desk-history-text">{event.text}</p> : null}
@@ -119,7 +145,9 @@ function LinkRow({ link }: { link: DelegationLink }) {
   if (link.kind === 'doc') {
     return (
       <li className="desk-link">
-        <a href={`#/docs/${encodeURIComponent(link.ref)}`}>{link.label ?? `Doc ${link.ref}`}</a>
+        <a href={`#/docs/${encodeURIComponent(link.ref)}`} title={link.label ? undefined : link.ref}>
+          {link.label ?? `Doc ${link.ref.length > 12 ? `${link.ref.slice(0, 11)}…` : link.ref}`}
+        </a>
       </li>
     );
   }
@@ -129,7 +157,11 @@ function LinkRow({ link }: { link: DelegationLink }) {
     <li className="desk-link">
       {link.label ? <span className="desk-link-label">{link.label}</span> : null}
       <span className="desk-link-meta">
-        {link.account ? `${what} in ${link.account}` : what} <code>{link.ref}</code>
+        <span>{link.account ? `${what} in ${link.account}` : what}</span>{' '}
+        {/* a long id stays on one line and ends in an ellipsis. the full id is in the title. */}
+        <code className="desk-link-ref" title={link.ref}>
+          {link.ref}
+        </code>
       </span>
     </li>
   );
@@ -143,7 +175,7 @@ function NudgeRow({ nudge }: { nudge: DelegationNudge }) {
         items={[
           { label: 'To', value: nudge.toAddress },
           { label: 'Subject', value: nudge.subject },
-          { label: 'Created', value: time(nudge.createdAt) },
+          { label: 'Created', value: when(nudge.createdAt) },
         ]}
       />
       <div className="desk-quiet">{nudge.body}</div>
@@ -151,10 +183,21 @@ function NudgeRow({ nudge }: { nudge: DelegationNudge }) {
   );
 }
 
-// the accounts of the nudges in words, for example "personal" or "personal and school".
+// the accounts of the nudges in words, for example "personal account" or "personal and school accounts".
 function accountsOf(nudges: DelegationNudge[]): string {
   const accounts = [...new Set(nudges.map((nudge) => nudge.account))];
-  return accounts.length <= 1 ? (accounts[0] ?? '') : `${accounts.slice(0, -1).join(', ')} and ${accounts.at(-1)}`;
+  return accounts.length <= 1 ? `${accounts[0] ?? ''} account` : `${accounts.slice(0, -1).join(', ')} and ${accounts.at(-1)} accounts`;
+}
+
+// the due time of the panel with the pill of the card when it is overdue or due today.
+function DueValue({ dueAt, active }: { dueAt: string; active: boolean }) {
+  const words = active ? dueWords(dueAt, new Date()) : null;
+  return (
+    <span className="desk-due">
+      {when(dueAt)}
+      {words?.startsWith('Overdue') ? <Badge tone="critical">{words}</Badge> : words === 'Due today' ? <Badge tone="warning">{words}</Badge> : null}
+    </span>
+  );
 }
 
 function NoteForm({ id, onAdded }: { id: number; onAdded: () => void }) {
@@ -254,7 +297,7 @@ function DelegationBody({ detail, onChanged, reload }: { detail: DelegationDetai
               </Button>
             ) : (
               <Button size="sm" disabled={busy} onClick={() => move('blocked')}>
-                Needs you
+                Move to needs you
               </Button>
             )}
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => move('dropped')}>
@@ -277,26 +320,24 @@ function DelegationBody({ detail, onChanged, reload }: { detail: DelegationDetai
         items={[
           { label: 'Status', value: <Badge tone={STATUS_TONE[detail.status] ?? 'muted'}>{STATUS_LABEL[detail.status] ?? detail.status}</Badge> },
           waiting ? { label: 'Waiting on', value: waiting } : null,
-          detail.waitingSince ? { label: 'Waiting since', value: time(detail.waitingSince) } : null,
-          detail.dueAt ? { label: 'Due', value: time(detail.dueAt) } : null,
-          detail.nextFollowUpAt ? { label: 'Next follow-up', value: time(detail.nextFollowUpAt) } : null,
-          detail.lastCheckedAt ? { label: 'Last checked', value: time(detail.lastCheckedAt) } : null,
+          detail.waitingSince ? { label: 'Waiting since', value: when(detail.waitingSince) } : null,
+          detail.dueAt ? { label: 'Due', value: <DueValue dueAt={detail.dueAt} active={active} /> } : null,
+          detail.nextFollowUpAt ? { label: 'Next follow-up', value: when(detail.nextFollowUpAt) } : null,
+          detail.lastCheckedAt ? { label: 'Last checked', value: when(detail.lastCheckedAt) } : null,
           detail.nudgeCount > 0 ? { label: 'Nudges', value: String(detail.nudgeCount) } : null,
-          { label: 'Created', value: `${detail.createdBy === 'owner' ? 'by you' : 'by ok computer'}, ${time(detail.createdAt)}` },
-          detail.closedAt ? { label: 'Closed', value: time(detail.closedAt) } : null,
+          { label: 'Created', value: `${detail.createdBy === 'owner' ? 'by you' : 'by ok computer'}, ${when(detail.createdAt)}` },
+          detail.closedAt ? { label: 'Closed', value: when(detail.closedAt) } : null,
         ]}
       />
       {detail.nextStep ? (
-        <div className="desk-block">
-          <h3 className="desk-subhead">Next step</h3>
+        <Section title="Next step">
           <p className="desk-next">{detail.nextStep}</p>
-        </div>
+        </Section>
       ) : null}
       {detail.details ? (
-        <div className="desk-block">
-          <h3 className="desk-subhead">Details</h3>
+        <Section title="Details">
           <div className="desk-pre">{detail.details}</div>
-        </div>
+        </Section>
       ) : null}
       <Section title="Links">
         {links.length ? (
@@ -316,10 +357,12 @@ function DelegationBody({ detail, onChanged, reload }: { detail: DelegationDetai
               <NudgeRow key={nudge.id} nudge={nudge} />
             ))}
           </ul>
-          <p className="desk-note">Saved in the Gmail Drafts of {accountsOf(nudges)}. ok computer never sends it.</p>
+          <p className="desk-note">Saved in Gmail Drafts ({accountsOf(nudges)}). ok computer never sends it.</p>
         </Section>
       ) : null}
+      {/* the note form comes first, so a long history does not push it out of view. */}
       <Section title="History">
+        <NoteForm id={detail.id} onAdded={changed} />
         {history.length ? (
           <ol className="desk-history">
             {history.map((event, index) => (
@@ -329,13 +372,22 @@ function DelegationBody({ detail, onChanged, reload }: { detail: DelegationDetai
         ) : (
           <p className="muted">No history yet.</p>
         )}
-        <NoteForm id={detail.id} onAdded={changed} />
       </Section>
     </>
   );
 }
 
-function Panel({ id, onClose, onChanged }: DelegationPanelProps) {
+// the title of the panel. the drawer of a narrow screen puts the focus on it, so the close button does not start with
+// a ring. the loading title and the loaded one are the same element, so the focus stays when the data comes.
+function PanelTitle({ text }: { text: string }) {
+  return (
+    <span className="desk-panel-title" title={text} tabIndex={-1} data-autofocus="">
+      {text}
+    </span>
+  );
+}
+
+function Panel({ id, onClose, onChanged, timeZone }: DelegationPanelProps) {
   const detail = useApi<DelegationDetail>(detailPath(id), refreshDesk);
   const [editing, setEditing] = useState(false);
   const data = detail.data;
@@ -343,7 +395,7 @@ function Panel({ id, onClose, onChanged }: DelegationPanelProps) {
   if (detail.error !== undefined && data === undefined) {
     const missing = isNotFound(detail.error);
     return (
-      <DetailsPanel title="Delegation" openKey={id} onClose={onClose}>
+      <DetailsPanel title={<PanelTitle text="Delegation" />} openKey={id} onClose={onClose}>
         {missing ? (
           <EmptyState icon="desk" title="This delegation is not on the desk." action={<Button onClick={onClose}>Close</Button>}>
             It may be an old link. The board shows every delegation.
@@ -361,18 +413,19 @@ function Panel({ id, onClose, onChanged }: DelegationPanelProps) {
   }
   if (data === undefined) {
     return (
-      <DetailsPanel title="Delegation" openKey={id} onClose={onClose}>
+      <DetailsPanel title={<PanelTitle text="Delegation" />} openKey={id} onClose={onClose}>
         <Skeleton lines={8} label="Loading the delegation…" />
       </DetailsPanel>
     );
   }
-  const title = <span title={data.title}>{data.title}</span>;
+  const title = <PanelTitle text={data.title} />;
   if (editing) {
     return (
-      <DetailsPanel title={title} openKey={id} onClose={onClose}>
+      <DetailsPanel title={<span className="desk-panel-title">Edit delegation</span>} openKey={id} onClose={onClose}>
         <DelegationForm
           mode="edit"
           delegation={data}
+          {...(timeZone ? { timeZone } : {})}
           onDone={() => {
             setEditing(false);
             onChanged();

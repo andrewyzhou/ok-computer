@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createDeskHarness, D, deskLink, H, nudgeStep, type DeskHarness } from '../../test/desk-harness.js';
+import { createDeskHarness, D, deskLink, H, nudgeStep, threadMessage, type DeskHarness } from '../../test/desk-harness.js';
 import { sessionTaint } from '../policy/store.js';
 import { runFollowUps } from './followups.js';
-import { listDelegationEvents } from './store.js';
+import { listDelegationEvents, updateDelegation } from './store.js';
 
 let h: DeskHarness | undefined;
 afterEach(async () => {
@@ -237,11 +237,18 @@ describe('runFollowUps', () => {
     h.script.push(nudgeStep(NUDGE));
     const result = await h.run();
     expect(result.decisions).toEqual([{ delegationId: d.id, action: 'nudge_failed', account: 'personal', to: 'dana@landlord.example' }]);
-    expect(events(h, d.id).find((each) => each.kind === 'follow_up_failed')!.text).toContain('the nudge does not match the task');
+    // the reason of the reviewer can quote the mail, so the history and the owner message name the policy decision,
+    // and the trace keeps the reason.
+    const [decision] = h.rows("SELECT id, reviewerReason FROM policy_decisions WHERE toolName = 'desk_draft_nudge'");
+    expect(decision!.reviewerReason).toBe('the nudge does not match the task');
+    const failed = events(h, d.id).find((each) => each.kind === 'follow_up_failed')!;
+    expect(failed.text).toBe(`The nudge was not saved: the reviewer held it or the tool refused it. See policy decision #${decision!.id} in the trace.`);
+    expect(failed.data).toMatchObject({ decisionId: decision!.id });
     expect(h.get(d.id)).toMatchObject({ nudgeCount: 0, nextFollowUpAt: iso(h, D) });
     expect(h.rows('SELECT id FROM delegation_nudges')).toEqual([]);
     expect(h.drafts('personal')).toEqual([]);
     expect(h.sent[0]).toContain('the nudge was not saved');
+    expect(h.sent[0]).not.toContain('does not match the task');
   });
 
   it('waits for the owner when the reviewer fails, and counts the nudge that the owner approved', async () => {
@@ -264,12 +271,15 @@ describe('runFollowUps', () => {
     expect(h.sent.join('\n')).toContain(`waits for your approval #${approval!.id}`);
     expect(h.drafts('personal')).toEqual([]);
 
-    // a later run asks nothing again while the card waits.
+    // a later run asks nothing again while the card waits. it only looks for a reply, in the headers of the thread.
     h.set(iso(h, 15 * 60_000));
+    const reads = h.google.fake.requests.filter((each) => each.path.includes('/threads/')).length;
     const second = await h.run();
     expect(second.decisions).toEqual([{ delegationId: d.id, action: 'nudge_pending', account: 'personal', to: 'dana@landlord.example' }]);
     expect(h.rows("SELECT id FROM approvals WHERE toolName = 'desk_draft_nudge'")).toHaveLength(1);
     expect(h.modelCalls).toHaveLength(1);
+    const read = h.google.fake.requests.filter((each) => each.path.includes('/threads/')).slice(reads);
+    expect(read.map((each) => new URL(`http://fake${each.path}`).searchParams.get('format'))).toEqual(['metadata']);
 
     // the owner approves, the tool saves the draft, and the next run counts it.
     await h.approve(Number(approval!.id));
@@ -283,7 +293,7 @@ describe('runFollowUps', () => {
     noSend(h);
   });
 
-  it('tries again in a day when the owner denied the nudge', async () => {
+  it('blocks the delegation when the owner denied the nudge, and asks no more', async () => {
     const h = await setup({
       review: async () => {
         throw new Error('the reviewer is down');
@@ -295,10 +305,30 @@ describe('runFollowUps', () => {
     const [approval] = h.rows("SELECT id FROM approvals WHERE toolName = 'desk_draft_nudge'");
     await h.deny(Number(approval!.id));
     const result = await h.run();
-    expect(result.decisions).toEqual([{ delegationId: d.id, action: 'nudge_failed', account: 'personal', to: 'dana@landlord.example' }]);
-    expect(events(h, d.id).at(-1)).toMatchObject({ kind: 'follow_up_failed', text: `the nudge of approval #${approval!.id} was denied and saved no draft` });
-    expect(h.get(d.id)).toMatchObject({ nudgeCount: 0, nextFollowUpAt: iso(h, D) });
+    expect(result.decisions).toEqual([{ delegationId: d.id, action: 'nudge_denied', account: 'personal', to: 'dana@landlord.example' }]);
+    expect(events(h, d.id).at(-1)).toMatchObject({ kind: 'follow_up_failed', text: `The owner declined the nudge of approval #${approval!.id}.` });
+    expect(h.get(d.id)).toMatchObject({ status: 'blocked', nextStep: 'You declined the nudge to Dana Park. Decide what to do next.', nextFollowUpAt: null });
+    expect(h.sent.at(-1)).toContain('you declined the nudge to Dana Park');
     expect(h.drafts('personal')).toEqual([]);
+    // nothing is due any more, so no new card comes.
+    h.set(iso(h, 2 * D));
+    expect((await h.run()).status).toBe('skipped');
+    expect(h.rows("SELECT id FROM approvals WHERE toolName = 'desk_draft_nudge'")).toHaveLength(1);
+  });
+
+  it('tries again in a day when the card of the nudge expired, and counts the try', async () => {
+    const h = await setup({
+      review: async () => {
+        throw new Error('the reviewer is down');
+      },
+    });
+    const d = h.seed({ thread: { account: 'personal', ref: 't-lease' } });
+    asked(h);
+    await h.run();
+    h.google.db.prepare("UPDATE approvals SET status = 'expired' WHERE toolName = 'desk_draft_nudge'").run();
+    const result = await h.run();
+    expect(result.decisions).toEqual([{ delegationId: d.id, action: 'nudge_failed', account: 'personal', to: 'dana@landlord.example' }]);
+    expect(h.get(d.id)).toMatchObject({ status: 'waiting', nudgeCount: 1, nextFollowUpAt: iso(h, D) });
   });
 
   it('goes on after one delegation fails, and sends one owner message with each desk link', async () => {
@@ -391,5 +421,133 @@ describe('runFollowUps', () => {
     expect(h.modelCalls).toEqual([]);
     expect(h.sent).toEqual([]);
     noSend(h);
+  });
+});
+
+describe('runFollowUps and other kinds of mail', () => {
+  it('does not take a bounce or a no-reply mail as the reply', async () => {
+    const h = await setup();
+    const d = h.seed({ thread: { account: 'personal', ref: 't-lease' } });
+    asked(h);
+    h.deliver('personal', { id: 'bounce', threadId: 't-lease', from: 'Mail Delivery Subsystem <mailer-daemon@googlemail.com>', at: iso(h, -4 * D + 120_000), subject: 'Delivery Status Notification (Failure)' });
+    h.deliver('personal', { id: 'auto', threadId: 't-lease', from: 'Landlord Portal <no-reply@landlord.example>', at: iso(h, -3 * D), subject: 'We got your message' });
+    const result = await h.run();
+    expect(result.decisions[0]!.action).not.toBe('reply_seen');
+    expect(h.get(d.id).status).toBe('waiting');
+  });
+
+  it('does not take an automatic answer as the reply', async () => {
+    const h = await setup();
+    const d = h.seed({ thread: { account: 'personal', ref: 't-lease' } });
+    asked(h);
+    const away = threadMessage({ id: 'away', threadId: 't-lease', from: DANA, at: iso(h, -3 * D), subject: 'Out of office' });
+    h.google.fake.deliver('personal', { ...away, headers: { ...away.headers, 'Auto-Submitted': 'auto-replied' } });
+    expect((await h.run()).decisions[0]!.action).toBe('nudged');
+    expect(h.get(d.id).status).toBe('waiting');
+  });
+
+  it('nudges no one outside the thread, even when the delegation waits on that email', async () => {
+    const h = await setup();
+    const d = h.seed({ thread: { account: 'personal', ref: 't-lease' }, waitingOn: { name: 'Eve', email: 'eve@evil.example' } });
+    asked(h);
+    const result = await h.run();
+    expect(result.decisions).toEqual([{ delegationId: d.id, action: 'nudged', account: 'personal', to: 'dana@landlord.example' }]);
+    expect(h.drafts('personal')[0]!.headers).not.toContain('eve@evil.example');
+  });
+});
+
+describe('runFollowUps and a delegation that is not waiting', () => {
+  it('drafts no nudge for a blocked delegation with a thread, and tells the owner that it is due', async () => {
+    const h = await setup();
+    const d = h.seed({ thread: { account: 'personal', ref: 't-lease' } });
+    h.google.db.prepare("UPDATE delegations SET status = 'blocked' WHERE id = ?").run(d.id);
+    asked(h);
+    const result = await h.run();
+    expect(result.decisions).toEqual([{ delegationId: d.id, action: 'not_waiting' }]);
+    expect(h.get(d.id)).toMatchObject({ status: 'blocked', nextFollowUpAt: null });
+    expect(h.history(d.id).at(-1)).toBe('follow_up_due');
+    expect(h.sent[0]).toContain('blocked and needs you, so no nudge was drafted');
+    expect(h.drafts('personal')).toEqual([]);
+    expect(h.google.fake.requests.filter((each) => each.path.includes('/threads/'))).toEqual([]);
+  });
+});
+
+describe('runFollowUps while the owner changes the desk', () => {
+  // the owner acts on the dashboard while the job waits on google.
+  function duringRead(h: DeskHarness, act: () => void) {
+    const accounts = h.ctx.google!.accounts;
+    let done = false;
+    const google = {
+      accounts: {
+        unavailable: (alias: string) => accounts.unavailable(alias),
+        run: async (alias: string, work: never) => {
+          const out = await accounts.run(alias, work);
+          if (!done) {
+            done = true;
+            act();
+          }
+          return out;
+        },
+      },
+    };
+    return { ...h.ctx, google } as never;
+  }
+
+  it('does not reopen a delegation that the owner closed while the thread was read', async () => {
+    const h = await setup();
+    const d = h.seed({ thread: { account: 'personal', ref: 't-lease' } });
+    asked(h);
+    h.deliver('personal', { id: 'reply', threadId: 't-lease', from: DANA, at: iso(h, -D) });
+    const result = await runFollowUps(duringRead(h, () => updateDelegation(h.google.db, d.id, { status: 'done' }, { actor: 'owner' }, h.now())));
+    expect(result.decisions).toEqual([{ delegationId: d.id, action: 'changed' }]);
+    expect(h.get(d.id)).toMatchObject({ status: 'done', nextFollowUpAt: null });
+    expect(h.history(d.id)).not.toContain('reply_seen');
+    expect(h.sent).toEqual([]);
+  });
+
+  it('keeps the follow-up time that the owner set while the thread was read', async () => {
+    const h = await setup();
+    const d = h.seed({ thread: { account: 'personal', ref: 't-lease' } });
+    asked(h);
+    const owners = iso(h, 5 * D);
+    const result = await runFollowUps(duringRead(h, () => updateDelegation(h.google.db, d.id, { nextFollowUpAt: owners }, { actor: 'owner' }, h.now())));
+    expect(result.decisions).toEqual([{ delegationId: d.id, action: 'changed' }]);
+    expect(h.get(d.id)).toMatchObject({ status: 'waiting', nextFollowUpAt: owners, nudgeCount: 0 });
+    expect(h.drafts('personal')).toEqual([]);
+    expect(h.modelCalls).toEqual([]);
+  });
+
+  it('puts no follow-up time on a delegation that the owner dropped while the nudge was reviewed', async () => {
+    let drop = () => {};
+    const h = await setup({
+      review: async () => {
+        drop();
+        return { verdict: 'allow', reason: 'fine' };
+      },
+    });
+    const d = h.seed({ thread: { account: 'personal', ref: 't-lease' } });
+    drop = () => {
+      updateDelegation(h.google.db, d.id, { status: 'dropped' }, { actor: 'owner' }, h.now());
+    };
+    asked(h);
+    const result = await h.run();
+    expect(result.decisions).toEqual([{ delegationId: d.id, action: 'changed' }]);
+    expect(h.get(d.id)).toMatchObject({ status: 'dropped', nextFollowUpAt: null, nudgeCount: 0 });
+    expect(h.history(d.id)).not.toContain('follow_up_failed');
+    expect(h.drafts('personal')).toEqual([]);
+    expect(h.sent).toEqual([]);
+  });
+
+  it('nudges again after a new wait, without the nudges of the old one', async () => {
+    const h = await setup();
+    const d = h.seed({ thread: { account: 'personal', ref: 't-lease' }, nudges: 3 });
+    asked(h);
+    expect((await h.run()).decisions[0]!.action).toBe('blocked');
+    // the owner waits on Dana again.
+    updateDelegation(h.google.db, d.id, { status: 'waiting', nextFollowUpAt: iso(h, D) }, { actor: 'owner' }, h.now());
+    expect(h.get(d.id).nudgeCount).toBe(0);
+    h.set(iso(h, D));
+    expect((await h.run()).decisions[0]!.action).toBe('nudged');
+    expect(h.get(d.id)).toMatchObject({ status: 'waiting', nudgeCount: 1 });
   });
 });

@@ -5,16 +5,17 @@ import type {
   DelegationStatus,
   DelegationUpdateRequest,
 } from '../../../../src/dashboard/desk-types';
-import { Button, DetailsPanel, Select } from '../../ui';
+import { Button, DetailsPanel } from '../../ui';
 import { STATUSES, STATUS_LABEL, createDelegation, updateDelegation } from './data';
 import './details.css';
 
 // the owner's form to create a delegation, or to edit one: title, details, next step, waiting on (name and email),
 // due and follow-up times, and the status of an edit. it sends POST /api/desk/delegations or
 // POST /api/desk/delegations/:id and shows the error text of a 400 or a 409 by the form.
+// timeZone is the time zone of the app (DeskBoard.timeZone). without it the form uses the zone of the browser.
 export type DelegationFormProps =
-  | { mode: 'create'; onDone: (delegation: Delegation) => void; onCancel: () => void }
-  | { mode: 'edit'; delegation: Delegation; onDone: (delegation: Delegation) => void; onCancel: () => void };
+  | { mode: 'create'; onDone: (delegation: Delegation) => void; onCancel: () => void; timeZone?: string }
+  | { mode: 'edit'; delegation: Delegation; onDone: (delegation: Delegation) => void; onCancel: () => void; timeZone?: string };
 
 // the limits of the server (LIMITS in src/desk/shared.ts), so the form says so before it sends.
 export const FORM_LIMITS = { title: 200, details: 4_000, nextStep: 500, name: 200, email: 320 } as const;
@@ -43,27 +44,51 @@ type Errors = Partial<Record<FieldName, string>>;
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
-// the day and the time of an iso time in the time zone of the browser, for the date and time inputs.
-export function localParts(iso: string | null): { date: string; time: string } {
+// the day and the time of an instant in a time zone, as yyyy-mm-dd and HH:MM.
+function partsIn(at: Date, timeZone: string): { date: string; time: string } {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(at);
+  const part = (type: string) => parts.find((each) => each.type === type)?.value ?? '';
+  return { date: `${part('year')}-${part('month')}-${part('day')}`, time: `${part('hour')}:${part('minute')}` };
+}
+
+// the day and the time of an iso time for the date and time inputs, in the time zone of the app when it is given, so
+// the form shows the same day as the board even when the browser is in another zone. without it, the zone of the
+// browser.
+export function localParts(iso: string | null, timeZone?: string): { date: string; time: string } {
   if (!iso) return { date: '', time: '' };
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return { date: '', time: '' };
+  if (timeZone) return partsIn(at, timeZone);
   return { date: `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`, time: `${pad(at.getHours())}:${pad(at.getMinutes())}` };
 }
 
 // the time to send for a date input and a time input. a day alone goes as yyyy-mm-dd, which the server reads in the
-// time zone of the app (the end of the day for a due time, 09:00 for a follow-up). a day with a time is the local
-// time of the browser, sent as an iso time with its exact offset.
-export function whenOf(date: string, time: string): string | null {
+// time zone of the app (the end of the day for a due time, 09:00 for a follow-up). a day with a time is read in the
+// time zone of the app when it is given, else in the zone of the browser, and goes as an iso time.
+export function whenOf(date: string, time: string, timeZone?: string): string | null {
   if (!date) return null;
   if (!time) return date;
-  const at = new Date(`${date}T${time}`);
-  return Number.isNaN(at.getTime()) ? null : at.toISOString();
+  if (!timeZone) {
+    const at = new Date(`${date}T${time}`);
+    return Number.isNaN(at.getTime()) ? null : at.toISOString();
+  }
+  // the instant whose day and time in the zone are the inputs. the offset of the zone is read at a first guess and
+  // then at the result, so a time near a change of daylight saving time comes out right.
+  const wall = Date.parse(`${date}T${time}:00Z`);
+  if (Number.isNaN(wall)) return null;
+  const offsetAt = (ms: number) => {
+    const shown = partsIn(new Date(ms), timeZone);
+    return Date.parse(`${shown.date}T${shown.time}:00Z`) - ms;
+  };
+  const first = wall - offsetAt(wall);
+  const at = wall - offsetAt(first);
+  // a day that is not on the calendar, for example 2026-02-30, does not read back as itself.
+  return partsIn(new Date(at), timeZone).date === date ? new Date(at).toISOString() : null;
 }
 
-function initialValues(delegation: Delegation | null): Values {
-  const due = localParts(delegation?.dueAt ?? null);
-  const follow = localParts(delegation?.nextFollowUpAt ?? null);
+function initialValues(delegation: Delegation | null, timeZone: string | undefined): Values {
+  const due = localParts(delegation?.dueAt ?? null, timeZone);
+  const follow = localParts(delegation?.nextFollowUpAt ?? null, timeZone);
   return {
     title: delegation?.title ?? '',
     details: delegation?.details ?? '',
@@ -87,7 +112,7 @@ const LENGTH_FIELDS: Array<[FieldName, keyof typeof FORM_LIMITS]> = [
 ];
 
 // the checks of the form before it sends. each error goes next to its field.
-function check(values: Values, mode: 'create' | 'edit', followChanged: boolean, now: Date): Errors {
+function check(values: Values, mode: 'create' | 'edit', followChanged: boolean, now: Date, timeZone: string | undefined): Errors {
   const errors: Errors = {};
   if (!values.title.trim()) errors.title = 'Give the delegation a title.';
   for (const [field, limit] of LENGTH_FIELDS) {
@@ -100,8 +125,8 @@ function check(values: Values, mode: 'create' | 'edit', followChanged: boolean, 
   if (values.dueTime && !values.dueDate) errors.dueDate = 'Give a day for this time.';
   if (values.followTime && !values.followDate) errors.followDate = 'Give a day for this time.';
   else if (values.followDate && followChanged) {
-    const today = localParts(now.toISOString()).date;
-    const when = whenOf(values.followDate, values.followTime);
+    const today = localParts(now.toISOString(), timeZone).date;
+    const when = whenOf(values.followDate, values.followTime, timeZone);
     const past = values.followTime ? when !== null && Date.parse(when) < now.getTime() : values.followDate < today;
     if (past) errors.followDate = 'The follow-up time is in the past.';
   }
@@ -116,10 +141,10 @@ function waitingOf(values: Values): { name?: string; email?: string } | null {
   return { ...(name ? { name } : {}), ...(email ? { email } : {}) };
 }
 
-function createBody(values: Values): DelegationCreateRequest {
+function createBody(values: Values, timeZone: string | undefined): DelegationCreateRequest {
   const waitingOn = waitingOf(values);
-  const dueAt = whenOf(values.dueDate, values.dueTime);
-  const nextFollowUpAt = whenOf(values.followDate, values.followTime);
+  const dueAt = whenOf(values.dueDate, values.dueTime, timeZone);
+  const nextFollowUpAt = whenOf(values.followDate, values.followTime, timeZone);
   return {
     title: values.title.trim(),
     ...(values.details.trim() ? { details: values.details.trim() } : {}),
@@ -132,7 +157,7 @@ function createBody(values: Values): DelegationCreateRequest {
 
 // the fields that the owner changed, and null for a field that the owner cleared. a time is compared by its inputs,
 // so a time that the owner did not touch is not sent again with other seconds.
-function updateBody(values: Values, before: Values): DelegationUpdateRequest {
+function updateBody(values: Values, before: Values, timeZone: string | undefined): DelegationUpdateRequest {
   const body: DelegationUpdateRequest = {};
   const title = values.title.trim();
   if (title !== before.title.trim()) body.title = title;
@@ -141,8 +166,8 @@ function updateBody(values: Values, before: Values): DelegationUpdateRequest {
     if (value !== before[field].trim()) body[field] = value || null;
   }
   if (values.name.trim() !== before.name.trim() || values.email.trim() !== before.email.trim()) body.waitingOn = waitingOf(values);
-  if (values.dueDate !== before.dueDate || values.dueTime !== before.dueTime) body.dueAt = whenOf(values.dueDate, values.dueTime);
-  if (values.followDate !== before.followDate || values.followTime !== before.followTime) body.nextFollowUpAt = whenOf(values.followDate, values.followTime);
+  if (values.dueDate !== before.dueDate || values.dueTime !== before.dueTime) body.dueAt = whenOf(values.dueDate, values.dueTime, timeZone);
+  if (values.followDate !== before.followDate || values.followTime !== before.followTime) body.nextFollowUpAt = whenOf(values.followDate, values.followTime, timeZone);
   if (values.status !== before.status) body.status = values.status;
   return body;
 }
@@ -192,9 +217,9 @@ function Field({
 }
 
 export function DelegationForm(props: DelegationFormProps) {
-  const { mode, onDone, onCancel } = props;
+  const { mode, onDone, onCancel, timeZone } = props;
   const original = mode === 'edit' ? props.delegation : null;
-  const [before] = useState(() => initialValues(original));
+  const [before] = useState(() => initialValues(original, timeZone));
   const [values, setValues] = useState(before);
   const [errors, setErrors] = useState<Errors>({});
   const [serverError, setServerError] = useState<string | null>(null);
@@ -233,7 +258,7 @@ export function DelegationForm(props: DelegationFormProps) {
     event.preventDefault();
     if (busy) return;
     const followChanged = mode === 'create' || values.followDate !== before.followDate || values.followTime !== before.followTime;
-    const found = check(values, mode, followChanged, new Date());
+    const found = check(values, mode, followChanged, new Date(), timeZone);
     setErrors(found);
     const first = (Object.keys(found) as FieldName[]).find((field) => found[field]);
     if (first) {
@@ -242,7 +267,7 @@ export function DelegationForm(props: DelegationFormProps) {
     }
     setServerError(null);
     setBusy(true);
-    const request = original ? updateDelegation(original.id, updateBody(values, before)) : createDelegation(createBody(values));
+    const request = original ? updateDelegation(original.id, updateBody(values, before, timeZone)) : createDelegation(createBody(values, timeZone));
     request.then(
       (delegation) => {
         setBusy(false);
@@ -250,12 +275,13 @@ export function DelegationForm(props: DelegationFormProps) {
       },
       (err: Error) => {
         setBusy(false);
-        setServerError(err.message);
+        // the error of the server says what broke, and the lead-in says what failed, as the board and the details do.
+        setServerError(`${original ? 'Could not save the changes' : 'Could not create the delegation'}: ${err.message}`);
       },
     );
   };
 
-  const input = (field: FieldName, extra: { type?: string; autoComplete?: string; ref?: typeof titleRef; required?: boolean } = {}) => (
+  const input = (field: FieldName, extra: { type?: string; autoComplete?: string; ref?: typeof titleRef; required?: boolean; autoFocus?: boolean } = {}) => (
     <input
       id={id(field)}
       type={extra.type ?? 'text'}
@@ -266,6 +292,7 @@ export function DelegationForm(props: DelegationFormProps) {
       autoComplete={extra.autoComplete ?? 'off'}
       required={extra.required}
       ref={extra.ref}
+      {...(extra.autoFocus ? { 'data-autofocus': '' } : {})}
     />
   );
 
@@ -277,7 +304,7 @@ export function DelegationForm(props: DelegationFormProps) {
         </p>
       ) : null}
       <Field id={id('title')} label="Title" error={errors.title} counter={<Counter length={values.title.trim().length} max={FORM_LIMITS.title} always />}>
-        {input('title', { ref: titleRef, required: true })}
+        {input('title', { ref: titleRef, required: true, autoFocus: true })}
       </Field>
       <Field id={id('details')} label="Details" error={errors.details} counter={<Counter length={values.details.trim().length} max={FORM_LIMITS.details} />}>
         <textarea
@@ -327,9 +354,15 @@ export function DelegationForm(props: DelegationFormProps) {
         </Field>
       </div>
       {mode === 'edit' ? (
-        <div className="desk-field">
-          <Select label="Status" value={values.status} options={STATUSES.map((status) => ({ value: status, label: STATUS_LABEL[status] }))} onChange={(value) => set('status')(value)} />
-        </div>
+        <Field id={id('status')} label="Status" error={undefined}>
+          <select id={id('status')} className="desk-select" value={values.status} onChange={(event) => set('status')(event.target.value)}>
+            {STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {STATUS_LABEL[status]}
+              </option>
+            ))}
+          </select>
+        </Field>
       ) : null}
       <div className="desk-form-actions">
         <Button type="submit" variant="primary" busy={busy}>
@@ -344,10 +377,10 @@ export function DelegationForm(props: DelegationFormProps) {
 }
 
 // the create form in the details panel of the shell, for the page when the hash query has new=1.
-export function NewDelegationPanel({ onDone, onCancel }: { onDone: (delegation: Delegation) => void; onCancel: () => void }) {
+export function NewDelegationPanel({ onDone, onCancel, timeZone }: { onDone: (delegation: Delegation) => void; onCancel: () => void; timeZone?: string }) {
   return (
     <DetailsPanel title="New delegation" openKey="new" onClose={onCancel}>
-      <DelegationForm mode="create" onDone={onDone} onCancel={onCancel} />
+      <DelegationForm mode="create" onDone={onDone} onCancel={onCancel} {...(timeZone ? { timeZone } : {})} />
     </DetailsPanel>
   );
 }

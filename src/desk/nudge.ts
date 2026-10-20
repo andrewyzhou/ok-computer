@@ -21,7 +21,7 @@ import { appendDelegationEvent, getDelegation } from './store.js';
 // - the tool desk_draft_nudge (NUDGE_TOOL in names.ts) saves it in Gmail Drafts as a reply in the thread. it is a
 //   write tool like inbox_draft_reply: the reviewer checks it in the tainted follow-up session, and it is never sent.
 //   it claims its delegation_nudges row before the draft, so one follow-up time gives one draft, and it refuses a
-//   recipient that is not the waiting-on email or an address in the From, To or Cc of the thread.
+//   recipient that is not an address in the From, To or Cc of the thread.
 // without google, createNudgeTools gives no tool. no code here sends a draft or a mail.
 
 // the longest nudge. a nudge is a few lines, so a longer text from the model is cut.
@@ -159,13 +159,14 @@ export function createNudgeTools(ctx: DeskContext): Tool[] {
       // only the read failed, so no draft was made.
       return { ...failed(NUDGE_TOOL, nudge.account, toGoogleError(err), true), effect: 'none' };
     }
-    // the nudge goes to someone who is in the thread already, or to the person that the delegation waits on. an
-    // address that the model or a mail chose is refused.
-    const known = new Set<string>(delegation.waitingOn?.email ? [delegation.waitingOn.email.toLowerCase()] : []);
+    // the nudge goes only to someone who is in the thread already. the waiting-on email counts only when it is in the
+    // thread too, because a tainted session could have set it from the text of a mail. an address that the model or
+    // a mail chose is refused.
+    const known = new Set<string>();
     for (const message of thread.messages ?? []) {
-      for (const key of ['From', 'To', 'Cc']) for (const address of addressesOf(header(message, key))) known.add(address);
+      for (const key of ['From', 'To', 'Cc']) for (const address of addressesOf(header(message, key))) known.add(address.toLowerCase());
     }
-    if (!known.has(to)) return refuse('a nudge goes only to the person that the delegation waits on, or to an address in the thread.');
+    if (!known.has(to)) return refuse('a nudge goes only to an address in the From, To or Cc of the thread.');
 
     // the claim comes before the draft, and no await is between the insert and its check. a second call for the same
     // follow-up finds the claim and makes no second draft in gmail.

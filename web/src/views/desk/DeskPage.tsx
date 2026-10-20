@@ -44,13 +44,17 @@ export function DeskPage({ query }: RouteProps) {
   const data = board.data;
   const totals = new Map(data?.columns.map((column) => [column.status, column.total]) ?? []);
   const sum = [...totals.values()].reduce((all, each) => all + each, 0);
+  // the tabs count the whole desk, so a filter never hides the overview. an older server gives no counts, and then
+  // the tabs count the rows of the filter.
+  const counts = new Map<DelegationStatus, number>(data?.counts ? STATUSES.map((status) => [status, data.counts![status] ?? 0]) : totals);
+  const everything = [...counts.values()].reduce((all, each) => all + each, 0);
 
   const openNew = () => setDeskQuery(query, { new: '1', id: null });
   const clearFilters = () => setDeskQuery(query, { status: null, person: null, q: null });
 
   const tabs: Array<{ id: StatusTab; label: string; count?: number }> = [
-    { id: 'all', label: 'All', ...(data ? { count: sum } : {}) },
-    ...STATUSES.map((status) => ({ id: status, label: STATUS_LABEL[status], ...(data ? { count: totals.get(status) ?? 0 } : {}) })),
+    { id: 'all', label: 'All', ...(data ? { count: everything } : {}) },
+    ...STATUSES.map((status) => ({ id: status, label: STATUS_LABEL[status], ...(data ? { count: counts.get(status) ?? 0 } : {}) })),
   ];
   const people: Option[] = (data?.people ?? []).map((person) => ({ value: person.key, label: person.name ?? person.email ?? person.key }));
   // a person in the hash that the list does not have, for example one whose delegations all closed, still shows.
@@ -120,6 +124,7 @@ export function DeskPage({ query }: RouteProps) {
       )}
       {creating ? (
         <NewDelegationPanel
+          {...(data?.timeZone ? { timeZone: data.timeZone } : {})}
           onDone={(delegation) => {
             setDeskQuery(query, { new: null, id: String(delegation.id) });
             board.reload();
@@ -127,7 +132,12 @@ export function DeskPage({ query }: RouteProps) {
           onCancel={() => setDeskQuery(query, { new: null })}
         />
       ) : selectedId !== null ? (
-        <DelegationPanel id={selectedId} onClose={() => setDeskQuery(query, { id: null })} onChanged={board.reload} />
+        <DelegationPanel
+          id={selectedId}
+          onClose={() => setDeskQuery(query, { id: null })}
+          onChanged={board.reload}
+          {...(data?.timeZone ? { timeZone: data.timeZone } : {})}
+        />
       ) : null}
     </Page>
   );

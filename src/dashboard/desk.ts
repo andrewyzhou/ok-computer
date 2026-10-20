@@ -2,7 +2,7 @@ import type { Context, Hono } from 'hono';
 import { z } from 'zod';
 import type { Db } from '../db/index.js';
 import { ACTIVE_STATUSES, DESK_CLOSED_LIMIT, DESK_STATUSES, isActive, LIMITS, LINK_KINDS, parseWhen, validEmail } from '../desk/shared.js';
-import { createDelegation, getDelegation, getDelegationDetail, listDelegations, updateDelegation, type DelegationPatch, type StoreResult } from '../desk/store.js';
+import { createDelegation, getDelegation, getDelegationDetail, listDelegations, textMatch, updateDelegation, type DelegationPatch, type StoreResult } from '../desk/store.js';
 import { addDays, localDay, zonedToUtc } from '../time.js';
 import { errorText } from '../tools/registry.js';
 import type { DashboardDeps } from './server.js';
@@ -155,8 +155,6 @@ function timesOf(
   return { ok: true, value: out };
 }
 
-const ESCAPE = /[\\%_]/g;
-
 // the totals of each status for the filter, in one query. the where clause is the one of listDelegations, so a total
 // counts the same rows that the column lists.
 function countByStatus(db: Db, query: DeskQuery): Map<DelegationStatus, number> {
@@ -171,9 +169,9 @@ function countByStatus(db: Db, query: DeskQuery): Map<DelegationStatus, number> 
     params.push(query.person);
   }
   if (query.q) {
-    const pattern = `%${query.q.toLowerCase().replace(ESCAPE, (char) => `\\${char}`)}%`;
-    where.push("(lower(title) LIKE ? ESCAPE '\\' OR lower(coalesce(details, '')) LIKE ? ESCAPE '\\' OR lower(coalesce(nextStep, '')) LIKE ? ESCAPE '\\')");
-    params.push(pattern, pattern, pattern);
+    const match = textMatch(db, query.q);
+    where.push(match.sql);
+    params.push(...match.params);
   }
   const rows = db.prepare(`SELECT status, COUNT(*) AS total FROM delegations ${where.length ? `WHERE ${where.join(' AND ')}` : ''} GROUP BY status`).all(...params);
   return new Map(rows.map((row) => [String(row.status) as DelegationStatus, Number(row.total)]));
@@ -227,7 +225,9 @@ export function deskBoard(db: Db, query: DeskQuery, now: Date, timeZone: string)
     });
     return { status: each, delegations, total: totals.get(each) ?? 0 };
   });
-  return { columns, people: peopleOf(db), dueToday: dueTodayOf(db, now, timeZone) };
+  const all = countByStatus(db, {});
+  const counts = Object.fromEntries(DESK_STATUSES.map((each) => [each, all.get(each) ?? 0])) as Record<DelegationStatus, number>;
+  return { columns, people: peopleOf(db), dueToday: dueTodayOf(db, now, timeZone), counts, timeZone };
 }
 
 export function mountDesk(server: Hono, deps: DashboardDeps): void {

@@ -13,7 +13,7 @@ import type {
 } from '../dashboard/desk-types.js';
 import type { Db } from '../db/index.js';
 import { inTransaction } from '../signals/store.js';
-import { ACTIVE_STATUSES, hrefOf, isClosed, personKey } from './shared.js';
+import { ACTIVE_STATUSES, hrefOf, isActive, isClosed, personKey } from './shared.js';
 
 // the store of the desk (021_delegations.sql). every change of a delegation writes its history row in the same
 // transaction, so the history is complete. the history is append-only: nothing here changes or removes a row of it.
@@ -29,6 +29,9 @@ export interface ChangeBy {
   actor: DelegationActor;
   runId?: string | null;
   toolCallId?: string | null;
+  // the session that made the change had read outside text, for example mail. the history row keeps it, so a later
+  // list marks the text of the delegation as untrusted even after a reset of that session.
+  tainted?: boolean;
 }
 
 export interface NewDelegation {
@@ -58,6 +61,9 @@ export interface DelegationPatch {
   addLinks?: DelegationLinkInput[];
   removeLinks?: Array<{ kind: DelegationLinkKind; ref: string; account?: string }>;
   note?: string;
+  // the patch applies only while the delegation is active and its follow-up time is still this one, else it gives a
+  // 409. the follow-up job sets it, so it never changes a delegation that the owner closed or moved while it worked.
+  ifFollowUpAt?: string | null;
 }
 
 // the result of a change. a 404 is a missing delegation, a 400 an input that breaks a rule of the status, and a 409
@@ -194,8 +200,8 @@ export function appendDelegationEvent(
 ): DelegationEvent {
   const row = db
     .prepare(
-      `INSERT INTO delegation_events (delegationId, kind, actor, text, data, runId, toolCallId, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO delegation_events (delegationId, kind, actor, text, data, runId, toolCallId, tainted, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       event.delegationId,
@@ -205,6 +211,7 @@ export function appendDelegationEvent(
       JSON.stringify(event.data ?? {}),
       event.runId ?? null,
       event.toolCallId ?? null,
+      event.tainted ? 1 : 0,
       now.toISOString(),
     );
   return eventRow(row!);
@@ -290,12 +297,18 @@ const sameWaiting = (a: WaitingOn | null, b: WaitingOn | null) => a?.name === b?
 // a patch that changes nothing writes no row. the rules of the status:
 // - waiting needs a person, from the patch or from the row. a patch that clears the person of a waiting delegation
 //   must also move it to another status.
-// - a move into waiting, or a new person while waiting, starts the wait now. a move out of waiting clears the time.
+// - a move into waiting, or a new person while waiting, starts the wait now and sets the nudge count back to 0, so
+//   each wait gets its own nudges. a move out of waiting clears the time. the follow-up time stays: on an open or a
+//   blocked delegation it is a reminder for the owner, and the follow-up job drafts no nudge for it.
 // - done and dropped set closedAt and clear the follow-up. a move back to an active status clears closedAt.
 // - a closed delegation takes no follow-up time.
+// - a patch with ifFollowUpAt gives a 409 when the delegation is closed or its follow-up time changed.
 export function updateDelegation(db: Db, id: number, patch: DelegationPatch, by: ChangeBy, now: Date): StoreResult<Delegation> {
   const before = getDelegation(db, id);
   if (!before) return notFound(id);
+  if (patch.ifFollowUpAt !== undefined && (!isActive(before.status) || before.nextFollowUpAt !== patch.ifFollowUpAt)) {
+    return fail(409, `delegation #${id} changed while the follow-up ran`);
+  }
   const status = patch.status ?? before.status;
   const waitingOn = patch.waitingOn === undefined ? before.waitingOn : waitingOf(patch.waitingOn);
   if (status === 'waiting' && !waitingOn) return fail(400, 'a waiting delegation needs a person or an email to wait on');
@@ -314,13 +327,17 @@ export function updateDelegation(db: Db, id: number, patch: DelegationPatch, by:
   const statusChanged = status !== before.status;
   const waitingSince = status !== 'waiting' ? null : statusChanged || personChanged || !before.waitingSince ? now.toISOString() : before.waitingSince;
   const closedAt = isClosed(status) ? (statusChanged ? now.toISOString() : before.closedAt) : null;
+  // a new wait counts its own nudges.
+  const newWait = status === 'waiting' && waitingSince !== before.waitingSince;
+  const nudges = newWait ? 0 : before.nudgeCount;
+  const reset = newWait && before.nudgeCount > 0 ? { nudgesReset: before.nudgeCount } : {};
 
   inTransaction(db, () => {
     let changed = false;
     if (Object.keys(changes).length || personChanged || statusChanged || waitingSince !== before.waitingSince || closedAt !== before.closedAt) {
       db.prepare(
         `UPDATE delegations SET title = ?, details = ?, nextStep = ?, status = ?, waitingOnName = ?, waitingOnEmail = ?,
-           waitingOnKey = ?, waitingSince = ?, dueAt = ?, nextFollowUpAt = ?, closedAt = ? WHERE id = ?`,
+           waitingOnKey = ?, waitingSince = ?, dueAt = ?, nextFollowUpAt = ?, closedAt = ?, nudges = ? WHERE id = ?`,
       ).run(
         next.title,
         next.details,
@@ -333,16 +350,20 @@ export function updateDelegation(db: Db, id: number, patch: DelegationPatch, by:
         next.dueAt,
         next.nextFollowUpAt,
         closedAt,
+        nudges,
         id,
       );
       changed = true;
     }
     if (Object.keys(changes).length) appendDelegationEvent(db, { delegationId: id, kind: 'updated', data: { changes }, ...by }, now);
     if (personChanged) {
-      const data = { name: waitingOn?.name ?? null, email: waitingOn?.email ?? null, followUpAt: next.nextFollowUpAt };
+      const data = { name: waitingOn?.name ?? null, email: waitingOn?.email ?? null, followUpAt: next.nextFollowUpAt, ...reset };
       appendDelegationEvent(db, { delegationId: id, kind: 'waiting_on', data, ...by }, now);
     }
-    if (statusChanged) appendDelegationEvent(db, { delegationId: id, kind: 'status', data: { from: before.status, to: status }, ...by }, now);
+    if (statusChanged) {
+      const data = { from: before.status, to: status, ...(personChanged ? {} : reset) };
+      appendDelegationEvent(db, { delegationId: id, kind: 'status', data, ...by }, now);
+    }
     for (const link of patch.removeLinks ?? []) changed = removeLink(db, id, link, by, now) || changed;
     for (const link of patch.addLinks ?? []) changed = addLink(db, id, link, by, now) || changed;
     if (patch.note?.trim()) {
@@ -355,14 +376,18 @@ export function updateDelegation(db: Db, id: number, patch: DelegationPatch, by:
 }
 
 // markChecked records a check of the follow-up job that changes no field the owner sees: the time of the check, and
-// the next follow-up time. the history row of the check is the caller's.
-export function markChecked(db: Db, id: number, change: { nextFollowUpAt: string | null; nudged?: boolean }, now: Date): void {
-  db.prepare('UPDATE delegations SET lastCheckedAt = ?, nextFollowUpAt = ?, nudges = nudges + ? WHERE id = ?').run(
-    now.toISOString(),
-    change.nextFollowUpAt,
-    change.nudged ? 1 : 0,
-    id,
-  );
+// the next follow-up time. it changes the row only while the delegation is active and its follow-up time is still
+// expected, the one that the job read, so a check never puts a follow-up time on a delegation that the owner closed,
+// and never overwrites a time that the owner set. it says whether the row changed. the history row of the check is
+// the caller's, and the caller writes it only when the row changed.
+export function markChecked(db: Db, id: number, change: { expected: string | null; nextFollowUpAt: string | null; nudged?: boolean }, now: Date): boolean {
+  const result = db
+    .prepare(
+      `UPDATE delegations SET lastCheckedAt = ?, nextFollowUpAt = ?, nudges = nudges + ?
+       WHERE id = ? AND nextFollowUpAt IS ? AND status IN (${ACTIVE_STATUSES.map(() => '?').join(', ')})`,
+    )
+    .run(now.toISOString(), change.nextFollowUpAt, change.nudged ? 1 : 0, id, change.expected, ...ACTIVE_STATUSES);
+  return Number(result.changes) > 0;
 }
 
 export interface DelegationFilter {
@@ -375,6 +400,24 @@ export interface DelegationFilter {
 }
 
 const ESCAPE = /[\\%_]/g;
+
+// sqlite folds only ascii case in lower() and like, so "École" would not find "ÉCOLE". the store folds both sides
+// with the same function of javascript instead. each connection gets the function once.
+const folding = new WeakSet<Db>();
+export const fold = (value: string) => value.normalize('NFC').toLowerCase();
+
+// the where clause of the q filter: the phrase in the title, the details or the next step, without case.
+export function textMatch(db: Db, q: string): { sql: string; params: string[] } {
+  if (!folding.has(db)) {
+    db.function('desk_fold', { deterministic: true }, (value: unknown) => (value === null || value === undefined ? '' : fold(String(value))));
+    folding.add(db);
+  }
+  const pattern = `%${fold(q.trim()).replace(ESCAPE, (char) => `\\${char}`)}%`;
+  return {
+    sql: "(desk_fold(title) LIKE ? ESCAPE '\\' OR desk_fold(details) LIKE ? ESCAPE '\\' OR desk_fold(nextStep) LIKE ? ESCAPE '\\')",
+    params: [pattern, pattern, pattern],
+  };
+}
 
 // listDelegations gives the delegations of the filter: the active ones by dueAt (rows without one last), then by id,
 // and the closed ones after them, the newest closedAt first.
@@ -391,9 +434,9 @@ export function listDelegations(db: Db, filter: DelegationFilter = {}): Delegati
     params.push(filter.person);
   }
   if (filter.q?.trim()) {
-    const pattern = `%${filter.q.trim().toLowerCase().replace(ESCAPE, (char) => `\\${char}`)}%`;
-    where.push("(lower(title) LIKE ? ESCAPE '\\' OR lower(coalesce(details, '')) LIKE ? ESCAPE '\\' OR lower(coalesce(nextStep, '')) LIKE ? ESCAPE '\\')");
-    params.push(pattern, pattern, pattern);
+    const match = textMatch(db, filter.q);
+    where.push(match.sql);
+    params.push(...match.params);
   }
   const rows = db
     .prepare(

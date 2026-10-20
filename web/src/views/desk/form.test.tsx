@@ -222,7 +222,7 @@ describe('the delegation form', () => {
     const button = screen.getByRole('button', { name: 'Create delegation' });
     submit('Create delegation');
     expect(screen.getByRole('button', { name: 'Saving…' }).getAttribute('aria-busy')).toBe('true');
-    expect((await screen.findByRole('alert')).textContent).toBe('a thread or event link needs its account');
+    expect((await screen.findByRole('alert')).textContent).toBe('Could not create the delegation: a thread or event link needs its account');
     expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Find the receipts');
     expect(button.hasAttribute('disabled')).toBe(false);
     expect(onDone).not.toHaveBeenCalled();
@@ -233,7 +233,7 @@ describe('the delegation form', () => {
     renderEdit(5);
     type('Follow-up', '2030-02-01');
     submit('Save changes');
-    expect((await screen.findByRole('alert')).textContent).toBe('delegation #5 is done, so it takes no follow-up time');
+    expect((await screen.findByRole('alert')).textContent).toBe('Could not save the changes: delegation #5 is done, so it takes no follow-up time');
   });
 
   it('submits with a form submit, as Enter in a single-line field does', async () => {
@@ -281,5 +281,17 @@ describe('the create form on the desk page', () => {
     fireEvent.click(details.getByRole('button', { name: 'Create delegation' }));
     await waitFor(() => expect(location.hash).toBe('#/desk?id=9'));
     expect(posts).toEqual([{ url: '/api/desk/delegations', body: { title: 'Order the textbooks' } }]);
+  });
+});
+
+describe('the times of the form in the time zone of the app', () => {
+  it('reads and sends a time in the zone of the app, not in the zone of the browser', () => {
+    // the browser of the tests is in los angeles, and the app is in new york.
+    expect(localParts('2026-10-21T03:59:00.000Z', 'America/New_York')).toEqual({ date: '2026-10-20', time: '23:59' });
+    expect(whenOf('2026-10-20', '23:59', 'America/New_York')).toBe('2026-10-21T03:59:00.000Z');
+    // the day after the end of daylight saving time has another offset.
+    expect(whenOf('2026-11-02', '09:00', 'America/New_York')).toBe('2026-11-02T14:00:00.000Z');
+    expect(whenOf('2026-02-30', '09:00', 'America/New_York')).toBeNull();
+    expect(whenOf('2026-10-20', '', 'America/New_York')).toBe('2026-10-20');
   });
 });

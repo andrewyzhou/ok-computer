@@ -198,3 +198,13 @@ describe('dueWords', () => {
     setTimeZone('America/Los_Angeles');
   });
 });
+
+describe('the status tabs under a filter', () => {
+  it('keep the counts of the whole desk when the server gives them', async () => {
+    const counts = { open: 2, waiting: 3, blocked: 1, done: 1, dropped: 1 };
+    await open('#/desk?status=waiting', { 'GET /api/desk': () => ({ ...board(delegations.filter((each) => each.status === 'waiting')), counts }) });
+    await inMain().findByText('Get the lease renewal from Dana');
+    const tabs = within(screen.getByRole('tablist', { name: 'status' }));
+    expect(tabs.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['All8', 'Open2', 'Waiting3', 'Needs you1', 'Done1', 'Dropped1']);
+  });
+});

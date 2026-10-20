@@ -86,7 +86,7 @@ export function seedDesk(db: Db, now: Date): void {
     { delegationId: lease, kind: 'nudge_drafted', text: 'Saved a nudge to Dana in Gmail Drafts. It is not sent.', data: { nudgeId: 1, gmailDraftId: 'd-nudge-1', account: 'personal', threadId: 't-lease' }, ...system },
     at(-1 * D),
   );
-  markChecked(db, lease, { nextFollowUpAt: iso(1 * D), nudged: true }, at(-1 * D));
+  markChecked(db, lease, { expected: iso(-1 * D), nextFollowUpAt: iso(1 * D), nudged: true }, at(-1 * D));
   change(lease, { note: 'Dana said on the phone that the lease comes this week.' }, owner, -2 * H);
 
   make(

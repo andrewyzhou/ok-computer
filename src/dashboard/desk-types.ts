@@ -147,6 +147,11 @@ export interface DeskBoard {
   people: DeskPerson[];
   // the active delegations that are due before the end of today, or whose follow-up time has passed.
   dueToday: number;
+  // the number of delegations of each status on the whole desk. like people, the filter does not change it, so the
+  // status tabs keep the overview. an older server leaves it out.
+  counts?: Record<DelegationStatus, number>;
+  // the time zone of the app, so the form reads and shows the times in it and not in the zone of the browser.
+  timeZone?: string;
 }
 
 // a link in a request. account is needed for a thread and an event.

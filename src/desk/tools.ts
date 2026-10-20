@@ -5,7 +5,7 @@ import { addDays, formatLocal, localDay, zonedToUtc } from '../time.js';
 import { defineTool, type Tool, type ToolContext, type ToolOutput } from '../tools/registry.js';
 import type { DeskContext } from './context.js';
 import { ACTIVE_STATUSES, isClosed, LIMITS, LINK_KINDS, parseWhen, personKey, validEmail } from './shared.js';
-import { createDelegation, getDelegation, listDelegations, updateDelegation, type ChangeBy, type StoreResult } from './store.js';
+import { createDelegation, fold, getDelegation, listDelegations, updateDelegation, type ChangeBy, type StoreResult } from './store.js';
 
 // the agent tools of the desk: delegation_create, delegation_update, delegation_wait_on, delegation_done and
 // delegation_list. the main session lists all five (DESK_MAIN_TOOLS in names.ts), and an isolated automation lists
@@ -99,8 +99,14 @@ const personText = (waitingOn: WaitingOn) =>
 const linkKey = (link: { kind: string; ref: string; account?: string | null }) => `${link.kind}|${link.account ?? ''}|${link.ref}`;
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
-// every write of a tool names the run and the tool call, so the history row leads back to the trace.
-const changeBy = (toolCtx: ToolContext): ChangeBy => ({ actor: 'agent', runId: toolCtx.runId, toolCallId: toolCtx.toolCallId ?? null });
+// every write of a tool names the run and the tool call, so the history row leads back to the trace. it also keeps
+// whether the session had read outside text at that time, so a later list knows that the text may come from a mail.
+const changeBy = (ctx: DeskContext, toolCtx: ToolContext): ChangeBy => ({
+  actor: 'agent',
+  runId: toolCtx.runId,
+  toolCallId: toolCtx.toolCallId ?? null,
+  tainted: sessionTaint(ctx.db, toolCtx.sessionKey).length > 0,
+});
 
 // a due time can be in the past, because the owner may record a date that has gone by. a follow-up time in the past
 // would fire at once, so it is an error.
@@ -186,16 +192,28 @@ function changesOf(before: Delegation, after: Delegation, timeZone: string, note
 }
 
 // titles and next steps can come from mail that a tainted session read, or from the follow-up job, which reads
-// threads. a list with such a row is outside text, so the caller wraps it as untrusted.
+// threads. a list with such a row is outside text, so the caller wraps it as untrusted. the history row keeps the
+// taint of the session at the time of the write, so neither a later reset nor a write from another session hides it.
 function fromOutside(ctx: DeskContext, delegations: readonly Delegation[]): boolean {
-  const keys = new Set(delegations.map((each) => each.sessionKey).filter((key): key is string => Boolean(key)));
-  for (const key of keys) if (sessionTaint(ctx.db, key).length) return true;
   if (!delegations.length) return false;
   const ids = delegations.map((each) => each.id);
   const row = ctx.db
-    .prepare(`SELECT 1 AS found FROM delegation_events WHERE actor = 'system' AND delegationId IN (${ids.map(() => '?').join(', ')}) LIMIT 1`)
+    .prepare(`SELECT 1 AS found FROM delegation_events WHERE (actor = 'system' OR tainted = 1) AND delegationId IN (${ids.map(() => '?').join(', ')}) LIMIT 1`)
     .get(...ids);
   return Boolean(row);
+}
+
+// the fields of a create that differ from the delegation that has the same title.
+function differences(same: Delegation, input: z.infer<typeof createInput>, dueAt: string | undefined, followUpAt: string | undefined): string[] {
+  const fields: string[] = [];
+  if (input.details !== undefined && input.details.trim() !== (same.details ?? '')) fields.push('details');
+  if (input.nextStep !== undefined && input.nextStep.trim() !== (same.nextStep ?? '')) fields.push('nextStep');
+  if (input.waitingOn && personKey(input.waitingOn) !== personKey(same.waitingOn)) fields.push('waitingOn');
+  if (dueAt !== undefined && dueAt !== same.dueAt) fields.push('dueAt');
+  if (followUpAt !== undefined && followUpAt !== same.nextFollowUpAt) fields.push('followUpAt');
+  const has = new Set(same.links.map(linkKey));
+  if ((input.links ?? []).some((each) => !has.has(linkKey({ kind: each.kind, ref: each.ref.trim(), account: each.account?.trim() ?? '' })))) fields.push('links');
+  return fields;
 }
 
 // the status filter of the list. active means every status that is still in flight, and all means no filter.
@@ -239,7 +257,14 @@ export function createDeskTools(ctx: DeskContext): Tool[] {
 
           // a model that retries a call must not put the same job on the desk two times.
           const same = listDelegations(ctx.db, { statuses: ACTIVE_STATUSES }).find((each) => each.title.trim().toLowerCase() === title.toLowerCase());
-          if (same) return { content: `Already on the desk as ${named(same)} (${same.status}). ${ctx.deskLink(same.id)}` };
+          if (same) {
+            // the input of this call was not saved, so the model must not tell the owner that it was.
+            const differ = differences(same, input, dueAt?.ok ? dueAt.iso : undefined, followUp?.ok ? followUp.iso : undefined);
+            if (!differ.length) return { content: `Already on the desk as ${named(same)} (${same.status}). Nothing new was given, so nothing changed. ${ctx.deskLink(same.id)}` };
+            return failed(
+              `Already on the desk as ${named(same)} (${same.status}), so nothing was saved. These fields differ from it: ${differ.join(', ')}. Use delegation_update on #${same.id} to change them, or delegation_wait_on for the person. ${ctx.deskLink(same.id)}`,
+            );
+          }
 
           const result = createDelegation(
             ctx.db,
@@ -255,7 +280,7 @@ export function createDeskTools(ctx: DeskContext): Tool[] {
               sessionKey: toolCtx.sessionKey,
               runId: toolCtx.runId,
             },
-            changeBy(toolCtx),
+            changeBy(ctx, toolCtx),
             toolCtx.clock(),
           );
           return answerOf(result, (delegation) => ({
@@ -281,6 +306,10 @@ export function createDeskTools(ctx: DeskContext): Tool[] {
           if (linkProblem) return failed(linkProblem);
 
           const before = getDelegation(ctx.db, input.id);
+          // a closed delegation was closed by a decision, often the owner's. only the owner reopens it, on the desk.
+          if (before && input.status && isClosed(before.status)) {
+            return failed(`${named(before)} is ${before.status}, and only the owner can reopen it from the desk. Nothing changed.`);
+          }
           const historyBefore = before ? historyCount(ctx, input.id) : 0;
           const result = updateDelegation(
             ctx.db,
@@ -296,7 +325,7 @@ export function createDeskTools(ctx: DeskContext): Tool[] {
               ...(input.removeLinks ? { removeLinks: asLinks(input.removeLinks) } : {}),
               ...(input.note ? { note: input.note } : {}),
             },
-            changeBy(toolCtx),
+            changeBy(ctx, toolCtx),
             toolCtx.clock(),
           );
           return answerOf(result, (after) => {
@@ -342,7 +371,7 @@ export function createDeskTools(ctx: DeskContext): Tool[] {
               ...(thread ? { addLinks: asLinks([thread]) } : {}),
               ...(input.note ? { note: input.note } : {}),
             },
-            changeBy(toolCtx),
+            changeBy(ctx, toolCtx),
             now,
           );
           return answerOf(result, (after) => {
@@ -367,7 +396,7 @@ export function createDeskTools(ctx: DeskContext): Tool[] {
           const before = getDelegation(ctx.db, input.id);
           if (!before) return failed(`delegation #${input.id} not found`);
           if (isClosed(before.status)) return failed(`${named(before)} is already ${before.status}. Nothing changed.`);
-          const result = updateDelegation(ctx.db, input.id, { status: input.outcome, ...(input.note ? { note: input.note } : {}) }, changeBy(toolCtx), toolCtx.clock());
+          const result = updateDelegation(ctx.db, input.id, { status: input.outcome, ...(input.note ? { note: input.note } : {}) }, changeBy(ctx, toolCtx), toolCtx.clock());
           return answerOf(result, (after) => ({ content: `Closed ${named(after)} as ${input.outcome}.` }));
         }),
     }),
@@ -384,15 +413,13 @@ export function createDeskTools(ctx: DeskContext): Tool[] {
           let rows: Delegation[];
           const text = input.person?.trim();
           if (text) {
+            // the key of a row with an email is the email, so a bare name finds such a row only through its name. the
+            // rows of the key and the rows whose name or email holds the text come together, in the order of the list.
             const key = personKey(text.includes('@') ? { email: text } : { name: text });
-            rows = key ? listDelegations(ctx.db, { ...filter, person: key, limit: input.limit }) : [];
-            // the key of a row with an email is the email, so a bare name finds it only through this match.
-            if (!rows.length) {
-              const needle = text.toLowerCase();
-              rows = listDelegations(ctx.db, { ...filter, statuses: statuses ?? ACTIVE_STATUSES })
-                .filter((each) => [each.waitingOn?.name, each.waitingOn?.email].some((value) => value?.toLowerCase().includes(needle)))
-                .slice(0, input.limit);
-            }
+            const needle = fold(text);
+            rows = listDelegations(ctx.db, filter)
+              .filter((each) => (key !== null && each.waitingOn !== null && personKey(each.waitingOn) === key) || [each.waitingOn?.name, each.waitingOn?.email].some((value) => value && fold(value).includes(needle)))
+              .slice(0, input.limit);
           } else {
             rows = listDelegations(ctx.db, { ...filter, limit: input.limit });
           }

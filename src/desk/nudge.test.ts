@@ -118,7 +118,7 @@ describe('the nudge tool', () => {
     const { h, d } = await setup();
     const outside = await h.nudge(input(d, { to: ['mallory@evil.example'] }));
     expect(outside).toMatchObject({ isError: true });
-    expect(outside.content).toContain('a nudge goes only to the person that the delegation waits on, or to an address in the thread');
+    expect(outside.content).toContain('a nudge goes only to an address in the From, To or Cc of the thread');
     expect((await h.nudge(input(d, { to: ['noreply@landlord.example'] }))).content).toContain('takes no replies');
     const list = await h.nudge(input(d, { to: ['dana@landlord.example, mallory@evil.example'] }));
     expect(list).toMatchObject({ isError: true });

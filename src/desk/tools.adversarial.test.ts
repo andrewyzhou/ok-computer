@@ -194,13 +194,16 @@ describe('delegation_update and delegation_done from a model that retries', () =
     expect(getDelegation(db, 1)).toMatchObject({ dueAt: null, nextFollowUpAt: null });
   });
 
-  it('opens a done delegation again with status open', async () => {
+  // the owner closed it, so only the owner reopens it, on the desk. a retry or a mail cannot undo that decision.
+  it('does not open a done delegation again with status open', async () => {
     const { db, call } = setup();
     await call('delegation_create', { title: 'x' });
     await call('delegation_done', { id: 1, outcome: 'dropped' });
     const out = await call('delegation_update', { id: 1, status: 'open' });
-    expect(out.content).toContain('status open');
-    expect(getDelegation(db, 1)).toMatchObject({ status: 'open', closedAt: null });
+    expect(out).toMatchObject({ isError: true });
+    expect(out.content).toContain('only the owner can reopen it from the desk');
+    expect(getDelegation(db, 1)).toMatchObject({ status: 'dropped' });
+    expect(getDelegation(db, 1)!.closedAt).not.toBeNull();
   });
 
   it('says nothing changed for a note of only spaces', async () => {

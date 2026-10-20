@@ -11,6 +11,7 @@ import {
   listDue,
   listFollowUpsDue,
   listWaiting,
+  markChecked,
   updateDelegation,
 } from './store.js';
 
@@ -123,5 +124,51 @@ describe('the desk rules', () => {
     expect(personKey({ name: 'Dana Park', email: ' Dana@Example.com ' })).toBe('dana@example.com');
     expect(personKey({ name: '  Dana   Park ' })).toBe('dana park');
     expect(personKey(null)).toBeNull();
+  });
+});
+
+describe('the desk store with other text', () => {
+  it('matches q without case for non-ascii text', () => {
+    const target = open();
+    createDelegation(target, { title: 'ÉCOLE forms', createdBy: 'owner' }, { actor: 'owner' }, NOW);
+    expect(listDelegations(target, { q: 'école' }).map((d) => d.title)).toEqual(['ÉCOLE forms']);
+  });
+});
+
+describe('the waits of a delegation', () => {
+  it('counts the nudges of each wait from 0, and records the reset', () => {
+    const target = open();
+    const delegation = made(target, { waitingOn: { name: 'Dana', email: 'dana@landlord.example' }, nextFollowUpAt: later(D).toISOString() });
+    expect(markChecked(target, delegation.id, { expected: later(D).toISOString(), nextFollowUpAt: later(2 * D).toISOString(), nudged: true }, NOW)).toBe(true);
+    expect(markChecked(target, delegation.id, { expected: later(2 * D).toISOString(), nextFollowUpAt: later(3 * D).toISOString(), nudged: true }, NOW)).toBe(true);
+    expect(getDelegationDetail(target, delegation.id)!.nudgeCount).toBe(2);
+    // a reply came: the delegation opens, as the follow-up job does it.
+    const open1 = updateDelegation(target, delegation.id, { status: 'open', nextFollowUpAt: null }, { actor: 'system' }, later(1000));
+    expect(open1.ok && open1.value).toMatchObject({ status: 'open', waitingSince: null, nudgeCount: 2 });
+    const again = updateDelegation(target, delegation.id, { status: 'waiting', nextFollowUpAt: later(4 * D).toISOString() }, { actor: 'agent' }, later(2000));
+    expect(again.ok && again.value).toMatchObject({ status: 'waiting', nudgeCount: 0 });
+    expect(listDelegationEvents(target, delegation.id).at(-1)).toMatchObject({ kind: 'status', data: { from: 'open', to: 'waiting', nudgesReset: 2 } });
+  });
+
+  it('keeps a follow-up time that the patch gives when it moves out of waiting', () => {
+    const target = open();
+    const delegation = made(target, { waitingOn: { name: 'Dana' }, nextFollowUpAt: later(D).toISOString() });
+    const moved = updateDelegation(target, delegation.id, { status: 'blocked', nextFollowUpAt: later(2 * D).toISOString() }, { actor: 'owner' }, later(1000));
+    expect(moved.ok && moved.value.nextFollowUpAt).toBe(later(2 * D).toISOString());
+  });
+
+  it('checks a delegation only while its follow-up time is the one that the job read', () => {
+    const target = open();
+    const delegation = made(target, { waitingOn: { name: 'Dana' }, nextFollowUpAt: later(D).toISOString() });
+    // the owner moved the follow-up time.
+    updateDelegation(target, delegation.id, { nextFollowUpAt: later(5 * D).toISOString() }, { actor: 'owner' }, NOW);
+    expect(markChecked(target, delegation.id, { expected: later(D).toISOString(), nextFollowUpAt: later(2 * D).toISOString(), nudged: true }, NOW)).toBe(false);
+    expect(getDelegationDetail(target, delegation.id)).toMatchObject({ nextFollowUpAt: later(5 * D).toISOString(), nudgeCount: 0 });
+    // the owner closed it: no follow-up time comes back.
+    updateDelegation(target, delegation.id, { status: 'done' }, { actor: 'owner' }, NOW);
+    expect(markChecked(target, delegation.id, { expected: null, nextFollowUpAt: later(2 * D).toISOString() }, NOW)).toBe(false);
+    expect(getDelegationDetail(target, delegation.id)!.nextFollowUpAt).toBeNull();
+    // a guarded patch gives a 409 for a closed delegation.
+    expect(updateDelegation(target, delegation.id, { status: 'open', ifFollowUpAt: null }, { actor: 'system' }, NOW)).toMatchObject({ ok: false, status: 409 });
   });
 });

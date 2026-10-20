@@ -74,7 +74,7 @@ describe('the details panel of a delegation', () => {
     expect(panel().getByText('dana@landlord.example', { selector: 'dd' })).toBeTruthy();
     expect(panel().getByText('Re: Lease renewal')).toBeTruthy();
     expect(panel().getByText(/Could you send the new lease when it is ready/)).toBeTruthy();
-    expect(panel().getByText('Saved in the Gmail Drafts of personal. ok computer never sends it.')).toBeTruthy();
+    expect(panel().getByText('Saved in Gmail Drafts (personal account). ok computer never sends it.')).toBeTruthy();
     expect(panel().queryByRole('button', { name: /send/i })).toBeNull();
 
     expect(historyKinds()).toEqual(['Created', 'Link added', 'Checked for a reply', 'Nudge drafted', 'Note']);
@@ -124,7 +124,7 @@ describe('the details panel of a delegation', () => {
     const { panel, onChanged } = renderPanel(2);
     await panel().findByText('Nudge drafted');
     const actions = within(panel().getByRole('group', { name: 'status actions' }));
-    expect(actions.getAllByRole('button').map((button) => button.textContent)).toEqual(['Mark done', 'Needs you', 'Drop']);
+    expect(actions.getAllByRole('button').map((button) => button.textContent)).toEqual(['Mark done', 'Move to needs you', 'Drop']);
     fireEvent.click(actions.getByRole('button', { name: 'Mark done' }));
     await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
     expect(posts).toEqual([{ status: 'done' }]);
@@ -238,7 +238,8 @@ describe('the details panel of a delegation', () => {
 
   it('words the data of each kind of history row', () => {
     expect(eventSummary({ kind: 'status', data: { from: 'open', to: 'waiting' } })).toBe('Open → Waiting');
-    expect(eventSummary({ kind: 'updated', data: { changes: { title: {}, details: {}, nextStep: {}, dueAt: {}, nextFollowUpAt: {} } } })).toBe('title, details, next step, due, follow-up');
+    expect(eventSummary({ kind: 'updated', data: { changes: { title: {}, details: {}, nextStep: {}, dueAt: {}, nextFollowUpAt: {} } } })).toBe('Title; Details; Next step; Due; Follow-up');
+    expect(eventSummary({ kind: 'updated', data: { changes: { nextStep: { from: 'Call the bank', to: null } } } })).toBe('Next step: Call the bank → none');
     expect(eventSummary({ kind: 'waiting_on', data: { name: 'Dana', email: 'dana@landlord.example' } })).toBe('Dana');
     expect(eventSummary({ kind: 'waiting_on', data: { name: null, email: 'dana@landlord.example' } })).toBe('dana@landlord.example');
     expect(eventSummary({ kind: 'waiting_on', data: { name: null, email: null } })).toBe('No one');
@@ -273,7 +274,7 @@ describe('the details panel on the desk page', () => {
     stubDesk();
     openApp('#/desk?id=2');
     expect(await details().findByText('Nudge drafted')).toBeTruthy();
-    expect(details().getByText('Saved in the Gmail Drafts of personal. ok computer never sends it.')).toBeTruthy();
+    expect(details().getByText('Saved in Gmail Drafts (personal account). ok computer never sends it.')).toBeTruthy();
     expect(historyKinds()).toEqual(['Created', 'Link added', 'Checked for a reply', 'Nudge drafted', 'Note']);
     for (const run of details().getAllByRole('link', { name: 'run run-1' })) expect(run.getAttribute('href')).toBe('#/runs/run-1');
   });
