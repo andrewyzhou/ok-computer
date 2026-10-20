@@ -34,6 +34,15 @@ describe('toAnthropicParams', () => {
     expect(params.tool_choice).toBeUndefined();
   });
 
+  // the digest sends each batch of mail once. a breakpoint at the end of it wrote the whole batch to the cache, and no
+  // later call read it.
+  it('keeps the breakpoint of the system text and drops the one at the end for a one-shot request', () => {
+    const params = toAnthropicParams({ ...call([{ role: 'user', content: [{ type: 'text', text: 'a batch of mail' }] }]), oneShot: true });
+    expect(params.system).toEqual([{ type: 'text', text: 'stable prompt', cache_control: { type: 'ephemeral' } }]);
+    expect(params.cache_control).toBeUndefined();
+    expect('oneShot' in params).toBe(false);
+  });
+
   // the owner writes 15 to 75 minutes apart, so the 5-minute cache expired between messages and each one paid a write.
   it('puts the 1-hour time on both breakpoints of a slot that asks for it, and reads the 1-hour writes', () => {
     const params = toAnthropicParams({ ...call([{ role: 'user', content: [{ type: 'text', text: 'hi' }] }]), cacheTtl: '1h' });

@@ -27,12 +27,14 @@ export interface DigestAccountStats {
 // the counts of one digest. accounts holds each configured account, also one that could not be read.
 export interface DigestStats {
   accounts: DigestAccountStats[];
-  // the deadlines that the model gave and the code dropped, because the mail does not state the date.
+  // the due dates that the model gave and the code dropped, because the mail does not state the date. a deadline
+  // whose date is dropped is left out, and a bill stays without its date.
   droppedDates: number;
   // the deadlines and bills that the digest left out because their due time had passed. absent in an older digest.
   pastDue?: number;
-  // the deadlines that the digest left out because the mail is a calendar invitation, which the calendar shows, or
-  // confirms a thing that the owner already did, such as a submitted form. absent in an older digest.
+  // the deadlines that the digest left out because the mail is a calendar invitation, which the calendar shows,
+  // confirms a thing that the owner already did, such as a submitted form, gives no date, or is list or machine mail
+  // that only announces an event. absent in an older digest.
   notDeadlines?: number;
 }
 

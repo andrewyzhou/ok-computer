@@ -122,8 +122,8 @@ describe('the inbox digest', () => {
     const hkn = within(main.getByTestId('coverage-hkn'));
     expect(hkn.getByText('Not read: the sign-in of this account has expired')).toBeTruthy();
     expect(hkn.queryByText(/read$/)).toBeNull();
-    // 58 + 9 + 7 + 80 + 0.
-    expect(main.getByText('154 automated or list mails hidden')).toBeTruthy();
+    // 58 + 9 + 7 + 80 + 0, and the one due date that the digest dropped.
+    expect(main.getByText('154 automated or list mails hidden · 1 due date left out because the mail did not state it')).toBeTruthy();
     // the mail that needs a reply stays the first section, under the strip.
     expect(main.getAllByRole('heading', { level: 2 })[0]!.textContent).toBe('Needs a reply 2');
   });
@@ -133,6 +133,29 @@ describe('the inbox digest', () => {
     stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/digests/latest': () => one, ...pastDigests });
     openApp('#/inbox');
     expect(await inMain().findByText('1 automated or list mail hidden')).toBeTruthy();
+  });
+
+  it('says how many due dates, past deadlines and mails without a deadline the digest left out', async () => {
+    const counts = { ...fiveDigest, stats: { accounts: [{ ...fiveDigest.stats!.accounts[0]!, hidden: 3 }], droppedDates: 2, pastDue: 1, notDeadlines: 4 } };
+    stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/digests/latest': () => counts, ...pastDigests });
+    openApp('#/inbox');
+    expect(
+      await inMain().findByText(
+        '3 automated or list mails hidden · 1 past deadline left out · 4 mails that set no deadline left out · 2 due dates left out because the mail did not state them',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('shows the whole of a long alias in its own row of the coverage list', async () => {
+    const alias = 'someone.long.alias@school.example.edu';
+    const long = { ...fiveDigest, stats: { accounts: [{ ...fiveDigest.stats!.accounts[0]!, alias }, fiveDigest.stats!.accounts[1]!], droppedDates: 0 } };
+    stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/digests/latest': () => long, ...pastDigests });
+    openApp('#/inbox');
+    const row = await inMain().findByTestId(`coverage-${alias}`);
+    expect(row.classList.contains('is-long')).toBe(true);
+    expect(row.querySelector('.inbox-account')!.classList.contains('is-full')).toBe(true);
+    expect(row.querySelector('.inbox-account-text')!.textContent).toBe(alias);
+    expect(inMain().getByTestId(`coverage-${fiveDigest.stats!.accounts[1]!.alias}`).classList.contains('is-long')).toBe(false);
   });
 
   it('shows no coverage and no error for a digest of phase 5 without stats', async () => {

@@ -44,6 +44,9 @@ export interface ModelRequest {
   system: string;
   messages: ModelMessage[];
   tools: ToolSpec[];
+  // true for a request whose messages no later call sends again, such as one batch of mail. the provider then caches
+  // only the tools and the system text, which the next call of the same job repeats, and not the messages.
+  oneShot?: boolean;
 }
 
 export interface ModelCall extends ModelRequest {

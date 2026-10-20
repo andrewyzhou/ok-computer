@@ -67,7 +67,8 @@ export function toAnthropicParams(call: ModelCall): MessageCreateParamsNonStream
     thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } },
     ...(call.effort ? { output_config: { effort: call.effort } } : {}),
     // the explicit breakpoint keeps the tools and the stable system prompt cached. the top-level breakpoint
-    // follows the end of the conversation.
+    // follows the end of the conversation. a one-shot request has none, because no later call reads its messages
+    // again, and a cache write costs more than plain input.
     ...(call.system ? { system: [{ type: 'text', text: call.system, cache_control: cache }] } : {}),
     ...(call.tools.length
       ? {
@@ -80,7 +81,7 @@ export function toAnthropicParams(call: ModelCall): MessageCreateParamsNonStream
           ),
         }
       : {}),
-    cache_control: cache,
+    ...(call.oneShot ? {} : { cache_control: cache }),
     messages: call.messages.flatMap(toAnthropicMessage),
   };
 }

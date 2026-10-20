@@ -52,7 +52,8 @@ export async function extractItems<T>(slots: SlotRunner, request: ExtractRequest
   const text = wrapUntrusted(request.source, request.inputs.map((each) => `item ${each.id}:\n${each.text}`).join('\n\n'));
   const result = await slots.call(
     request.slot,
-    { system: request.system, messages: [{ role: 'user', content: [{ type: 'text', text }] }], tools: [request.tool] },
+    // each batch of mail is sent once, so only the system text and the tool are worth a cache entry.
+    { system: request.system, messages: [{ role: 'user', content: [{ type: 'text', text }] }], tools: [request.tool], oneShot: true },
     { runId: request.runId, ...(request.signal ? { signal: request.signal } : {}) },
   );
   if (!result.ok) {
