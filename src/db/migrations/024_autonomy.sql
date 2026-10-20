@@ -39,6 +39,14 @@ BEGIN
   SELECT RAISE(ABORT, 'autonomy changes are append-only');
 END;
 
+-- an insert or replace with the id of a row deletes that row, and sqlite runs no delete trigger for it while
+-- recursive triggers are off, which is the default. so an insert with an id that exists is refused too.
+CREATE TRIGGER autonomy_changes_no_replace BEFORE INSERT ON autonomy_changes
+WHEN EXISTS (SELECT 1 FROM autonomy_changes WHERE id = NEW.id)
+BEGIN
+  SELECT RAISE(ABORT, 'autonomy changes are append-only');
+END;
+
 -- the current level of each domain that was ever changed. a domain with no row has its default level. changeId is the
 -- history row that set the level.
 CREATE TABLE autonomy_levels (

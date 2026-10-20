@@ -138,15 +138,30 @@ export function changeLevel(db: Db, change: LevelChange, now: Date): AutonomyCha
     return toChangeRow(row);
   };
   // BEGIN IMMEDIATE takes the write lock first, so the compare and set sees the newest level also when the agent and
-  // the dashboard write at the same time. a caller that is already in a transaction keeps its own.
-  if (db.isTransaction) return work();
+  // the dashboard write at the same time. a caller that is already in a transaction keeps its own, and a savepoint
+  // inside it takes back a half-written change, so a failed upsert does not leave a history row without its level.
+  if (db.isTransaction) {
+    db.exec('SAVEPOINT autonomy_change');
+    try {
+      const result = work();
+      db.exec('RELEASE autonomy_change');
+      return result;
+    } catch (err) {
+      // some errors, for example a full disk, end the whole transaction, and the savepoint is gone with it.
+      if (db.isTransaction) {
+        db.exec('ROLLBACK TO autonomy_change');
+        db.exec('RELEASE autonomy_change');
+      }
+      throw err;
+    }
+  }
   db.exec('BEGIN IMMEDIATE');
   try {
     const result = work();
     db.exec('COMMIT');
     return result;
   } catch (err) {
-    db.exec('ROLLBACK');
+    if (db.isTransaction) db.exec('ROLLBACK');
     throw err;
   }
 }
