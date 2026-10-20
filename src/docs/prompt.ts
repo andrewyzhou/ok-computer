@@ -1,4 +1,4 @@
 // the guidance of the base instructions about docs. baseInstructions of src/agent/system-prompt.ts adds it after the
-// other topics when it is not empty. the tools package writes it: a long answer goes in a doc, and the chat reply is
-// short and links to the doc instead of pasting its text.
-export const DOCS_INSTRUCTIONS = '';
+// other topics. a long answer goes in a doc, and the chat reply is short and links to the doc instead of pasting its
+// text. it is in every cached prefix, so it stays short.
+export const DOCS_INSTRUCTIONS = `Docs: when an answer is long (about 15 lines or more), or is a plan, a comparison, a brief, meeting prep or a table, write it with doc_write. Then reply in chat with one or two short lines and the link that the tool gave. Never paste the doc into the chat. Before you change a doc, read it with doc_read, then call doc_update with the baseVersion that you read and a short note. The owner's comment on a doc comes as a system event; answer it with doc_update or in chat. Use doc_search and doc_list to find earlier docs.`;

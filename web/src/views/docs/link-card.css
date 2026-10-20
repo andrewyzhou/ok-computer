@@ -1,0 +1,150 @@
+/* the cards of the doc links under an agent message. each state has the same height, so a card that loads does not
+   move the messages under it. */
+.doc-cards {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 460px;
+  min-width: 0;
+}
+.doc-cards > li {
+  min-width: 0;
+}
+.doc-card {
+  --doc-card-h: 58px;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'icon title taint'
+    'icon info info';
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 3px;
+  height: var(--doc-card-h);
+  padding: 8px 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--ink);
+  text-decoration: none;
+  min-width: 0;
+}
+a.doc-card:hover {
+  background: var(--bg-hover);
+  border-color: var(--faint);
+}
+a.doc-card:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.doc-card-icon {
+  grid-area: icon;
+  align-self: start;
+  margin-top: 2px;
+  color: var(--muted);
+}
+.doc-card-title {
+  grid-area: title;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-md);
+  font-weight: 560;
+}
+.doc-card-taint {
+  grid-area: taint;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--serious) 55%, transparent);
+  color: var(--serious-ink);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.doc-card-info {
+  grid-area: info;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.doc-card-kind {
+  flex: none;
+  height: 18px;
+  font-size: var(--text-xs);
+}
+.doc-card-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* a doc that does not exist, and the card while the doc loads. */
+.doc-card.is-missing {
+  grid-template-areas: 'icon title title';
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
+}
+.doc-card.is-missing .doc-card-icon {
+  align-self: center;
+  margin-top: 0;
+}
+.doc-card-note {
+  grid-area: title;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+}
+.doc-card.is-loading {
+  display: block;
+  padding: 0;
+  border-color: var(--rule);
+  overflow: hidden;
+}
+.doc-card-skeleton {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--bg-sunken) 0%, var(--bg-active) 50%, var(--bg-sunken) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .doc-card-skeleton {
+    animation: none;
+  }
+}
+
+/* when the doc cannot load, a plain link of the same size still opens it. */
+.doc-card.is-plain {
+  grid-template-areas: 'icon title title';
+  background: transparent;
+}
+.doc-card.is-plain .doc-card-icon {
+  align-self: center;
+  margin-top: 0;
+}
+.doc-card.is-plain .doc-card-note {
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-decoration-color: var(--rule-strong);
+  text-underline-offset: 2px;
+}
+
+@media (max-width: 759.98px) {
+  .doc-cards {
+    max-width: none;
+  }
+}
