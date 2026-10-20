@@ -28,6 +28,8 @@ import {
 } from './memory/consolidate.js';
 import { appendToDailyNote, sessionExcerpt } from './memory/daily.js';
 import { createMemoryTools } from './memory/tools.js';
+import { createDocComments, type DocComments } from './docs/comments.js';
+import { createDocTools } from './docs/tools.js';
 import { createGoogle, syncGooglePoll, type Google } from './google/google.js';
 import { createInbox, installInboxJobs, type Inbox } from './inbox/inbox.js';
 import { createDesk, DESK_INSTRUCTIONS, installDeskJobs } from './desk/index.js';
@@ -132,6 +134,8 @@ export interface App {
   chat?: WebChat;
   inbox?: Inbox;
   sandbox: Pick<Sandbox, 'status'>;
+  // the owner's comments on the docs (phase 6 t4). the dashboard adds them, and each goes to the main session.
+  docs: Pick<DocComments, 'add'>;
   secretVault?: SecretVault;
 }
 
@@ -229,6 +233,8 @@ export function createApp(deps: AppDeps): App {
     : undefined;
   // the desk of phase 6 t3 needs only the database, so it exists also without google. its follow-up job reads mail
   // threads and saves nudge drafts only when the google accounts are there.
+  // the dashboard accepts the public name only with a token, and the sign-in codes exist only then. without them, a
+  // link to the public name gets a 403.
   const dashboardUrl = (deps.loginCodes && config.dashboard.publicUrl) || `http://127.0.0.1:${config.dashboard.port}`;
   const desk = createDesk({
     db,
@@ -296,6 +302,7 @@ export function createApp(deps: AppDeps): App {
     : undefined;
   // the scheduler is created below. the tools call replan only after the start.
   const replan = () => scheduler.replan();
+  const docComments = createDocComments({ db, queue, clock, logger });
   const builtIn = [
     nowTool,
     ...createGoalTools({ db, replan }),
@@ -310,6 +317,7 @@ export function createApp(deps: AppDeps): App {
     ...createAutonomyTools({ db }),
     ...web.tools,
     ...sandbox.tools,
+    ...createDocTools({ db, dashboardUrl }),
   ];
   // a profile names built-in tools and google tools. a name that this app does not have is left out.
   const registered = new Set([...builtIn, ...(google?.tools ?? [])].map((tool) => tool.name));
@@ -383,7 +391,7 @@ export function createApp(deps: AppDeps): App {
   const agent = async (input: Parameters<typeof runAgent>[1]) => {
     // the router and the automation runner send the final text to the owner's chat, so it goes through the guard.
     const guard = (text: string, run: { runId: string; signal: AbortSignal }) =>
-      guardReply({ db, reviewer, logger, clock }, { ...run, sessionKey: input.sessionKey }, text);
+      guardReply({ db, reviewer, logger, clock, dashboardUrl }, { ...run, sessionKey: input.sessionKey }, text);
     const result = await runAgent(agentDeps, { ...input, allowedTools: withIntegrations(input.sessionKey, input.allowedTools), guardReply: guard });
     // the router tells the owner about a stopped message run in its reply. a background run has no reply, so the owner gets a message here.
     if (result.stoppedAtLimit && input.trigger !== 'message') {
@@ -460,6 +468,7 @@ export function createApp(deps: AppDeps): App {
     queue,
     channels,
     agent,
+    dashboardUrl,
     // the cli runs on the owner's own terminal, and the dashboard signed in each web request. other channels check the
     // sender id against the owner id.
     isOwner: (message) => message.channel === 'cli' || message.channel === WEB || ownerIds[message.channel] === message.senderId,
@@ -471,9 +480,7 @@ export function createApp(deps: AppDeps): App {
       db,
       clock,
       timeZone: config.timeZone,
-      // the dashboard accepts the public name only with a token, and the sign-in codes exist only then. without them,
-      // a link to the public name gets a 403.
-      dashboardUrl: (deps.loginCodes && config.dashboard.publicUrl) || `http://127.0.0.1:${config.dashboard.port}`,
+      dashboardUrl,
       ...(config.dashboard.publicUrl && deps.loginCodes ? { signInLink: signInLink(config.dashboard.publicUrl, deps.loginCodes, config.dashboard.port) } : {}),
       approvalCard: approvals.card,
       integrations: () => [...integrations.status(), ...googleStates()],
@@ -559,6 +566,7 @@ export function createApp(deps: AppDeps): App {
       syncGooglePoll(db, config, clock());
       if (inbox && installInboxJobs(db, config, clock())) logger.info('inbox jobs installed');
       if (installDeskJobs(db, config, clock())) logger.info('desk jobs installed');
+      docComments.start();
       // missed jobs can take minutes, so the start does not wait for them.
       if (deps.background !== false) void scheduler.start().catch((err: unknown) => logger.error('scheduler start failed', { err }));
       // a server can need many seconds to start, so the start does not wait. tool_search reads the stored catalog.
@@ -581,6 +589,7 @@ export function createApp(deps: AppDeps): App {
     ...(google ? { google } : {}),
     ...(inbox ? { inbox } : {}),
     sandbox,
+    docs: docComments,
     ...(deps.secretVault ? { secretVault: deps.secretVault } : {}),
     // without compaction hooks the strategy only renders. it does not call a model or append an event.
     contextView: (sessionKey) =>

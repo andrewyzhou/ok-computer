@@ -1,0 +1,7 @@
+/* the shared parts of the docs views (parts.tsx). */
+
+.docs-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}

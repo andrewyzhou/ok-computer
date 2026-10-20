@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { RunInput, RunResult } from '../agent/loop.js';
 import type { Config } from '../config/schema.js';
 import type { Db } from '../db/index.js';
+import { DOC_TOOLS } from '../docs/names.js';
 import { appendEvent } from '../events/log.js';
 import { checkinPrompt, writeDayResults } from '../goals/routine.js';
 import { getGoal, listGoals, startCheckin } from '../goals/store.js';
@@ -37,6 +38,7 @@ export const AUTOMATION_TOOLS: readonly string[] = [
   'result_read',
   'skill_read',
   ...DESK_AUTO_TOOLS,
+  ...DOC_TOOLS,
 ];
 
 export interface JobDeps {

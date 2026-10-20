@@ -6,6 +6,7 @@ import { parseAlwaysButton } from '../approvals/always.js';
 import type { ChannelAdapter, InboundMessage } from '../channels/types.js';
 import type { Db } from '../db/index.js';
 import { DESK_MAIN_TOOLS } from '../desk/names.js';
+import { DOC_TOOLS } from '../docs/names.js';
 import { appendEvent, type EventInput } from '../events/log.js';
 import type { TaintSource } from '../policy/policy.js';
 import { guardDraft } from '../policy/reply.js';
@@ -38,6 +39,7 @@ export const MAIN_TOOLS: readonly string[] = [
   'result_read',
   'skill_read',
   ...DESK_MAIN_TOOLS,
+  ...DOC_TOOLS,
 ];
 export const NO_REPLY = 'NO_REPLY';
 
@@ -79,6 +81,8 @@ export interface RouterDeps {
   turns?: TurnHooks;
   // the id of the run of a turn. the router makes it before the run starts when it has turns, so started() can name it.
   newId?: () => string;
+  // the url of the owner's own dashboard. the draft keeps a link to a doc on it, as the reply guard does.
+  dashboardUrl?: string;
 }
 
 const APPROVAL_COMMAND = /^\/(approve|deny)\s+#?(\d+)$/i;
@@ -271,7 +275,7 @@ export function createRouter(deps: RouterDeps): Router {
         const runId = deps.turns ? (deps.newId ?? randomUUID)() : undefined;
         const stopRun = () => (current === run ? stopCurrent() : undefined);
         // the reply guard reads only the final reply, so the draft hides each data link of a tainted session.
-        const guard = (text: string) => guardDraft(db, MAIN_SESSION, text);
+        const guard = (text: string) => guardDraft(db, MAIN_SESSION, text, deps.dashboardUrl);
         const progress = teeProgress(
           channel.progress?.(message, stopRun, guard),
           runId !== undefined ? hook((turns) => turns.started(message, runId, stopRun, guard)) : undefined,

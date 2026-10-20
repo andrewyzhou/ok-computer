@@ -38,7 +38,7 @@ describe('the shell', () => {
       .getAllByRole('heading', { level: 2 })
       .map((heading) => heading.textContent);
     // the hash opens a dev page outside developer mode, but the nav and the rail do not list it.
-    expect(groups).toEqual(['Today', 'Desk', 'Inbox', 'Chats', 'Activity', 'Agent', 'Connections']);
+    expect(groups).toEqual(['Today', 'Desk', 'Inbox', 'Docs', 'Chats', 'Activity', 'Agent', 'Connections']);
     expect(nav().queryByRole('link', { name: 'Cost' })).toBeNull();
     const rail = within(screen.getByRole('navigation', { name: 'sections' }));
     expect(rail.queryByRole('link', { name: 'Dev' })).toBeNull();
@@ -46,7 +46,7 @@ describe('the shell', () => {
     const devGroups = nav()
       .getAllByRole('heading', { level: 2 })
       .map((heading) => heading.textContent);
-    expect(devGroups).toEqual(['Today', 'Desk', 'Inbox', 'Chats', 'Activity', 'Agent', 'Connections', 'Dev']);
+    expect(devGroups).toEqual(['Today', 'Desk', 'Inbox', 'Docs', 'Chats', 'Activity', 'Agent', 'Connections', 'Dev']);
     expect(nav().getByRole('link', { name: 'Cost' }).getAttribute('aria-current')).toBe('page');
     expect(rail.getByRole('link', { name: 'Dev' }).getAttribute('aria-current')).toBe('true');
     fireEvent.change(nav().getByRole('searchbox'), { target: { value: 'goa' } });

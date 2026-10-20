@@ -1,0 +1,170 @@
+/* the owner's comments on a doc and the form for a new one. each name starts with doc-comment, and each color and size
+   comes from the tokens of styles.css, so the dark theme reaches the panel too. */
+
+.doc-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.doc-comments-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.doc-comment {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule);
+  min-width: 0;
+}
+.doc-comment:first-child {
+  padding-top: 2px;
+}
+
+/* a quote and a text are the owner's own words. they keep their line breaks, and a long word wraps. */
+.doc-comment-quote {
+  margin: 0 0 6px;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--rule-strong);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.doc-comment-text {
+  margin: 0;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.doc-comment-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-top: 6px;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.doc-comment-meta a {
+  color: var(--ink-2);
+}
+.doc-comment-meta time {
+  font-variant-numeric: tabular-nums;
+}
+.doc-comment-state::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: 1px;
+}
+.doc-comment-state.is-sent {
+  color: var(--good-ink);
+}
+.doc-comment-state.is-sent::before {
+  background: var(--good);
+}
+.doc-comment-state.is-waiting {
+  color: var(--warning-ink);
+}
+.doc-comment-state.is-waiting::before {
+  background: var(--warning);
+}
+
+.doc-comments-empty {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.doc-comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.doc-comment-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.doc-comment-quote-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  min-width: 0;
+}
+.doc-comment-quote-preview .doc-comment-quote {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  max-height: 7.5em;
+  overflow-y: auto;
+}
+.doc-comment-quote-preview .btn {
+  flex: none;
+}
+
+.doc-comment-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 84px;
+  max-height: 50vh;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-md);
+  line-height: 1.5;
+}
+.doc-comment-input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.doc-comment-input[aria-invalid='true'] {
+  border-color: var(--critical);
+}
+
+.doc-comment-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.doc-comment-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+  font-size: var(--text-sm);
+}
+.doc-comment-info .error-text {
+  overflow-wrap: anywhere;
+}
+.doc-comment-counter {
+  font-variant-numeric: tabular-nums;
+}
+
+/* a phone has no keyboard shortcut, so the hint goes, and the input is large enough to type in without a zoom. */
+@media (max-width: 599.98px) {
+  .doc-comment-hint {
+    display: none;
+  }
+  .doc-comment-input {
+    font-size: 16px;
+  }
+}
