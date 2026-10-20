@@ -549,7 +549,10 @@ export async function runFollowUps(ctx: DeskContext, options: FollowUpOptions = 
             try {
               // the check expects the follow-up time that the job read, so an error never moves a time that the owner
               // set meanwhile, and never touches a delegation that the owner closed.
-              const event: HistoryRow = { kind: 'follow_up_failed', text: `the follow-up stopped: ${errorText(err)}` };
+              // the history is append-only, so the text of the error is redacted and cut to one short line before it is
+              // written. a secret in it would stay in the desk history for good.
+              const text = `the follow-up stopped: ${headOf(cleanLine(redact(errorText(err)), LINE_LIMIT), LINE_LIMIT)}`;
+              const event: HistoryRow = { kind: 'follow_up_failed', text };
               settle(delegation, { delegationId: delegation.id, action: 'error' }, { next: at(DAY_MS), event });
             } catch (inner) {
               decide({ delegationId: delegation.id, action: 'error' });

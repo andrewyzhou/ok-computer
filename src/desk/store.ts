@@ -13,7 +13,7 @@ import type {
 } from '../dashboard/desk-types.js';
 import type { Db } from '../db/index.js';
 import { inTransaction } from '../signals/store.js';
-import { ACTIVE_STATUSES, hrefOf, isActive, isClosed, personKey } from './shared.js';
+import { ACTIVE_STATUSES, hrefOf, isActive, isClosed, linkRefError, personKey } from './shared.js';
 
 // the store of the desk (021_delegations.sql). every change of a delegation writes its history row in the same
 // transaction, so the history is complete. the history is append-only: nothing here changes or removes a row of it.
@@ -154,6 +154,7 @@ function eventRow(row: Row): DelegationEvent {
     data,
     runId: str(row.runId),
     toolCallId: str(row.toolCallId),
+    tainted: Number(row.tainted) === 1,
     createdAt: String(row.createdAt),
   };
 }
@@ -243,8 +244,10 @@ function removeLink(db: Db, delegationId: number, link: { kind: DelegationLinkKi
 }
 
 // createDelegation makes a delegation with its links and its created row. a delegation with a person starts as
-// waiting, and the wait starts now.
+// waiting, and the wait starts now. a doc link must name a doc by its id, here and in updateDelegation.
 export function createDelegation(db: Db, input: NewDelegation, by: ChangeBy, now: Date): StoreResult<Delegation> {
+  const linkProblem = linkRefError(input.links);
+  if (linkProblem) return fail(400, linkProblem);
   const waitingOn = waitingOf(input.waitingOn);
   const status: DelegationStatus = waitingOn ? 'waiting' : 'open';
   const at = now.toISOString();
@@ -306,6 +309,8 @@ const sameWaiting = (a: WaitingOn | null, b: WaitingOn | null) => a?.name === b?
 export function updateDelegation(db: Db, id: number, patch: DelegationPatch, by: ChangeBy, now: Date): StoreResult<Delegation> {
   const before = getDelegation(db, id);
   if (!before) return notFound(id);
+  const linkProblem = linkRefError(patch.addLinks);
+  if (linkProblem) return fail(400, linkProblem);
   if (patch.ifFollowUpAt !== undefined && (!isActive(before.status) || before.nextFollowUpAt !== patch.ifFollowUpAt)) {
     return fail(409, `delegation #${id} changed while the follow-up ran`);
   }

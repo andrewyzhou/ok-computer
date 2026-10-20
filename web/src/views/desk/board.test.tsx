@@ -208,3 +208,35 @@ describe('the status tabs under a filter', () => {
     expect(tabs.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['All8', 'Open2', 'Waiting3', 'Needs you1', 'Done1', 'Dropped1']);
   });
 });
+
+describe('the filters of the hash', () => {
+  it('drops a blank q and person, and cuts a long q and person to the limits of the route', async () => {
+    const calls = await open('#/desk?q=%20&person=%20%20');
+    await inMain().findByText('Book the Denver flights');
+    expect(deskCalls(calls)[0]).toBe('/api/desk');
+    expect(screen.queryByText(/Could not load the desk/)).toBeNull();
+
+    cleanup();
+    const long = await open(`#/desk?q=${'a'.repeat(250)}&person=${'b'.repeat(400)}`);
+    await waitFor(() => expect(deskCalls(long).length).toBeGreaterThan(0));
+    const query = new URLSearchParams(deskCalls(long)[0]!.split('?')[1]);
+    expect(query.get('q')).toBe('a'.repeat(200));
+    expect(query.get('person')).toBe('b'.repeat(320));
+    expect((screen.getByRole('searchbox', { name: 'Search the desk' }) as HTMLInputElement).value).toBe('a'.repeat(200));
+    expect(screen.getByText('The search uses the first 200 characters.')).toBeTruthy();
+  });
+
+  it('shows a filter error of the route next to the search, not as a load failure', async () => {
+    await open('#/desk?q=lease', { 'GET /api/desk': () => json({ error: 'give q as text of 1 to 200 characters' }, 400) });
+    expect((await screen.findByText('Search with 1 to 200 characters.')).getAttribute('role')).toBe('alert');
+    expect(screen.queryByText(/Could not load the desk/)).toBeNull();
+    expect(inMain().getByText('The desk cannot use this filter.')).toBeTruthy();
+  });
+
+  it('gives the whole person of a card chip in its title', async () => {
+    await open();
+    await inMain().findByText('Book the Denver flights');
+    expect(within(cardOf('Get the lease renewal from Dana')).getByText('Dana Park').closest('.pill')!.getAttribute('title')).toBe('Dana Park <dana@landlord.example>');
+    expect(within(cardOf('Reschedule the dentist')).getByText('front@dentist.example').closest('.pill')!.getAttribute('title')).toBe('front@dentist.example');
+  });
+});

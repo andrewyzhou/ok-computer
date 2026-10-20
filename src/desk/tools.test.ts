@@ -147,6 +147,16 @@ describe('delegation_create', () => {
     expect(getDelegation(google.db, 1)!.links.map((each) => `${each.kind}:${each.account ?? ''}:${each.ref}`)).toEqual(['run::run-1', 'thread:school:t-1']);
   });
 
+  it('refuses a doc link whose ref is not the id of a doc', async () => {
+    const t = setup();
+    const bad = await t.call('delegation_create', { title: 'Renew the passport', links: [{ kind: 'doc', ref: 'doc-1' }] });
+    expect(bad).toEqual({ content: '"doc-1" is not a doc id. Give a doc link ref as the id of a doc, the number in its #/docs/<id> link.', isError: true });
+    expect(getDelegation(t.db, 1)).toBeUndefined();
+    expect((await t.call('delegation_create', { title: 'Renew the passport', links: [{ kind: 'doc', ref: '12' }] })).isError).toBeUndefined();
+    expect(getDelegation(t.db, 1)!.links.at(-1)).toMatchObject({ kind: 'doc', ref: '12', href: 'docs/12' });
+    expect((await t.call('delegation_update', { id: 1, addLinks: [{ kind: 'doc', ref: '0' }] })).isError).toBe(true);
+  });
+
   it('takes details of 4000 characters and refuses 4001 at the schema', () => {
     const t = setup();
     expect(t.schema('delegation_create', { title: 'Long', details: 'x'.repeat(LIMITS.details) })).toBe(true);
@@ -164,7 +174,7 @@ describe('delegation_update', () => {
       status: 'blocked',
       dueAt: null,
       followUpAt: '2026-10-21',
-      addLinks: [{ kind: 'doc', ref: 'doc-1', label: 'The trip plan' }],
+      addLinks: [{ kind: 'doc', ref: '1', label: 'The trip plan' }],
       note: 'Waiting for the seat choice',
     });
     expect(out.content).toBe(
@@ -173,7 +183,7 @@ describe('delegation_update', () => {
     expect(getDelegation(t.db, 1)).toMatchObject({ status: 'blocked', dueAt: null, nextFollowUpAt: '2026-10-21T16:00:00.000Z' });
     expect(kinds(t.db, 1).slice(2)).toEqual(['updated:agent', 'status:agent', 'link_added:agent', 'note:agent']);
 
-    const removed = await t.call('delegation_update', { id: 1, removeLinks: [{ kind: 'doc', ref: 'doc-1' }], followUpAt: null });
+    const removed = await t.call('delegation_update', { id: 1, removeLinks: [{ kind: 'doc', ref: '1' }], followUpAt: null });
     expect(removed.content).toBe(`Updated #1 "Book the Denver flights": follow-up cleared, 1 link removed. ${link(1)}`);
   });
 

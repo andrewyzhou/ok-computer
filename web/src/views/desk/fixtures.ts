@@ -80,7 +80,7 @@ export const delegations: Delegation[] = [
     status: 'blocked',
     nextStep: 'Sign the form and choose a photo',
     dueAt: iso(20 * D),
-    links: [{ kind: 'doc', ref: 'doc-1', account: null, label: 'Passport checklist', href: 'docs/doc-1' }],
+    links: [{ kind: 'doc', ref: '1', account: null, label: 'Passport checklist', href: 'docs/1' }],
     createdBy: 'owner',
     sessionKey: null,
     runId: null,
@@ -140,6 +140,7 @@ const event = (id: number, delegationId: number, overrides: Partial<DelegationEv
   data: {},
   runId: null,
   toolCallId: null,
+  tainted: false,
   createdAt: iso(-1 * D),
   ...overrides,
 });

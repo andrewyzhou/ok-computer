@@ -44,6 +44,24 @@ describe('the desk store', () => {
     expect(listDelegationEvents(target, 1).map((each) => each.kind)).toEqual(['created', 'link_added', 'link_added']);
   });
 
+  it('refuses a doc link whose ref is not the id of a doc, and gives an old one no href', () => {
+    const target = open();
+    const by = { actor: 'owner' } as const;
+    expect(createDelegation(target, { title: 'x', createdBy: 'owner', links: [{ kind: 'doc', ref: 'doc-1' }] }, by, NOW)).toEqual({
+      ok: false,
+      status: 400,
+      error: 'give a doc link ref as the id of a doc',
+    });
+    expect(listDelegations(target, {})).toEqual([]);
+    const delegation = made(target, { links: [{ kind: 'doc', ref: ' 7 ' }] });
+    expect(delegation.links).toEqual([{ kind: 'doc', ref: '7', account: null, label: null, href: 'docs/7' }]);
+    expect(updateDelegation(target, delegation.id, { addLinks: [{ kind: 'doc', ref: '1e3' }] }, by, NOW)).toMatchObject({ ok: false, status: 400 });
+    // a row from before the rule keeps its ref, but the page gets no link to a doc that does not exist.
+    target.prepare("INSERT INTO delegation_links (delegationId, kind, ref, account, label, createdAt) VALUES (?, 'doc', 'doc-1', '', NULL, ?)").run(delegation.id, NOW.toISOString());
+    expect(getDelegationDetail(target, delegation.id)!.links.at(-1)).toMatchObject({ ref: 'doc-1', href: null });
+    expect(updateDelegation(target, delegation.id, { removeLinks: [{ kind: 'doc', ref: 'doc-1' }] }, by, NOW).ok).toBe(true);
+  });
+
   it('starts a delegation with a person as waiting', () => {
     const target = open();
     const delegation = made(target, { waitingOn: { name: ' Dana ', email: 'Dana@Landlord.example' } });

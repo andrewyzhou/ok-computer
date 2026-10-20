@@ -182,7 +182,9 @@
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
 }
 
-/* middle: the three active columns side by side, and the done and dropped columns under them when they are open. */
+/* wide: the three active columns side by side, and the done and dropped columns under them when they are open. the
+   board folds done and dropped at every width, so the active columns keep room for a long title or email, and the
+   board looks the same with the details panel open or closed. */
 @container (min-width: 560px) {
   .desk-board-all .desk-columns {
     display: grid;
@@ -204,17 +206,15 @@
   }
 }
 
-/* wide: all five columns, with narrower done and dropped columns, and no fold. */
-@container (min-width: 1000px) {
-  .desk-board-all .desk-columns {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-  .desk-board-all .desk-column.is-folded {
-    display: block;
-  }
-  .desk-board-all .desk-closed-bar {
-    display: none;
-  }
+/* the note under the filter bar, for a search that is cut or that the route refused. it takes a row of its own. */
+.desk-search-note {
+  flex: 1 1 100%;
+  margin: -4px 0 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.desk-search-note.is-error {
+  color: var(--critical-ink);
 }
 
 /* the filter bar of the desk. the shared FilterBar takes no class, so the rules name its label. the person select

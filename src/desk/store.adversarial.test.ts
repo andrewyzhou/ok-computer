@@ -170,10 +170,12 @@ describe('the store with hostile or odd input', () => {
     expect(d.links[0]).toMatchObject({ kind: 'run', ref: 'run-9', account: null, href: 'runs/run-9' });
   });
 
-  it('escapes a link ref in its href', () => {
+  it('escapes a link ref in its href, and refuses a doc ref that is not the id of a doc', () => {
     const target = open();
-    const d = made(target, { links: [{ kind: 'doc', ref: '../../etc/passwd?x=1#y' }] });
-    expect(d.links[0]!.href).toBe('docs/..%2F..%2Fetc%2Fpasswd%3Fx%3D1%23y');
+    const d = made(target, { links: [{ kind: 'run', ref: '../../etc/passwd?x=1#y' }] });
+    expect(d.links[0]!.href).toBe('runs/..%2F..%2Fetc%2Fpasswd%3Fx%3D1%23y');
+    const doc = createDelegation(target, { title: 'x', createdBy: 'owner', links: [{ kind: 'doc', ref: '../../etc/passwd?x=1#y' }] }, { actor: 'owner' }, NOW);
+    expect(doc).toEqual({ ok: false, status: 400, error: 'give a doc link ref as the id of a doc' });
   });
 
   it('removes the person and the wait with a move out of waiting, and keeps the history of each step', () => {

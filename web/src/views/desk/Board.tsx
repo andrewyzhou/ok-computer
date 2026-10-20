@@ -5,8 +5,9 @@ import { Badge, Button, Count, Pill } from '../../ui';
 import { STATUS_LABEL, personLabel } from './data';
 
 // the columns of the board, one for each status, with a card for each delegation: the title, who it waits on, the
-// due time and the next step. a wide board shows the columns side by side. a narrow one stacks them into one list
-// with a heading for each status, and folds the done and dropped columns behind a button.
+// due time and the next step. a wide board shows the three active columns side by side. a narrow one stacks them into
+// one list with a heading for each status. both fold the done and dropped columns behind a button, so the board has
+// one layout at a width whether the details panel is open or not.
 export interface BoardProps {
   board: DeskBoard;
   // the id of the selected delegation, whose card is marked.
@@ -60,6 +61,12 @@ function When({ delegation, now }: { delegation: Delegation; now: Date }) {
   return <span className={words === 'Due today' ? 'desk-card-when is-soon' : 'desk-card-when'}>{words}</span>;
 }
 
+// the whole person of a card, for the tooltip of its chip, because a long name or email ends in an ellipsis.
+const personTitle = (delegation: Delegation) => {
+  const { name, email } = delegation.waitingOn ?? {};
+  return name && email ? `${name} <${email}>` : (name ?? email ?? undefined);
+};
+
 function Card({ delegation, selected, onSelect, now }: { delegation: Delegation; selected: boolean; onSelect: (id: number) => void; now: Date }) {
   const person = personLabel(delegation);
   const followUpDue = isActive(delegation) && delegation.nextFollowUpAt !== null && Date.parse(delegation.nextFollowUpAt) <= now.getTime();
@@ -71,7 +78,7 @@ function Card({ delegation, selected, onSelect, now }: { delegation: Delegation;
         </span>
         {person ? (
           <span className="desk-card-person">
-            <Pill icon="people" className="desk-person">
+            <Pill icon="people" className="desk-person" title={personTitle(delegation)}>
               <span className="desk-person-name">{person}</span>
             </Pill>
             {delegation.status === 'waiting' && delegation.waitingSince ? (
@@ -118,8 +125,7 @@ function Column({ column, selectedId, onSelect, now, folded }: { column: DeskCol
 }
 
 export function Board({ board, selectedId, onSelect, now = new Date() }: BoardProps) {
-  // the done and dropped columns start folded on a narrow board. the css shows them on a wide board in any case, and
-  // shows the button only on a narrow one.
+  // the done and dropped columns start folded, on a board of any width.
   const [showClosed, setShowClosed] = useState(false);
   const closed = board.columns.filter(isClosedColumn);
   // a closed column that holds the selected card opens, so the selection is never hidden, and a board of one column

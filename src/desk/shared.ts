@@ -51,13 +51,22 @@ export function personKey(waitingOn: { name?: string | null; email?: string | nu
 // a waiting-on email must be one plain address, so the follow-up job never takes a header with two mailboxes.
 export const validEmail = (email: string) => badAddress([email.trim().toLowerCase()]) === undefined;
 
-// the hash path of a link for the web app, or null when the app has no page for it.
+// the ref of a doc link is the id of a doc, a positive whole number, because the docs routes take only that. the
+// routes, the tools and the store refuse any other ref with DOC_REF_ERROR.
+export const DOC_REF_ERROR = 'give a doc link ref as the id of a doc';
+export const validDocRef = (ref: string) => /^[1-9]\d{0,15}$/.test(ref.trim()) && Number.isSafeInteger(Number(ref.trim()));
+// the first link that the rules refuse, as a sentence, or undefined when each link is fine.
+export const linkRefError = (links: ReadonlyArray<{ kind: string; ref: string }> | undefined): string | undefined =>
+  (links ?? []).some((link) => link.kind === 'doc' && !validDocRef(link.ref)) ? DOC_REF_ERROR : undefined;
+
+// the hash path of a link for the web app, or null when the app has no page for it. an old doc link whose ref is not
+// the id of a doc gets no path, so the page shows no dead link.
 export function hrefOf(link: { kind: DelegationLinkKind; ref: string }): string | null {
   switch (link.kind) {
     case 'run':
       return `runs/${encodeURIComponent(link.ref)}`;
     case 'doc':
-      return `docs/${encodeURIComponent(link.ref)}`;
+      return validDocRef(link.ref) ? `docs/${link.ref.trim()}` : null;
     case 'thread':
     case 'event':
       return null;

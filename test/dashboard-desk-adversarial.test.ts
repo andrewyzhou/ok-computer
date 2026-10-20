@@ -87,7 +87,7 @@ describe('the desk routes with odd json', () => {
 
   it('writes owner rows in the history, with no run', async () => {
     const { db, post } = serve();
-    const made = (await (await post('/api/desk/delegations', { title: 'x', links: [{ kind: 'doc', ref: 'doc-1' }] })).json()) as DelegationDetail;
+    const made = (await (await post('/api/desk/delegations', { title: 'x', links: [{ kind: 'doc', ref: '1' }] })).json()) as DelegationDetail;
     await post(`/api/desk/delegations/${made.id}`, { note: 'called them' });
     expect(listDelegationEvents(db, made.id).map((each) => [each.kind, each.actor, each.runId])).toEqual([
       ['created', 'owner', null],
