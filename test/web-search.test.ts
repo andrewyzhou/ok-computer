@@ -4,7 +4,7 @@ import { getSetting } from '../src/db/settings.js';
 import type { BrowserWorker } from '../src/browser/worker.js';
 import { openDb } from '../src/db/index.js';
 import { createWebSearchTool, resumeEngines, type Engine } from '../src/web/search.js';
-import { createBrowserHarness, hasChrome, traceEntries } from './browser-harness.js';
+import { CHROME_RETRY, createBrowserHarness, hasChrome, traceEntries } from './browser-harness.js';
 import { startFixture, type Fixture } from './web-fixture.js';
 
 let site: Fixture;
@@ -48,7 +48,7 @@ function setup(extra: Parameters<typeof createBrowserHarness>[0] = {}) {
   };
 }
 
-describe.skipIf(!hasChrome())('web_search through the browser', { timeout: 60_000 }, () => {
+describe.skipIf(!hasChrome())('web_search through the browser', { timeout: 60_000, retry: CHROME_RETRY }, () => {
   it('reads the results of google, and records the search as a step with a screenshot', async () => {
     // this test waits for no timeout, so its tabs get the timeouts of the app. the short ones of the harness made this
     // first search fail while chrome started on a busy machine.

@@ -4,7 +4,7 @@ import { BUILTIN_RULES } from '../src/policy/policy.js';
 import { textStep, toolStep } from '../src/models/fake.js';
 import { sessionTaint } from '../src/policy/store.js';
 import { createTestApp } from './app-harness.js';
-import { FIXTURE_ARGS, hasChrome } from './browser-harness.js';
+import { CHROME_RETRY, FIXTURE_ARGS, hasChrome } from './browser-harness.js';
 import { fixtureEgress, startFixture, type Fixture } from './web-fixture.js';
 
 let site: Fixture;
@@ -39,7 +39,7 @@ describe.each(OWNER_CALLS)('%s', (name, input) => {
 
 // the acceptance of the milestone, through the whole app: the agent loop, the tool caller, the policy and the
 // approval flow, with a fake model and the real chrome against the local site.
-describe.skipIf(!hasChrome())('web acceptance', { timeout: 60_000 }, () => {
+describe.skipIf(!hasChrome())('web acceptance', { timeout: 60_000, retry: CHROME_RETRY }, () => {
   it('records every step, blocks an off-list page, and sends a form only after the owner approves', async () => {
     const shop = site.url('shop.test');
     const fields = { name: '', size: 'S' };

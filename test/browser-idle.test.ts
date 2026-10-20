@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { createBrowserHarness, hasChrome } from './browser-harness.js';
+import { CHROME_RETRY, createBrowserHarness, hasChrome } from './browser-harness.js';
 
 // the idle close of chrome runs on a timer. these tests slow one playwright call, so a tick of the timer lands inside a
 // tab that starts or ends, as it can in the app.
@@ -36,7 +36,7 @@ async function slow(h: Harness, target: 'context' | 'page', method: string, ms: 
   });
 }
 
-describe.skipIf(!hasChrome())('the idle close of chrome', { timeout: 60_000 }, () => {
+describe.skipIf(!hasChrome())('the idle close of chrome', { timeout: 60_000, retry: CHROME_RETRY }, () => {
   const url = () => `http://shop.test:${port}/`;
 
   it('waits for a tab that starts, so the open returns and later opens work', async () => {

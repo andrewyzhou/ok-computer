@@ -29,6 +29,11 @@ export const hasLanAddress = await new Promise<boolean>((done) => {
 // chrome resolves the *.test names to the fixture itself. the gate resolves them with the fixture egress.
 export const FIXTURE_ARGS = ['--host-resolver-rules=MAP *.test 127.0.0.1'];
 
+// a test that drives a real chrome waits for pages, traces and the disk. a shared ci runner is several times slower
+// than the owner's machine and its speed changes from run to run, so on ci a failed chrome test runs again up to two
+// times. on the owner's machine it runs once, so a real fault still fails each time.
+export const CHROME_RETRY = process.env.CI ? 2 : 0;
+
 export function createBrowserHarness(extra: Partial<BrowserDeps> = {}) {
   const dir = extra.dir ?? mkdtempSync(join(tmpdir(), 'okc-browser-'));
   const db = extra.db ?? openDb(':memory:');

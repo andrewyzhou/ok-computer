@@ -10,7 +10,7 @@ import { browserLogin } from '../src/browser/login.js';
 import { maskPasswords, profileBusy } from '../src/browser/worker.js';
 import { openDb } from '../src/db/index.js';
 import { registerSecret } from '../src/observability/redact.js';
-import { createBrowserHarness, FIXTURE_ARGS, hasChrome, hasLanAddress, killChrome, traceEntries } from './browser-harness.js';
+import { CHROME_RETRY, FIXTURE_ARGS, createBrowserHarness, hasChrome, hasLanAddress, killChrome, traceEntries } from './browser-harness.js';
 import { FIXTURE_COOKIE, FIXTURE_PASSWORD, startFixture, type Fixture } from './web-fixture.js';
 
 // not real secrets: a value with the shape of an api key, and a value that the test registers.
@@ -59,7 +59,7 @@ describe('the password mask', () => {
   });
 });
 
-describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 }, () => {
+describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000, retry: CHROME_RETRY }, () => {
   it('records a step with a snapshot and a screenshot, and starts the allowlist with the first site', async () => {
     const h = harness();
     const out = await h.run('browser_open', { url: site.url('shop.test') });

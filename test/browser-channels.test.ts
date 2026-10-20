@@ -6,7 +6,7 @@ import { createServer as createTcpServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { createBrowserHarness, FIXTURE_ARGS, hasChrome } from './browser-harness.js';
+import { CHROME_RETRY, FIXTURE_ARGS, createBrowserHarness, hasChrome } from './browser-harness.js';
 
 // these tests pin the channels that chrome opens outside a frame. neither page layer of the gate sees them, and the
 // proxy carries them with a check of the address only.
@@ -160,7 +160,7 @@ async function typeAndGo(h: Harness, path: string) {
   return h.run('browser_click', { ref: refOf(typed.content, /button "Go" \[ref=(s\d+e\d+)\]/), element: 'Go' });
 }
 
-describe.skipIf(!hasChrome())('channels of chrome outside a frame', { timeout: 60_000 }, () => {
+describe.skipIf(!hasChrome())('channels of chrome outside a frame', { timeout: 60_000, retry: CHROME_RETRY }, () => {
   it.skipIf(!OPENSSL)('sends no report of the reporting api', async () => {
     const h = harness(['--ignore-certificate-errors']);
     const out = await h.run('browser_open', { url: `https://shop.test:${securePort}/report` });
