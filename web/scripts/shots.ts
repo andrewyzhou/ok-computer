@@ -8,7 +8,8 @@
 // - click is a playwright selector that the script clicks after the page loads. keys is a key press after it, for
 //   example Meta+k.
 // - wait is the selector to wait for. the default is the page title in the main area.
-// - stubs maps "GET /api/path" to a json body, for an endpoint that is not built yet. the path has no query.
+// - stubs maps "GET /api/path" to a json body, for an endpoint that is not built yet. the path has no query. a value
+//   of the form { "$status": 500, "$body": {...} } answers with that status, for a shot of an error state.
 // the script uses the chrome of the system, and prints each page error, each console error and each page that
 // scrolls sideways. the out dir goes under explorations/, which git ignores.
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -30,6 +31,11 @@ type Shot = {
   stubs?: Record<string, unknown>;
 };
 
+// a stub with a status other than 200 wraps its body, so that a plain body with a field named status stays a body.
+function statusStub(value: unknown): value is { $status: number; $body: unknown } {
+  return typeof value === 'object' && value !== null && typeof (value as { $status?: unknown }).$status === 'number';
+}
+
 const [spec, out, only] = process.argv.slice(2) as [string, string, string | undefined];
 const shots = JSON.parse(readFileSync(spec, 'utf8')) as Shot[];
 mkdirSync(out, { recursive: true });
@@ -49,11 +55,12 @@ for (const shot of shots.filter((each) => !only || each.name.includes(only))) {
   });
   if (shot.devMode) await context.addInitScript(() => localStorage.setItem('okc.prefs', JSON.stringify({ devMode: true })));
   const page = await context.newPage();
-  for (const [key, body] of Object.entries(shot.stubs ?? {})) {
+  for (const [key, value] of Object.entries(shot.stubs ?? {})) {
     const [method, path] = key.split(' ', 2) as [string, string];
+    const answer = statusStub(value) ? { status: value.$status, json: value.$body } : { json: value };
     await page.route(
       (url) => url.pathname === path,
-      (route) => (route.request().method() === method ? route.fulfill({ json: body }) : route.fallback()),
+      (route) => (route.request().method() === method ? route.fulfill(answer) : route.fallback()),
     );
   }
   page.on('pageerror', (err) => console.log(`${shot.name}: page error ${err.message}`));
