@@ -24,6 +24,43 @@ export interface ReplyGuardDeps {
   reviewer?: Reviewer;
   logger: Logger;
   clock: Clock;
+  // the url of the owner's own dashboard. a link to a doc on it does not count as a link that can carry data.
+  dashboardUrl?: string;
+}
+
+// a link to a doc on the owner's own dashboard, like http://127.0.0.1:4000/#/docs/3?version=2. its host is the
+// owner's own dashboard, and a browser never sends the fragment, so the link carries nothing out. the check takes only
+// the exact form that the doc tools give: the same origin and path, no user name, no query, and a fragment that holds
+// only the doc id and a version.
+const DOC_HASH = /^#\/docs\/[1-9]\d{0,8}(\?version=[1-9]\d{0,8})?$/;
+
+export function isDashboardDocLink(link: string, dashboardUrl: string | undefined): boolean {
+  if (!dashboardUrl) return false;
+  try {
+    const url = new URL(link);
+    const own = new URL(dashboardUrl);
+    const path = (value: string) => value.replace(/\/+$/, '');
+    return (
+      url.origin === own.origin &&
+      path(url.pathname) === path(own.pathname) &&
+      !url.username &&
+      !url.password &&
+      url.search === '' &&
+      DOC_HASH.test(url.hash)
+    );
+  } catch {
+    return false;
+  }
+}
+
+// the finder also gives a candidate that runs from a link to the end of the text, because a tool can fetch all of it.
+// a chat app makes a link only of the text up to a space, a double quote or an angle bracket, and leaves out the stop
+// at the end of a sentence. so a candidate counts as a doc link when that part of it is one. each link after it starts
+// a candidate of its own, so the guard still judges that link.
+function isDocCandidate(text: string, dashboardUrl: string | undefined): boolean {
+  if (!dashboardUrl) return false;
+  const link = text.split(/[\s"<>]/)[0]!.replace(/[.,;:!?)\]]+$/, '');
+  return isDashboardDocLink(link, dashboardUrl);
 }
 
 export async function guardReply(
@@ -32,7 +69,7 @@ export async function guardReply(
   text: string,
 ): Promise<string> {
   const { db, clock } = deps;
-  const found = dataUrls(text);
+  const found = dataUrls(text).filter((each) => !isDocCandidate(each.url, deps.dashboardUrl));
   if (!found.length) return text;
   const taint = sessionTaint(db, run.sessionKey);
   if (!taint.length) return text;
@@ -81,9 +118,9 @@ export async function guardReply(
 // no review, so a link that the session read also gets the mark. the final reply shows it after the guard.
 export const DRAFT_LINK = '[link]';
 
-export function guardDraft(db: Db, sessionKey: string, text: string): string {
+export function guardDraft(db: Db, sessionKey: string, text: string, dashboardUrl?: string): string {
   if (!sessionTaint(db, sessionKey).length) return text;
-  const found = dataUrls(text);
+  const found = dataUrls(text).filter((each) => !isDocCandidate(each.url, dashboardUrl));
   if (!found.length) return text;
   return replaceLinks(text, found.map((each) => each.url), DRAFT_LINK) ?? '';
 }

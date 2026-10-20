@@ -127,7 +127,7 @@ export const docsPage: DocsPage = { docs: docsList, nextCursor: null, mode: null
 export const emptyDocsPage: DocsPage = { docs: [], nextCursor: null, mode: null };
 
 export const searchPage: DocsPage = {
-  docs: [docItem(1, { title: 'Trip plan: Lisbon', kind: 'plan', version: 3, snippet: '…The hotel moved to Alfama, closer to the walks…', marks: [[18, 24]] })],
+  docs: [docItem(1, { title: 'Trip plan: Lisbon', kind: 'plan', version: 3, snippet: '…The hotel moved to Alfama, closer to the walks…', marks: [[20, 26]] })],
   nextCursor: null,
   mode: 'fts',
 };

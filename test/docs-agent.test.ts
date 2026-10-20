@@ -141,12 +141,10 @@ describe('docs in the app', () => {
 });
 
 describe('the reply guard and the doc link', () => {
-  // a web page makes the session tainted. the reply that links to the doc should still reach the chat as it is. it
-  // does not yet: the link has a fragment (#/docs/1), so dataUrls counts it as a link that can carry data, and urlSeen
-  // does not exempt it, because it counts only tool results with an untrusted source and the result of doc_write has
-  // none. the reply then goes to the reviewer, and without a verdict of allow the chat gets it without the link. the
-  // test is marked as failing until the guard knows the links of the dashboard; then the mark comes off.
-  it.fails('lets the link of a doc reach the chat in a tainted session', async () => {
+  // a web page makes the session tainted. the reply that links to the doc still reaches the chat as it is. the link has
+  // a fragment (#/docs/1), so dataUrls counts it as a link that can carry data, but the guard exempts a link to a doc on
+  // the owner's own dashboard: its host is the dashboard, and a browser never sends the fragment.
+  it('lets the link of a doc reach the chat in a tainted session', async () => {
     const t = app([toolStep({ id: 'f1', name: 'web_fetch', input: { url: site.url('shop.test') } }), write('w1'), replyWithLink]);
     const port = t.config.dashboard.port;
     await t.app.start();
@@ -158,19 +156,5 @@ describe('the reply guard and the doc link', () => {
     expect(t.rows('SELECT toolName FROM policy_decisions WHERE toolName = ?', REPLY_TOOL)).toEqual([]);
     expect(t.printed()).not.toContain(REMOVED_LINK);
     expect(t.printed()).toContain(`okc> Your trip plan is ready: ${linkOf(port, 1)}`);
-  });
-
-  // what the guard does today, so a change of it shows up here. the reply keeps its words and loses only the link.
-  it('today sends the reply of a tainted session to review and removes the doc link', async () => {
-    const t = app([toolStep({ id: 'f1', name: 'web_fetch', input: { url: site.url('shop.test') } }), write('w1'), replyWithLink]);
-    const port = t.config.dashboard.port;
-    await t.app.start();
-    await t.say('read the shop page and plan the trip');
-    expect(t.rows('SELECT decision, rule, reason FROM policy_decisions WHERE toolName = ?', REPLY_TOOL)).toEqual([
-      { decision: 'review', rule: 'exfiltration', reason: expect.stringContaining(`(${linkOf(port, 1)}): it has a query or a fragment`) },
-    ]);
-    expect(t.printed()).toContain(`okc> Your trip plan is ready: ${REMOVED_LINK}`);
-    // the event log keeps the full reply, so the run page shows the link.
-    expect(JSON.stringify(listEvents(t.db, 'main'))).toContain(`Your trip plan is ready: ${linkOf(port, 1)}`);
   });
 });

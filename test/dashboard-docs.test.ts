@@ -61,7 +61,7 @@ describe('the docs list', () => {
 
   it('gives a search to searchDocs and answers its hits with no cursor', async () => {
     const { dashboard, docs } = await seedDashboard();
-    const hit = { id: docs.tripId, title: 'Trip plan: Lisbon', snippet: 'the hotel moved to Alfama', marks: [[18, 24]] } as unknown as DocListItem;
+    const hit = { id: docs.tripId, title: 'Trip plan: Lisbon', snippet: 'the hotel moved to Alfama', marks: [[19, 25]] } as unknown as DocListItem;
     vi.mocked(searchDocs).mockReturnValue({ mode: 'fts', docs: [hit] });
     const page = await get<DocsPage>(dashboard, '/api/docs?q=%20alfama%20&kind=plan&limit=5&cursor=ignored');
     expect(page).toEqual({ docs: [hit], nextCursor: null, mode: 'fts' });

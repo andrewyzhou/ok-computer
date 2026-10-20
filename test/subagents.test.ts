@@ -62,7 +62,7 @@ describe('sub-agents in the app', () => {
     expect(userText(parent!)).toMatch(/goals/i);
     expect(userText(child!)).not.toMatch(/goals|automation/i);
     expect(userText(child!)).toContain('Your task from the parent agent:\ntask d1');
-    expect(child!.tools.map((tool) => tool.name)).toEqual(['memory_get', 'memory_search', 'result_read', 'web_fetch', 'web_search']);
+    expect(child!.tools.map((tool) => tool.name)).toEqual(['doc_list', 'doc_read', 'doc_search', 'memory_get', 'memory_search', 'result_read', 'web_fetch', 'web_search']);
     expect(t.rows("SELECT trigger, slot, status FROM runs WHERE sessionKey LIKE 'sub:%'")).toEqual([{ trigger: 'subagent', slot: 'main', status: 'completed' }]);
   });
 

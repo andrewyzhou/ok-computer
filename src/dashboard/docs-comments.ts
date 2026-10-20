@@ -3,8 +3,8 @@ import { z } from 'zod';
 import { DOC_NOT_FOUND, VERSION_NOT_FOUND } from '../docs/comments.js';
 import type { DashboardDeps } from './server.js';
 
-// the comment routes of the docs: POST /api/docs/:id/comments (docs/API.md, T4). the comments package owns this
-// module, and docs.ts mounts it, so the comments and the other doc routes are built apart. server.ts already answered
+// the comment routes of the docs: POST /api/docs/:id/comments (docs/API.md, T4). docs.ts mounts this module, so the
+// comment routes stay apart from the routes that read and export a doc. server.ts already answered
 // 401 without a sign-in and 415 for a write without a json body.
 
 // the body checks only the types. add trims the text and the quote before it checks their lengths, so a text of

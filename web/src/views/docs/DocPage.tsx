@@ -20,6 +20,9 @@ import './reader.css';
 const QUOTE_LIMIT = 500;
 // the taint banner names this many sources, and counts the rest.
 const TAINT_SHOWN = 5;
+// the shell already starts the breadcrumb with the docs group, which links to the list. a crumb of the list here
+// would read Docs / Docs.
+const NO_CRUMBS: never[] = [];
 
 // a query value that is a positive whole number, else undefined. null means that the query does not have it.
 function versionOf(value: string | null): number | undefined | null {
@@ -96,7 +99,7 @@ export function DocPage({ params, query }: RouteProps) {
 
   if (id === undefined)
     return (
-      <Page title="Doc" crumbs={[{ label: 'Docs', href: '#/docs' }]}>
+      <Page title="Doc" crumbs={NO_CRUMBS}>
         <NotFound icon="docs" what="doc">
           <a href="#/docs">Go to the docs</a>
         </NotFound>
@@ -106,7 +109,7 @@ export function DocPage({ params, query }: RouteProps) {
   if (asked === undefined || (loaded.error && isNotFound(loaded.error))) {
     const missingVersion = asked === undefined || /version/i.test(loaded.error ?? '');
     return (
-      <Page title="Doc" crumbs={[{ label: 'Docs', href: '#/docs' }]}>
+      <Page title="Doc" crumbs={NO_CRUMBS}>
         <NotFound icon="docs" what={missingVersion ? 'version' : 'doc'}>
           {missingVersion ? <a href={docHref(id)}>Read the newest version</a> : <a href="#/docs">Go to the docs</a>}
         </NotFound>
@@ -116,7 +119,7 @@ export function DocPage({ params, query }: RouteProps) {
 
   if (loaded.error)
     return (
-      <Page title="Doc" crumbs={[{ label: 'Docs', href: '#/docs' }]}>
+      <Page title="Doc" crumbs={NO_CRUMBS}>
         <div className="doc-error">
           <p className="error-box">Could not load the doc: {loaded.error}</p>
           <Button size="sm" onClick={loaded.reload}>
@@ -128,7 +131,7 @@ export function DocPage({ params, query }: RouteProps) {
 
   if (!detail)
     return (
-      <Page title="Doc" crumbs={[{ label: 'Docs', href: '#/docs' }]}>
+      <Page title="Doc" crumbs={NO_CRUMBS}>
         <div className="doc-reader">
           <Skeleton lines={8} label="Loading the doc…" />
         </div>
@@ -140,7 +143,7 @@ export function DocPage({ params, query }: RouteProps) {
   return (
     <Page
       title={shown.title}
-      crumbs={[{ label: 'Docs', href: '#/docs' }]}
+      crumbs={NO_CRUMBS}
       subtitle={
         <span className="doc-subtitle">
           <Badge tone="muted">{kindLabel(shown.kind)}</Badge>
@@ -186,7 +189,7 @@ export function DocPage({ params, query }: RouteProps) {
           </Button>
         </div>
       </div>
-      <DetailsPanel title="Versions">
+      <DetailsPanel title="Versions and comments">
         <VersionHistory docId={id} versions={versions} current={shown.version} />
         <DocComments doc={doc} version={shown.version} comments={comments} selection={selection} onAdded={loaded.reload} />
       </DetailsPanel>

@@ -8,7 +8,8 @@
 // - click is a playwright selector that the script clicks after the page loads. keys is a key press after it, for
 //   example Meta+k.
 // - wait is the selector to wait for. the default is the page title in the main area.
-// - stubs maps "GET /api/path" to a json body, for an endpoint that is not built yet. the path has no query.
+// - stubs maps "GET /api/path" to a json body, for an endpoint that is not built yet. the path has no query. a body
+//   of { "__status": 500, "error": "..." } answers with that status and { error }, for the error state of a view.
 // the script uses the chrome of the system, and prints each page error, each console error and each page that
 // scrolls sideways. the out dir goes under explorations/, which git ignores.
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -29,6 +30,15 @@ type Shot = {
   wait?: string;
   stubs?: Record<string, unknown>;
 };
+
+// a stub body with a __status gives that status and its error text. any other body is the json of a 200 answer.
+function stubAnswer(body: unknown): { status?: number; json: unknown } {
+  if (body && typeof body === 'object' && '__status' in body) {
+    const { __status, error } = body as { __status: number; error?: unknown };
+    return { status: __status, json: { error: typeof error === 'string' ? error : 'stubbed error' } };
+  }
+  return { json: body };
+}
 
 const [spec, out, only] = process.argv.slice(2) as [string, string, string | undefined];
 const shots = JSON.parse(readFileSync(spec, 'utf8')) as Shot[];
@@ -53,7 +63,7 @@ for (const shot of shots.filter((each) => !only || each.name.includes(only))) {
     const [method, path] = key.split(' ', 2) as [string, string];
     await page.route(
       (url) => url.pathname === path,
-      (route) => (route.request().method() === method ? route.fulfill({ json: body }) : route.fallback()),
+      (route) => (route.request().method() === method ? route.fulfill(stubAnswer(body)) : route.fallback()),
     );
   }
   page.on('pageerror', (err) => console.log(`${shot.name}: page error ${err.message}`));

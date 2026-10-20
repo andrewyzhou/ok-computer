@@ -371,7 +371,7 @@ export function createApp(deps: AppDeps): App {
   const agent = async (input: Parameters<typeof runAgent>[1]) => {
     // the router and the automation runner send the final text to the owner's chat, so it goes through the guard.
     const guard = (text: string, run: { runId: string; signal: AbortSignal }) =>
-      guardReply({ db, reviewer, logger, clock }, { ...run, sessionKey: input.sessionKey }, text);
+      guardReply({ db, reviewer, logger, clock, dashboardUrl }, { ...run, sessionKey: input.sessionKey }, text);
     const result = await runAgent(agentDeps, { ...input, allowedTools: withIntegrations(input.sessionKey, input.allowedTools), guardReply: guard });
     // the router tells the owner about a stopped message run in its reply. a background run has no reply, so the owner gets a message here.
     if (result.stoppedAtLimit && input.trigger !== 'message') {
@@ -447,6 +447,7 @@ export function createApp(deps: AppDeps): App {
     queue,
     channels,
     agent,
+    dashboardUrl,
     // the cli runs on the owner's own terminal, and the dashboard signed in each web request. other channels check the
     // sender id against the owner id.
     isOwner: (message) => message.channel === 'cli' || message.channel === WEB || ownerIds[message.channel] === message.senderId,

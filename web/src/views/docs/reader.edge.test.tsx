@@ -11,8 +11,7 @@ import { tripDetail, tripDiff, tripVersions } from './fixtures';
 
 const spy = vi.hoisted(() => ({ comments: [] as unknown[] }));
 
-// the comments package builds the inside of DocComments in parallel, so this file checks only the props that the page
-// gives it.
+// comments.test.tsx checks the inside of DocComments, so this file checks only the props that the page gives it.
 vi.mock('./Comments', () => ({
   DocComments: (props: DocCommentsProps) => {
     spy.comments.push(props);

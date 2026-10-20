@@ -1,12 +1,12 @@
 [
   { "name": "doc-comments-1440", "hash": "#/docs/1", "width": 1440, "wait": ".doc-comments" },
   { "name": "doc-comments-1440-dark", "hash": "#/docs/1", "width": 1440, "dark": true, "wait": ".doc-comments" },
-  { "name": "doc-comments-390", "hash": "#/docs/1", "width": 390, "wait": ".doc-comments", "click": ".doc-comment-input" },
-  { "name": "doc-comments-390-dark", "hash": "#/docs/1", "width": 390, "dark": true, "wait": ".doc-comments", "click": ".doc-comment-input" },
+  { "name": "doc-comments-390", "hash": "#/docs/1", "width": 390, "click": "role=button[name='Versions and comments']" },
+  { "name": "doc-comments-390-dark", "hash": "#/docs/1", "width": 390, "dark": true, "click": "role=button[name='Versions and comments']" },
   { "name": "doc-comments-empty-1440", "hash": "#/docs/5", "width": 1440, "wait": ".doc-comments" },
   { "name": "doc-comments-empty-1440-dark", "hash": "#/docs/5", "width": 1440, "dark": true, "wait": ".doc-comments" },
-  { "name": "doc-comments-empty-390", "hash": "#/docs/5", "width": 390, "wait": ".doc-comments", "click": ".doc-comment-input" },
-  { "name": "doc-comments-empty-390-dark", "hash": "#/docs/5", "width": 390, "dark": true, "wait": ".doc-comments", "click": ".doc-comment-input" },
+  { "name": "doc-comments-empty-390", "hash": "#/docs/5", "width": 390, "click": "role=button[name='Versions and comments']" },
+  { "name": "doc-comments-empty-390-dark", "hash": "#/docs/5", "width": 390, "dark": true, "click": "role=button[name='Versions and comments']" },
   { "name": "doc-comments-old-version-1440", "hash": "#/docs/1?version=2", "width": 1440, "wait": ".doc-comments" },
-  { "name": "doc-comments-old-version-390-dark", "hash": "#/docs/1?version=2", "width": 390, "dark": true, "wait": ".doc-comments", "click": ".doc-comment-input" }
+  { "name": "doc-comments-old-version-390-dark", "hash": "#/docs/1?version=2", "width": 390, "dark": true, "click": "role=button[name='Versions and comments']" }
 ]
