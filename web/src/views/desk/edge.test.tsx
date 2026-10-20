@@ -120,10 +120,8 @@ describe('the desk board at its edges', () => {
     expect(screen.getByRole('button', { name: 'Hide done and dropped' }).getAttribute('aria-expanded')).toBe('true');
   });
 
-  // the seeded server has no desk routes until the work package "dashboard routes" merges into the track, so this
-  // test runs against the real seeded routes only after that merge. then remove the skip and check the seed of
-  // test/seed-desk.ts, which matches the fixture.
-  it.skip('shows the seeded delegations from the real routes', async () => {
+  // this test runs against the real routes of the seeded server. the seed of test/seed-desk.ts matches the fixture.
+  it('shows the seeded delegations from the real routes', async () => {
     stubFetch(seeded.dashboard);
     vi.useRealTimers();
     openApp('#/desk');

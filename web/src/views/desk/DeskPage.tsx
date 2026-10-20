@@ -10,8 +10,8 @@ import { STATUSES, STATUS_LABEL, boardPath, deskQueryOf, refreshDesk, setDeskQue
 import './desk.css';
 
 // the desk: a board of the delegations with a column for each status, the filters by status and person, the details
-// panel of the selected delegation and the create form. the work package "desk board" builds this page and Board.tsx;
-// the work package "details panel and form" builds Details.tsx and DelegationForm.tsx, which this page renders.
+// panel of the selected delegation and the create form. Board.tsx draws the columns, Details.tsx the details panel and
+// DelegationForm.tsx the create and edit form.
 
 // the search goes into the hash this long after the last key, so each key does not load the board.
 const SEARCH_DELAY_MS = 300;

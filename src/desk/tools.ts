@@ -10,7 +10,7 @@ import { createDelegation, getDelegation, listDelegations, updateDelegation, typ
 // the agent tools of the desk: delegation_create, delegation_update, delegation_wait_on, delegation_done and
 // delegation_list. the main session lists all five (DESK_MAIN_TOOLS in names.ts), and an isolated automation lists
 // only delegation_list (DESK_AUTO_TOOLS). the input schemas below are the contract that docs/API.md (T3) describes.
-// the work package "agent tools" fills each run: it parses the times with parseWhen, writes through store.ts with
+// each tool parses the times with parseWhen, writes through store.ts with
 // { actor: 'agent', runId, toolCallId } from the tool context, and answers with a short text that names the
 // delegation as #<id> "<title>" with its desk link.
 

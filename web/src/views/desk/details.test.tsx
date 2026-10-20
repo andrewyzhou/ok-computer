@@ -6,14 +6,9 @@ import { seedDashboard } from '../../../../test/seed';
 import { installEventSource, json, openApp, stubFetch, type StubRoutes } from '../../testing';
 import { setPrefs } from '../../shell/prefs';
 import { DelegationPanel, eventSummary } from './Details';
-import deskPageSource from './DeskPage.tsx?raw';
 import { board, delegation, detail } from './fixtures';
 
 installEventSource();
-
-// the page of the work package "desk board" renders this panel. until it is in, the tests render the panel by
-// itself, and the tests through the hash run once the page renders it.
-const pageRendersPanel = deskPageSource.includes('<DelegationPanel');
 
 let seeded: Awaited<ReturnType<typeof seedDashboard>>;
 
@@ -271,7 +266,7 @@ describe('the details panel of a delegation', () => {
   });
 });
 
-describe.skipIf(!pageRendersPanel)('the details panel on the desk page', () => {
+describe('the details panel on the desk page', () => {
   const details = () => within(document.querySelector('.details') as HTMLElement);
 
   it('opens the delegation of #/desk?id=2', async () => {

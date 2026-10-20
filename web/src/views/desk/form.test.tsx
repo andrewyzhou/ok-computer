@@ -5,14 +5,9 @@ import { seedDashboard } from '../../../../test/seed';
 import { installEventSource, json, openApp, stubFetch, type StubRoutes } from '../../testing';
 import { setPrefs } from '../../shell/prefs';
 import { DelegationForm, NewDelegationPanel, localParts, whenOf } from './DelegationForm';
-import deskPageSource from './DeskPage.tsx?raw';
 import { board, delegation, delegations, detail } from './fixtures';
 
 installEventSource();
-
-// the page of the work package "desk board" renders the create panel for new=1. until it is in, the tests render the
-// panel by itself, and the test through the hash runs once the page renders it.
-const pageRendersForm = deskPageSource.includes('<NewDelegationPanel');
 
 let seeded: Awaited<ReturnType<typeof seedDashboard>>;
 
@@ -276,7 +271,7 @@ describe('the delegation form', () => {
   });
 });
 
-describe.skipIf(!pageRendersForm)('the create form on the desk page', () => {
+describe('the create form on the desk page', () => {
   it('opens for #/desk?new=1 and goes to the new delegation when it is made', async () => {
     const posts = stubDesk();
     openApp('#/desk?new=1');

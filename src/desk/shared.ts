@@ -40,9 +40,6 @@ export const MAX_NUDGES = 3;
 // the session of a follow-up run is desk:followups:<runId>, like the inbox jobs.
 export const DESK_PREFIX = 'desk:';
 
-// the error of a part of the skeleton that its work package has not built yet.
-export const notBuilt = (what: string) => new Error(`${what} is not built yet`);
-
 // the key of a person for the filter: the email in lower case, or the name in lower case with single spaces.
 export function personKey(waitingOn: { name?: string | null; email?: string | null } | null | undefined): string | null {
   const email = waitingOn?.email?.trim().toLowerCase();

@@ -11,8 +11,7 @@ import './details.css';
 
 // the owner's form to create a delegation, or to edit one: title, details, next step, waiting on (name and email),
 // due and follow-up times, and the status of an edit. it sends POST /api/desk/delegations or
-// POST /api/desk/delegations/:id and shows the error text of a 400 or a 409 by the form. the work package "details
-// panel and form" builds it.
+// POST /api/desk/delegations/:id and shows the error text of a 400 or a 409 by the form.
 export type DelegationFormProps =
   | { mode: 'create'; onDone: (delegation: Delegation) => void; onCancel: () => void }
   | { mode: 'edit'; delegation: Delegation; onDone: (delegation: Delegation) => void; onCancel: () => void };
