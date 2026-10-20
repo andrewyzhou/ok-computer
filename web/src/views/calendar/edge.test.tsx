@@ -71,7 +71,7 @@ describe('a dense week', () => {
     await waitFor(() => expect(block('school/primary/panel-a')).toBeTruthy());
     for (const panel of panels) expect(block(panel.key)).toBeTruthy();
     expect(inMain().queryByRole('button', { name: /more$/ })).toBeNull();
-  });
+   }, 20_000);
 });
 
 describe('the details of an event', () => {

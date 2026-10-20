@@ -171,6 +171,8 @@ describe('matchRoute with typed and edited hashes', () => {
     expect(navRoute(match.route, ROUTES)?.path).toBe('overview');
     expect(navRoute(match.route, ROUTES)?.group).toBe('agent');
     expect(navRoute(matchRoute('today/2026-10-19')!.route, ROUTES)?.path).toBe('today');
+    // the home page has no group and no parent, so it marks the nav item with its page key.
+    expect(navRoute(matchRoute('#/')!.route, ROUTES)?.path).toBe('today');
   });
 
   it('keeps a question mark inside the query', () => {

@@ -36,10 +36,16 @@ export function parentRoute(route: RouteDef, routes: RouteDef[]): RouteDef | und
   return undefined;
 }
 
-// the nav item that shows as current: the route itself, or the parent of a detail page.
+// the nav item that shows as current: the route itself, or the parent of a detail page. the home page #/ has no
+// group and no parent, so it shows the nav item with the same page key, which is today.
 export function navRoute(route: RouteDef | undefined, routes: RouteDef[]): RouteDef | undefined {
   if (!route) return undefined;
-  return route.group !== null ? route : parentRoute(route, routes);
+  if (route.group !== null) return route;
+  if (route.path === '') {
+    const home = route.pageKey?.({});
+    return home === undefined ? undefined : routes.find((each) => each.group !== null && each.pageKey?.({}) === home);
+  }
+  return parentRoute(route, routes);
 }
 
 export function routeHref(route: RouteDef): string {

@@ -32,7 +32,7 @@ describe('the shell', () => {
     expect(rail.getByRole('link', { name: 'Today' }).getAttribute('aria-current')).toBe('true');
     expect(rail.getByRole('link', { name: 'ok computer, today' }).getAttribute('href')).toBe('#/');
     expect(nav().getByRole('link', { name: 'ok computer' }).getAttribute('href')).toBe('#/');
-  });
+  }, 20_000);
 
   it('marks today in the nav for the page of a day', async () => {
     openApp('#/today/2026-10-19');

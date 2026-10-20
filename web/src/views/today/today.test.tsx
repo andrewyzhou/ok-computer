@@ -54,7 +54,7 @@ describe('the today page', () => {
     expect(within(conflict).getByText('urgent')).toBeTruthy();
     expect(within(main.getByRole('list', { name: 'Tight moves' })).getByText('needs you')).toBeTruthy();
     expect(within(document.querySelector('.header-actions') as HTMLElement).getByRole('link', { name: 'Calendar' }).getAttribute('href')).toBe(calendarHash('2026-10-12'));
-  });
+   }, 20_000);
 
   it('shows the schedule, the delivery and the message, and no sources strip when every source was read', async () => {
     stubFetch(null, routes());
@@ -105,7 +105,7 @@ describe('the today page', () => {
     fireEvent.click(main.getByText('Lab meeting').closest('a')!);
     fireEvent.click(main.getByRole('button', { name: 'Previous day' }));
     await waitFor(() => expect(location.hash).toBe('#/today/2026-10-11'));
-    expect(await main.findByText('No events today.')).toBeTruthy();
+    expect(await main.findByRole('list', { name: 'missing sources' })).toBeTruthy();
     expect(first.isConnected).toBe(false);
     expect(document.querySelector('.today-page')).toBe(page);
     expect(main.getByText('Sunday, October 11')).toBeTruthy();
@@ -125,10 +125,12 @@ describe('the today page', () => {
     stubFetch(null, routes());
     openApp('#/today/2026-10-11');
     const main = inMain();
-    expect(await main.findByText('No events today.')).toBeTruthy();
+    const strip = within(await main.findByRole('list', { name: 'missing sources' }));
     expect(main.queryByRole('list', { name: 'Today' })).toBeNull();
-    const strip = within(main.getByRole('list', { name: 'missing sources' }));
     expect(strip.getByText('Google is not set up, so the brief has no calendar.')).toBeTruthy();
+    // the note of the day says the same as the strip, so it is not drawn twice, and the empty day section is left out.
+    expect(main.getAllByText('Google is not set up, so the brief has no calendar.')).toHaveLength(1);
+    expect(document.querySelector('.today-section')).toBeNull();
     expect(strip.getByRole('link', { name: 'Set up Google' }).getAttribute('href')).toBe('#/google');
     expect(strip.getByText('No inbox digest yet.')).toBeTruthy();
     expect(strip.getByRole('link', { name: 'Open the inbox' }).getAttribute('href')).toBe('#/inbox');

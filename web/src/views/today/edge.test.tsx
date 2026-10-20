@@ -120,7 +120,7 @@ describe('the today page at its edges', () => {
     stubFetch(null, routes({ 'POST /api/brief/run': () => json({ started: true }, 202) }));
     openApp('#/today/2026-10-11');
     const main = inMain();
-    await main.findByText('No events today.');
+    await main.findByRole('list', { name: 'missing sources' });
     fireEvent.click(document.querySelector('.header-actions button') as HTMLButtonElement);
     await waitFor(() => expect(location.hash).toBe('#/today/2026-10-12'));
     expect(await main.findByText('Run with Sam')).toBeTruthy();

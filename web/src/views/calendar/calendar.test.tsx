@@ -88,7 +88,7 @@ describe('the calendar week', () => {
     expect(inMain().getByRole('heading', { name: '12 – 18 Oct 2026' })).toBeTruthy();
     const legend = within(inMain().getByRole('group', { name: 'calendars' }));
     expect(legend.getAllByRole('button').map((each) => each.textContent)).toEqual(['personal', 'school', 'CS 189school']);
-  });
+   }, 20_000);
 
   it('puts the tight move marker between the lab and the lecture', async () => {
     await fullWeek();

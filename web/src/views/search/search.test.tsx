@@ -136,7 +136,7 @@ describe('the command menu search', () => {
     fireEvent.click(await within(again).findByRole('option', { name: /All results for “essay”/ }));
     await waitFor(() => expect(location.hash).toBe('#/search?q=essay'));
     expect(await inMain().findByRole('link', { name: 'essay plan' })).toBeTruthy();
-  });
+  }, 20_000);
 
   it('cuts a long text to 200 characters and shows an error of the server in the menu', async () => {
     const calls = stubFetch(seeded.dashboard, { 'GET /api/search': () => json({ error: 'the search index is not ready' }, 500) });

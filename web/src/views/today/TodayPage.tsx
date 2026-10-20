@@ -7,7 +7,7 @@ import { Icon } from '../../icons';
 import type { RouteProps } from '../../routes';
 import { Button, ButtonLink, EmptyState, isNotFound, Page, Skeleton } from '../../ui';
 import { calendarHash } from './links';
-import { addDays, BriefSections, Delivery, findItem, isDay, ItemDetails, localDay, ScheduleLine, SourcesStrip } from './parts';
+import { addDays, BriefSections, Delivery, findItem, isDay, ItemDetails, localDay, ScheduleLine, sourceNotes, SourcesStrip } from './parts';
 import './today.css';
 
 // the today page: the stored brief of a day (params.day, or the local today), with each item linked to its source.
@@ -154,7 +154,12 @@ export function TodayPage({ params }: RouteProps) {
         ) : data ? (
           <>
             <SourcesStrip sources={data.content.sources} />
-            <BriefSections sections={sections} selectedId={selectedKey} onSelect={(key) => setSelection({ day, key })} />
+            <BriefSections
+              sections={sections}
+              strip={sourceNotes(data.content.sources).map((note) => note.text)}
+              selectedId={selectedKey}
+              onSelect={(key) => setSelection({ day, key })}
+            />
             <Delivery brief={data} />
           </>
         ) : (

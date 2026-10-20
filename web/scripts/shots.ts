@@ -8,7 +8,8 @@
 // - click is a playwright selector that the script clicks after the page loads. keys is a key press after it, for
 //   example Meta+k.
 // - wait is the selector to wait for. the default is the page title in the main area.
-// - stubs maps "GET /api/path" to a json body, for an endpoint that is not built yet. the path has no query.
+// - stubs maps "GET /api/path" to a json body, for an endpoint that is not built yet or for a state that the seed
+//   does not have, such as an empty list or a failed calendar. the path has no query.
 // the script uses the chrome of the system, and prints each page error, each console error and each page that
 // scrolls sideways. the out dir goes under explorations/, which git ignores.
 import { mkdirSync, readFileSync } from 'node:fs';

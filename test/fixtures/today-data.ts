@@ -179,7 +179,7 @@ export const CALENDAR_FAILED: CalendarPage = {
 
 const eventItem = (key: string, title: string, detail: string | null, tone: 'info' | 'warning' | 'critical' | null = null) => {
   const found = TODAY_EVENTS.find((each) => each.key === key)!;
-  return { id: `event:${key}`, title, detail, at: found.startAt, account: found.account, tone, source: { kind: 'event' as const, key, day: found.startDay } };
+  return { id: `event:${key}`, title, detail, at: found.allDay ? found.startDay : found.startAt, account: found.account, tone, source: { kind: 'event' as const, key, day: found.startDay } };
 };
 
 export const BRIEF_CONTENT: BriefContent = {
@@ -277,7 +277,7 @@ export const BRIEF_FULL: Brief = {
     'Brief for Mon 12 Oct',
     '10 events, first at 07:00 Run with Sam.',
     '1 conflict, 1 tight move, 2 invitations to answer.',
-    '3 deadlines this week. Inbox: 2 need a reply, 1 bill.',
+    '3 deadlines this week. Inbox: 2 need a reply, 1 bill, 1 package.',
     '2 delegations, 2 goals.',
     'http://127.0.0.1:7777/#/today/2026-10-12',
   ].join('\n'),
@@ -298,7 +298,7 @@ export const BRIEF_QUIET: Brief = {
     timeZone: TODAY_TZ,
     generatedAt: '2026-10-11T14:30:00.000Z',
     sources: { calendar: 'off', skipped: [], digest: null, desk: false },
-    sections: [{ kind: 'day', title: 'Today', note: 'No events today.', items: [] }],
+    sections: [{ kind: 'day', title: 'Today', note: 'Google is not set up, so the brief has no calendar.', items: [] }],
   },
   delivery: { channel: null, ok: false, error: 'no chat of the owner is known', at: '2026-10-11T14:30:01.000Z' },
 };

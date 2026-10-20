@@ -41,8 +41,3 @@ export const briefSession = (runId: string) => `${BRIEF_PREFIX}${runId}`;
 
 export const BRIEF_AUTOMATION_NAME = 'brief: morning brief';
 export const DEFAULT_BRIEF_TIME = '07:30';
-
-// a stub of the scaffold throws this until its work package builds it.
-export function notBuilt(what: string): never {
-  throw new Error(`${what} is not built yet`);
-}

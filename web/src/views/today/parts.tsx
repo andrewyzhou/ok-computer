@@ -101,25 +101,41 @@ function Item({ item, selected, onSelect }: { item: BriefItem; selected: boolean
   );
 }
 
-export function BriefSections({ sections, selectedId, onSelect }: { sections: BriefSection[]; selectedId: string | null; onSelect: (key: string) => void }) {
+// a note that the sources strip already says is not drawn again under its section, and a section with no items and
+// no other note is left out. the index of each section stays the same, so the keys of the items do not change.
+export function BriefSections({
+  sections,
+  selectedId,
+  onSelect,
+  strip = [],
+}: {
+  sections: BriefSection[];
+  selectedId: string | null;
+  onSelect: (key: string) => void;
+  strip?: string[];
+}) {
   return (
     <>
-      {sections.map((section, index) => (
-        <section key={`${section.kind}:${index}`} className="today-section" aria-labelledby={`today-section-${index}`}>
-          <h2 className="today-section-title" id={`today-section-${index}`}>
-            {section.title}
-          </h2>
-          {section.note ? <p className="today-section-note">{section.note}</p> : null}
-          {section.items.length ? (
-            <ul className="today-items" aria-label={section.title}>
-              {section.items.map((item) => {
-                const key = itemKey(section, index, item);
-                return <Item key={key} item={item} selected={key === selectedId} onSelect={() => onSelect(key)} />;
-              })}
-            </ul>
-          ) : null}
-        </section>
-      ))}
+      {sections.map((section, index) => {
+        const note = section.note && !strip.includes(section.note) ? section.note : null;
+        if (!note && !section.items.length) return null;
+        return (
+          <section key={`${section.kind}:${index}`} className="today-section" aria-labelledby={`today-section-${index}`}>
+            <h2 className="today-section-title" id={`today-section-${index}`}>
+              {section.title}
+            </h2>
+            {note ? <p className="today-section-note">{note}</p> : null}
+            {section.items.length ? (
+              <ul className="today-items" aria-label={section.title}>
+                {section.items.map((item) => {
+                  const key = itemKey(section, index, item);
+                  return <Item key={key} item={item} selected={key === selectedId} onSelect={() => onSelect(key)} />;
+                })}
+              </ul>
+            ) : null}
+          </section>
+        );
+      })}
     </>
   );
 }
@@ -178,7 +194,7 @@ export function ItemDetails({ item, timeZone, onClose }: { item: BriefItem | und
 
 // the notes about the sources that the brief could not read. a missing desk module shows nothing, because the page
 // does not claim that nothing waits.
-export function SourcesStrip({ sources }: { sources: BriefSources }) {
+export function sourceNotes(sources: BriefSources) {
   const notes: Array<{ key: string; text: string; link?: { href: string; label: string } }> = [];
   if (sources.calendar === 'off') notes.push({ key: 'off', text: 'Google is not set up, so the brief has no calendar.', link: { href: '#/google', label: 'Set up Google' } });
   else if (sources.calendar === 'partial' || sources.calendar === 'failed') {
@@ -186,6 +202,11 @@ export function SourcesStrip({ sources }: { sources: BriefSources }) {
     else notes.push({ key: 'failed', text: 'The calendar could not be read.' });
   }
   if (sources.digest === null) notes.push({ key: 'digest', text: 'No inbox digest yet.', link: { href: '#/inbox', label: 'Open the inbox' } });
+  return notes;
+}
+
+export function SourcesStrip({ sources }: { sources: BriefSources }) {
+  const notes = sourceNotes(sources);
   if (!notes.length) return null;
   return (
     <ul className="today-sources" aria-label="missing sources">
