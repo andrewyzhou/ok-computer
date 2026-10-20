@@ -1,0 +1,2756 @@
+[
+  {
+    "name": "desk-1440",
+    "hash": "#/desk",
+    "width": 1440,
+    "stubs": {
+      "GET /api/desk": {
+        "columns": [
+          {
+            "status": "open",
+            "delegations": [
+              {
+                "id": 1,
+                "title": "Book the Denver flights",
+                "details": "Two seats, out on Oct 24 and back on Oct 27. Aisle seats when they cost the same.",
+                "status": "open",
+                "nextStep": "Compare the morning flights on Oct 24",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-10-16T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "run",
+                    "ref": "run-1",
+                    "account": null,
+                    "label": "The chat where you asked",
+                    "href": "runs/run-1"
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-11T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 7,
+                "title": "Collect every receipt of the October trip from mail and the photos, and put them into one expense report for the school",
+                "details": null,
+                "status": "open",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "event",
+                    "ref": "ev-1",
+                    "account": "school",
+                    "label": "Trip review",
+                    "href": null
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-12T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 2
+          },
+          {
+            "status": "waiting",
+            "delegations": [
+              {
+                "id": 3,
+                "title": "Reschedule the dentist",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Pick a time next week from the slots they send",
+                "waitingOn": {
+                  "name": null,
+                  "email": "front@dentist.example"
+                },
+                "waitingSince": "2026-10-10T01:00:00.000Z",
+                "dueAt": "2026-10-12T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-13T00:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-dentist",
+                    "account": "school",
+                    "label": null,
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-10T01:00:00.000Z",
+                "updatedAt": "2026-10-10T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 2,
+                "title": "Get the lease renewal from Dana",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Wait for Dana's reply with the new lease",
+                "waitingOn": {
+                  "name": "Dana Park",
+                  "email": "dana@landlord.example"
+                },
+                "waitingSince": "2026-10-09T01:00:00.000Z",
+                "dueAt": "2026-10-18T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-14T01:00:00.000Z",
+                "lastCheckedAt": "2026-10-12T01:00:00.000Z",
+                "nudgeCount": 1,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-lease",
+                    "account": "personal",
+                    "label": "Lease renewal",
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-09T01:00:00.000Z",
+                "updatedAt": "2026-10-12T23:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 8,
+                "title": "Ask Dana about the parking spot",
+                "details": null,
+                "status": "waiting",
+                "nextStep": null,
+                "waitingOn": {
+                  "name": "Dana",
+                  "email": null
+                },
+                "waitingSince": "2026-10-12T22:00:00.000Z",
+                "dueAt": null,
+                "nextFollowUpAt": "2026-10-15T01:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-12T22:00:00.000Z",
+                "updatedAt": "2026-10-12T22:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 3
+          },
+          {
+            "status": "blocked",
+            "delegations": [
+              {
+                "id": 4,
+                "title": "Renew the passport",
+                "details": "The passport ends in March.",
+                "status": "blocked",
+                "nextStep": "Sign the form and choose a photo",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-11-02T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "doc",
+                    "ref": "doc-1",
+                    "account": null,
+                    "label": "Passport checklist",
+                    "href": "docs/doc-1"
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-07T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "done",
+            "delegations": [
+              {
+                "id": 5,
+                "title": "Send the thank-you note to Prof. Lee",
+                "details": null,
+                "status": "done",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-06T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": "2026-10-11T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "dropped",
+            "delegations": [
+              {
+                "id": 6,
+                "title": "Find a cheaper phone plan",
+                "details": null,
+                "status": "dropped",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-03T01:00:00.000Z",
+                "updatedAt": "2026-10-08T01:00:00.000Z",
+                "closedAt": "2026-10-08T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          }
+        ],
+        "people": [
+          {
+            "key": "dana",
+            "name": "Dana",
+            "email": null,
+            "active": 1
+          },
+          {
+            "key": "dana@landlord.example",
+            "name": "Dana Park",
+            "email": "dana@landlord.example",
+            "active": 1
+          },
+          {
+            "key": "front@dentist.example",
+            "name": null,
+            "email": "front@dentist.example",
+            "active": 1
+          }
+        ],
+        "dueToday": 1
+      }
+    },
+    "wait": "main .desk-card"
+  },
+  {
+    "name": "desk-1440-dark",
+    "hash": "#/desk",
+    "width": 1440,
+    "stubs": {
+      "GET /api/desk": {
+        "columns": [
+          {
+            "status": "open",
+            "delegations": [
+              {
+                "id": 1,
+                "title": "Book the Denver flights",
+                "details": "Two seats, out on Oct 24 and back on Oct 27. Aisle seats when they cost the same.",
+                "status": "open",
+                "nextStep": "Compare the morning flights on Oct 24",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-10-16T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "run",
+                    "ref": "run-1",
+                    "account": null,
+                    "label": "The chat where you asked",
+                    "href": "runs/run-1"
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-11T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 7,
+                "title": "Collect every receipt of the October trip from mail and the photos, and put them into one expense report for the school",
+                "details": null,
+                "status": "open",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "event",
+                    "ref": "ev-1",
+                    "account": "school",
+                    "label": "Trip review",
+                    "href": null
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-12T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 2
+          },
+          {
+            "status": "waiting",
+            "delegations": [
+              {
+                "id": 3,
+                "title": "Reschedule the dentist",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Pick a time next week from the slots they send",
+                "waitingOn": {
+                  "name": null,
+                  "email": "front@dentist.example"
+                },
+                "waitingSince": "2026-10-10T01:00:00.000Z",
+                "dueAt": "2026-10-12T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-13T00:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-dentist",
+                    "account": "school",
+                    "label": null,
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-10T01:00:00.000Z",
+                "updatedAt": "2026-10-10T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 2,
+                "title": "Get the lease renewal from Dana",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Wait for Dana's reply with the new lease",
+                "waitingOn": {
+                  "name": "Dana Park",
+                  "email": "dana@landlord.example"
+                },
+                "waitingSince": "2026-10-09T01:00:00.000Z",
+                "dueAt": "2026-10-18T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-14T01:00:00.000Z",
+                "lastCheckedAt": "2026-10-12T01:00:00.000Z",
+                "nudgeCount": 1,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-lease",
+                    "account": "personal",
+                    "label": "Lease renewal",
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-09T01:00:00.000Z",
+                "updatedAt": "2026-10-12T23:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 8,
+                "title": "Ask Dana about the parking spot",
+                "details": null,
+                "status": "waiting",
+                "nextStep": null,
+                "waitingOn": {
+                  "name": "Dana",
+                  "email": null
+                },
+                "waitingSince": "2026-10-12T22:00:00.000Z",
+                "dueAt": null,
+                "nextFollowUpAt": "2026-10-15T01:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-12T22:00:00.000Z",
+                "updatedAt": "2026-10-12T22:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 3
+          },
+          {
+            "status": "blocked",
+            "delegations": [
+              {
+                "id": 4,
+                "title": "Renew the passport",
+                "details": "The passport ends in March.",
+                "status": "blocked",
+                "nextStep": "Sign the form and choose a photo",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-11-02T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "doc",
+                    "ref": "doc-1",
+                    "account": null,
+                    "label": "Passport checklist",
+                    "href": "docs/doc-1"
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-07T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "done",
+            "delegations": [
+              {
+                "id": 5,
+                "title": "Send the thank-you note to Prof. Lee",
+                "details": null,
+                "status": "done",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-06T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": "2026-10-11T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "dropped",
+            "delegations": [
+              {
+                "id": 6,
+                "title": "Find a cheaper phone plan",
+                "details": null,
+                "status": "dropped",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-03T01:00:00.000Z",
+                "updatedAt": "2026-10-08T01:00:00.000Z",
+                "closedAt": "2026-10-08T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          }
+        ],
+        "people": [
+          {
+            "key": "dana",
+            "name": "Dana",
+            "email": null,
+            "active": 1
+          },
+          {
+            "key": "dana@landlord.example",
+            "name": "Dana Park",
+            "email": "dana@landlord.example",
+            "active": 1
+          },
+          {
+            "key": "front@dentist.example",
+            "name": null,
+            "email": "front@dentist.example",
+            "active": 1
+          }
+        ],
+        "dueToday": 1
+      }
+    },
+    "wait": "main .desk-card",
+    "dark": true
+  },
+  {
+    "name": "desk-390",
+    "hash": "#/desk",
+    "width": 390,
+    "stubs": {
+      "GET /api/desk": {
+        "columns": [
+          {
+            "status": "open",
+            "delegations": [
+              {
+                "id": 1,
+                "title": "Book the Denver flights",
+                "details": "Two seats, out on Oct 24 and back on Oct 27. Aisle seats when they cost the same.",
+                "status": "open",
+                "nextStep": "Compare the morning flights on Oct 24",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-10-16T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "run",
+                    "ref": "run-1",
+                    "account": null,
+                    "label": "The chat where you asked",
+                    "href": "runs/run-1"
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-11T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 7,
+                "title": "Collect every receipt of the October trip from mail and the photos, and put them into one expense report for the school",
+                "details": null,
+                "status": "open",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "event",
+                    "ref": "ev-1",
+                    "account": "school",
+                    "label": "Trip review",
+                    "href": null
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-12T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 2
+          },
+          {
+            "status": "waiting",
+            "delegations": [
+              {
+                "id": 3,
+                "title": "Reschedule the dentist",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Pick a time next week from the slots they send",
+                "waitingOn": {
+                  "name": null,
+                  "email": "front@dentist.example"
+                },
+                "waitingSince": "2026-10-10T01:00:00.000Z",
+                "dueAt": "2026-10-12T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-13T00:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-dentist",
+                    "account": "school",
+                    "label": null,
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-10T01:00:00.000Z",
+                "updatedAt": "2026-10-10T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 2,
+                "title": "Get the lease renewal from Dana",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Wait for Dana's reply with the new lease",
+                "waitingOn": {
+                  "name": "Dana Park",
+                  "email": "dana@landlord.example"
+                },
+                "waitingSince": "2026-10-09T01:00:00.000Z",
+                "dueAt": "2026-10-18T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-14T01:00:00.000Z",
+                "lastCheckedAt": "2026-10-12T01:00:00.000Z",
+                "nudgeCount": 1,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-lease",
+                    "account": "personal",
+                    "label": "Lease renewal",
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-09T01:00:00.000Z",
+                "updatedAt": "2026-10-12T23:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 8,
+                "title": "Ask Dana about the parking spot",
+                "details": null,
+                "status": "waiting",
+                "nextStep": null,
+                "waitingOn": {
+                  "name": "Dana",
+                  "email": null
+                },
+                "waitingSince": "2026-10-12T22:00:00.000Z",
+                "dueAt": null,
+                "nextFollowUpAt": "2026-10-15T01:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-12T22:00:00.000Z",
+                "updatedAt": "2026-10-12T22:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 3
+          },
+          {
+            "status": "blocked",
+            "delegations": [
+              {
+                "id": 4,
+                "title": "Renew the passport",
+                "details": "The passport ends in March.",
+                "status": "blocked",
+                "nextStep": "Sign the form and choose a photo",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-11-02T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "doc",
+                    "ref": "doc-1",
+                    "account": null,
+                    "label": "Passport checklist",
+                    "href": "docs/doc-1"
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-07T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "done",
+            "delegations": [
+              {
+                "id": 5,
+                "title": "Send the thank-you note to Prof. Lee",
+                "details": null,
+                "status": "done",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-06T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": "2026-10-11T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "dropped",
+            "delegations": [
+              {
+                "id": 6,
+                "title": "Find a cheaper phone plan",
+                "details": null,
+                "status": "dropped",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-03T01:00:00.000Z",
+                "updatedAt": "2026-10-08T01:00:00.000Z",
+                "closedAt": "2026-10-08T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          }
+        ],
+        "people": [
+          {
+            "key": "dana",
+            "name": "Dana",
+            "email": null,
+            "active": 1
+          },
+          {
+            "key": "dana@landlord.example",
+            "name": "Dana Park",
+            "email": "dana@landlord.example",
+            "active": 1
+          },
+          {
+            "key": "front@dentist.example",
+            "name": null,
+            "email": "front@dentist.example",
+            "active": 1
+          }
+        ],
+        "dueToday": 1
+      }
+    },
+    "wait": "main .desk-card"
+  },
+  {
+    "name": "desk-390-dark",
+    "hash": "#/desk",
+    "width": 390,
+    "stubs": {
+      "GET /api/desk": {
+        "columns": [
+          {
+            "status": "open",
+            "delegations": [
+              {
+                "id": 1,
+                "title": "Book the Denver flights",
+                "details": "Two seats, out on Oct 24 and back on Oct 27. Aisle seats when they cost the same.",
+                "status": "open",
+                "nextStep": "Compare the morning flights on Oct 24",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-10-16T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "run",
+                    "ref": "run-1",
+                    "account": null,
+                    "label": "The chat where you asked",
+                    "href": "runs/run-1"
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-11T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 7,
+                "title": "Collect every receipt of the October trip from mail and the photos, and put them into one expense report for the school",
+                "details": null,
+                "status": "open",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "event",
+                    "ref": "ev-1",
+                    "account": "school",
+                    "label": "Trip review",
+                    "href": null
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-12T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 2
+          },
+          {
+            "status": "waiting",
+            "delegations": [
+              {
+                "id": 3,
+                "title": "Reschedule the dentist",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Pick a time next week from the slots they send",
+                "waitingOn": {
+                  "name": null,
+                  "email": "front@dentist.example"
+                },
+                "waitingSince": "2026-10-10T01:00:00.000Z",
+                "dueAt": "2026-10-12T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-13T00:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-dentist",
+                    "account": "school",
+                    "label": null,
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-10T01:00:00.000Z",
+                "updatedAt": "2026-10-10T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 2,
+                "title": "Get the lease renewal from Dana",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Wait for Dana's reply with the new lease",
+                "waitingOn": {
+                  "name": "Dana Park",
+                  "email": "dana@landlord.example"
+                },
+                "waitingSince": "2026-10-09T01:00:00.000Z",
+                "dueAt": "2026-10-18T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-14T01:00:00.000Z",
+                "lastCheckedAt": "2026-10-12T01:00:00.000Z",
+                "nudgeCount": 1,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-lease",
+                    "account": "personal",
+                    "label": "Lease renewal",
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-09T01:00:00.000Z",
+                "updatedAt": "2026-10-12T23:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 8,
+                "title": "Ask Dana about the parking spot",
+                "details": null,
+                "status": "waiting",
+                "nextStep": null,
+                "waitingOn": {
+                  "name": "Dana",
+                  "email": null
+                },
+                "waitingSince": "2026-10-12T22:00:00.000Z",
+                "dueAt": null,
+                "nextFollowUpAt": "2026-10-15T01:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-12T22:00:00.000Z",
+                "updatedAt": "2026-10-12T22:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 3
+          },
+          {
+            "status": "blocked",
+            "delegations": [
+              {
+                "id": 4,
+                "title": "Renew the passport",
+                "details": "The passport ends in March.",
+                "status": "blocked",
+                "nextStep": "Sign the form and choose a photo",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-11-02T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "doc",
+                    "ref": "doc-1",
+                    "account": null,
+                    "label": "Passport checklist",
+                    "href": "docs/doc-1"
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-07T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "done",
+            "delegations": [
+              {
+                "id": 5,
+                "title": "Send the thank-you note to Prof. Lee",
+                "details": null,
+                "status": "done",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-06T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": "2026-10-11T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "dropped",
+            "delegations": [
+              {
+                "id": 6,
+                "title": "Find a cheaper phone plan",
+                "details": null,
+                "status": "dropped",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-03T01:00:00.000Z",
+                "updatedAt": "2026-10-08T01:00:00.000Z",
+                "closedAt": "2026-10-08T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          }
+        ],
+        "people": [
+          {
+            "key": "dana",
+            "name": "Dana",
+            "email": null,
+            "active": 1
+          },
+          {
+            "key": "dana@landlord.example",
+            "name": "Dana Park",
+            "email": "dana@landlord.example",
+            "active": 1
+          },
+          {
+            "key": "front@dentist.example",
+            "name": null,
+            "email": "front@dentist.example",
+            "active": 1
+          }
+        ],
+        "dueToday": 1
+      }
+    },
+    "wait": "main .desk-card",
+    "dark": true
+  },
+  {
+    "name": "desk-1024",
+    "hash": "#/desk",
+    "width": 1024,
+    "stubs": {
+      "GET /api/desk": {
+        "columns": [
+          {
+            "status": "open",
+            "delegations": [
+              {
+                "id": 1,
+                "title": "Book the Denver flights",
+                "details": "Two seats, out on Oct 24 and back on Oct 27. Aisle seats when they cost the same.",
+                "status": "open",
+                "nextStep": "Compare the morning flights on Oct 24",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-10-16T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "run",
+                    "ref": "run-1",
+                    "account": null,
+                    "label": "The chat where you asked",
+                    "href": "runs/run-1"
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-11T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 7,
+                "title": "Collect every receipt of the October trip from mail and the photos, and put them into one expense report for the school",
+                "details": null,
+                "status": "open",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "event",
+                    "ref": "ev-1",
+                    "account": "school",
+                    "label": "Trip review",
+                    "href": null
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-12T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 2
+          },
+          {
+            "status": "waiting",
+            "delegations": [
+              {
+                "id": 3,
+                "title": "Reschedule the dentist",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Pick a time next week from the slots they send",
+                "waitingOn": {
+                  "name": null,
+                  "email": "front@dentist.example"
+                },
+                "waitingSince": "2026-10-10T01:00:00.000Z",
+                "dueAt": "2026-10-12T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-13T00:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-dentist",
+                    "account": "school",
+                    "label": null,
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-10T01:00:00.000Z",
+                "updatedAt": "2026-10-10T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 2,
+                "title": "Get the lease renewal from Dana",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Wait for Dana's reply with the new lease",
+                "waitingOn": {
+                  "name": "Dana Park",
+                  "email": "dana@landlord.example"
+                },
+                "waitingSince": "2026-10-09T01:00:00.000Z",
+                "dueAt": "2026-10-18T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-14T01:00:00.000Z",
+                "lastCheckedAt": "2026-10-12T01:00:00.000Z",
+                "nudgeCount": 1,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-lease",
+                    "account": "personal",
+                    "label": "Lease renewal",
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-09T01:00:00.000Z",
+                "updatedAt": "2026-10-12T23:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 8,
+                "title": "Ask Dana about the parking spot",
+                "details": null,
+                "status": "waiting",
+                "nextStep": null,
+                "waitingOn": {
+                  "name": "Dana",
+                  "email": null
+                },
+                "waitingSince": "2026-10-12T22:00:00.000Z",
+                "dueAt": null,
+                "nextFollowUpAt": "2026-10-15T01:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-12T22:00:00.000Z",
+                "updatedAt": "2026-10-12T22:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 3
+          },
+          {
+            "status": "blocked",
+            "delegations": [
+              {
+                "id": 4,
+                "title": "Renew the passport",
+                "details": "The passport ends in March.",
+                "status": "blocked",
+                "nextStep": "Sign the form and choose a photo",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-11-02T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "doc",
+                    "ref": "doc-1",
+                    "account": null,
+                    "label": "Passport checklist",
+                    "href": "docs/doc-1"
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-07T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "done",
+            "delegations": [
+              {
+                "id": 5,
+                "title": "Send the thank-you note to Prof. Lee",
+                "details": null,
+                "status": "done",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-06T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": "2026-10-11T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "dropped",
+            "delegations": [
+              {
+                "id": 6,
+                "title": "Find a cheaper phone plan",
+                "details": null,
+                "status": "dropped",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-03T01:00:00.000Z",
+                "updatedAt": "2026-10-08T01:00:00.000Z",
+                "closedAt": "2026-10-08T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          }
+        ],
+        "people": [
+          {
+            "key": "dana",
+            "name": "Dana",
+            "email": null,
+            "active": 1
+          },
+          {
+            "key": "dana@landlord.example",
+            "name": "Dana Park",
+            "email": "dana@landlord.example",
+            "active": 1
+          },
+          {
+            "key": "front@dentist.example",
+            "name": null,
+            "email": "front@dentist.example",
+            "active": 1
+          }
+        ],
+        "dueToday": 1
+      }
+    },
+    "wait": "main .desk-card"
+  },
+  {
+    "name": "desk-1024-dark",
+    "hash": "#/desk",
+    "width": 1024,
+    "stubs": {
+      "GET /api/desk": {
+        "columns": [
+          {
+            "status": "open",
+            "delegations": [
+              {
+                "id": 1,
+                "title": "Book the Denver flights",
+                "details": "Two seats, out on Oct 24 and back on Oct 27. Aisle seats when they cost the same.",
+                "status": "open",
+                "nextStep": "Compare the morning flights on Oct 24",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-10-16T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "run",
+                    "ref": "run-1",
+                    "account": null,
+                    "label": "The chat where you asked",
+                    "href": "runs/run-1"
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-11T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 7,
+                "title": "Collect every receipt of the October trip from mail and the photos, and put them into one expense report for the school",
+                "details": null,
+                "status": "open",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "event",
+                    "ref": "ev-1",
+                    "account": "school",
+                    "label": "Trip review",
+                    "href": null
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-12T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 2
+          },
+          {
+            "status": "waiting",
+            "delegations": [
+              {
+                "id": 3,
+                "title": "Reschedule the dentist",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Pick a time next week from the slots they send",
+                "waitingOn": {
+                  "name": null,
+                  "email": "front@dentist.example"
+                },
+                "waitingSince": "2026-10-10T01:00:00.000Z",
+                "dueAt": "2026-10-12T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-13T00:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-dentist",
+                    "account": "school",
+                    "label": null,
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-10T01:00:00.000Z",
+                "updatedAt": "2026-10-10T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 2,
+                "title": "Get the lease renewal from Dana",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Wait for Dana's reply with the new lease",
+                "waitingOn": {
+                  "name": "Dana Park",
+                  "email": "dana@landlord.example"
+                },
+                "waitingSince": "2026-10-09T01:00:00.000Z",
+                "dueAt": "2026-10-18T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-14T01:00:00.000Z",
+                "lastCheckedAt": "2026-10-12T01:00:00.000Z",
+                "nudgeCount": 1,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-lease",
+                    "account": "personal",
+                    "label": "Lease renewal",
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-09T01:00:00.000Z",
+                "updatedAt": "2026-10-12T23:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 8,
+                "title": "Ask Dana about the parking spot",
+                "details": null,
+                "status": "waiting",
+                "nextStep": null,
+                "waitingOn": {
+                  "name": "Dana",
+                  "email": null
+                },
+                "waitingSince": "2026-10-12T22:00:00.000Z",
+                "dueAt": null,
+                "nextFollowUpAt": "2026-10-15T01:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-12T22:00:00.000Z",
+                "updatedAt": "2026-10-12T22:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 3
+          },
+          {
+            "status": "blocked",
+            "delegations": [
+              {
+                "id": 4,
+                "title": "Renew the passport",
+                "details": "The passport ends in March.",
+                "status": "blocked",
+                "nextStep": "Sign the form and choose a photo",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-11-02T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "doc",
+                    "ref": "doc-1",
+                    "account": null,
+                    "label": "Passport checklist",
+                    "href": "docs/doc-1"
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-07T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "done",
+            "delegations": [
+              {
+                "id": 5,
+                "title": "Send the thank-you note to Prof. Lee",
+                "details": null,
+                "status": "done",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-06T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": "2026-10-11T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "dropped",
+            "delegations": [
+              {
+                "id": 6,
+                "title": "Find a cheaper phone plan",
+                "details": null,
+                "status": "dropped",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-03T01:00:00.000Z",
+                "updatedAt": "2026-10-08T01:00:00.000Z",
+                "closedAt": "2026-10-08T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          }
+        ],
+        "people": [
+          {
+            "key": "dana",
+            "name": "Dana",
+            "email": null,
+            "active": 1
+          },
+          {
+            "key": "dana@landlord.example",
+            "name": "Dana Park",
+            "email": "dana@landlord.example",
+            "active": 1
+          },
+          {
+            "key": "front@dentist.example",
+            "name": null,
+            "email": "front@dentist.example",
+            "active": 1
+          }
+        ],
+        "dueToday": 1
+      }
+    },
+    "wait": "main .desk-card",
+    "dark": true
+  },
+  {
+    "name": "desk-1440-selected",
+    "hash": "#/desk",
+    "width": 1440,
+    "stubs": {
+      "GET /api/desk": {
+        "columns": [
+          {
+            "status": "open",
+            "delegations": [
+              {
+                "id": 1,
+                "title": "Book the Denver flights",
+                "details": "Two seats, out on Oct 24 and back on Oct 27. Aisle seats when they cost the same.",
+                "status": "open",
+                "nextStep": "Compare the morning flights on Oct 24",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-10-16T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "run",
+                    "ref": "run-1",
+                    "account": null,
+                    "label": "The chat where you asked",
+                    "href": "runs/run-1"
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-11T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 7,
+                "title": "Collect every receipt of the October trip from mail and the photos, and put them into one expense report for the school",
+                "details": null,
+                "status": "open",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "event",
+                    "ref": "ev-1",
+                    "account": "school",
+                    "label": "Trip review",
+                    "href": null
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-12T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 2
+          },
+          {
+            "status": "waiting",
+            "delegations": [
+              {
+                "id": 3,
+                "title": "Reschedule the dentist",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Pick a time next week from the slots they send",
+                "waitingOn": {
+                  "name": null,
+                  "email": "front@dentist.example"
+                },
+                "waitingSince": "2026-10-10T01:00:00.000Z",
+                "dueAt": "2026-10-12T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-13T00:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-dentist",
+                    "account": "school",
+                    "label": null,
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-10T01:00:00.000Z",
+                "updatedAt": "2026-10-10T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 2,
+                "title": "Get the lease renewal from Dana",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Wait for Dana's reply with the new lease",
+                "waitingOn": {
+                  "name": "Dana Park",
+                  "email": "dana@landlord.example"
+                },
+                "waitingSince": "2026-10-09T01:00:00.000Z",
+                "dueAt": "2026-10-18T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-14T01:00:00.000Z",
+                "lastCheckedAt": "2026-10-12T01:00:00.000Z",
+                "nudgeCount": 1,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-lease",
+                    "account": "personal",
+                    "label": "Lease renewal",
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-09T01:00:00.000Z",
+                "updatedAt": "2026-10-12T23:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 8,
+                "title": "Ask Dana about the parking spot",
+                "details": null,
+                "status": "waiting",
+                "nextStep": null,
+                "waitingOn": {
+                  "name": "Dana",
+                  "email": null
+                },
+                "waitingSince": "2026-10-12T22:00:00.000Z",
+                "dueAt": null,
+                "nextFollowUpAt": "2026-10-15T01:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-12T22:00:00.000Z",
+                "updatedAt": "2026-10-12T22:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 3
+          },
+          {
+            "status": "blocked",
+            "delegations": [
+              {
+                "id": 4,
+                "title": "Renew the passport",
+                "details": "The passport ends in March.",
+                "status": "blocked",
+                "nextStep": "Sign the form and choose a photo",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-11-02T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "doc",
+                    "ref": "doc-1",
+                    "account": null,
+                    "label": "Passport checklist",
+                    "href": "docs/doc-1"
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-07T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "done",
+            "delegations": [
+              {
+                "id": 5,
+                "title": "Send the thank-you note to Prof. Lee",
+                "details": null,
+                "status": "done",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-06T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": "2026-10-11T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "dropped",
+            "delegations": [
+              {
+                "id": 6,
+                "title": "Find a cheaper phone plan",
+                "details": null,
+                "status": "dropped",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-03T01:00:00.000Z",
+                "updatedAt": "2026-10-08T01:00:00.000Z",
+                "closedAt": "2026-10-08T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          }
+        ],
+        "people": [
+          {
+            "key": "dana",
+            "name": "Dana",
+            "email": null,
+            "active": 1
+          },
+          {
+            "key": "dana@landlord.example",
+            "name": "Dana Park",
+            "email": "dana@landlord.example",
+            "active": 1
+          },
+          {
+            "key": "front@dentist.example",
+            "name": null,
+            "email": "front@dentist.example",
+            "active": 1
+          }
+        ],
+        "dueToday": 1
+      }
+    },
+    "wait": "main .desk-card",
+    "click": "main .desk-card >> nth=1"
+  },
+  {
+    "name": "desk-390-selected",
+    "hash": "#/desk",
+    "width": 390,
+    "stubs": {
+      "GET /api/desk": {
+        "columns": [
+          {
+            "status": "open",
+            "delegations": [
+              {
+                "id": 1,
+                "title": "Book the Denver flights",
+                "details": "Two seats, out on Oct 24 and back on Oct 27. Aisle seats when they cost the same.",
+                "status": "open",
+                "nextStep": "Compare the morning flights on Oct 24",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-10-16T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "run",
+                    "ref": "run-1",
+                    "account": null,
+                    "label": "The chat where you asked",
+                    "href": "runs/run-1"
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-11T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 7,
+                "title": "Collect every receipt of the October trip from mail and the photos, and put them into one expense report for the school",
+                "details": null,
+                "status": "open",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "event",
+                    "ref": "ev-1",
+                    "account": "school",
+                    "label": "Trip review",
+                    "href": null
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-12T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 2
+          },
+          {
+            "status": "waiting",
+            "delegations": [
+              {
+                "id": 3,
+                "title": "Reschedule the dentist",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Pick a time next week from the slots they send",
+                "waitingOn": {
+                  "name": null,
+                  "email": "front@dentist.example"
+                },
+                "waitingSince": "2026-10-10T01:00:00.000Z",
+                "dueAt": "2026-10-12T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-13T00:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-dentist",
+                    "account": "school",
+                    "label": null,
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-10T01:00:00.000Z",
+                "updatedAt": "2026-10-10T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 2,
+                "title": "Get the lease renewal from Dana",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Wait for Dana's reply with the new lease",
+                "waitingOn": {
+                  "name": "Dana Park",
+                  "email": "dana@landlord.example"
+                },
+                "waitingSince": "2026-10-09T01:00:00.000Z",
+                "dueAt": "2026-10-18T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-14T01:00:00.000Z",
+                "lastCheckedAt": "2026-10-12T01:00:00.000Z",
+                "nudgeCount": 1,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-lease",
+                    "account": "personal",
+                    "label": "Lease renewal",
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-09T01:00:00.000Z",
+                "updatedAt": "2026-10-12T23:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 8,
+                "title": "Ask Dana about the parking spot",
+                "details": null,
+                "status": "waiting",
+                "nextStep": null,
+                "waitingOn": {
+                  "name": "Dana",
+                  "email": null
+                },
+                "waitingSince": "2026-10-12T22:00:00.000Z",
+                "dueAt": null,
+                "nextFollowUpAt": "2026-10-15T01:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-12T22:00:00.000Z",
+                "updatedAt": "2026-10-12T22:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 3
+          },
+          {
+            "status": "blocked",
+            "delegations": [
+              {
+                "id": 4,
+                "title": "Renew the passport",
+                "details": "The passport ends in March.",
+                "status": "blocked",
+                "nextStep": "Sign the form and choose a photo",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-11-02T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "doc",
+                    "ref": "doc-1",
+                    "account": null,
+                    "label": "Passport checklist",
+                    "href": "docs/doc-1"
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-07T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "done",
+            "delegations": [
+              {
+                "id": 5,
+                "title": "Send the thank-you note to Prof. Lee",
+                "details": null,
+                "status": "done",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-06T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": "2026-10-11T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "dropped",
+            "delegations": [
+              {
+                "id": 6,
+                "title": "Find a cheaper phone plan",
+                "details": null,
+                "status": "dropped",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-03T01:00:00.000Z",
+                "updatedAt": "2026-10-08T01:00:00.000Z",
+                "closedAt": "2026-10-08T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          }
+        ],
+        "people": [
+          {
+            "key": "dana",
+            "name": "Dana",
+            "email": null,
+            "active": 1
+          },
+          {
+            "key": "dana@landlord.example",
+            "name": "Dana Park",
+            "email": "dana@landlord.example",
+            "active": 1
+          },
+          {
+            "key": "front@dentist.example",
+            "name": null,
+            "email": "front@dentist.example",
+            "active": 1
+          }
+        ],
+        "dueToday": 1
+      }
+    },
+    "wait": "main .desk-card",
+    "click": "main .desk-card >> nth=1"
+  },
+  {
+    "name": "desk-390-closed-open",
+    "hash": "#/desk",
+    "width": 390,
+    "stubs": {
+      "GET /api/desk": {
+        "columns": [
+          {
+            "status": "open",
+            "delegations": [
+              {
+                "id": 1,
+                "title": "Book the Denver flights",
+                "details": "Two seats, out on Oct 24 and back on Oct 27. Aisle seats when they cost the same.",
+                "status": "open",
+                "nextStep": "Compare the morning flights on Oct 24",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-10-16T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "run",
+                    "ref": "run-1",
+                    "account": null,
+                    "label": "The chat where you asked",
+                    "href": "runs/run-1"
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-11T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 7,
+                "title": "Collect every receipt of the October trip from mail and the photos, and put them into one expense report for the school",
+                "details": null,
+                "status": "open",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "event",
+                    "ref": "ev-1",
+                    "account": "school",
+                    "label": "Trip review",
+                    "href": null
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-12T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 2
+          },
+          {
+            "status": "waiting",
+            "delegations": [
+              {
+                "id": 3,
+                "title": "Reschedule the dentist",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Pick a time next week from the slots they send",
+                "waitingOn": {
+                  "name": null,
+                  "email": "front@dentist.example"
+                },
+                "waitingSince": "2026-10-10T01:00:00.000Z",
+                "dueAt": "2026-10-12T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-13T00:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-dentist",
+                    "account": "school",
+                    "label": null,
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-10T01:00:00.000Z",
+                "updatedAt": "2026-10-10T01:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 2,
+                "title": "Get the lease renewal from Dana",
+                "details": null,
+                "status": "waiting",
+                "nextStep": "Wait for Dana's reply with the new lease",
+                "waitingOn": {
+                  "name": "Dana Park",
+                  "email": "dana@landlord.example"
+                },
+                "waitingSince": "2026-10-09T01:00:00.000Z",
+                "dueAt": "2026-10-18T01:00:00.000Z",
+                "nextFollowUpAt": "2026-10-14T01:00:00.000Z",
+                "lastCheckedAt": "2026-10-12T01:00:00.000Z",
+                "nudgeCount": 1,
+                "links": [
+                  {
+                    "kind": "thread",
+                    "ref": "t-lease",
+                    "account": "personal",
+                    "label": "Lease renewal",
+                    "href": null
+                  }
+                ],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-09T01:00:00.000Z",
+                "updatedAt": "2026-10-12T23:00:00.000Z",
+                "closedAt": null
+              },
+              {
+                "id": 8,
+                "title": "Ask Dana about the parking spot",
+                "details": null,
+                "status": "waiting",
+                "nextStep": null,
+                "waitingOn": {
+                  "name": "Dana",
+                  "email": null
+                },
+                "waitingSince": "2026-10-12T22:00:00.000Z",
+                "dueAt": null,
+                "nextFollowUpAt": "2026-10-15T01:00:00.000Z",
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-12T22:00:00.000Z",
+                "updatedAt": "2026-10-12T22:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 3
+          },
+          {
+            "status": "blocked",
+            "delegations": [
+              {
+                "id": 4,
+                "title": "Renew the passport",
+                "details": "The passport ends in March.",
+                "status": "blocked",
+                "nextStep": "Sign the form and choose a photo",
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": "2026-11-02T01:00:00.000Z",
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [
+                  {
+                    "kind": "doc",
+                    "ref": "doc-1",
+                    "account": null,
+                    "label": "Passport checklist",
+                    "href": "docs/doc-1"
+                  }
+                ],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-07T01:00:00.000Z",
+                "updatedAt": "2026-10-12T01:00:00.000Z",
+                "closedAt": null
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "done",
+            "delegations": [
+              {
+                "id": 5,
+                "title": "Send the thank-you note to Prof. Lee",
+                "details": null,
+                "status": "done",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "agent",
+                "sessionKey": "main",
+                "runId": "run-1",
+                "createdAt": "2026-10-06T01:00:00.000Z",
+                "updatedAt": "2026-10-11T01:00:00.000Z",
+                "closedAt": "2026-10-11T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          },
+          {
+            "status": "dropped",
+            "delegations": [
+              {
+                "id": 6,
+                "title": "Find a cheaper phone plan",
+                "details": null,
+                "status": "dropped",
+                "nextStep": null,
+                "waitingOn": null,
+                "waitingSince": null,
+                "dueAt": null,
+                "nextFollowUpAt": null,
+                "lastCheckedAt": null,
+                "nudgeCount": 0,
+                "links": [],
+                "createdBy": "owner",
+                "sessionKey": null,
+                "runId": null,
+                "createdAt": "2026-10-03T01:00:00.000Z",
+                "updatedAt": "2026-10-08T01:00:00.000Z",
+                "closedAt": "2026-10-08T01:00:00.000Z"
+              }
+            ],
+            "total": 1
+          }
+        ],
+        "people": [
+          {
+            "key": "dana",
+            "name": "Dana",
+            "email": null,
+            "active": 1
+          },
+          {
+            "key": "dana@landlord.example",
+            "name": "Dana Park",
+            "email": "dana@landlord.example",
+            "active": 1
+          },
+          {
+            "key": "front@dentist.example",
+            "name": null,
+            "email": "front@dentist.example",
+            "active": 1
+          }
+        ],
+        "dueToday": 1
+      }
+    },
+    "wait": "main .desk-card",
+    "click": "main .desk-closed-toggle"
+  },
+  {
+    "name": "desk-first-run-1440",
+    "hash": "#/desk",
+    "width": 1440,
+    "stubs": {
+      "GET /api/desk": {
+        "columns": [
+          {
+            "status": "open",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "waiting",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "blocked",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "done",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "dropped",
+            "delegations": [],
+            "total": 0
+          }
+        ],
+        "people": [],
+        "dueToday": 0
+      }
+    },
+    "wait": "main .empty-state"
+  },
+  {
+    "name": "desk-first-run-1440-dark",
+    "hash": "#/desk",
+    "width": 1440,
+    "stubs": {
+      "GET /api/desk": {
+        "columns": [
+          {
+            "status": "open",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "waiting",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "blocked",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "done",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "dropped",
+            "delegations": [],
+            "total": 0
+          }
+        ],
+        "people": [],
+        "dueToday": 0
+      }
+    },
+    "wait": "main .empty-state",
+    "dark": true
+  },
+  {
+    "name": "desk-first-run-390",
+    "hash": "#/desk",
+    "width": 390,
+    "stubs": {
+      "GET /api/desk": {
+        "columns": [
+          {
+            "status": "open",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "waiting",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "blocked",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "done",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "dropped",
+            "delegations": [],
+            "total": 0
+          }
+        ],
+        "people": [],
+        "dueToday": 0
+      }
+    },
+    "wait": "main .empty-state"
+  },
+  {
+    "name": "desk-first-run-390-dark",
+    "hash": "#/desk",
+    "width": 390,
+    "stubs": {
+      "GET /api/desk": {
+        "columns": [
+          {
+            "status": "open",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "waiting",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "blocked",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "done",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "dropped",
+            "delegations": [],
+            "total": 0
+          }
+        ],
+        "people": [],
+        "dueToday": 0
+      }
+    },
+    "wait": "main .empty-state",
+    "dark": true
+  },
+  {
+    "name": "desk-filtered-empty",
+    "hash": "#/desk?status=blocked",
+    "width": 1440,
+    "stubs": {
+      "GET /api/desk": {
+        "columns": [
+          {
+            "status": "open",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "waiting",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "blocked",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "done",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "dropped",
+            "delegations": [],
+            "total": 0
+          }
+        ],
+        "people": [
+          {
+            "key": "dana",
+            "name": "Dana",
+            "email": null,
+            "active": 1
+          },
+          {
+            "key": "dana@landlord.example",
+            "name": "Dana Park",
+            "email": "dana@landlord.example",
+            "active": 1
+          },
+          {
+            "key": "front@dentist.example",
+            "name": null,
+            "email": "front@dentist.example",
+            "active": 1
+          }
+        ],
+        "dueToday": 0
+      }
+    },
+    "wait": "main .empty-state"
+  },
+  {
+    "name": "desk-filtered-empty-390",
+    "hash": "#/desk?status=blocked",
+    "width": 390,
+    "stubs": {
+      "GET /api/desk": {
+        "columns": [
+          {
+            "status": "open",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "waiting",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "blocked",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "done",
+            "delegations": [],
+            "total": 0
+          },
+          {
+            "status": "dropped",
+            "delegations": [],
+            "total": 0
+          }
+        ],
+        "people": [
+          {
+            "key": "dana",
+            "name": "Dana",
+            "email": null,
+            "active": 1
+          },
+          {
+            "key": "dana@landlord.example",
+            "name": "Dana Park",
+            "email": "dana@landlord.example",
+            "active": 1
+          },
+          {
+            "key": "front@dentist.example",
+            "name": null,
+            "email": "front@dentist.example",
+            "active": 1
+          }
+        ],
+        "dueToday": 0
+      }
+    },
+    "wait": "main .empty-state"
+  },
+  {
+    "name": "desk-error-1440",
+    "hash": "#/desk?q=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "width": 1440,
+    "wait": "main [role=alert]"
+  },
+  {
+    "name": "desk-error-1440-dark",
+    "hash": "#/desk?q=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "width": 1440,
+    "wait": "main [role=alert]",
+    "dark": true
+  },
+  {
+    "name": "desk-error-390",
+    "hash": "#/desk?q=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "width": 390,
+    "wait": "main [role=alert]"
+  },
+  {
+    "name": "desk-error-390-dark",
+    "hash": "#/desk?q=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "width": 390,
+    "wait": "main [role=alert]",
+    "dark": true
+  }
+]
