@@ -1,4 +1,4 @@
-import type { ElementHandle, Frame, Locator, Page } from 'playwright-core';
+import { errors, type ElementHandle, type Frame, type Locator, type Page, type Request } from 'playwright-core';
 import { z } from 'zod';
 import { formIsPurchase, isPurchase } from '../policy/autonomy.js';
 import { defineTool, type Tool, type ToolContext, type ToolOutput } from '../tools/registry.js';
@@ -105,6 +105,53 @@ async function sendsData(page: Page, locator: Locator): Promise<boolean> {
     // the attribute as it is gave '' for formmethod="", which the browser sends as get (r5 probe).
     return !reads.includes(control.formMethod || control.form.method);
   }, [SUBMIT_CONTROL, READ_FORM_METHODS] as const));
+}
+
+// playwright waits after a click until the navigation that the click started commits, but only within the action
+// timeout. a site that answered a get form or a link later than that, for example on a busy pc, gave a click error,
+// although the click ran and the page then loaded, and the agent could click again. a navigation of the page that
+// started at the click may take the navigation time, as browser_open may.
+async function clickAndFollow(page: Page, tab: ActTab, control: Locator | ElementHandle): Promise<void> {
+  let navigation: Request | undefined;
+  let committed = false;
+  const onRequest = (request: Request) => {
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) navigation = request;
+  };
+  const onNavigated = (frame: Frame) => {
+    if (navigation && frame === page.mainFrame()) committed = true;
+  };
+  page.on('request', onRequest);
+  page.on('framenavigated', onNavigated);
+  try {
+    try {
+      await control.click();
+      return;
+    } catch (err) {
+      if (!navigation || !(err instanceof errors.TimeoutError)) throw err;
+    }
+    // a redirect is a new request of the same navigation, so the wait follows the chain to its last hop.
+    const end = performance.now() + tab.navigationMs;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<'late'>((resolve) => (timer = setTimeout(() => resolve('late'), tab.navigationMs)));
+    try {
+      while (!committed && performance.now() < end) {
+        const waited: Request = navigation!;
+        if ((await Promise.race([waited.response(), late])) === 'late') break;
+        if (navigation !== waited) continue;
+        // the page commits a moment after its answer, or the answer was the hop of a redirect.
+        await page.waitForEvent('framenavigated', { predicate: (frame) => frame === page.mainFrame(), timeout: 1_000 }).catch(() => undefined);
+        if (navigation === waited) break;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!committed && performance.now() >= end) {
+      throw new Error(`the click ran, but the page gave no answer within ${tab.navigationMs / 1000} s`);
+    }
+  } finally {
+    page.off('request', onRequest);
+    page.off('framenavigated', onNavigated);
+  }
 }
 
 // playwright reads a ref against the last snapshot of the page, which can be newer than the one that the model read.
@@ -298,7 +345,7 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
           await act(ctx, 'click', { ref: id, element: name }, async (page, tab) => {
             const target = await find(page, tab, id);
             if (await sendsData(page, target)) throw new NotDone(`${id} sends a form. Nothing was clicked. Use browser_submit with its name and this ref`);
-            await target.click();
+            await clickAndFollow(page, tab, target);
           }),
         );
       },
@@ -415,8 +462,10 @@ export function createBrowserTools(worker: BrowserWorker): Tool[] {
             const sends = form.script || !READ_FORM_METHODS.includes(form.method);
             // playwright waits after a click for the navigation that it starts. a site that answered the post after the
             // action timeout gave a click error, and the tool said nothing of the form that had left (r8 probe). a get
-            // form keeps the wait, because nothing else waits for its page, and the snapshot failed during its load.
-            await control.click({ noWaitAfter: sends });
+            // form keeps the wait, because nothing else waits for its page, and the snapshot failed during its load. the
+            // wait may take the navigation time, as the wait of a link may.
+            if (sends) await control.click({ noWaitAfter: true });
+            else await clickAndFollow(page, tab, control);
             await page.waitForLoadState('domcontentloaded').catch(() => undefined);
             if (sends) outcome = await tab.waitForSent(SUBMIT_WAIT_MS, SUBMIT_SETTLE_MS, form.script);
           } finally {

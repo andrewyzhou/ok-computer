@@ -120,6 +120,12 @@ export async function startFixture(): Promise<Fixture> {
         return send(200, 'invoice 42', 'text/plain', { 'content-disposition': 'attachment; filename="invoice.txt"' });
       case 'shop.test/search':
         return send(200, html('<form action="/find" method="get"><input name="q" aria-label="Query" value="shirts"><button type="submit">Search</button></form>', 'Search'));
+      case 'shop.test/slow-search':
+        return send(200, html('<form action="/slow-find" method="get"><input name="q" aria-label="Query" value="hats"><button type="submit">Search</button></form><a href="/slow-find?q=caps">Caps</a>', 'Slow search'));
+      // the answer comes after the action timeout of the test harness, as a slow site or a busy pc gives it.
+      case 'shop.test/slow-find':
+        await new Promise((resolve) => setTimeout(resolve, 4000));
+        return send(200, html(`<h1>Found ${new URL(path, 'http://x').searchParams.get('q')}</h1>`, 'Found'));
       case 'shop.test/find':
         return send(200, html(`<h1>Found ${new URL(path, 'http://x').searchParams.get('q')}</h1>`, 'Found'));
       case 'shop.test/workers': {

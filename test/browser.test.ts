@@ -223,11 +223,29 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000, r
 
   it('lets a click send a get form, such as a search box', async () => {
     const h = harness();
+    site.hits.length = 0;
     const first = await h.run('browser_open', { url: site.url('shop.test', '/search') });
-    const out = await h.run('browser_click', { ref: refOf(first.content, /button "Search"/) });
-    expect(out.isError).toBe(false);
+    const out = await h.run('browser_click', { ref: refOf(first.content, /button "Search"/), element: 'Search' });
+    expect(out.isError, out.content).toBe(false);
     expect(out.content).toContain('Found shirts');
     expect(site.hitsOn('shop.test').filter((hit) => hit.path.startsWith('/find'))).toEqual([expect.objectContaining({ method: 'GET', path: '/find?q=shirts' })]);
+  });
+
+  // playwright waits for the page of a click only within the action timeout. a busy windows runner answered the search
+  // later than that, and the click was called an error, although the search had run and its page loaded.
+  it('waits for the page of a get form or a link that answers after the action timeout', async () => {
+    const h = harness();
+    site.hits.length = 0;
+    const url = site.url('shop.test', '/slow-search');
+    const first = await h.run('browser_open', { url });
+    const form = await h.run('browser_click', { ref: refOf(first.content, /button "Search"/), element: 'Search' });
+    expect(form.isError, form.content).toBe(false);
+    expect(form.content).toContain('Found hats');
+    const again = await h.run('browser_open', { url });
+    const link = await h.run('browser_click', { ref: refOf(again.content, /link "Caps"/), element: 'Caps' });
+    expect(link.isError, link.content).toBe(false);
+    expect(link.content).toContain('Found caps');
+    expect(site.hitsOn('shop.test').filter((hit) => hit.path.startsWith('/slow-find')).map((hit) => hit.path)).toEqual(['/slow-find?q=hats', '/slow-find?q=caps']);
   });
 
   it('blocks a 307 hop of an approved post to an off-list host', async () => {
