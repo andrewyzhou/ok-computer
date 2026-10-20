@@ -618,6 +618,10 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
 
   async function startTab(ctx: BrowserContext, kind: Tab['kind'], step: StepInput, allowlist: string[]): Promise<Tab | BrowserRefusal> {
     try {
+      // a new task waits for the end of the task that has the trace before its own limit starts. each wait in that end
+      // has a limit of its own. a slow trace stop under load, for example on windows, used up the limit of the new
+      // tab, so chrome closed as if it gave no answer, and the old task lost its trace and the new task crashed.
+      if (kind === 'task') await traceStop;
       // the start of a tab has no timeout of its own. a chrome that gave no answer held each later open and search
       // behind it until the app restarted (r8 probe). that chrome closes, and the next call starts a new one.
       const work = newTab(ctx, kind, step, allowlist);
