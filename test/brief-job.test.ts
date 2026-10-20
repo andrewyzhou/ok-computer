@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { BriefContext } from '../src/brief/context.js';
 import { BRIEF_AUTOMATION_NAME } from '../src/brief/context.js';
-import { BRIEF_TASK, runBriefJob } from '../src/brief/job.js';
+import { BRIEF_TASK, digestPending, runBriefJob } from '../src/brief/job.js';
 import { briefOfDay } from '../src/brief/store.js';
 import { openDb, type Db } from '../src/db/index.js';
 import { silentLogger } from '../src/observability/logger.js';
+import { installInboxJobs } from '../src/inbox/inbox.js';
 import { createRunQueue } from '../src/sessions/queue.js';
 import { createTestApp } from './app-harness.js';
 
@@ -31,7 +32,7 @@ type Owner = BriefContext['owner'];
 
 // a brief context without the app, for the cases that the app cannot set up: a digest that runs, and an owner channel
 // that fails.
-function context(options: { owner?: Owner; running?: () => boolean; signal?: AbortSignal } = {}) {
+function context(options: { owner?: Owner; running?: () => boolean; signal?: AbortSignal; delegations?: boolean } = {}) {
   const db = openDb(':memory:');
   const activeRuns = new Set<string>();
   const sent: string[] = [];
@@ -151,6 +152,63 @@ describe('the morning brief job', () => {
     expect(briefOfDay(db, DAY)?.delivery).toMatchObject({ channel: 'telegram', ok: false, error: 'the message did not reach the owner' });
     expect(db.prepare("SELECT status, error FROM runs WHERE id = 'run-b'").get()).toEqual({ status: 'completed', error: 'the message did not reach the owner' });
     expect(systemEvents(db, 'brief:run-b').at(-1)).toEqual({ text: 'The brief did not reach the owner.' });
+    // the agent must not think that the owner read a brief that never arrived.
+    const main = systemEvents(db, 'main');
+    expect(main).toHaveLength(1);
+    expect(main[0]!.text).toMatch(/^The morning brief was built but did not reach the owner:\n/);
+    expect(main[0]!.text).not.toContain('went to the owner');
+  });
+
+  it('waits for a digest of the same tick that has not started yet', async () => {
+    // the digest automation is due at 07:30, as the brief is. the brief starts first and the digest has not been
+    // claimed yet, so nothing runs when the brief looks.
+    let running = false;
+    const { db, ctx } = context({ running: () => running });
+    installInboxJobs(db, { timeZone: TZ }, new Date(pdt('06:00')));
+    expect(digestPending(ctx, DAY, 600_000)).toBe(true);
+    const job = runBriefJob(ctx, { pollMs: 5, maxWaitMs: 60_000 });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    running = true;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(db.prepare('SELECT COUNT(*) AS n FROM briefs').get()?.n).toBe(0);
+    digest(db, DAY, ['school']);
+    running = false;
+    expect((await job).status).toBe('completed');
+    expect(briefOfDay(db, DAY)?.content.sources.digest).toEqual({ id: 1, day: DAY });
+  });
+
+  it('does not wait for a digest that already ran, is off, is planned later, or was made after its time', () => {
+    const ran = context({ running: () => false });
+    installInboxJobs(ran.db, { timeZone: TZ }, new Date(pdt('06:00')));
+    const id = String(ran.db.prepare("SELECT id FROM automations WHERE json_extract(payload, '$.job') = 'digest'").get()!.id);
+    ran.db.prepare("INSERT INTO automation_runs (automationId, runId, status, startedAt, endedAt, error) VALUES (?, 'r', 'failed', ?, ?, 'x')").run(id, pdt('07:30'), pdt('07:30'));
+    expect(digestPending(ran.ctx, DAY, 600_000)).toBe(false);
+
+    const off = context({ running: () => false });
+    installInboxJobs(off.db, { timeZone: TZ }, new Date(pdt('06:00')));
+    off.db.prepare("UPDATE automations SET enabled = 0 WHERE json_extract(payload, '$.job') = 'digest'").run();
+    expect(digestPending(off.ctx, DAY, 600_000)).toBe(false);
+
+    const later = context({ running: () => false });
+    installInboxJobs(later.db, { timeZone: TZ }, new Date(pdt('06:00')));
+    later.db.prepare(`UPDATE automations SET schedule = '{"kind":"cron","expr":"0 9 * * *","tz":"${TZ}"}' WHERE json_extract(payload, '$.job') = 'digest'`).run();
+    expect(digestPending(later.ctx, DAY, 600_000)).toBe(false);
+
+    const fresh = context({ running: () => false });
+    installInboxJobs(fresh.db, { timeZone: TZ }, new Date(pdt('07:29')));
+    fresh.db.prepare('UPDATE automations SET createdAt = ?').run(new Date(Date.parse(pdt('07:30')) + 1).toISOString());
+    expect(digestPending(fresh.ctx, DAY, 600_000)).toBe(false);
+
+    // a digest planned long before now is not waited for either.
+    const old = context({ running: () => false });
+    installInboxJobs(old.db, { timeZone: TZ }, new Date(pdt('06:00')));
+    expect(digestPending({ ...old.ctx, clock: () => new Date(pdt('09:00')) }, DAY, 600_000)).toBe(false);
+  });
+
+  it('writes the trigger of a brief that the owner started on the dashboard', async () => {
+    const { db, ctx } = context();
+    await runBriefJob(ctx, undefined, 'dashboard');
+    expect(db.prepare("SELECT trigger FROM runs WHERE id = 'run-b'").get()?.trigger).toBe('dashboard');
   });
 
   it('fails the run when the brief cannot be stored, and sends nothing', async () => {

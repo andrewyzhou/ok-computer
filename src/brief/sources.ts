@@ -12,11 +12,17 @@ import { readDelegations } from './desk.js';
 
 // the sources of a brief: the calendar, the inbox digest, the calendar proposals, the delegations and the goals.
 
+// the id of the newest digest of one day, or undefined.
+export function digestOfDay(db: Db, day: string): number | undefined {
+  const row = db.prepare('SELECT id FROM inbox_digests WHERE day = ? ORDER BY id DESC LIMIT 1').get(day);
+  return row ? Number(row.id) : undefined;
+}
+
 // the digest of the brief: the newest digest of the day, else the newest digest of the day before, else null.
 export function digestForBrief(db: Db, day: string): InboxDigest | null {
   for (const each of [day, addDays(day, -1)]) {
-    const row = db.prepare('SELECT id FROM inbox_digests WHERE day = ? ORDER BY id DESC LIMIT 1').get(each);
-    if (row) return getDigest(db, Number(row.id)) ?? null;
+    const id = digestOfDay(db, each);
+    if (id !== undefined) return getDigest(db, id) ?? null;
   }
   return null;
 }
@@ -25,11 +31,11 @@ export function digestForBrief(db: Db, day: string): InboxDigest | null {
 export const calendarAliases = (ctx: Pick<BriefContext, 'google'>): string[] => ctx.google?.accounts.aliases ?? [];
 
 // the state of the calendar source: off without a google block, failed when every account was skipped, partial when
-// some were, and ok otherwise.
+// some were or when one calendar of an account was not read in full, and ok otherwise.
 function calendarState(ctx: Pick<BriefContext, 'google'>, read: CalendarRead): BriefSources['calendar'] {
   if (!read.configured) return 'off';
   const aliases = calendarAliases(ctx);
-  const skipped = new Set(read.skipped.map((each) => each.account));
+  const skipped = new Set(read.skipped.filter((each) => each.calendarId === undefined).map((each) => each.account));
   if (aliases.length && aliases.every((alias) => skipped.has(alias))) return 'failed';
   return read.skipped.length ? 'partial' : 'ok';
 }
@@ -60,7 +66,7 @@ export async function gatherBriefInput(ctx: BriefContext, day: string): Promise<
     });
     events = read.events;
     calendar = calendarState(ctx, read);
-    skipped = read.skipped.map((each) => ({ account: each.account, reason: each.reason }));
+    skipped = read.skipped.map((each) => ({ account: each.account, reason: each.reason, ...(each.calendarId !== undefined ? { calendarId: each.calendarId } : {}) }));
   } catch (err) {
     failed('calendar', err);
     // without a google block there is no calendar to fail. with one, each account counts as not read.

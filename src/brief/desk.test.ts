@@ -72,4 +72,25 @@ describe('brief delegations', () => {
     const result = await readDelegations(db, END, async () => ({ listDelegations: async () => [row(1, { waitingOn: 'sam' })] }));
     expect(result).toEqual([{ id: 1, title: 'job 1', status: 'open', nextStep: null, waitingOn: 'sam', dueAt: null, followUpAt: null }]);
   });
+
+  // this test runs only when the desk track is merged. it makes a delegation with the real desk store and reads it
+  // with the default loader, so a change of the desk module that breaks the brief shows here.
+  const deskFile = new URL(DESK_MODULE.replace(/\.js$/, '.ts'), import.meta.url);
+  it.runIf(existsSync(deskFile))('reads a delegation that the real desk store made', async () => {
+    const desk = (await import(/* @vite-ignore */ DESK_MODULE)) as {
+      createDelegation: (db: unknown, input: Record<string, unknown>, by: Record<string, unknown>, now: Date) => { ok: boolean };
+    };
+    const own = openDb(':memory:');
+    const made = desk.createDelegation(
+      own,
+      { title: 'Get the refund', waitingOn: { name: 'Dana', email: 'dana@example.com' }, dueAt: '2026-10-12T20:00:00.000Z', createdBy: 'owner' },
+      { actor: 'owner' },
+      new Date('2026-10-12T14:00:00.000Z'),
+    );
+    expect(made.ok).toBe(true);
+    const got = await readDelegations(own, END);
+    expect(got).toEqual([
+      { id: expect.any(Number), title: 'Get the refund', status: 'waiting', nextStep: null, waitingOn: 'Dana', dueAt: '2026-10-12T20:00:00.000Z', followUpAt: null },
+    ]);
+  });
 });

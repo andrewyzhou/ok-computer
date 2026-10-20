@@ -291,7 +291,7 @@ export function createApp(deps: AppDeps): App {
     ...(inbox ? { inbox } : {}),
     owner,
     queue,
-    dashboardUrl: (deps.loginCodes && config.dashboard.publicUrl) || `http://127.0.0.1:${config.dashboard.port}`,
+    dashboardUrl: ((deps.loginCodes && config.dashboard.publicUrl) || `http://127.0.0.1:${config.dashboard.port}`).replace(/\/+$/, ''),
     signal: shutdown.signal,
     replan,
     activeRuns,

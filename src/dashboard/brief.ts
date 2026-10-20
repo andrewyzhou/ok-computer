@@ -96,7 +96,7 @@ export function mountBrief(server: Hono, deps: DashboardDeps): void {
     if (!input.ok) return c.json({ error: input.error }, 400);
     if (app.today.running()) return c.json({ error: 'a brief is being built now' }, 409);
     logger.info('dashboard builds a brief now');
-    void app.today.runBrief().catch((err: unknown) => logger.error('the brief run failed', { error: errorText(err) }));
+    void app.today.runBrief('dashboard').catch((err: unknown) => logger.error('the brief run failed', { error: errorText(err) }));
     return c.json({ started: true }, 202);
   });
 }

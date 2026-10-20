@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { BriefContext } from '../src/brief/context.js';
-import { runBriefJob } from '../src/brief/job.js';
+import { briefLink, runBriefJob } from '../src/brief/job.js';
 import { briefOfDay, getBrief, listBriefs, saveBrief } from '../src/brief/store.js';
 import { createToday } from '../src/brief/today.js';
 import type { BriefContent, BriefsPage } from '../src/dashboard/brief-types.js';
@@ -86,7 +86,8 @@ describe('the calendar route with odd events', () => {
   it('gives a conflict that touches two days once, and keeps the events in start order', async () => {
     const { dashboard } = withEvents([
       ev('late', '2026-10-12T23:30:00-07:00', '2026-10-13T00:30:00-07:00'),
-      ev('night', '2026-10-12T23:45:00-07:00', '2026-10-13T01:00:00-07:00'),
+      // an accepted meeting, because two time blocks of the owner alone never conflict.
+      ev('night', '2026-10-12T23:45:00-07:00', '2026-10-13T01:00:00-07:00', { answer: 'accepted', organizerSelf: false }),
       ev('early', '2026-10-12T08:00:00-07:00', '2026-10-12T08:30:00-07:00'),
     ]);
     const answer = await page(dashboard, '/api/calendar?from=2026-10-12&days=2');
@@ -269,5 +270,11 @@ describe('the brief job around midnight and at once', () => {
     db.exec('DROP TABLE brief_deliveries; DROP TABLE briefs');
     expect((await today.runBrief()).status).toBe('failed');
     expect(today.running()).toBe(false);
+  });
+});
+
+describe('the link of the telegram message', () => {
+  it('writes a link without a double slash when the public address ends in a slash', () => {
+    expect(briefLink('https://okc.example.net/', '2026-10-12')).toBe('https://okc.example.net/#/today/2026-10-12');
   });
 });
