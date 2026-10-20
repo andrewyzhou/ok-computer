@@ -5,9 +5,10 @@ import type { DocListItem } from '../dashboard/docs-types.js';
 import { openDb, type Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import { createToolRegistry, type ToolContext } from '../tools/registry.js';
+import { splitLines } from './diff.js';
 import { searchDocs } from './fts.js';
 import { addVersion, getDoc, getVersion, listDocs, listVersions, versionTaint } from './store.js';
-import { createDocTools, DOC_TOOLS } from './tools.js';
+import { createDocTools, DOC_TOOLS, LIST_TAINT_SOURCE } from './tools.js';
 
 // another package builds the search. the tests here check only how doc_search uses it.
 vi.mock('./fts.js', () => ({ searchDocs: vi.fn() }));
@@ -160,7 +161,7 @@ describe('doc_read', () => {
 
   it('reads an older version from a line, and ends without a more line', async () => {
     const { tripId } = seedDocs(db);
-    const body = getVersion(db, tripId, 1)!.body.split('\n');
+    const body = splitLines(getVersion(db, tripId, 1)!.body);
     const out = await setup()('doc_read', { id: tripId, version: 1, fromLine: body.length - 1 });
     expect(out.content).toContain(`version 1 of 3, updated Saturday, October 10, 2026 at 09:00 PDT`);
     expect(out.content).toContain(`lines ${body.length - 1}-${body.length} of ${body.length}:\n${body.at(-2)}\n${body.at(-1)}\nthe owner's comments`);
@@ -209,7 +210,7 @@ describe('doc_list', () => {
       `#${notesId} [notes] Notes on the essay - v1, updated Sunday, October 11, 2026 at 20:00 PDT, 0 comments`,
       `#${laptopsId} [comparison] Laptop comparison - v1, updated Sunday, October 11, 2026 at 11:05 PDT, 0 comments`,
     ]);
-    expect(out.untrustedSource).toBe(`doc titles written after reading untrusted content (#${laptopsId})`);
+    expect(out.untrustedSource).toBe(LIST_TAINT_SOURCE);
   });
 
   it('filters by kind, pages with the cursor and refuses a bad cursor', async () => {
@@ -242,7 +243,7 @@ describe('doc_search', () => {
     const out = await setup()('doc_search', { query: 'hotel', kind: 'plan', limit: 3 });
     expect(search).toHaveBeenCalledWith(db, { q: 'hotel', kind: 'plan', limit: 3 });
     expect(out.content).toBe(`#${tripId} [plan] Trip plan: Lisbon - v3: The hotel moved to Alfama\n#${laptopsId} [comparison] Laptop comparison - v1: the Air 13`);
-    expect(out.untrustedSource).toBe(`doc titles written after reading untrusted content (#${laptopsId})`);
+    expect(out.untrustedSource).toBe(LIST_TAINT_SOURCE);
   });
 
   it('says so when no doc matches, with the default limit', async () => {

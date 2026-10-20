@@ -17,11 +17,12 @@ export interface DiffInput {
   to: { version: number; title: string; body: string };
 }
 
-// the lines of a text. an empty text has no lines, a last line break adds no empty line, and a crlf line break is the
-// same as a lf one.
+// the lines of a text, as the page shows them. an empty text has no lines, a last line break adds no empty line, and a
+// crlf or a lone cr line break is the same as a lf one, because the markdown of the page reads each of them as a line
+// break. doc_read numbers its lines with this function too, so the tool and the diff count the same lines.
 export function splitLines(text: string): string[] {
   if (text === '') return [];
-  const lines = text.split(/\r?\n/);
+  const lines = text.split(/\r\n|\r|\n/);
   if (lines.at(-1) === '') lines.pop();
   return lines;
 }

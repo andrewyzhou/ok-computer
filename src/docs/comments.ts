@@ -5,8 +5,10 @@ import { appendEvent } from '../events/log.js';
 import type { Logger } from '../observability/logger.js';
 import type { RunQueue } from '../sessions/queue.js';
 import { inTransaction } from '../signals/store.js';
+import type { TaintSource } from '../policy/policy.js';
 import type { Clock } from '../time.js';
-import { getDoc, listComments } from './store.js';
+import { wrapUntrusted } from '../tools/untrusted.js';
+import { getDoc, hasNul, listComments, NUL_ERROR, versionTaint } from './store.js';
 
 // the owner's comments on a doc (doc_comments and doc_comment_deliveries of 022_docs.sql). a comment is stored at once,
 // so the page shows it, and then it goes to its session as a system_event through the session queue, so it never lands
@@ -62,11 +64,19 @@ export function createDocComments(deps: DocCommentsDeps): DocComments {
       const doc = getDoc(db, docId);
       if (!comment || !doc) return;
       const at = clock();
-      // the event has no taint: the quote and the text are the owner's own words, and the event names the doc only by
-      // its id.
+      // the text of a comment is the owner's own words, but its quote is text of the doc that the owner selected, and
+      // a version that a tainted session wrote can repeat outside text. so the event carries the taint of the quoted
+      // version, and main gains it as it does for the copy of an automation message. a comment with no quote has no
+      // taint, and the event names the doc only by its id.
+      const taint = comment.quote ? versionTaint(db, docId, comment.version) : [];
       const event = appendEvent(
         db,
-        { sessionKey: COMMENT_SESSION, runId: null, type: 'system_event', payload: { text: commentEventText(comment, doc.version) } },
+        {
+          sessionKey: COMMENT_SESSION,
+          runId: null,
+          type: 'system_event',
+          payload: { text: commentEventText(comment, doc.version, taint), ...(taint.length ? { taint } : {}) },
+        },
         at,
       );
       db.prepare('INSERT INTO doc_comment_deliveries (commentId, eventId, deliveredAt) VALUES (?, ?, ?)').run(id, event.id, at.toISOString());
@@ -82,6 +92,8 @@ export function createDocComments(deps: DocCommentsDeps): DocComments {
 
   return {
     add(input) {
+      // sqlite cuts a text at a nul character when it binds it, so the stored comment would lose the rest.
+      if (hasNul(input.text) || (input.quote !== undefined && hasNul(input.quote))) return { ok: false, error: NUL_ERROR };
       const text = input.text.trim();
       if (!text) return { ok: false, error: 'write a comment of 1 to 4,000 characters, because this one is empty' };
       if (text.length > COMMENT_CHARS) return { ok: false, error: 'the comment has more than 4,000 characters' };
@@ -109,16 +121,19 @@ export function createDocComments(deps: DocCommentsDeps): DocComments {
 }
 
 // the text of the system_event that carries a comment. it names the doc by its id and never by its title: the model
-// wrote the title, maybe after reading outside text, and the event has no taint, because the comment is the owner's
-// own text. newest is the newest version of the doc when the event is written.
-export function commentEventText(comment: DocComment, newest: number): string {
+// wrote the title, maybe after reading outside text. newest is the newest version of the doc when the event is
+// written, and taint is the taint of the quoted version. a quote of a tainted version goes in an untrusted block, and
+// the owner's own text stays outside it.
+export function commentEventText(comment: DocComment, newest: number, taint: readonly TaintSource[] = []): string {
   const later = newest > comment.version ? `; the doc is now at version ${newest}` : '';
   const parts = [`The owner commented on doc #${comment.docId}, version ${comment.version}${later}.`];
   if (comment.quote) {
-    const quoted = comment.quote
-      .split('\n')
-      .map((line) => `> ${line}`)
-      .join('\n');
+    const quoted = taint.length
+      ? wrapUntrusted(`doc #${comment.docId} version ${comment.version}`, comment.quote)
+      : comment.quote
+          .split('\n')
+          .map((line) => `> ${line}`)
+          .join('\n');
     parts.push(`The comment is about this part of the doc:\n${quoted}`);
   }
   parts.push(`The comment:\n${comment.text}`);

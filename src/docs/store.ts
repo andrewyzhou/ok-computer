@@ -86,9 +86,16 @@ export function isSafeHref(href: string): boolean {
   }
 }
 
+// sqlite cuts a text at a nul character when it binds it, so a stored body would lose the text after the nul while the
+// writer is told that all of it was saved. a text with a nul is refused, so the stored text is the text that was sent.
+export const hasNul = (text: string) => text.includes('\u0000');
+export const NUL_ERROR = 'the text has a nul character (U+0000); remove it and send the text again';
+
 // the checks that each version passes. the tool schemas check the same limits, so a model gets the error before the
 // store, and the dashboard and the seed get it here.
 function checkFields(fields: { title: string; body: string; links: DocLink[]; note?: string | undefined }): string | undefined {
+  const texts = [fields.title, fields.body, fields.note ?? '', ...fields.links.map((link) => link.label)];
+  if (texts.some(hasNul)) return NUL_ERROR;
   if (!fields.title.trim()) return 'give the doc a title';
   // the store keeps the title trimmed, so the limit counts the trimmed title.
   if (fields.title.trim().length > TITLE_CHARS) return `the title has more than ${TITLE_CHARS} characters`;

@@ -29,6 +29,33 @@ const FTS_WHERE = 'd.id IN (SELECT rowid FROM docs_fts WHERE docs_fts MATCH $mat
 const LIKE_WHERE = "(v.title LIKE $pattern ESCAPE '\\' OR v.body LIKE $pattern ESCAPE '\\')";
 const KIND_WHERE = ' AND ($kind IS NULL OR d.kind = $kind)';
 
+// the snippet shows the words of the body without its markdown marks, so a heading mark, an emphasis mark, a table
+// pipe or the address of a link does not read as noise in the list. the marks of the matches are found in this plain
+// text. it is a cheap pass over the lines and not a parser, so an odd construct can keep a mark.
+export function plainMarkdown(body: string): string {
+  return body
+    .split(/\r\n|\r|\n/)
+    .filter((line) => !/^\s{0,3}(?:```|~~~)/.test(line) && !/^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(line))
+    .map((line) =>
+      line
+        .replace(/^\s{0,3}(?:>\s?)+/, '')
+        .replace(/^\s{0,3}#{1,6}(?:\s+|$)/, '')
+        .replace(/^\s*(?:[-*+]|\d{1,9}[.)])\s+(?:\[[ xX]\]\s+)?/, '')
+        .replace(/!?\[([^\]\n]*)\]\([^)\n]*\)/g, '$1')
+        .replace(/!?\[([^\]\n]+)\]\[[^\]\n]*\]/g, '$1')
+        .replace(/^\s{0,3}\[[^\]\n]+\]:\s*\S.*$/, '')
+        .replace(/(\*\*|__|~~)(?=\S)([^\n]*?\S)\1/g, '$2')
+        .replace(/(^|[^\w*])[*_](?=\S)([^*_\n]*?\S)[*_](?![\w*])/g, '$1$2')
+        .replace(/`([^`\n]*)`/g, '$1')
+        .replace(/^\s*\|/, '')
+        .replace(/\|\s*$/, '')
+        .replace(/\s*\|\s*/g, ' · ')
+        .trim(),
+    )
+    .filter((line) => line !== '')
+    .join('\n');
+}
+
 export function searchDocs(db: Db, input: DocSearchInput): DocSearchResult {
   const q = input.q.replaceAll('\u0000', '').trim();
   // the route refuses an empty query before it gets here. this guard keeps a match of everything out of the store.
@@ -40,6 +67,6 @@ export function searchDocs(db: Db, input: DocSearchInput): DocSearchResult {
       ? summariesWithBody(db, FTS_WHERE + KIND_WHERE, { match: ftsPhrase(q), kind }, input.limit)
       : summariesWithBody(db, LIKE_WHERE + KIND_WHERE, { pattern: likePattern(q), kind }, input.limit);
   // a hit in the title alone finds no match in the body, so its snippet is the start of the body with no marks.
-  const docs = rows.map(({ summary, body }): DocListItem => ({ ...summary, ...snippetOf(body, q, SNIPPET_CHARS) }));
+  const docs = rows.map(({ summary, body }): DocListItem => ({ ...summary, ...snippetOf(plainMarkdown(body), q, SNIPPET_CHARS) }));
   return { mode, docs };
 }

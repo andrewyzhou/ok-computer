@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { seedDocs } from '../../test/docs-seed.js';
 import type { DocKind, DocListItem } from '../dashboard/docs-types.js';
 import { openDb, type Db } from '../db/index.js';
-import { searchDocs } from './fts.js';
+import { plainMarkdown, searchDocs } from './fts.js';
 import { addVersion, createDoc } from './store.js';
 
 const base = new Date('2026-10-12T12:00:00Z');
@@ -163,5 +163,20 @@ describe('searchDocs', () => {
     expect(ids(searchDocs(db, { q: body.slice(5, 205), limit: 10 }).docs)).toEqual([id]);
     expect(searchDocs(db, { q: 'z'.repeat(200), limit: 10 })).toEqual({ mode: 'fts', docs: [] });
     expect(searchDocs(db, { q: '"'.repeat(200), limit: 10 }).docs).toEqual([]);
+  });
+});
+
+describe('the snippet without markdown', () => {
+  it('shows the words of the body without the marks of headings, emphasis, links and tables', () => {
+    const db = openDb(':memory:');
+    add(db, 'Trip', '# Trip plan: Lisbon\n\nFive days in Lisbon. **nothing is paid yet**, see [the site](https://a.example/x).\n\n| Flight | Price |\n|---|---|\n| TP 1 | $612 |');
+    const hit = searchDocs(db, { q: 'paid', limit: 5 }).docs[0]!;
+    expect(hit.snippet).toBe('Trip plan: Lisbon Five days in Lisbon. nothing is paid yet, see the site. Flight · Price TP 1 · $612');
+    expect(marked(hit)).toEqual(['paid']);
+  });
+
+  it('keeps the marks inside words and code', () => {
+    expect(plainMarkdown('snake_case_word and 2*3*4 and `a_b`')).toBe('snake_case_word and 2*3*4 and a_b');
+    expect(plainMarkdown('> quote\n- [x] done\n1. first\n```\ncode\n```')).toBe('quote\ndone\nfirst\ncode');
   });
 });

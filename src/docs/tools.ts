@@ -5,6 +5,7 @@ import { sourceNames } from '../policy/policy.js';
 import { sessionTaint } from '../policy/store.js';
 import { formatLocal } from '../time.js';
 import { defineTool, type Tool, type ToolOutput } from '../tools/registry.js';
+import { splitLines } from './diff.js';
 import { searchDocs } from './fts.js';
 import {
   addVersion,
@@ -53,10 +54,12 @@ const links = z
 const refused = (content: string): ToolOutput => ({ content, isError: true, effect: 'none' });
 
 // the titles of tainted docs are model text that the model may have taken from outside text, so a list that shows
-// them is untrusted. the source names the docs, so the owner can open them.
+// them is untrusted. the source is one fixed text: the session dedupes its taint on the source, so a source that named
+// the docs of each page would add a new source for each list or search with another set of docs.
+export const LIST_TAINT_SOURCE = 'doc titles or snippets written after reading untrusted content';
+
 function listTaint(docs: readonly DocSummary[]): Pick<ToolOutput, 'untrustedSource'> {
-  const tainted = docs.filter((doc) => doc.tainted).map((doc) => `#${doc.id}`);
-  return tainted.length ? { untrustedSource: `doc titles written after reading untrusted content (${tainted.join(', ')})` } : {};
+  return docs.some((doc) => doc.tainted) ? { untrustedSource: LIST_TAINT_SOURCE } : {};
 }
 
 export function createDocTools(deps: DocToolDeps): Tool[] {
@@ -154,7 +157,7 @@ export function createDocTools(deps: DocToolDeps): Tool[] {
       const wanted = version ?? doc.version;
       const read = getVersion(db, id, wanted);
       if (!read) return { content: `doc #${id} has no version ${wanted}; its newest version is ${doc.version}`, isError: true };
-      const all = read.body.split(/\r?\n/);
+      const all = splitLines(read.body);
       const slice = all.slice(fromLine - 1, fromLine - 1 + lines);
       const out = [`#${id} "${read.title}" [${read.kind}], version ${read.version} of ${doc.version}, updated ${local(read.createdAt, ctx.timeZone)}`];
       if (read.links.length) out.push('links:', ...read.links.map((link) => `- ${link.label}: ${link.href}`));
@@ -165,15 +168,25 @@ export function createDocTools(deps: DocToolDeps): Tool[] {
       } else {
         out.push(`no lines from line ${fromLine}; the body has ${all.length} lines`);
       }
+      const taint = versionTaint(db, id, read.version);
       const comments = listComments(db, id).slice(-COMMENTS_SHOWN);
       if (comments.length) {
         out.push(`the owner's comments (newest ${comments.length}):`);
+        // a quote is text of the doc, so a quote of a tainted version can be outside text. when the read version is
+        // tainted, the whole result is untrusted and the quote can show. when it is not, the quote of a tainted
+        // version stays out, so the result stays trusted, and the model reads that version to see the passage.
+        const quoteTainted = new Map<number, boolean>();
+        const tainted = (version: number) => {
+          if (!quoteTainted.has(version)) quoteTainted.set(version, versionTaint(db, id, version).length > 0);
+          return quoteTainted.get(version)!;
+        };
         for (const comment of comments) {
-          const quote = comment.quote ? ` (on the text "${comment.quote}")` : '';
+          let quote = '';
+          if (comment.quote && (taint.length || !tainted(comment.version))) quote = ` (on the text "${comment.quote}")`;
+          else if (comment.quote) quote = ` (on a passage of version ${comment.version}, which holds outside text; read that version to see it)`;
           out.push(`#${comment.id} on version ${comment.version}${quote}: ${comment.text}`);
         }
       }
-      const taint = versionTaint(db, id, read.version);
       // the source names only the doc, the version and its stored sources, so a second read of the same version gives
       // the same source and the taint list of the session does not grow.
       const untrusted = taint.length

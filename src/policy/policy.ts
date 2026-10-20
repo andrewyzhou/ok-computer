@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Result } from '../config/load.js';
 import { DOC_WRITE_TOOLS } from '../docs/names.js';
 import { headOf } from '../text.js';
+import { linkSignal } from './link-signal.js';
 
 // exec runs code that the model wrote in the code sandbox (src/sandbox). the container has no network, so the call
 // cannot send data off the pc, but the code can change the scratch files and use the cpu, so a reviewer checks it.
@@ -293,14 +294,7 @@ function urlsIn(raw: string): UrlCandidate[] {
 // the part of a found url that a chat app makes a link of.
 export const linkOf = (url: string) => url.split(LINK_END)[0]!;
 
-// a url can carry data in its query, its fragment, a long path, or a long label of its host (dns lookups leave the pc
-// too). a short url such as https://example.com/about carries no more than its choice of page. any query counts,
-// because a length limit let a short secret through (24 bytes in base64 fit in 31 characters), and a false match
-// costs only one call of the reviewer. the path limit is near that size for the same reason: a limit of 100 let about
-// 57 bytes through. a long link usually comes from a page or a mail, and such a link passes as read. the limits on the
-// path and the labels are a filter, not a proof.
-const PATH_LIMIT = 48;
-const LABEL_LIMIT = 32;
+// the limits of a url that can carry data are in link-signal.ts, which the doc reader of the web app shares.
 // a url that the session already read carries no new data, for example a link from a mail or a search result. the
 // check of each url reads the event log, so a call with many urls goes to the reviewer without the check.
 export const SEEN_CHECKS = 20;
@@ -332,16 +326,8 @@ export function unseenUrls(urls: DataUrl[], seen?: (url: string) => boolean): Da
 }
 
 // the words after a link make a long path, so a candidate with more than the link is judged only by the parts that
-// carry data in place of a page name: the query, the fragment, and the user name and password (a browser sends them
-// after a 401 answer).
-function urlSignal({ url, whole }: UrlCandidate): string | undefined {
-  if (url.search.length > 1 || url.hash.length > 1) return 'it has a query or a fragment';
-  if (url.username || url.password) return 'it has a user name or a password';
-  if (!whole) return undefined;
-  if (url.hostname.length + url.pathname.length > PATH_LIMIT) return `its host and path have over ${PATH_LIMIT} characters`;
-  if (url.hostname.split('.').some((label) => label.length > LABEL_LIMIT)) return `a label of its host has over ${LABEL_LIMIT} characters`;
-  return undefined;
-}
+// carry data in place of a page name (linkSignal of link-signal.ts).
+const urlSignal = ({ url, whole }: UrlCandidate): string | undefined => linkSignal(url, whole);
 
 // web_search has no url, but it sends its query to a search engine, so its query counts as the query of a url.
 function dataLeak(input: PolicyInput): string | undefined {
