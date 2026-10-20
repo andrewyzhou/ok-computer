@@ -1,4 +1,4 @@
-import type { PeoplePage, PeopleStatus, PersonProfile, PersonSummary } from '../../../../src/dashboard/people-types';
+import type { PeoplePage, PeopleStatus, PersonProfile, PersonSummary } from '../../../../src/dashboard/people-types.js';
 
 // the answers of the people api for the web tests and for the stubs of the screenshots. they match the rows of
 // test/seed-people.ts at its clock (2026-10-18 16:00 utc), so a page test and a route test can share one story.

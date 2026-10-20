@@ -1,76 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { createTestCaller } from '../../test/harness.js';
-import { PEOPLE_NOW } from '../../test/seed-people.js';
-import type { PeoplePage, PersonNoteView, PersonProfile, PersonSummary } from '../dashboard/people-types.js';
-import { openDb } from '../db/index.js';
+import { PEOPLE_NOW, seedPeople } from '../../test/seed-people.js';
+import type { PeoplePage, PersonNoteView } from '../dashboard/people-types.js';
+import { openDb, type Db } from '../db/index.js';
 import type { GoogleConfig } from '../google/config.js';
 import { createToolRegistry, type Tool, type ToolContext } from '../tools/registry.js';
-import { PersonNotFound, type NoteInput, type PeopleStore, type SearchInput } from './store.js';
+import { peopleStore, type PeopleStore, type SearchInput } from './store.js';
 import { createPeopleTools, PEOPLE_READ_TOOLS, PEOPLE_TOOLS, peopleToolsFor } from './tools.js';
 
-// the store is a fake with the values of test/seed-people.ts at PEOPLE_NOW (the web fixtures hold the same values),
-// so these tests run before the real store is built. the fake keeps the rules that the tools depend on: an address is
-// found without case, a search counts its total, and a note that supersedes must belong to the same person.
-
-const summary = (person: Partial<PersonSummary> & Pick<PersonSummary, 'id' | 'primaryEmail'>): PersonSummary => ({
-  name: null,
-  displayName: person.name ?? person.primaryEmail,
-  emails: [person.primaryEmail],
-  organization: null,
-  organizationDomain: null,
-  mailCount: 0,
-  meetingCount: 0,
-  firstContactAt: null,
-  lastContactAt: null,
-  nextMeetingAt: null,
-  ...person,
-});
-
-const maya = summary({
-  id: 1,
-  name: 'Maya Lindqvist',
-  primaryEmail: 'maya@northwind.example',
-  emails: ['maya@northwind.example', 'maya.lindqvist@gmail.com'],
-  organization: 'Northwind',
-  organizationDomain: 'northwind.example',
-  mailCount: 3,
-  meetingCount: 1,
-  firstContactAt: '2026-09-02T16:00:00.000Z',
-  lastContactAt: '2026-10-17T17:00:00.000Z',
-  nextMeetingAt: '2026-10-21T17:00:00.000Z',
-});
-const tomas = summary({
-  id: 2,
-  name: 'Tomas Okafor',
-  primaryEmail: 'tomas.okafor@gmail.com',
-  mailCount: 2,
-  firstContactAt: '2026-10-10T16:00:00.000Z',
-  lastContactAt: '2026-10-16T16:00:00.000Z',
-});
-const priya = summary({
-  id: 3,
-  name: 'Priya',
-  primaryEmail: 'praman@berkeley.edu',
-  organization: 'Berkeley',
-  organizationDomain: 'berkeley.edu',
-  mailCount: 1,
-  meetingCount: 1,
-  firstContactAt: '2026-10-01T16:00:00.000Z',
-  lastContactAt: '2026-10-14T20:00:00.000Z',
-  nextMeetingAt: '2026-10-22T20:00:00.000Z',
-});
-const noName = summary({
-  id: 4,
-  primaryEmail: 'k.osei@fabrikam.example',
-  organization: 'Fabrikam',
-  organizationDomain: 'fabrikam.example',
-  mailCount: 2,
-  firstContactAt: '2026-10-12T16:00:00.000Z',
-  lastContactAt: '2026-10-12T18:00:00.000Z',
-});
-const jonas = summary({ id: 5, name: 'Jonas Weber', primaryEmail: 'jonas.weber@outlook.com', nextMeetingAt: '2026-10-25T15:00:00.000Z' });
-const PEOPLE = [maya, tomas, priya, noName, jonas];
-const NAMES: Record<number, string[]> = { 1: ['Maya Lindqvist', 'Maya L.'], 2: ['Tomas Okafor'], 3: ['Priya Raman'], 5: ['Jonas Weber'] };
+// the tools run on the real store over the seeded database of test/seed-people.ts, with the clock at PEOPLE_NOW (the
+// web fixtures hold the same values). the store is wrapped so a test can see each search that a tool sends.
 
 interface StoredNote extends PersonNoteView {
   personId: number;
@@ -78,75 +17,21 @@ interface StoredNote extends PersonNoteView {
   toolCallId: string | null;
 }
 
-function fakeStore() {
-  const notes: StoredNote[] = [
-    { id: 1, personId: 1, kind: 'preference', text: 'prefers morning meetings', author: 'agent', supersedes: null, runId: 'run-people-1', toolCallId: 'call-note-1', createdAt: '2026-10-01T16:00:00.000Z' },
-    { id: 2, personId: 1, kind: 'note', text: 'met at the design offsite', author: 'owner', supersedes: null, runId: null, toolCallId: null, createdAt: '2026-10-05T16:00:00.000Z' },
-    { id: 3, personId: 1, kind: 'preference', text: 'prefers meetings before 11:00', author: 'agent', supersedes: 1, runId: 'run-people-2', toolCallId: 'call-note-3', createdAt: '2026-10-10T16:00:00.000Z' },
-    { id: 4, personId: 2, kind: 'note', text: 'waiting on the signed lease from Tomas', author: 'agent', supersedes: null, runId: 'run-people-3', toolCallId: 'call-note-4', createdAt: '2026-10-16T16:00:00.000Z' },
-  ];
-  const view = ({ id, kind, text, author, runId, createdAt }: StoredNote): PersonNoteView => ({ id, kind, text, author, runId, createdAt });
-  const meeting = (account: string, eventId: string, title: string, startAt: string, endAt: string, role: 'organizer' | 'attendee') => ({ account, eventId, title, startAt, endAt, role });
-  const upcoming: Record<number, PersonProfile['upcoming']> = {
-    1: [meeting('personal', 'e-202', 'Design review', '2026-10-21T17:00:00.000Z', '2026-10-21T18:00:00.000Z', 'attendee')],
-    // the cancelled meeting e-402 on 10-20 is not here, as the store leaves it out.
-    3: [meeting('school', 'e-403', 'Paper draft review', '2026-10-22T20:00:00.000Z', '2026-10-22T21:00:00.000Z', 'organizer')],
-    5: [meeting('personal', 'e-601', 'Intro call', '2026-10-25T15:00:00.000Z', '2026-10-25T15:30:00.000Z', 'attendee')],
-  };
-  const openThreads: Record<number, PersonProfile['openThreads']> = {
-    2: [{ account: 'personal', threadId: 't-3', subject: 'Re: Lease for the new place', lastAt: '2026-10-16T16:00:00.000Z', messages: 2 }],
-  };
-  const getPerson = (_db: unknown, id: number): PersonProfile | undefined => {
-    const person = PEOPLE.find((each) => each.id === id);
-    if (!person) return undefined;
-    const superseded = new Set(notes.map((note) => note.supersedes));
-    const live = notes.filter((note) => note.personId === id && !superseded.has(note.id)).reverse();
-    return {
-      ...person,
-      names: (NAMES[id] ?? []).map((name) => ({ name, count: 1, lastSeenAt: person.lastContactAt ?? '' })),
-      emailDetails: person.emails.map((email) => ({ email, isPrimary: email === person.primaryEmail, firstSeenAt: '', lastSeenAt: '' })),
-      upcoming: upcoming[id] ?? [],
-      recentMeetings: [],
-      openThreads: openThreads[id] ?? [],
-      notes: live.filter((note) => note.kind === 'note').map(view),
-      preferences: live.filter((note) => note.kind === 'preference').map(view),
-      delegations: [],
-    };
-  };
+function recordingStore(db: Db) {
   const searches: SearchInput[] = [];
-  const store = {
-    getPerson,
-    findPersonByEmail: (_db: unknown, email: string) => PEOPLE.find((each) => each.emails.includes(email.trim().toLowerCase())),
-    searchPeople: (_db: unknown, input: SearchInput): PeoplePage => {
+  const store: PeopleStore = {
+    ...peopleStore,
+    searchPeople: (db: Db, input: SearchInput, now: Date): PeoplePage => {
       searches.push(input);
-      const q = (input.q ?? '').toLowerCase();
-      const matched = PEOPLE.filter((each) => !q || [...(NAMES[each.id] ?? []), each.displayName, ...each.emails, each.organization ?? ''].some((text) => text.toLowerCase().includes(q)));
-      const sorted = [...matched].sort((a, b) => {
-        if (input.sort === 'name') return a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()) || a.id - b.id;
-        if (input.sort === 'frequent') return b.mailCount + b.meetingCount - (a.mailCount + a.meetingCount) || a.id - b.id;
-        return (b.lastContactAt ?? '').localeCompare(a.lastContactAt ?? '') || a.id - b.id;
-      });
-      return { people: sorted.slice(0, input.limit), next: null, total: sorted.length };
-    },
-    addNote: (_db: unknown, input: NoteInput, now: Date): PersonNoteView => {
-      if (!PEOPLE.some((each) => each.id === input.personId)) throw new PersonNotFound();
-      if (input.supersedes !== undefined && !notes.some((note) => note.id === input.supersedes && note.personId === input.personId)) throw new PersonNotFound('note');
-      const note: StoredNote = {
-        id: notes.length + 1,
-        personId: input.personId,
-        kind: input.kind,
-        text: input.text.trim(),
-        author: input.author,
-        supersedes: input.supersedes ?? null,
-        runId: input.runId ?? null,
-        toolCallId: input.toolCallId ?? null,
-        createdAt: now.toISOString(),
-      };
-      notes.push(note);
-      return view(note);
+      return peopleStore.searchPeople(db, input, now);
     },
   };
-  return { store: store as unknown as PeopleStore, notes, searches };
+  const notes = () => db.prepare('SELECT id, personId, kind, text, author, supersedes, runId, toolCallId, createdAt FROM person_notes ORDER BY id').all() as unknown as StoredNote[];
+  const addNote = (note: StoredNote) =>
+    db
+      .prepare('INSERT INTO person_notes (id, personId, kind, text, author, supersedes, runId, toolCallId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(note.id, note.personId, note.kind, note.text, note.author, note.supersedes, note.runId, note.toolCallId, note.createdAt);
+  return { store, searches, notes, addNote };
 }
 
 const ctx = (): ToolContext => ({
@@ -160,7 +45,8 @@ const ctx = (): ToolContext => ({
 
 function setup() {
   const db = openDb(':memory:');
-  const fake = fakeStore();
+  seedPeople(db);
+  const fake = recordingStore(db);
   const tools = createPeopleTools({ db, store: fake.store });
   const byName = (name: string) => tools.find((tool) => tool.name === name)!;
   // the input goes through the schema first, as in the registry, so the defaults apply.
@@ -250,9 +136,9 @@ describe('the people tools', () => {
   });
 
   it('cuts a long profile to about 4000 characters', async () => {
-    const { run, notes } = setup();
+    const { run, addNote } = setup();
     for (let i = 0; i < 5; i++) {
-      notes.push({ id: 10 + i, personId: 2, kind: 'note', text: 'x'.repeat(1500), author: 'owner', supersedes: null, runId: null, toolCallId: null, createdAt: '2026-10-17T16:00:00.000Z' });
+      addNote({ id: 10 + i, personId: 2, kind: 'note', text: 'x'.repeat(1500), author: 'owner', supersedes: null, runId: null, toolCallId: null, createdAt: '2026-10-17T16:00:00.000Z' });
     }
     const { content } = await run('person_lookup', { id: 2 });
     expect(content.length).toBeLessThan(4100);
@@ -288,19 +174,19 @@ describe('the people tools', () => {
     const { run, notes } = setup();
     const saved = await run('person_note', { person: 'PRaman@Berkeley.edu', text: '  likes short agendas  ', kind: 'preference' });
     expect(saved).toEqual({ content: 'saved note 5 for Priya' });
-    expect(notes.at(-1)).toMatchObject({ id: 5, personId: 3, kind: 'preference', text: 'likes short agendas', author: 'agent', runId: 'r1', toolCallId: 'c1', supersedes: null });
+    expect(notes().at(-1)).toMatchObject({ id: 5, personId: 3, kind: 'preference', text: 'likes short agendas', author: 'agent', runId: 'r1', toolCallId: 'c1', supersedes: null });
     const replaced = await run('person_note', { person: 1, text: 'prefers meetings before 10:00', kind: 'preference', supersedes: 3 });
     expect(replaced).toEqual({ content: 'saved note 6 for Maya Lindqvist' });
-    expect(notes.at(-1)).toMatchObject({ personId: 1, supersedes: 3, kind: 'preference' });
+    expect(notes().at(-1)).toMatchObject({ personId: 1, supersedes: 3, kind: 'preference' });
     expect((await run('person_lookup', { id: 1 })).content).not.toContain('before 11:00');
     // the default kind is note.
     await run('person_note', { person: 2, text: 'lease signed' });
-    expect(notes.at(-1)).toMatchObject({ personId: 2, kind: 'note' });
+    expect(notes().at(-1)).toMatchObject({ personId: 2, kind: 'note' });
   });
 
   it("refuses to supersede another person's note, and an unknown person, without saving", async () => {
     const { run, notes } = setup();
-    const before = notes.length;
+    const before = notes().length;
     const other = await run('person_note', { person: 2, text: 'x', supersedes: 3 });
     expect(other).toEqual({ content: 'note 3 is not a note of Tomas Okafor, so no note was saved.', isError: true, effect: 'none' });
     const unknown = await run('person_note', { person: 'stranger@nowhere.example', text: 'x' });
@@ -308,7 +194,7 @@ describe('the people tools', () => {
     expect(unknown.content).toContain('no person matches the email address stranger@nowhere.example');
     const unknownId = await run('person_note', { person: 99, text: 'x' });
     expect(unknownId).toMatchObject({ isError: true, effect: 'none', content: expect.stringContaining('the id 99') });
-    expect(notes.length).toBe(before);
+    expect(notes().length).toBe(before);
   });
 
   it('checks the note input', () => {
@@ -332,6 +218,20 @@ describe('the people tools', () => {
     expect(output.content).toContain('Maya Lindqvist');
     const decision = db.prepare("SELECT decision, rule FROM policy_decisions WHERE toolCallId = 'lookup-call'").get();
     expect(decision).toEqual({ decision: 'allow', rule: 'risk:read' });
+  });
+
+  it('allows a note through the policy by its builtin rule, because it changes only the local database', async () => {
+    const { db, tools, notes } = setup();
+    db.prepare("INSERT INTO runs (id, sessionKey, trigger, slot, status, startedAt) VALUES ('r1', 'main', 'message', 'main', 'running', 'x')").run();
+    const { caller } = createTestCaller(db, createToolRegistry(tools as Tool[]), () => PEOPLE_NOW);
+    const output = await caller.call(
+      { id: 'note-call', name: 'person_note', input: { person: 2, text: 'lease signed' } },
+      { runId: 'r1', sessionKey: 'main', allowed: [...PEOPLE_TOOLS], signal: new AbortController().signal },
+    );
+    expect(output.content).toBe('saved note 5 for Tomas Okafor');
+    expect(notes().at(-1)).toMatchObject({ personId: 2, runId: 'r1', toolCallId: 'note-call' });
+    const decision = db.prepare("SELECT decision, rule FROM policy_decisions WHERE toolCallId = 'note-call'").get();
+    expect(decision).toEqual({ decision: 'allow', rule: 'builtin:person_note' });
   });
 });
 

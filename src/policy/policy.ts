@@ -39,6 +39,7 @@ const LOCAL_WRITE_TOOLS = [
   'heartbeat_respond',
   'memory_write',
   'message_owner',
+  'person_note',
 ];
 
 export const BUILTIN_RULES: Rule[] = [

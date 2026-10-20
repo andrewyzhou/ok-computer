@@ -6,142 +6,46 @@ import { createDashboard, type DashboardDeps } from '../src/dashboard/server.js'
 import type { Db } from '../src/db/index.js';
 import { googleConfigSchema } from '../src/google/config.js';
 import { createLogger, type Logger } from '../src/observability/logger.js';
-import { InvalidCursor, PersonNotFound, peopleStore, type NoteInput, type PeopleStore, type SearchInput } from '../src/people/store.js';
+import { peopleStore, type NoteInput, type PeopleStore, type SearchInput } from '../src/people/store.js';
+import { maya, mayaProfile, statusDone, tomasProfile } from '../web/src/views/people/fixtures.js';
 import { createTestApp } from './app-harness.js';
 import { PEOPLE_ACCOUNTS, PEOPLE_NOW, seedPeople } from './seed-people.js';
 
 // the people routes on the seeded database of test/seed-people.ts, with the clock at PEOPLE_NOW. the profiles must
-// equal the fixtures of the web view, which keeps the fixtures honest.
-//
-// the store of the people memory is not built on this branch yet, so the routes get a fake store, mounted on a plain
-// hono server as server.ts mounts them. the fake answers from the fixtures and keeps the notes in memory. when the
-// real store lands, build() mounts with peopleStore through createDashboard, and every test below stays the same.
+// equal the fixtures of the web view, which keeps the fixtures honest. the routes get the real store, wrapped so a
+// test can see the clock and the notes that the routes pass to it.
 
-interface FakeNote extends PersonNoteView {
-  personId: number;
-  supersedes: number | null;
-}
-
-interface FakeStore extends PeopleStore {
+interface RecordingStore extends PeopleStore {
   // every now that a read or a write got, so a test can see that the routes pass the clock of the dashboard.
   nows: Date[];
   notesAdded: NoteInput[];
 }
 
-// the fixtures live in the web project, whose imports leave out the .js ending that the node typecheck needs. a path
-// that tsc does not follow keeps that file out of the node typecheck, and the web typecheck still covers it.
-interface Fixtures {
-  maya: PersonSummary;
-  tomas: PersonSummary;
-  priya: PersonSummary;
-  noName: PersonSummary;
-  jonas: PersonSummary;
-  mayaProfile: PersonProfile;
-  tomasProfile: PersonProfile;
-  statusDone: PeopleStatus;
-}
-const fixturesPath: string = '../web/src/views/people/fixtures.ts';
-const { jonas, maya, mayaProfile, noName, priya, statusDone, tomas, tomasProfile } = (await import(fixturesPath)) as Fixtures;
-
-const summaries = [maya, tomas, priya, noName, jonas];
-const bareProfile = (summary: PersonSummary): PersonProfile => ({
-  ...summary,
-  names: [],
-  emailDetails: [],
-  upcoming: [],
-  recentMeetings: [],
-  openThreads: [],
-  notes: [],
-  preferences: [],
-  delegations: [],
-});
-
-function fakeStore(): FakeStore {
+function recordingStore(): RecordingStore {
   const nows: Date[] = [];
   const notesAdded: NoteInput[] = [];
-  // the notes of the seed, with note 1 superseded by note 3.
-  const notes: FakeNote[] = [
-    { id: 1, personId: 1, kind: 'preference', text: 'prefers morning meetings', author: 'agent', runId: 'run-people-1', createdAt: '2026-10-01T16:00:00.000Z', supersedes: null },
-    ...mayaProfile.notes.map((note) => ({ ...note, personId: 1, supersedes: null })),
-    ...mayaProfile.preferences.map((note) => ({ ...note, personId: 1, supersedes: 1 })),
-    ...tomasProfile.notes.map((note) => ({ ...note, personId: 2, supersedes: null })),
-  ];
-  const profiles = new Map<number, PersonProfile>([
-    [1, mayaProfile],
-    [2, tomasProfile],
-    [3, bareProfile(priya)],
-    [4, bareProfile(noName)],
-    [5, bareProfile(jonas)],
-  ]);
-  const view = ({ id, kind, text, author, runId, createdAt }: FakeNote): PersonNoteView => ({ id, kind, text, author, runId, createdAt });
-  const shown = (personId: number, kind: FakeNote['kind']) =>
-    notes
-      .filter((note) => note.personId === personId && note.kind === kind && !notes.some((later) => later.supersedes === note.id))
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id)
-      .map(view);
-  const words = (summary: PersonSummary) => [summary.displayName, ...(profiles.get(summary.id)?.names.map((name) => name.name) ?? []), ...summary.emails, summary.organization ?? ''].map((word) => word.toLowerCase());
-  const order = (sort: SearchInput['sort']) => (a: PersonSummary, b: PersonSummary) => {
-    if (sort === 'frequent') return b.mailCount + b.meetingCount - (a.mailCount + a.meetingCount) || a.id - b.id;
-    if (sort === 'name') return a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()) || a.id - b.id;
-    if (a.lastContactAt === b.lastContactAt) return a.id - b.id;
-    if (a.lastContactAt === null) return 1;
-    if (b.lastContactAt === null) return -1;
-    return b.lastContactAt.localeCompare(a.lastContactAt) || a.id - b.id;
-  };
-
   return {
     ...peopleStore,
     nows,
     notesAdded,
-    searchPeople(_db: Db, input: SearchInput, now: Date): PeoplePage {
+    searchPeople(db: Db, input: SearchInput, now: Date): PeoplePage {
       nows.push(now);
-      let offset = 0;
-      if (input.cursor !== undefined) {
-        const match = /^at:(\d+)$/.exec(Buffer.from(input.cursor, 'base64url').toString());
-        if (!match) throw new InvalidCursor();
-        offset = Number(match[1]);
-      }
-      const q = input.q?.toLowerCase() ?? '';
-      const matched = summaries.filter((summary) => words(summary).some((word) => word.includes(q))).sort(order(input.sort));
-      const end = offset + input.limit;
-      return { people: matched.slice(offset, end), next: end < matched.length ? Buffer.from(`at:${end}`).toString('base64url') : null, total: matched.length };
+      return peopleStore.searchPeople(db, input, now);
     },
-    getPerson(_db: Db, id: number, now: Date) {
+    getPerson(db: Db, id: number, now: Date) {
       nows.push(now);
-      const profile = profiles.get(id);
-      return profile && { ...profile, notes: shown(id, 'note'), preferences: shown(id, 'preference') };
+      return peopleStore.getPerson(db, id, now);
     },
-    findPersonByEmail(_db: Db, email: string, now: Date) {
+    findPersonByEmail(db: Db, email: string, now: Date) {
       nows.push(now);
-      return summaries.find((summary) => summary.emails.includes(email.trim().toLowerCase()));
+      return peopleStore.findPersonByEmail(db, email, now);
     },
-    addNote(_db: Db, input: NoteInput, now: Date): PersonNoteView {
+    addNote(db: Db, input: NoteInput, now: Date): PersonNoteView {
       nows.push(now);
-      if (!profiles.has(input.personId)) throw new PersonNotFound();
-      if (input.supersedes !== undefined && !notes.some((note) => note.id === input.supersedes && note.personId === input.personId)) throw new PersonNotFound('note');
+      const note = peopleStore.addNote(db, input, now);
       notesAdded.push(input);
-      const note: FakeNote = {
-        id: Math.max(...notes.map((each) => each.id)) + 1,
-        personId: input.personId,
-        kind: input.kind,
-        text: input.text.trim(),
-        author: input.author,
-        runId: input.runId ?? null,
-        createdAt: now.toISOString(),
-        supersedes: input.supersedes ?? null,
-      };
-      notes.push(note);
-      return view(note);
+      return note;
     },
-    // the status reads the seeded tables, as the real store does.
-    countPeople: (db: Db) => (db.prepare('SELECT count(*) AS n FROM people').get() as { n: number }).n,
-    listBackfillStates: (db: Db, accounts: readonly string[]) =>
-      accounts.map((account) => {
-        const row = db.prepare('SELECT backfill, backfillMessages, backfillEvents, backfilledAt, error FROM people_accounts WHERE account = ?').get(account) as
-          | Omit<PeopleStatus['accounts'][number], 'account'>
-          | undefined;
-        return { account, ...(row ?? { backfill: 'pending' as const, backfillMessages: 0, backfillEvents: 0, backfilledAt: null, error: null }) };
-      }),
   };
 }
 
@@ -176,7 +80,7 @@ function build(options: { google?: boolean; token?: string; full?: boolean } = {
     app: t.app,
     ...(options.token ? { token: options.token } : {}),
   };
-  const store = fakeStore();
+  const store = recordingStore();
   // full gives the whole dashboard with its sign-in and json checks, which come before the store.
   let dashboard: Hono;
   if (options.full) {
