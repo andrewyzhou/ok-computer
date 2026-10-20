@@ -44,11 +44,9 @@
   font-family: var(--font-mono);
 }
 
-.doc-error {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 12px;
+/* a long title clips only the last crumb, so the crumb of the docs list stays readable. */
+.app:has(.doc-reader) .crumb:not(.crumb-current) {
+  flex-shrink: 0;
 }
 
 /* the article. */
@@ -174,6 +172,13 @@
   min-width: 0;
   border: 1px solid var(--rule);
   border-radius: var(--radius-md);
+  /* a shadow at an edge shows that the table goes on past it. the covers scroll with the table and hide the shadow
+     at the start and the end, so it shows only where more of the table is out of view. */
+  background:
+    linear-gradient(to right, var(--bg) 30%, transparent) left / 32px 100% no-repeat local,
+    linear-gradient(to left, var(--bg) 30%, transparent) right / 32px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, color-mix(in srgb, var(--ink) 22%, transparent), transparent) left / 12px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--ink) 22%, transparent), transparent) right / 12px 100% no-repeat scroll;
 }
 /* the shell makes a table a scrolling block on a phone. these tables scroll in their own box, so they stay tables and
    fill it. */
@@ -195,7 +200,7 @@
   white-space: nowrap;
 }
 .doc-table th {
-  background: var(--bg-sunken);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
   font-weight: 600;
   color: var(--ink-2);
 }
@@ -205,6 +210,16 @@
 .doc-source {
   white-space: pre-wrap;
   color: var(--ink-2);
+}
+/* a link of a tainted version that can carry data out. it does not open, and its full address shows as text. */
+.doc-held-link {
+  color: var(--ink-2);
+}
+.doc-held-url {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--warning-ink);
+  overflow-wrap: anywhere;
 }
 .doc-unsafe-link {
   text-decoration: underline dotted var(--faint);
@@ -275,10 +290,33 @@
   display: none;
 }
 
-/* the version history, in the details panel. */
+/* the version history and the comments, in the details panel. each has a small heading, and a hairline rule parts
+   them. */
 
+.doc-panel-title {
+  margin: 0 0 10px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.doc-panel-count {
+  margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+  color: var(--faint);
+}
+/* the panel puts its own gap between the sections, so the history adds only the rule. */
 .doc-history {
-  margin-bottom: 28px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--rule-strong);
+}
+.doc-comments .doc-panel-title {
+  margin-bottom: -6px;
+}
+/* the ghost button lines its text up with the version links above it. */
+.doc-versions-all {
+  margin: 8px 0 0 -12px;
 }
 .doc-versions {
   list-style: none;
@@ -364,6 +402,9 @@
 .doc-diff-summary {
   margin: 0;
   font-weight: 600;
+}
+.doc-diff-counts {
+  white-space: nowrap;
 }
 .doc-diff-added {
   color: var(--good-ink);
@@ -479,5 +520,21 @@
   }
   .doc-diff-lines td {
     padding: 1px 5px;
+  }
+}
+
+@media (max-width: 499.98px) {
+  /* a phone wraps a code block, so no line hides past the edge. */
+  .doc-markdown .doc-code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 12.5px;
+  }
+  .doc-markdown .doc-table th,
+  .doc-markdown .doc-table td {
+    padding: 6px 8px;
+  }
+  .doc-table {
+    font-size: 13px;
   }
 }

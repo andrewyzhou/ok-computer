@@ -1,8 +1,10 @@
+import type { ReactNode } from 'react';
 import type { DocDetail } from '../../../../src/dashboard/docs-types';
 import { useApi } from '../../api';
-import { time } from '../../format';
+import { plural } from '../../format';
 import { Icon } from '../../icons';
 import { isNotFound } from '../../ui';
+import { docTime, TaintBadge } from './parts';
 import { docApi, docHref, docIdOf, kindLabel } from './shared';
 import './link-card.css';
 
@@ -13,10 +15,11 @@ import './link-card.css';
 // a reply names a few docs at most. more cards would push the next message far down.
 export const MAX_CARDS = 3;
 
-// the link of a doc: an optional http(s) origin, the hash of the doc and an optional version. the id must not go on
+// the link of a doc: an optional http(s) origin with an optional path (the tools give ${dashboardUrl}/#/docs/<id>), the
+// hash of the doc and an optional version. the id must not go on
 // with a digit, a letter or a slash, so #/docs/12x and #/docs/1/edit are not links of a doc. an id with a leading
 // zero is not one either: [1-9] cannot match its first digit.
-const DOC_LINK = /(?:https?:\/\/[^\s/#?"'<>]+)?#\/docs\/([1-9]\d*)(?:\?version=([1-9]\d*))?(?![\w/])/g;
+const DOC_LINK = /(?:https?:\/\/[^\s/#?"'<>]+(?:\/[^\s#?"'<>]*)?)?#\/docs\/([1-9]\d*)(?:\?version=([1-9]\d*))?(?![\w/])/g;
 
 export interface DocLinkRef {
   id: number;
@@ -35,17 +38,54 @@ export function docLinksIn(text: string): DocLinkRef[] {
   return [...found.values()];
 }
 
+// the text of a chat message with each doc link as a short link, for example "doc #2", so the dashboard url and the
+// hash do not fill the message. the card under the message gives the title. the link opens the local hash of the doc.
+export function DocLinkText({ text }: { text: string }) {
+  const parts: ReactNode[] = [];
+  let at = 0;
+  for (const match of text.matchAll(DOC_LINK)) {
+    const id = docIdOf(match[1]);
+    if (id === undefined) continue;
+    const version = docIdOf(match[2]);
+    if (match.index > at) parts.push(text.slice(at, match.index));
+    parts.push(
+      <a key={match.index} className="doc-inline-link" href={docHref(id, version)} title={match[0]}>
+        doc #{id}
+        {version === undefined ? '' : `, version ${version}`}
+      </a>,
+    );
+    at = match.index + match[0].length;
+  }
+  if (!parts.length) return <>{text}</>;
+  if (at < text.length) parts.push(text.slice(at));
+  return <>{parts}</>;
+}
+
 export function DocLinkCards({ text }: { text: string }) {
-  const links = docLinksIn(text).slice(0, MAX_CARDS);
+  const all = docLinksIn(text);
+  const links = all.slice(0, MAX_CARDS);
   if (!links.length) return null;
+  const more = all.length - links.length;
   return (
-    <ul className="doc-cards" aria-label={links.length === 1 ? 'linked doc' : 'linked docs'}>
-      {links.map((link) => (
-        <li key={link.id}>
-          <DocLinkCard {...link} />
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="doc-cards" aria-label={links.length === 1 ? 'linked doc' : 'linked docs'}>
+        {links.map((link) => (
+          <li key={link.id}>
+            <DocLinkCard {...link} />
+          </li>
+        ))}
+      </ul>
+      {more > 0 ? (
+        <p className="doc-cards-more">
+          and {plural(more, 'more doc')}: {all.slice(MAX_CARDS).map((link, index) => (
+            <span key={link.id}>
+              {index ? ', ' : ''}
+              <a href={docHref(link.id, link.version)}>doc #{link.id}</a>
+            </span>
+          ))}
+        </p>
+      ) : null}
+    </>
   );
 }
 
@@ -87,14 +127,14 @@ function DocLinkCard({ id, version }: DocLinkRef) {
       <Icon name="docs" size={16} className="doc-card-icon" />
       <span className="doc-card-title">{doc.title}</span>
       {doc.tainted ? (
-        <span className="doc-card-taint" title="Written after reading outside content" aria-label="written after reading outside content">
-          !
+        <span className="doc-card-taint">
+          <TaintBadge tainted />
         </span>
       ) : null}
       <span className="doc-card-info">
         <span className="badge tone-muted doc-card-kind">{kindLabel(doc.kind)}</span>
         <span className="doc-card-meta">
-          {`version ${shown}${shown === doc.version ? '' : ` of ${doc.version}`} · ${time(shown === doc.version ? doc.updatedAt : data.version.createdAt)}`}
+          {`version ${shown}${shown === doc.version ? '' : ` of ${doc.version}`} · ${docTime(shown === doc.version ? doc.updatedAt : data.version.createdAt)}`}
         </span>
       </span>
     </a>

@@ -154,7 +154,7 @@ describe('the doc reader at its edges', () => {
     expect(await main.findByText('Could not load the diff: diff failed')).toBeTruthy();
     fail = false;
     fireEvent.click(main.getByRole('button', { name: 'Try again' }));
-    expect(await main.findByText('@@ −1,4 +1,6 @@')).toBeTruthy();
+    expect(await main.findByText('Lines 1–4 → 1–6')).toBeTruthy();
   });
 
   it('notes a coarse diff, and says when two versions have the same text', async () => {

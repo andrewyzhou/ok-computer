@@ -57,11 +57,6 @@
   margin-top: var(--space-4);
 }
 
-.docs-error {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
 
 /* the cards of a phone. the title link stretches over the whole card, so a tap anywhere on it opens the doc. */
 .docs-cards {
@@ -124,4 +119,11 @@
 .docs-card-meta .badge[title] {
   position: relative;
   z-index: 1;
+}
+
+/* the comment count of a card, which the table shows in its own column. */
+.docs-card-comments {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }

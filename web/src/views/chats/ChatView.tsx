@@ -7,7 +7,7 @@ import { clock, time, tokens, usd } from '../../format';
 import type { Crumb } from '../../shell/context';
 import { useDevMode } from '../../shell/prefs';
 import { ApprovalCard, Badge, Button, ButtonLink, DetailsPanel, EmptyState, Facts, Page, Skeleton, Status } from '../../ui';
-import { DocLinkCards } from '../docs/DocLinkCard';
+import { DocLinkCards, DocLinkText } from '../docs/DocLinkCard';
 import { Composer } from './Composer';
 import { chatHref, scrollParent, useTranscript } from './data';
 
@@ -99,7 +99,9 @@ function ReplyButtons({ buttons, turnId }: { buttons: ChatButton[][]; turnId?: s
 function Reply({ reply, turnId }: { reply: LiveReply; turnId?: string }) {
   return (
     <>
-      <p className="chat-text">{reply.text}</p>
+      <p className="chat-text">
+        <DocLinkText text={reply.text} />
+      </p>
       <DocLinkCards text={reply.text} />
       <ReplyButtons buttons={reply.buttons} {...(turnId ? { turnId } : {})} />
       {reply.details ? (
@@ -171,7 +173,9 @@ function Message({
         {message.guarded ? <Badge tone="warning">guarded</Badge> : null}
         {message.runId && showRun ? <RunLinks runId={message.runId} /> : null}
       </div>
-      <p className="chat-text">{message.text}</p>
+      <p className="chat-text">
+        <DocLinkText text={message.text} />
+      </p>
       <DocLinkCards text={message.text} />
       {approval}
       {message.runId && showRun ? <ToolChips runId={message.runId} /> : null}

@@ -57,8 +57,12 @@ describe('the docs list', () => {
     stubFetch(seeded.dashboard, { 'GET /api/docs': () => emptyDocsPage });
     openApp('#/docs');
     expect(await inMain().findByText('No docs yet')).toBeTruthy();
-    expect(inMain().getByText('When an answer is long, the agent writes a doc here and sends you the link in the chat.')).toBeTruthy();
+    expect(inMain().getByText(/^When an answer is long, the agent writes a doc here/)).toBeTruthy();
     expect(inMain().queryByRole('button', { name: 'Clear filters' })).toBeNull();
+    // the first run has nothing to filter, so the filters stay hidden, and the next step is a question in the chat.
+    expect(inMain().queryByRole('searchbox')).toBeNull();
+    expect(inMain().queryByLabelText('Search docs')).toBeNull();
+    expect(inMain().getByRole('link', { name: 'Ask in chat' }).getAttribute('href')).toBe('#/chats');
   });
 
   it('says that no doc matches a filter, and clears the filters', async () => {
@@ -243,6 +247,11 @@ describe('the docs list', () => {
     expect(trip.getByRole('link', { name: 'Trip plan: Lisbon' }).getAttribute('href')).toBe('#/docs/1');
     expect(trip.getByText('Plan')).toBeTruthy();
     expect(trip.getByText('v3')).toBeTruthy();
+    // a phone shows the comment count too, and a doc with no comment shows none.
+    expect(trip.getByLabelText('2 comments').textContent).toBe('2');
+    expect(within(items[1]!).queryByLabelText(/comment/)).toBeNull();
+    // the time has no seconds.
+    expect(trip.getByText(/^Oct 12, 17:45$/)).toBeTruthy();
     expect(within(items[4]!).getByText('outside text').getAttribute('title')).toMatch(/untrusted content/);
     // the kind is a select on a phone, so the bar never scrolls sideways.
     expect(inMain().queryByRole('group', { name: 'kind' })).toBeNull();

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DocDetail } from '../../../../src/dashboard/docs-types';
 import { seedDashboard } from '../../../../test/seed';
 import { TRIP_V2 } from '../../../../test/docs-seed';
@@ -25,6 +25,12 @@ vi.mock('./Comments', () => ({
 }));
 
 installEventSource();
+
+// the doc page is a lazy chunk of the app, and its first import, with marked, can take seconds on a busy machine. the
+// import goes here, so the limit of the first test does not count it.
+beforeAll(async () => {
+  await import('./DocPage');
+}, 60_000);
 
 let seeded: Awaited<ReturnType<typeof seedDashboard>>;
 
@@ -60,8 +66,9 @@ describe('the doc reader', () => {
     expect(main.getByText('Plan')).toBeTruthy();
     expect(main.getByText('version 3 of 3')).toBeTruthy();
     expect(main.getByText(/^updated /)).toBeTruthy();
-    // the h1 of the doc is an h2, because the page title is the h1.
-    expect(main.getByRole('heading', { level: 2, name: 'Trip plan: Lisbon' }).id).toBe('doc-trip-plan-lisbon');
+    // the body starts with the title as an h1, and the page title shows it already, so the reader leaves it out.
+    expect(main.queryByRole('heading', { level: 2, name: 'Trip plan: Lisbon' })).toBeNull();
+    expect(main.getAllByText('Trip plan: Lisbon')).toHaveLength(1);
     expect(main.getByRole('heading', { level: 3, name: 'Hotel' })).toBeTruthy();
     expect(main.getByRole('table')).toBeTruthy();
     expect(main.getByText(/<script>alert\("x"\)<\/script>/)).toBeTruthy();
@@ -136,6 +143,9 @@ describe('the doc reader', () => {
     openApp('#/docs/1?version=2');
     const main = inMain();
     expect(await main.findByText('version 2 of 3')).toBeTruthy();
+    // an old version shows its own time, to the minute, and not the time of the newest version.
+    expect(main.getByText('written Oct 10, 10:30')).toBeTruthy();
+    expect(main.queryByText(/^updated /)).toBeNull();
     expect(calls.some((call) => call.url === '/api/docs/1?version=2&token=t0k')).toBe(true);
     const banner = main.getByText(/You are reading version 2 of 3\./).closest('.doc-banner') as HTMLElement;
     expect(within(banner).getByRole('link', { name: 'Read the newest version' }).getAttribute('href')).toBe('#/docs/1');
@@ -155,7 +165,7 @@ describe('the doc reader', () => {
     expect(await main.findByText('The agent wrote this after reading outside content.')).toBeTruthy();
     expect(main.getByText('web_fetch: https://reviews.example.com/laptops').closest('a')).toBeNull();
     expect(main.getByText('Comparison')).toBeTruthy();
-    expect(within(panel().getByRole('list', { name: 'Versions' })).getByRole('img', { name: 'written after reading outside content' })).toBeTruthy();
+    expect(within(panel().getByRole('list', { name: 'Versions' })).getByText('outside text')).toBeTruthy();
     // a doc of one version has nothing to compare.
     expect(panel().queryByRole('form', { name: 'Compare two versions' })).toBeNull();
   });
@@ -185,7 +195,7 @@ describe('the doc reader', () => {
     const call = calls.find((each) => each.url.startsWith('/api/docs/1/diff'))!;
     const query = new URL(call.url, 'http://localhost').searchParams;
     expect([query.get('from'), query.get('to')]).toEqual(['2', '3']);
-    expect(diff.getByText('@@ −1,4 +1,6 @@')).toBeTruthy();
+    expect(diff.getByText('Lines 1–4 → 1–6')).toBeTruthy();
     const rows = [...document.querySelectorAll('.doc-diff-lines tr')];
     expect(rows.map((row) => row.className)).toEqual([
       'doc-line doc-line-same',

@@ -84,7 +84,7 @@ describe('the doc link card', () => {
     stubFetch(null, docRoutes());
     render(<DocLinkCards text="#/docs/2" />);
     const link = await screen.findByRole('link', { name: /Laptop comparison/ });
-    expect(within(link).getByLabelText('written after reading outside content')).toBeTruthy();
+    expect(within(link).getByText('outside text')).toBeTruthy();
   });
 
   it('loads the version of a version link and opens it', async () => {

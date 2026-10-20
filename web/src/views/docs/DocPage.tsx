@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DocDetail, DocLink } from '../../../../src/dashboard/docs-types';
 import { useApi } from '../../api';
-import { time } from '../../format';
 import type { RouteProps } from '../../routes';
 import { useShell } from '../../shell/context';
 import { Badge, Button, ButtonLink, DetailsPanel, isNotFound, NotFound, Page, Skeleton } from '../../ui';
 import { DocComments } from './Comments';
 import { DiffView } from './DiffView';
-import { DocAnchor, Markdown } from './Markdown';
+import { DocAnchor, Markdown, withoutTitle } from './Markdown';
+import { docTime, ErrorBlock } from './parts';
 import { docApi, docExportHref, docHref, docIdOf, kindLabel } from './shared';
 import { VersionHistory } from './VersionHistory';
 import './reader.css';
@@ -48,7 +48,9 @@ function TaintBanner({ sources }: { sources: string[] }) {
   );
 }
 
-function Links({ links }: { links: DocLink[] }) {
+// the links of a version. a tainted version gets the same checks as the links in its text (heldReason of
+// Markdown.tsx).
+function Links({ links, tainted }: { links: DocLink[]; tainted: boolean }) {
   if (!links.length) return null;
   return (
     <section className="doc-links" aria-label="Links">
@@ -56,7 +58,9 @@ function Links({ links }: { links: DocLink[] }) {
       <ul>
         {links.map((link, index) => (
           <li key={index}>
-            <DocAnchor href={link.href}>{link.label}</DocAnchor>
+            <DocAnchor href={link.href} tainted={tainted}>
+              {link.label}
+            </DocAnchor>
           </li>
         ))}
       </ul>
@@ -120,12 +124,7 @@ export function DocPage({ params, query }: RouteProps) {
   if (loaded.error)
     return (
       <Page title="Doc" crumbs={NO_CRUMBS}>
-        <div className="doc-error">
-          <p className="error-box">Could not load the doc: {loaded.error}</p>
-          <Button size="sm" onClick={loaded.reload}>
-            Try again
-          </Button>
-        </div>
+        <ErrorBlock what="the doc" error={loaded.error} onRetry={loaded.reload} />
       </Page>
     );
 
@@ -140,6 +139,7 @@ export function DocPage({ params, query }: RouteProps) {
 
   const { doc, version: shown, versions, comments } = detail;
   const old = shown.version !== doc.version;
+  const tainted = shown.taint.length > 0;
   return (
     <Page
       title={shown.title}
@@ -150,7 +150,8 @@ export function DocPage({ params, query }: RouteProps) {
           <span>
             version {shown.version} of {doc.version}
           </span>
-          <span>updated {time(doc.updatedAt)}</span>
+          {/* an old version shows its own time, not the time of the newest one. */}
+          <span>{old ? `written ${docTime(shown.createdAt)}` : `updated ${docTime(doc.updatedAt)}`}</span>
         </span>
       }
       actions={
@@ -179,10 +180,10 @@ export function DocPage({ params, query }: RouteProps) {
           <DiffView docId={id} from={diffFrom} to={shown.version} closeHref={docHref(id, version)} />
         ) : (
           <div className="doc-article" ref={article} onMouseUp={readSelection} onKeyUp={readSelection}>
-            <Markdown text={shown.body} />
+            <Markdown text={withoutTitle(shown.body, shown.title)} tainted={tainted} />
           </div>
         )}
-        <Links links={shown.links} />
+        <Links links={shown.links} tainted={tainted} />
         <div className="doc-panel-button">
           <Button icon="panel" onClick={() => shell?.openDetails()}>
             Versions and comments
@@ -190,7 +191,7 @@ export function DocPage({ params, query }: RouteProps) {
         </div>
       </div>
       <DetailsPanel title="Versions and comments">
-        <VersionHistory docId={id} versions={versions} current={shown.version} />
+        <VersionHistory docId={id} versions={versions} current={shown.version} {...(typeof diffFrom === 'number' ? { diffFrom } : {})} />
         <DocComments doc={doc} version={shown.version} comments={comments} selection={selection} onAdded={loaded.reload} />
       </DetailsPanel>
     </Page>

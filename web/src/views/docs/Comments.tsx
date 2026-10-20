@@ -1,8 +1,8 @@
 import { useEffect, useId, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { DocComment, DocCommentRequest, DocSummary } from '../../../../src/dashboard/docs-types';
 import { send } from '../../api';
-import { time } from '../../format';
 import { Button, KeyHint } from '../../ui';
+import { docTime } from './parts';
 import { docCommentsApi, docHref } from './shared';
 import './comments.css';
 
@@ -28,6 +28,9 @@ const COUNTER_FROM = 3_500;
 export function DocComments({ doc, version, comments, selection = '', onAdded }: DocCommentsProps) {
   return (
     <section className="doc-comments" aria-label="Comments">
+      <h2 className="doc-panel-title">
+        Comments <span className="doc-panel-count">{comments.length}</span>
+      </h2>
       {comments.length ? (
         <ol className="doc-comments-list">
           {comments.map((comment) => (
@@ -54,7 +57,7 @@ function CommentItem({ comment, shown }: { comment: DocComment; shown: number })
         ) : (
           <a href={docHref(comment.docId, comment.version)}>on version {comment.version}</a>
         )}
-        <time dateTime={comment.createdAt}>{time(comment.createdAt)}</time>
+        <time dateTime={comment.createdAt}>{docTime(comment.createdAt)}</time>
         <span className={sent ? 'doc-comment-state is-sent' : 'doc-comment-state is-waiting'}>{sent ? 'sent to the agent' : 'waits for the agent'}</span>
       </div>
     </li>

@@ -1,10 +1,11 @@
 import type { DocDiff, DocDiffLine } from '../../../../src/dashboard/docs-types';
 import { useApi } from '../../api';
-import { Button, isNotFound, Skeleton } from '../../ui';
+import { isNotFound, Skeleton } from '../../ui';
+import { ErrorBlock } from './parts';
 import { docDiffApi } from './shared';
 
-// the diff between two versions of a doc, in place of its text. it is a unified diff: each hunk has its header, the
-// line numbers of both versions sit in two columns, and each added or removed line has a + or − mark next to its
+// the diff between two versions of a doc, in place of its text. it is a unified diff: each hunk has a header that
+// names its lines in plain words, the line numbers of both versions sit in two columns, and each added or removed line has a + or − mark next to its
 // color, so the meaning never rests on the color alone. the lines are model text and show as plain text.
 
 const MINUS = '−';
@@ -19,6 +20,16 @@ const SPOKEN: Record<DocDiffLine['op'], string> = {
   add: 'added: ',
   del: 'removed: ',
 };
+
+// the lines of one side of a hunk in words, for example 1–40, 7 or none.
+function lineRange(start: number, lines: number): string {
+  if (lines === 0) return 'none';
+  return lines === 1 ? String(start) : `${start}–${start + lines - 1}`;
+}
+
+export function hunkHeader(hunk: { fromStart: number; fromLines: number; toStart: number; toLines: number }): string {
+  return `Lines ${lineRange(hunk.fromStart, hunk.fromLines)} → ${lineRange(hunk.toStart, hunk.toLines)}`;
+}
 
 export function DiffView({ docId, from, to, closeHref }: { docId: number; from: number; to: number; closeHref: string }) {
   const loaded = useApi<DocDiff>(docDiffApi(docId, from, to));
@@ -40,12 +51,7 @@ export function DiffView({ docId, from, to, closeHref }: { docId: number; from: 
         {isNotFound(loaded.error) ? (
           <p className="muted">That version does not exist.</p>
         ) : (
-          <div className="doc-error">
-            <p className="error-box">Could not load the diff: {loaded.error}</p>
-            <Button size="sm" onClick={loaded.reload}>
-              Try again
-            </Button>
-          </div>
+          <ErrorBlock what="the diff" error={loaded.error} onRetry={loaded.reload} />
         )}
       </section>
     );
@@ -54,12 +60,15 @@ export function DiffView({ docId, from, to, closeHref }: { docId: number; from: 
     <section className="doc-diff" aria-label="Diff">
       <div className="doc-diff-head">
         <p className="doc-diff-summary">
-          Changes from version {diff.from} to version {diff.to}: <span className="doc-diff-added">+{diff.added}</span>{' '}
-          <span className="doc-diff-removed">
-            {MINUS}
-            {diff.removed}
-          </span>{' '}
-          lines
+          Changes from version {diff.from} to version {diff.to}:{' '}
+          <span className="doc-diff-counts">
+            <span className="doc-diff-added">+{diff.added}</span>{' '}
+            <span className="doc-diff-removed">
+              {MINUS}
+              {diff.removed}
+            </span>{' '}
+            lines
+          </span>
         </p>
         {close}
       </div>
@@ -79,10 +88,7 @@ export function DiffView({ docId, from, to, closeHref }: { docId: number; from: 
         <div className="doc-hunks">
           {diff.hunks.map((hunk, index) => (
             <div key={index} className="doc-hunk">
-              <div className="doc-hunk-head">
-                @@ {MINUS}
-                {hunk.fromStart},{hunk.fromLines} +{hunk.toStart},{hunk.toLines} @@
-              </div>
+              <div className="doc-hunk-head">{hunkHeader(hunk)}</div>
               <div className="doc-hunk-scroll">
                 <table className="doc-diff-lines">
                   <tbody>

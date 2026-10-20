@@ -56,18 +56,20 @@ a.doc-card:focus-visible {
   font-size: var(--text-md);
   font-weight: 560;
 }
+/* the card shows the same amber badge as the docs list, so a phone owner reads its meaning without a tooltip. */
 .doc-card-taint {
   grid-area: taint;
-  display: inline-grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--serious) 55%, transparent);
-  color: var(--serious-ink);
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+.doc-cards-more {
+  margin: 4px 0 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+/* a doc link inside the text of a chat message, in place of the dashboard url and its hash. */
+.doc-inline-link {
+  font-weight: 500;
 }
 .doc-card-info {
   grid-area: info;

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { DOC_KINDS, type DocKind, type DocListItem, type DocsPage } from '../../../../src/dashboard/docs-types';
 import { api, useStream } from '../../api';
-import { plural, time } from '../../format';
+import { plural } from '../../format';
+import { Icon } from '../../icons';
 import type { RouteProps } from '../../routes';
-import { Badge, Button, EmptyState, FilterBar, Highlight, Page, SearchField, Segmented, Select, Skeleton, Table, type Column } from '../../ui';
+import { Badge, Button, ButtonLink, EmptyState, FilterBar, Highlight, Page, SearchField, Segmented, Select, Skeleton, Table, type Column } from '../../ui';
+import { docTime, ErrorBlock, TaintBadge } from './parts';
 import { docHref, docsApi, docsHref, kindLabel } from './shared';
 import './list.css';
 
@@ -19,8 +21,6 @@ const PAGE_SIZE = 30;
 const MAX_QUERY = 200;
 // the width where the table gives way to cards. it matches the sm breakpoint of styles.css.
 const CARDS_BELOW = 760;
-
-const TAINT_TITLE = 'The writer of this doc had read untrusted content, such as a web page or a mail, so its text can repeat outside text.';
 
 type KindValue = DocKind | '';
 
@@ -149,15 +149,6 @@ function useDocs(q: string, kind: KindValue) {
   };
 }
 
-function TaintBadge({ doc }: { doc: DocListItem }) {
-  if (!doc.tainted) return null;
-  return (
-    <Badge tone="warning" title={TAINT_TITLE}>
-      outside text
-    </Badge>
-  );
-}
-
 function Snippet({ doc }: { doc: DocListItem }) {
   if (!doc.snippet) return null;
   return (
@@ -189,7 +180,7 @@ const columns: Array<Column<DocListItem>> = [
     cell: (doc) => (
       <span className="docs-badges">
         <Badge>{kindLabel(doc.kind)}</Badge>
-        <TaintBadge doc={doc} />
+        <TaintBadge tainted={doc.tainted} />
       </span>
     ),
   },
@@ -201,7 +192,7 @@ const columns: Array<Column<DocListItem>> = [
     header: 'Updated',
     cell: (doc) => (
       <time className="docs-nowrap" dateTime={doc.updatedAt}>
-        {time(doc.updatedAt)}
+        {docTime(doc.updatedAt)}
       </time>
     ),
   },
@@ -219,8 +210,14 @@ function DocCards({ rows }: { rows: DocListItem[] }) {
           <p className="docs-card-meta">
             <Badge>{kindLabel(doc.kind)}</Badge>
             <span>v{doc.version}</span>
-            <time dateTime={doc.updatedAt}>{time(doc.updatedAt)}</time>
-            <TaintBadge doc={doc} />
+            <time dateTime={doc.updatedAt}>{docTime(doc.updatedAt)}</time>
+            {doc.comments ? (
+              <span className="docs-card-comments" aria-label={plural(doc.comments, 'comment')}>
+                <Icon name="chat" size={13} />
+                {doc.comments}
+              </span>
+            ) : null}
+            <TaintBadge tainted={doc.tainted} />
           </p>
           <Snippet doc={doc} />
         </li>
@@ -286,7 +283,9 @@ export function DocsListPage({ query }: RouteProps) {
   // the first run has no count, because its empty state says it all.
   const subtitle = !list.fresh || list.error || (!rows.length && !filtered) ? undefined : q ? 'Search results' : `${plural(rows.length, 'doc')}${list.more ? ' so far' : ''}`;
 
-  const toolbar = (
+  // the first run has no docs and no filter, so the filters would filter nothing. they show once a doc exists.
+  const firstRun = list.fresh && !list.error && !rows.length && !filtered && !list.more;
+  const toolbar = firstRun ? undefined : (
     <FilterBar label="doc filters">
       <div className="docs-search">
         <SearchField label="Search docs" placeholder="Search docs" value={text} onChange={onType} maxLength={MAX_QUERY} />
@@ -301,18 +300,7 @@ export function DocsListPage({ query }: RouteProps) {
 
   let body;
   if (list.error && list.fresh) {
-    body = (
-      <div className="docs-error">
-        <p className="error-box" role="alert">
-          Could not load the docs: {list.error}
-        </p>
-        <div>
-          <Button size="sm" icon="refresh" busy={list.loading} onClick={list.retry}>
-            Try again
-          </Button>
-        </div>
-      </div>
-    );
+    body = <ErrorBlock what="the docs" error={list.error} busy={list.loading} onRetry={list.retry} />;
   } else if (!list.started || (!list.fresh && !rows.length)) {
     body = <Skeleton lines={6} label="Loading the docs…" />;
   } else if (!rows.length) {
@@ -329,8 +317,16 @@ export function DocsListPage({ query }: RouteProps) {
         {q ? `No doc has the words “${q}”${kind ? ` in ${kindLabel(kind)}` : ''}.` : `No doc is of the kind ${kindLabel(kind as DocKind)}.`}
       </EmptyState>
     ) : (
-      <EmptyState icon="docs" title="No docs yet">
-        When an answer is long, the agent writes a doc here and sends you the link in the chat.
+      <EmptyState
+        icon="docs"
+        title="No docs yet"
+        action={
+          <ButtonLink href="#/chats" size="sm" variant="primary" icon="chat">
+            Ask in chat
+          </ButtonLink>
+        }
+      >
+        When an answer is long, the agent writes a doc here and sends you the link in the chat. Ask for a plan, a comparison or a brief to start one.
       </EmptyState>
     );
   } else {
