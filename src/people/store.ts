@@ -12,6 +12,7 @@ import type {
   PersonSummary,
   PersonThreadView,
 } from '../dashboard/people-types.js';
+import { listWaitingOn } from '../desk/index.js';
 import { likePattern } from '../search/fts.js';
 import { inTransaction } from '../signals/store.js';
 import { isPersonalDomain, normalizeEmail, organizationOf } from './address.js';
@@ -447,43 +448,13 @@ function openThreadsOf(db: Db, id: number, now: Date): PersonThreadView[] {
   }));
 }
 
-// the columns of the delegations table of the desk (track t3, 021_delegations.sql) that the profile reads.
-// waitingOnKey is the address in lower case, or the name in lower case when the delegation names no address.
-const DELEGATION_COLUMNS = ['id', 'title', 'status', 'waitingOnEmail', 'waitingOnKey', 'dueAt'];
-
-// deskShape says whether the delegations table of the desk is there and has the columns that the profile reads. the
-// people routes log a mismatch once, so a change of the desk table does not hide the delegations without a word.
-export function deskShape(db: Db): 'missing' | 'ok' | 'mismatch' {
-  const table = db.prepare("SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = 'delegations'").get();
-  if (!table) return 'missing';
-  const columns = new Set(db.prepare("SELECT name FROM pragma_table_info('delegations')").all().map((row) => text(row.name)));
-  return DELEGATION_COLUMNS.every((column) => columns.has(column)) ? 'ok' : 'mismatch';
-}
-
 // the delegations of the desk that wait on a person: on one of their addresses, or, for a delegation without an
-// address, on their name when it has two words or more (a first name alone names too many people). the desk may not
-// be there, or its table may have another shape, so this reads it with care and gives an empty list instead of an
-// error. a delegation that is done or dropped waits on nobody.
+// address, on their name when it has two words or more (a first name alone names too many people). the desk read api
+// gives only active delegations, because a delegation that is done or dropped waits on nobody.
 function delegationsOf(db: Db, emails: readonly string[], name: string | null): PersonDelegationView[] {
   if (emails.length === 0) return [];
-  try {
-    if (deskShape(db) !== 'ok') return [];
-    const keys = emails.map((email) => email.toLowerCase());
-    const fullName = name !== null && name.trim().split(/\s+/).length >= 2 ? name.trim().toLowerCase() : null;
-    const list = keys.map(() => '?').join(', ');
-    const rows = withFold(db)
-      .prepare(
-        `SELECT id, title, status, dueAt FROM delegations
-         WHERE (waitingOnKey IN (${list}) OR lower(trim(waitingOnEmail)) IN (${list})
-             OR (waitingOnEmail IS NULL AND ? IS NOT NULL AND people_fold(trim(waitingOnKey)) = ?))
-           AND coalesce(status, '') NOT IN ('done', 'dropped')
-         ORDER BY dueAt IS NULL, dueAt ASC, id ASC`,
-      )
-      .all(...keys, ...keys, fullName, fullName);
-    return rows.map((row) => ({ id: count(row.id), title: text(row.title), status: text(row.status), dueAt: textOrNull(row.dueAt) }));
-  } catch {
-    return [];
-  }
+  const fullName = name !== null && name.trim().split(/\s+/).length >= 2 ? name : null;
+  return listWaitingOn(db, { emails, name: fullName }).map((each) => ({ id: each.id, title: each.title, status: each.status, dueAt: each.dueAt }));
 }
 
 // getPerson gives the profile of a person, or undefined for an unknown id. the id of a person that the owner merged

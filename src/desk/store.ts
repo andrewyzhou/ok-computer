@@ -480,6 +480,32 @@ export function listWaiting(db: Db): Delegation[] {
   return delegationsOf(db, rows);
 }
 
+// listWaitingOn gives the active delegations that wait on a person, by dueAt (rows without one last), then by id. a
+// row matches when it waits on one of the emails, or, when it names no email, when its name has the key of name. the
+// people profile reads it, and it decides itself which name is specific enough to pass.
+export function listWaitingOn(db: Db, who: { emails: readonly string[]; name?: string | null }): Delegation[] {
+  const keys = [...new Set(who.emails.map((email) => email.trim().toLowerCase()).filter(Boolean))];
+  const nameKey = who.name ? personKey({ name: who.name }) : null;
+  if (!keys.length && !nameKey) return [];
+  const match: string[] = [];
+  const params: string[] = [];
+  if (keys.length) {
+    match.push(`waitingOnKey IN (${keys.map(() => '?').join(', ')})`);
+    params.push(...keys);
+  }
+  if (nameKey) {
+    match.push('(waitingOnEmail IS NULL AND waitingOnKey = ?)');
+    params.push(nameKey);
+  }
+  const rows = db
+    .prepare(
+      `SELECT * FROM delegations WHERE status IN (${ACTIVE_STATUSES.map(() => '?').join(', ')}) AND (${match.join(' OR ')})
+       ORDER BY dueAt IS NULL, dueAt, id`,
+    )
+    .all(...ACTIVE_STATUSES, ...params);
+  return delegationsOf(db, rows);
+}
+
 // the delegations that link to a thread or an event of an account, for example to find the delegation of a reply.
 export function delegationsLinkedTo(db: Db, link: { kind: DelegationLinkKind; ref: string; account?: string }): Delegation[] {
   const rows = db

@@ -1,13 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { openDb, type Db } from '../db/index.js';
-import { DESK_DELEGATIONS } from '../../test/fixtures/people/desk-delegations.js';
+import { createDelegation, updateDelegation } from '../desk/store.js';
 import { PEOPLE_ACCOUNTS, PEOPLE_NOW, seedPeople } from '../../test/seed-people.js';
 import {
   addNote,
   backfillStateOf,
   cancelMeetings,
   countPeople,
-  deskShape,
   findPersonByEmail,
   getPerson,
   InvalidCursor,
@@ -396,38 +395,34 @@ describe('addNote', () => {
 });
 
 describe('the delegations of a person', () => {
-  it('are empty without a delegations table', () => {
+  it('are empty when the desk has none', () => {
     seeded();
-    expect(getPerson(db, 2, PEOPLE_NOW)?.delegations).toEqual([]);
-  });
-
-  it('are empty when the table has another shape', () => {
-    seeded();
-    db.exec('DROP TABLE IF EXISTS delegations');
-    db.exec('CREATE TABLE delegations (id INTEGER PRIMARY KEY, name TEXT, person TEXT)');
-    expect(deskShape(db)).toBe('mismatch');
-    db.prepare("INSERT INTO delegations (name, person) VALUES ('x', 'tomas.okafor@gmail.com')").run();
     expect(getPerson(db, 2, PEOPLE_NOW)?.delegations).toEqual([]);
   });
 
   it('show the open delegations that wait on one of the addresses, or on the full name when they have no address', () => {
     seeded();
-    // the delegations table of the desk (021_delegations.sql of track t3). when the desk is merged, its migration
-    // made the table already, and this keeps it.
-    db.exec(DESK_DELEGATIONS);
-    expect(deskShape(db)).toBe('ok');
-    const insert = db.prepare(
-      `INSERT INTO delegations (title, status, waitingOnName, waitingOnEmail, waitingOnKey, dueAt, createdBy, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, 'owner', '2026-10-18T00:00:00.000Z', '2026-10-18T00:00:00.000Z')`,
-    );
-    insert.run('Get the signed lease', 'waiting', 'Tomas', 'Tomas.Okafor@Gmail.com', 'tomas.okafor@gmail.com', at('10-20'));
-    insert.run('An old one', 'done', null, 'tomas.okafor@gmail.com', 'tomas.okafor@gmail.com', null);
-    insert.run('A dropped one', 'dropped', null, 'tomas.okafor@gmail.com', 'tomas.okafor@gmail.com', null);
-    insert.run('Someone else', 'waiting', null, 'maya@northwind.example', 'maya@northwind.example', null);
-    insert.run('Call about the deposit', 'blocked', 'Tomas Okafor', null, 'tomas okafor', null);
-    insert.run('Only a first name', 'open', 'Tomas', null, 'tomas', null);
+    // the profile reads the desk through its read api, so the rows go in through the desk store.
+    const make = (title: string, waitingOn: { name?: string; email?: string } | null, dueAt: string | null = null) => {
+      const made = createDelegation(db, { title, waitingOn, dueAt, createdBy: 'owner' }, { actor: 'owner' }, PEOPLE_NOW);
+      if (!made.ok) throw new Error(made.error);
+      return made.value.id;
+    };
+    const close = (id: number, status: 'done' | 'dropped') => {
+      const closed = updateDelegation(db, id, { status }, { actor: 'owner' }, PEOPLE_NOW);
+      if (!closed.ok) throw new Error(closed.error);
+    };
+    make('Get the signed lease', { name: 'Tomas', email: 'Tomas.Okafor@Gmail.com' }, at('10-20'));
+    close(make('An old one', { email: 'tomas.okafor@gmail.com' }), 'done');
+    close(make('A dropped one', { email: 'tomas.okafor@gmail.com' }), 'dropped');
+    make('Someone else', { email: 'maya@northwind.example' });
+    const blocked = make('Call about the deposit', { name: 'Tomas Okafor' });
+    const moved = updateDelegation(db, blocked, { status: 'blocked' }, { actor: 'owner' }, PEOPLE_NOW);
+    if (!moved.ok) throw new Error(moved.error);
+    make('Only a first name', { name: 'Tomas' });
     expect(getPerson(db, 2, PEOPLE_NOW)?.delegations.map((each) => each.title)).toEqual(['Get the signed lease', 'Call about the deposit']);
     expect(getPerson(db, 2, PEOPLE_NOW)?.delegations[0]).toMatchObject({ status: 'waiting', dueAt: at('10-20') });
+    expect(getPerson(db, 2, PEOPLE_NOW)?.delegations[1]).toMatchObject({ status: 'blocked', dueAt: null });
   });
 });
 

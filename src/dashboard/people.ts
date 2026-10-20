@@ -1,7 +1,7 @@
 import type { Context, Hono } from 'hono';
 import { z } from 'zod';
 import { normalizeEmail } from '../people/address.js';
-import { deskShape, InvalidCursor, InvalidMerge, PersonNotFound, peopleStore, type PeopleStore } from '../people/store.js';
+import { InvalidCursor, InvalidMerge, PersonNotFound, peopleStore, type PeopleStore } from '../people/store.js';
 import { limitOf } from './params.js';
 import type { PeopleStatus } from './people-types.js';
 import type { DashboardDeps } from './server.js';
@@ -82,9 +82,6 @@ export function mountPeople(server: Hono, deps: DashboardDeps, store: PeopleStor
   const { db, logger } = deps;
   const accounts = deps.config.google?.accounts.map((each) => each.alias) ?? [];
   const personNotFound = (c: Context) => c.json({ error: 'person not found' }, 404);
-  // the profile reads the delegations of the desk. a desk table of another shape would hide them without an error,
-  // so a mismatch is logged once here.
-  if (deskShape(db) === 'mismatch') logger.debug('the delegations table has columns that the people profile does not know, so profiles show no delegations');
 
   server.get('/api/people', (c) => {
     const parsed = listQuery.safeParse(c.req.query());
