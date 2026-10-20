@@ -55,6 +55,11 @@ describe('the calendar week', () => {
     expect(today.ranges).toEqual([{ startAt: CALENDAR_WEEK.startAt, endAt: CALENDAR_WEEK.endAt }]);
   });
 
+  it('answers the same week on the seed with its proposal, which the screenshots use', async () => {
+    const { dashboard } = seed({ proposal: true });
+    expect(await get<CalendarPage>(dashboard, '/api/calendar?from=2026-10-12')).toEqual(CALENDAR_WEEK);
+  });
+
   it('starts today when from is left out', async () => {
     const { dashboard, db } = seed();
     insertProposals(db, [PROPOSAL_7]);

@@ -60,13 +60,26 @@ export function fakeToday(state: CalendarState = 'full'): FakeToday {
   return fake;
 }
 
+// proposal 7 of TODAY_PROPOSALS as the digest writes it: "Problem set 4 due", all day on wed 2026-10-14, waiting for
+// approval 11. the calendar page shows it as a proposal block.
+export function seedProposal(db: Db): void {
+  db.prepare(
+    `INSERT INTO inbox_proposals (id, account, calendarId, kind, title, startAt, endAt, allDay, description, sourceMessageId, sourceSubject, dedupeKey, state,
+       approvalId, eventId, error, runId, createdAt, resolvedAt)
+     VALUES (7, 'school', 'primary', 'course', 'Problem set 4 due', '2026-10-14', NULL, 1, NULL, 'm-7', 'Problem set 4 due', 'm-7:course:2026-10-14',
+       'proposed', 11, NULL, NULL, 'run-digest-1', '2026-10-12T14:00:00Z', NULL)`,
+  ).run();
+}
+
 // options: token signs the dashboard in, google false leaves out the google block (as on a first run), calendar picks
-// the state of the fake calendar, and empty true writes no brief rows.
-export function seedToday(options: { token?: string; google?: boolean; calendar?: CalendarState; empty?: boolean } = {}) {
+// the state of the fake calendar, empty true writes no brief rows, and proposal true writes the proposal of the week
+// (seedProposal).
+export function seedToday(options: { token?: string; google?: boolean; calendar?: CalendarState; empty?: boolean; proposal?: boolean } = {}) {
   const now = new Date(TODAY_NOW);
   const t = createTestApp([], { start: TODAY_NOW, config: { timeZone: 'America/Los_Angeles' } });
   const { db } = t;
   if (!options.empty) seedBriefRows(db);
+  if (options.proposal) seedProposal(db);
   const today = fakeToday(options.calendar ?? (options.google === false ? 'off' : 'full'));
   const google =
     options.google === false ? undefined : googleConfigSchema.parse({ clientId: 'seed.apps.googleusercontent.com', accounts: [{ alias: 'personal' }, { alias: 'school' }] });

@@ -4,10 +4,11 @@ import type {
   AutonomyDomainView,
   AutonomyLevel,
   AutonomyPage,
-} from '../../../../src/dashboard/autonomy-types';
+} from '../../../../src/dashboard/autonomy-types.js';
 
 // the answers of the autonomy endpoints for the tests and the screenshots. the texts are the ones of DOMAINS in
-// src/policy/autonomy.ts, so a shot looks like the real page.
+// src/policy/autonomy.ts, so a shot looks like the real page. test/dashboard-autonomy.test.ts checks that firstRun
+// equals the first-run answer of the server, so a new domain or a new text there fails until it is copied here.
 
 export const LEVEL_TEXT: Record<AutonomyLevel, string> = {
   ask: 'You approve each action before it happens.',
@@ -48,8 +49,8 @@ export const DEFAULT_DOMAINS: AutonomyDomainView[] = [
   domain(
     'mail_drafts',
     'Mail drafts',
-    'Save a reply or a new mail as a draft in Gmail. A draft is never sent. You send it yourself.',
-    ['google__gmail_draft', 'inbox_draft_reply'],
+    'Save a reply, a new mail or the follow-up nudge of a delegation as a draft in Gmail. A draft is never sent. You send it yourself.',
+    ['google__gmail_draft', 'inbox_draft_reply', 'desk_draft_nudge'],
     'review',
     'auto',
   ),
@@ -70,6 +71,22 @@ export const DEFAULT_DOMAINS: AutonomyDomainView[] = [
     'ask',
     'ask',
     'An invitation goes to other people in your name, so you approve each one.',
+  ),
+  domain(
+    'delegations',
+    'Delegations',
+    'Create, update and close the delegations on your desk, and set who each one waits on. This changes only the desk of the app. The nudge of a follow-up is a mail draft, in Mail drafts.',
+    ['delegation_create', 'delegation_done', 'delegation_update', 'delegation_wait_on'],
+    'review',
+    'auto',
+  ),
+  domain(
+    'local_writes',
+    'Docs and notes',
+    'Write a doc or a new version of one, and add a note about a person. This changes only the data of the app. A note written after the agent read mail or a page goes to a second model anyway.',
+    ['doc_update', 'doc_write', 'person_note'],
+    'auto',
+    'auto',
   ),
   domain(
     'browser_submits',

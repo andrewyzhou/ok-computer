@@ -3411,5 +3411,83 @@
         ]
       }
     }
+  },
+  {
+    "name": "people-seeded-1440",
+    "hash": "#/people",
+    "width": 1440,
+    "seed": "people"
+  },
+  {
+    "name": "people-seeded-1440-dark",
+    "hash": "#/people",
+    "width": 1440,
+    "dark": true,
+    "seed": "people"
+  },
+  {
+    "name": "people-seeded-390",
+    "hash": "#/people",
+    "width": 390,
+    "seed": "people"
+  },
+  {
+    "name": "people-seeded-390-dark",
+    "hash": "#/people",
+    "width": 390,
+    "dark": true,
+    "seed": "people"
+  },
+  {
+    "name": "people-seeded-profile-1440",
+    "hash": "#/people/1",
+    "width": 1440,
+    "seed": "people"
+  },
+  {
+    "name": "people-seeded-profile-1440-dark",
+    "hash": "#/people/1",
+    "width": 1440,
+    "dark": true,
+    "seed": "people"
+  },
+  {
+    "name": "people-seeded-profile-390",
+    "hash": "#/people/1",
+    "width": 390,
+    "seed": "people"
+  },
+  {
+    "name": "people-seeded-profile-390-dark",
+    "hash": "#/people/1",
+    "width": 390,
+    "dark": true,
+    "seed": "people"
+  },
+  {
+    "name": "people-seeded-thread-1440",
+    "hash": "#/people/2",
+    "width": 1440,
+    "seed": "people"
+  },
+  {
+    "name": "people-seeded-thread-1440-dark",
+    "hash": "#/people/2",
+    "width": 1440,
+    "dark": true,
+    "seed": "people"
+  },
+  {
+    "name": "people-seeded-thread-390",
+    "hash": "#/people/2",
+    "width": 390,
+    "seed": "people"
+  },
+  {
+    "name": "people-seeded-thread-390-dark",
+    "hash": "#/people/2",
+    "width": 390,
+    "dark": true,
+    "seed": "people"
   }
 ]

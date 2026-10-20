@@ -2181,6 +2181,24 @@
     "click": "main .desk-card >> nth=1"
   },
   {
+    "name": "desk-selected-1440-dark",
+    "hash": "#/desk",
+    "width": 1440,
+    "dark": true,
+    "wait": "main .desk-card",
+    "click": "main .desk-card >> nth=1",
+    "stubsOf": "desk-1440-selected"
+  },
+  {
+    "name": "desk-selected-390-dark",
+    "hash": "#/desk",
+    "width": 390,
+    "dark": true,
+    "wait": "main .desk-card",
+    "click": "main .desk-card >> nth=1",
+    "stubsOf": "desk-390-selected"
+  },
+  {
     "name": "desk-390-closed-open",
     "hash": "#/desk",
     "width": 390,
@@ -2452,6 +2470,15 @@
     },
     "wait": "main .desk-card",
     "click": "main .desk-closed-toggle"
+  },
+  {
+    "name": "desk-closed-open-390-dark",
+    "hash": "#/desk",
+    "width": 390,
+    "dark": true,
+    "wait": "main .desk-card",
+    "click": "main .desk-closed-toggle",
+    "stubsOf": "desk-390-closed-open"
   },
   {
     "name": "desk-first-run-1440",
@@ -2726,6 +2753,22 @@
       }
     },
     "wait": "main .empty-state"
+  },
+  {
+    "name": "desk-filtered-empty-1440-dark",
+    "hash": "#/desk?status=blocked",
+    "width": 1440,
+    "dark": true,
+    "wait": "main .empty-state",
+    "stubsOf": "desk-filtered-empty"
+  },
+  {
+    "name": "desk-filtered-empty-390-dark",
+    "hash": "#/desk?status=blocked",
+    "width": 390,
+    "dark": true,
+    "wait": "main .empty-state",
+    "stubsOf": "desk-filtered-empty-390"
   },
   {
     "name": "desk-error-1440",

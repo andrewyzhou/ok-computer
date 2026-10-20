@@ -6,6 +6,7 @@ import { silentLogger } from '../src/observability/logger.js';
 import { DOMAINS, LEVEL_TEXT } from '../src/policy/autonomy.js';
 import { changeLevel } from '../src/policy/autonomy-store.js';
 import type { Rule } from '../src/policy/policy.js';
+import { firstRun } from '../web/src/views/autonomy/fixtures.js';
 import { createTestApp } from './app-harness.js';
 
 const NOW = new Date('2026-10-19T17:00:00Z');
@@ -87,6 +88,11 @@ describe('GET /api/autonomy', () => {
     expect(page.levelText).toEqual(LEVEL_TEXT);
     expect(page.history).toEqual([]);
     expect(page.before).toBeNull();
+  });
+
+  it('gives the first-run answer that the fixtures of the web page and the screenshots copy', async () => {
+    const { dashboard } = fresh();
+    expect(await get<AutonomyPage>(dashboard, '/api/autonomy')).toEqual(firstRun);
   });
 });
 
