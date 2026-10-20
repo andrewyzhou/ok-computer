@@ -42,8 +42,8 @@
 }
 .docs-badges {
   display: inline-flex;
-  flex-wrap: wrap;
   gap: 6px;
+  white-space: nowrap;
 }
 .docs-nowrap {
   white-space: nowrap;

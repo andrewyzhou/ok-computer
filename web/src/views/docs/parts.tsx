@@ -1,5 +1,5 @@
 import { time } from '../../format';
-import { Badge, Button } from '../../ui';
+import { Badge, Button, ButtonLink } from '../../ui';
 import './parts.css';
 
 // the small parts that the docs views share: the time of a change, the badge of a tainted doc and the error block.
@@ -24,17 +24,22 @@ export function TaintBadge({ tainted, title = TAINT_TITLE }: { tainted: boolean;
 }
 
 // the error of a docs view that did not load: a full-width box and a Try again button with the refresh icon. the list,
-// the doc and the diff show the same block.
-export function ErrorBlock({ what, error, onRetry, busy }: { what: string; error: string; onRetry: () => void; busy?: boolean }) {
+// the doc and the diff show the same block. back is the href of a way out, such as the list for a doc that failed.
+export function ErrorBlock({ what, error, onRetry, busy, back }: { what: string; error: string; onRetry: () => void; busy?: boolean; back?: { href: string; label: string } }) {
   return (
     <div className="docs-error">
       <p className="error-box" role="alert">
         Could not load {what}: {error}
       </p>
-      <div>
+      <div className="docs-error-actions">
         <Button size="sm" icon="refresh" busy={busy} onClick={onRetry}>
           Try again
         </Button>
+        {back ? (
+          <ButtonLink href={back.href} size="sm">
+            {back.label}
+          </ButtonLink>
+        ) : null}
       </div>
     </div>
   );

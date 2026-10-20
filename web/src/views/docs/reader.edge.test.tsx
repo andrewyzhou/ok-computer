@@ -51,6 +51,7 @@ describe('the doc reader at its edges', () => {
     openApp('#/docs/99');
     expect(await inMain().findByText('This doc does not exist.')).toBeTruthy();
     expect(inMain().queryByRole('button', { name: 'Try again' })).toBeNull();
+    expect(inMain().getByRole('link', { name: 'Go to the docs' }).className).toContain('btn');
   });
 
   it('shows not found for a version that the doc does not have, with a link to the newest', async () => {
@@ -74,6 +75,7 @@ describe('the doc reader at its edges', () => {
     openApp('#/docs/1');
     const main = inMain();
     expect(await main.findByText('Could not load the doc: database is locked')).toBeTruthy();
+    expect(main.getByRole('link', { name: 'Back to docs' }).getAttribute('href')).toBe('#/docs');
     fail = false;
     fireEvent.click(main.getByRole('button', { name: 'Try again' }));
     expect(await main.findByRole('heading', { level: 1, name: 'Trip plan: Lisbon' })).toBeTruthy();
