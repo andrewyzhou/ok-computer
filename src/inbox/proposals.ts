@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { CalendarProposalView } from '../dashboard/types.js';
 import { getSetting, setSetting } from '../db/settings.js';
 import { toGoogleError } from '../google/errors.js';
-import { failed } from '../google/send.js';
+import { failed } from '../google/failed.js';
 import { requestContext } from '../google/trace.js';
 import { cleanLine } from '../signals/store.js';
 import { headOf } from '../text.js';
@@ -19,7 +19,10 @@ export const EVENT_TOOL = 'inbox_create_event';
 
 // a deadline that the digest found. the times are iso with an offset. an all-day event has startAt at midnight in the
 // time zone of the app, and endAt null.
-export type ProposalInput = Pick<CalendarProposalView, 'account' | 'kind' | 'title' | 'startAt' | 'endAt' | 'allDay' | 'description' | 'sourceMessageId' | 'sourceSubject'>;
+// dueText is the words of the mail that state the date, which the digest checked. a caller without them leaves it out.
+export type ProposalInput = Pick<CalendarProposalView, 'account' | 'kind' | 'title' | 'startAt' | 'endAt' | 'allDay' | 'description' | 'sourceMessageId' | 'sourceSubject'> & {
+  dueText?: string | null;
+};
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 // a deadline more than a year ahead is more likely a wrong date than a plan.
@@ -28,6 +31,16 @@ const HORIZON_MS = 365 * DAY_MS;
 const DEFAULT_LENGTH_MS = 30 * 60 * 1000;
 const TITLE_LIMIT = 200;
 const DESCRIPTION_LIMIT = 2000;
+const DUE_TEXT_LIMIT = 200;
+
+// the description of the event and of the approval card. the words of the mail that state the date go last, so the
+// owner sees the evidence of the date before approving. the description is cut first, so the words always fit.
+export function cardDescription(description: string | null | undefined, dueText: string | null): string | null {
+  const words = dueText ? `The mail says: "${dueText}"` : '';
+  if (!words) return description ? headOf(description, DESCRIPTION_LIMIT) : null;
+  if (!description) return words;
+  return `${headOf(description, DESCRIPTION_LIMIT - words.length - 2)}\n\n${words}`;
+}
 
 // the titles of two events are the same when they differ only in case and spaces.
 const sameTitle = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -125,11 +138,12 @@ export async function proposeEvent(ctx: InboxContext, run: JobRun, p: ProposalIn
     return null;
   }
 
-  const description = p.description ? headOf(p.description, DESCRIPTION_LIMIT) : null;
+  const dueText = (p.dueText && cleanLine(p.dueText, DUE_TEXT_LIMIT)) || null;
+  const description = cardDescription(p.description, dueText);
   const inserted = ctx.db
     .prepare(
-      `INSERT INTO inbox_proposals (account, calendarId, kind, title, startAt, endAt, allDay, description, sourceMessageId, sourceSubject, dedupeKey, state, runId, createdAt)
-       VALUES (?, 'primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?)`,
+      `INSERT INTO inbox_proposals (account, calendarId, kind, title, startAt, endAt, allDay, description, sourceMessageId, sourceSubject, dueText, dedupeKey, state, runId, createdAt)
+       VALUES (?, 'primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?)`,
     )
     .run(
       p.account,
@@ -141,6 +155,7 @@ export async function proposeEvent(ctx: InboxContext, run: JobRun, p: ProposalIn
       description,
       p.sourceMessageId,
       p.sourceSubject === null ? null : cleanLine(p.sourceSubject, 500),
+      dueText,
       dedupeKey,
       run.runId,
       now.toISOString(),

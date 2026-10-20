@@ -39,6 +39,12 @@
   margin: 4px 0 0;
   color: var(--ink-2);
   max-width: 68ch;
+  overflow-wrap: anywhere;
+}
+/* the kind of a mail next to its sender: plain small text, so it never reads as the badge of an account. */
+.inbox-item-kind {
+  font-size: var(--text-sm);
+  color: var(--muted);
 }
 .inbox-item-meta {
   display: flex;
@@ -289,4 +295,167 @@
 
 .inbox-nowrap {
   white-space: nowrap;
+}
+
+/* the account of a row. the badge is at most 18 characters wide at every width, a fixed length so that a table
+   sizes its column by it, and a long address cannot push the other columns away. the rest of the name ends in an
+   ellipsis, and the title of the badge holds all of it. */
+.inbox-account {
+  display: inline-flex;
+  max-width: 18ch;
+  min-width: 0;
+  vertical-align: middle;
+}
+.inbox-account .badge {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+.inbox-account-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inbox-name .inbox-below-md,
+.inbox-cell-badges {
+  margin-top: 4px;
+}
+/* the account under the name shows only where the account column is hidden. the table hides that column below
+   1100px, so this shows below the same width. */
+.inbox-below-md {
+  display: none;
+}
+@media (max-width: 1099.98px) {
+  .inbox-below-md {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    max-width: 100%;
+  }
+}
+
+/* the accounts that one digest read, with the mail it hid and the accounts it could not read. each row is a grid of
+   the badge and its facts, and the facts wrap in their own column, so a warning or an error stays with its account. */
+.inbox-coverage {
+  margin-bottom: var(--space-2);
+}
+.inbox-coverage-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-width: 0;
+}
+.inbox-coverage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.inbox-coverage-item {
+  display: grid;
+  grid-template-columns: 18ch minmax(0, 1fr);
+  align-items: start;
+  gap: 4px 10px;
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+/* the badges sit in a column of one width, so the counts of the accounts start at the same place. */
+.inbox-coverage-item > .inbox-account {
+  justify-self: start;
+  max-width: 100%;
+}
+@media (max-width: 759.98px) {
+  .inbox-coverage-item {
+    grid-template-columns: 12ch minmax(0, 1fr);
+  }
+}
+.inbox-coverage-item .error-text {
+  overflow-wrap: anywhere;
+}
+.inbox-coverage-hidden {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.inbox-reasons {
+  margin: 0;
+  padding-left: 1.2em;
+}
+.inbox-reasons li + li {
+  margin-top: 4px;
+}
+.inbox-due-text {
+  margin: 0 0 var(--space-2);
+  padding: 10px 12px;
+  background: var(--bg-sunken);
+  border-radius: var(--radius-md);
+  overflow-wrap: anywhere;
+}
+
+/* a table of the inbox measures the column it sits in. the last column of such a table (the actions of a sender or a
+   subscription, the creation time of a draft) is in the details panel too, so a table in a column narrower than
+   880px, such as the main column next to the details panel at 1440px, drops it and keeps the facts of each row in
+   view without a sideways scroll. */
+.inbox-table {
+  container-type: inline-size;
+  min-width: 0;
+}
+@container (max-width: 879.98px) {
+  .inbox-table-drop-last th:last-child,
+  .inbox-table-drop-last td:last-child {
+    display: none;
+  }
+}
+
+/* the first recipient of a draft on one line, with the count of the others after it. */
+.inbox-to {
+  display: inline-flex;
+  max-width: 13rem;
+  min-width: 8rem;
+  white-space: nowrap;
+}
+.inbox-to-first {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* an address or a link that breaks only after "@", ".", "/" and the marks of a query. */
+.inbox-breakable {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+/* the account filter is as wide as its longest option, which a long address makes wider than a phone. the filters
+   of the inbox pages are at most 16rem wide, and a long value ends in an ellipsis. */
+.filterbar[aria-label='newsletter filters'] .select,
+.filterbar[aria-label='subscription filters'] .select {
+  max-width: 16rem;
+  min-width: 0;
+}
+.filterbar[aria-label='newsletter filters'] .select select,
+.filterbar[aria-label='subscription filters'] .select select {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+.inbox-error p {
+  margin: 0;
+  overflow-wrap: anywhere;
 }

@@ -4,15 +4,18 @@ import type { InboxJob } from '../dashboard/types.js';
 import type { Db } from '../db/index.js';
 import { getSetting, setSetting } from '../db/settings.js';
 import type { JobResult } from '../scheduler/scheduler.js';
-import { createAutomation, listAutomations, type Automation } from '../scheduler/store.js';
+import type { Logger } from '../observability/logger.js';
+import { createAutomation } from '../scheduler/store.js';
 import type { Tool } from '../tools/registry.js';
 import { settleApprovals } from './actions.js';
+import { DIGEST_EXPR, inboxAutomation } from './automations.js';
 import type { ActionResult, InboxContext, InboxDeps } from './context.js';
 import { runDigest } from './digest.js';
 import { createDraftTools } from './drafts.js';
 import { createNewsletterTools, keepSender, requestArchive, requestUnsubscribe, sweepNewsletters } from './newsletters.js';
 import { createProposalTools } from './proposals.js';
 import { runJob } from './run.js';
+import { moveDigestBeforeBrief } from './schedule.js';
 import { createSubscriptionTools, ignoreSubscription, requestCancel, scanSubscriptions } from './subscriptions.js';
 
 // the inbox jobs of phase 5 m8 on the owner's google accounts. app.ts makes this object when the config has a google
@@ -65,9 +68,10 @@ export function createInbox(deps: InboxDeps): Inbox {
 }
 
 // the automation of each job. the owner can change the time or turn a job off on the automations page, and the app
-// never puts it back. the times are in the time zone of the app.
+// never puts it back. the times are in the time zone of the app. the digest runs at 07:00, before the morning brief at
+// 07:30.
 const JOBS: Array<{ job: InboxJob; name: string; expr: string; slot: 'utility' | 'batch' }> = [
-  { job: 'digest', name: 'inbox: daily digest', expr: '30 7 * * *', slot: 'utility' },
+  { job: 'digest', name: 'inbox: daily digest', expr: DIGEST_EXPR, slot: 'utility' },
   { job: 'newsletters', name: 'inbox: newsletter sweep', expr: '0 9 * * 6', slot: 'utility' },
   { job: 'subscriptions', name: 'inbox: subscription finder', expr: '0 10 * * 0', slot: 'batch' },
 ];
@@ -75,8 +79,14 @@ const JOBS: Array<{ job: InboxJob; name: string; expr: string; slot: 'utility' |
 const INSTALLED = 'inbox_jobs_installed';
 
 // installInboxJobs makes the automations one time, as the goals routine does. a job whose automation the owner
-// deleted does not come back.
-export function installInboxJobs(db: Db, config: Pick<Config, 'timeZone'>, now: Date): boolean {
+// deleted does not come back. on each start it first moves a digest of phase 5 from 07:30 to 07:00, one time. it gives
+// true only when it installed the automations now. a failed move only logs, so it never stops the start.
+export function installInboxJobs(db: Db, config: Pick<Config, 'timeZone'>, now: Date, logger?: Pick<Logger, 'warn'>): boolean {
+  try {
+    moveDigestBeforeBrief(db, config, now, logger);
+  } catch (err) {
+    logger?.warn('the inbox digest could not move to 07:00, so it stays at 07:30 until the next start', { err });
+  }
   if (getSetting(db, INSTALLED)) return false;
   for (const each of JOBS) {
     if (inboxAutomation(db, each.job)) continue;
@@ -98,7 +108,5 @@ export function installInboxJobs(db: Db, config: Pick<Config, 'timeZone'>, now: 
   return true;
 }
 
-// the automation of a job, for POST /api/inbox/run.
-export function inboxAutomation(db: Db, job: InboxJob): Automation | undefined {
-  return listAutomations(db).find((each) => each.payload.type === 'inbox' && each.payload.job === job);
-}
+// the automation of a job lives in automations.ts. the dashboard and the tests import it from here.
+export { inboxAutomation } from './automations.js';

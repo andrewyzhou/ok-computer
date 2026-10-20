@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedDashboard } from '../../../../test/seed';
 import { inMain, installEventSource, json, openApp, stubFetch, type StubRoutes } from '../../testing';
 import { setPrefs } from '../../shell/prefs';
-import { subscriptionsPage } from './fixtures';
+import { fiveSubscriptionsPage, subscriptionsPage, googleReady } from './fixtures';
 
 installEventSource();
 
@@ -25,7 +25,7 @@ async function open(routes: StubRoutes = {}, hash = '#/inbox/subscriptions') {
     ...subscriptionsPage,
     subscriptions: subscriptionsPage.subscriptions.map((row) => (row.approvalId === null ? row : { ...row, approvalId: seeded.pendingApprovalId })),
   };
-  const calls = stubFetch(seeded.dashboard, { 'GET /api/inbox/subscriptions': () => page, ...routes });
+  const calls = stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/subscriptions': () => page, ...routes });
   openApp(hash);
   await inMain().findByText('Streamly');
   return calls;
@@ -107,5 +107,82 @@ describe('the subscriptions', () => {
     const calls = await open({ 'POST /api/inbox/run': () => json({ started: true }, 202) });
     fireEvent.click(screen.getByRole('button', { name: 'Scan now' }));
     await waitFor(() => expect(calls.find((call) => call.method === 'POST')).toMatchObject({ url: '/api/inbox/run', body: { job: 'subscriptions' } }));
+  });
+
+  describe('with the confidence of phase 6', () => {
+    async function openFive() {
+      stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/subscriptions': () => fiveSubscriptionsPage });
+      openApp('#/inbox/subscriptions');
+      await inMain().findByText('Streamly');
+    }
+
+    it('shows the confidence as a word and a percent with the tone of its band', async () => {
+      await openFive();
+      const badge = (name: string, text: string) => rowOf(name).getAllByText(text)[0]!.closest('.badge')!;
+      expect(badge('Gym Plus', 'low 30%').className).toContain('tone-warning');
+      expect(badge('Cloud Notes', 'medium 60%').className).toContain('tone-info');
+      expect(badge('Streamly', 'high 90%').className).toContain('tone-good');
+    });
+
+    it('says where the cadence comes from in words, in the details panel', async () => {
+      await openFive();
+      const panel = within(document.querySelector('.details') as HTMLElement);
+      const cadence = async (name: string) => {
+        fireEvent.click(rowOf(name).getByText(name));
+        await panel.findByRole('heading', { name });
+        return panel.getByText('Cadence').nextElementSibling?.textContent;
+      };
+      expect(await cadence('Streamly')).toBe('stated and confirmed by the dates');
+      expect(await cadence('Cloud Notes')).toBe('stated on the receipt');
+      expect(await cadence('Gym Plus')).toBe('from the charge dates');
+      fireEvent.click(screen.getByRole('checkbox', { name: /Show rows with no repeating charge/ }));
+      expect(await cadence('Campus Store')).toBe('unknown');
+    });
+
+    it('lists the reasons in the details panel', async () => {
+      await openFive();
+      fireEvent.click(rowOf('Cloud Notes').getByText('Cloud Notes'));
+      const panel = within(document.querySelector('.details') as HTMLElement);
+      const reasons = within(await panel.findByRole('list', { name: 'reasons' }));
+      expect(reasons.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+        'The receipt says the plan renews each year.',
+        'Only one receipt was found, so the dates cannot confirm it.',
+      ]);
+      expect(panel.getByText('Cadence').nextElementSibling?.textContent).toBe('stated on the receipt');
+      expect(panel.getByText('Confidence').nextElementSibling?.textContent).toBe('medium 60%');
+    });
+
+    it('hides the rows with confidence 0 until the toggle is on, and keeps the monthly totals', async () => {
+      await openFive();
+      const table = within(inMain().getByRole('table', { name: 'subscriptions' }));
+      const toggle = screen.getByRole('checkbox', { name: /Show rows with no repeating charge/ }) as HTMLInputElement;
+      expect(toggle.checked).toBe(false);
+      expect(table.queryByText('Campus Store')).toBeNull();
+      expect(table.queryByText('Event Tickets')).toBeNull();
+      const totals = within(document.querySelector<HTMLElement>('main dl[aria-label="monthly totals"]')!);
+      expect(totals.getByText('$31.49')).toBeTruthy();
+      expect(totals.getByText('2 with no repeating charge hidden')).toBeTruthy();
+      fireEvent.click(toggle);
+      expect(table.getByText('Campus Store')).toBeTruthy();
+      expect(table.getByText('Event Tickets')).toBeTruthy();
+      expect(rowOf('Campus Store').getAllByText('low 0%').length).toBeGreaterThan(0);
+      expect(totals.getByText('$31.49')).toBeTruthy();
+      fireEvent.click(toggle);
+      expect(table.queryByText('Campus Store')).toBeNull();
+    });
+
+    it('explains an empty table when every row has confidence 0', async () => {
+      const once = { ...fiveSubscriptionsPage, subscriptions: fiveSubscriptionsPage.subscriptions.filter((row) => row.confidence === 0), monthlyTotals: [] };
+      stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/subscriptions': () => once });
+      openApp('#/inbox/subscriptions');
+      expect(await inMain().findByText('No repeating charges found.')).toBeTruthy();
+      fireEvent.click(screen.getByRole('checkbox', { name: /Show rows with no repeating charge/ }));
+      expect(await inMain().findByText('Campus Store')).toBeTruthy();
+    });
+
+    it('shows no toggle when no row has confidence 0', async () => {
+      await open();
+      expect(screen.queryByRole('checkbox', { name: /Show rows with no repeating charge/ })).toBeNull();
+    });
   });
 });

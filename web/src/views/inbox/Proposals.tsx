@@ -1,10 +1,10 @@
-import type { MouseEvent } from 'react';
+import { useEffect, type MouseEvent } from 'react';
 import type { CalendarProposalView, ProposalState } from '../../../../src/dashboard/types';
 import { useApi } from '../../api';
-import { clock, longDay, time } from '../../format';
+import { clock, longDay } from '../../format';
 import type { RouteProps } from '../../routes';
 import { Badge, DetailsPanel, EmptyState, Facts, FilterBar, Page, Skeleton, Tabs, type Tone } from '../../ui';
-import { ApprovalFor, LoadMore, RunLink, StateBadge, setHashQuery, useApprovals, usePaged, withQuery } from './shared';
+import { AccountBadge, ApprovalFor, Breakable, ErrorBox, LoadMore, minuteTime, RunLink, StateBadge, setHashQuery, useApprovals, usePaged, withQuery } from './shared';
 import './inbox.css';
 
 // the calendar events that the digest job proposes, for example a course deadline or a bill. the owner approves each
@@ -33,10 +33,10 @@ const STATE_TONE: Record<ProposalState, Tone> = {
 
 const KIND_TONE: Record<CalendarProposalView['kind'], Tone> = { course: 'info', bill: 'warning', other: 'muted' };
 
-// an all-day event shows its day. another event shows its start and the clock of its end.
+// an all-day event shows its day. another event shows its start and the clock of its end, both to the minute.
 export function when(proposal: CalendarProposalView): string {
   if (proposal.allDay) return longDay(proposal.startAt.slice(0, 10));
-  return proposal.endAt ? `${time(proposal.startAt)} to ${clock(proposal.endAt)}` : time(proposal.startAt);
+  return proposal.endAt ? `${minuteTime(proposal.startAt)} to ${clock(proposal.endAt)}` : minuteTime(proposal.startAt);
 }
 
 function fromControl(event: MouseEvent): boolean {
@@ -65,6 +65,7 @@ function ProposalItem({
         </button>
         <Badge tone={KIND_TONE[proposal.kind]}>{proposal.kind}</Badge>
         <StateBadge value={proposal.state} tones={STATE_TONE} />
+        <AccountBadge account={proposal.account} />
       </div>
       <p className="inbox-proposal-when">{when(proposal)}</p>
       {proposal.sourceSubject ? <p className="muted small">from the mail “{proposal.sourceSubject}”</p> : null}
@@ -81,25 +82,29 @@ function ProposalItem({
 
 function ProposalFacts({ proposal }: { proposal: CalendarProposalView }) {
   return (
-    <Facts
-      layout="stacked"
-      items={[
-        { label: 'State', value: <StateBadge value={proposal.state} tones={STATE_TONE} /> },
-        { label: 'When', value: when(proposal) },
-        { label: 'Kind', value: proposal.kind },
-        { label: 'Account', value: proposal.account },
-        { label: 'Calendar', value: proposal.calendarId },
-        proposal.description ? { label: 'Description', value: <div className="inbox-body">{proposal.description}</div> } : null,
-        { label: 'Source', value: proposal.sourceSubject ?? <span className="muted">none</span> },
-        proposal.sourceMessageId ? { label: 'Source message', value: <code>{proposal.sourceMessageId}</code> } : null,
-        proposal.approvalId !== null ? { label: 'Approval', value: <a href="#/approvals">#{proposal.approvalId}</a> } : null,
-        proposal.eventId ? { label: 'Event', value: <code>{proposal.eventId}</code> } : null,
-        proposal.error ? { label: 'Error', value: <span className="error-text">{proposal.error}</span> } : null,
-        { label: 'Created', value: time(proposal.createdAt) },
-        { label: 'Resolved', value: time(proposal.resolvedAt) },
-        { label: 'Run', value: <RunLink runId={proposal.runId} /> },
-      ]}
-    />
+    <>
+      {/* the words of the mail that give the date, so the owner can check that the date is not made up. */}
+      {proposal.dueText ? <p className="inbox-due-text">The mail says: “{proposal.dueText}”</p> : null}
+      <Facts
+        layout="stacked"
+        items={[
+          { label: 'State', value: <StateBadge value={proposal.state} tones={STATE_TONE} /> },
+          { label: 'When', value: when(proposal) },
+          { label: 'Kind', value: proposal.kind },
+          { label: 'Account', value: <Breakable text={proposal.account} /> },
+          { label: 'Calendar', value: proposal.calendarId },
+          proposal.description ? { label: 'Description', value: <div className="inbox-body">{proposal.description}</div> } : null,
+          { label: 'Source', value: proposal.sourceSubject ?? <span className="muted">none</span> },
+          proposal.sourceMessageId ? { label: 'Source message', value: <code>{proposal.sourceMessageId}</code> } : null,
+          proposal.approvalId !== null ? { label: 'Approval', value: <a href="#/approvals">#{proposal.approvalId}</a> } : null,
+          proposal.eventId ? { label: 'Event', value: <code>{proposal.eventId}</code> } : null,
+          proposal.error ? { label: 'Error', value: <span className="error-text">{proposal.error}</span> } : null,
+          { label: 'Created', value: minuteTime(proposal.createdAt) },
+          { label: 'Resolved', value: minuteTime(proposal.resolvedAt) },
+          { label: 'Run', value: <RunLink runId={proposal.runId} /> },
+        ]}
+      />
+    </>
   );
 }
 
@@ -123,6 +128,12 @@ export function ProposalsPage({ query }: RouteProps) {
   const single = useApi<CalendarProposalView>(lookup);
   const proposal = listed ?? single.data;
   const select = (id: string | null) => setHashQuery(PATH, query, { id });
+  // a link from the digest or the brief names only the id. a proposal that the owner already decided is in another
+  // tab, so the page opens the tab of the proposal, and the list then shows the selected one.
+  const otherTab = !query.get('state') && single.data !== undefined && single.data.state !== tab ? single.data.state : null;
+  useEffect(() => {
+    if (otherTab) setHashQuery(PATH, query, { state: otherTab });
+  }, [otherTab, query]);
 
   return (
     <Page
@@ -135,7 +146,7 @@ export function ProposalsPage({ query }: RouteProps) {
       }
     >
       {paged.error ? (
-        <p className="error-box">Could not load: {paged.error}</p>
+        <ErrorBox error={paged.error} onRetry={paged.reload} />
       ) : paged.data === undefined ? (
         <Skeleton lines={5} />
       ) : proposals.length ? (

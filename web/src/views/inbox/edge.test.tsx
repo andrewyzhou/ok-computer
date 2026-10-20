@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedDashboard } from '../../../../test/seed';
 import { setPrefs } from '../../shell/prefs';
 import { inMain, installEventSource, json, openApp, stubFetch, type StubRoutes } from '../../testing';
-import { sendersPage, sendersPage2 } from './fixtures';
+import { sendersPage, sendersPage2, googleReady } from './fixtures';
 import { unsubscribeBlock } from './Newsletters';
 import { render } from '@testing-library/react';
 import { ExternalLink, money, safeHref, withQuery } from './shared';
@@ -30,7 +30,7 @@ const senders: StubRoutes = {
 };
 
 async function open(routes: StubRoutes = {}) {
-  const calls = stubFetch(seeded.dashboard, { ...senders, ...routes });
+  const calls = stubFetch(seeded.dashboard, { ...googleReady, ...senders, ...routes });
   openApp('#/inbox/newsletters');
   await inMain().findByText('Weekly Deals');
   return calls;
@@ -81,19 +81,19 @@ describe('the archive form', () => {
 
 describe('a list that fails', () => {
   it('shows the error of the server when the senders do not load', async () => {
-    stubFetch(seeded.dashboard, { 'GET /api/inbox/senders': () => json({ error: 'the inbox tables are missing' }, 500) });
+    stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/senders': () => json({ error: 'the inbox tables are missing' }, 500) });
     openApp('#/inbox/newsletters');
     expect(await inMain().findByText(/the inbox tables are missing/)).toBeTruthy();
   });
 
   it('shows the error of the server when the subscriptions do not load', async () => {
-    stubFetch(seeded.dashboard, { 'GET /api/inbox/subscriptions': () => json({ error: 'the subscription scan failed' }, 500) });
+    stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/subscriptions': () => json({ error: 'the subscription scan failed' }, 500) });
     openApp('#/inbox/subscriptions');
     expect(await inMain().findByText(/the subscription scan failed/)).toBeTruthy();
   });
 
   it('shows the error of the server when the drafts do not load', async () => {
-    stubFetch(seeded.dashboard, { 'GET /api/inbox/drafts': () => json({ error: 'gmail did not answer' }, 503) });
+    stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/drafts': () => json({ error: 'gmail did not answer' }, 503) });
     openApp('#/inbox/drafts');
     expect(await inMain().findByText(/gmail did not answer/)).toBeTruthy();
   });

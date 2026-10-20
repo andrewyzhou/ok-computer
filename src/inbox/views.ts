@@ -17,6 +17,9 @@ import { browserTaskOf } from './actions.js';
 import { monthlyTotals } from './cadence.js';
 import { lastJobRun } from './run.js';
 
+// the lowest confidence of a row that the monthly totals count.
+const CONFIDENT = 0.5;
+
 // the reads of the inbox pages. each function maps the rows of 019_inbox.sql to the shapes of src/dashboard/types.ts.
 // the route checks the queries, so these functions get valid values. only a cursor can still be wrong, because the
 // page sends it back as it got it, and a wrong one throws InvalidCursor.
@@ -151,6 +154,8 @@ function toSubscription(db: Db, row: Row): SubscriptionRow {
     sourceSubject: text(row.sourceSubject),
     sourceMessageIds: JSON.parse(String(row.sourceMessageIds)) as string[],
     confidence: Number(row.confidence),
+    cadenceSource: row.cadenceSource as SubscriptionRow['cadenceSource'],
+    reasons: JSON.parse(String(row.reasons)) as string[],
     cancelUrl: text(row.cancelUrl),
     state: row.state as SubscriptionState,
     approvalId: num(row.approvalId),
@@ -175,8 +180,9 @@ export function listSubscriptions(db: Db, query: { account?: string; state?: Sub
     .prepare(`SELECT * FROM inbox_subscriptions ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY lastChargeAt IS NULL, lastChargeAt DESC, id DESC`)
     .all(...params)
     .map((row) => toSubscription(db, row));
-  // a cancelled or ignored subscription costs nothing more, so the totals leave it out.
-  const paying = subscriptions.filter((each) => each.state === 'active' || each.state === 'cancel_pending');
+  // a cancelled or ignored subscription costs nothing more, so the totals leave it out. a doubtful row (confidence
+  // below 0.5, such as two purchases or a plan that may have ended) stays on the page, but the totals leave it out too.
+  const paying = subscriptions.filter((each) => (each.state === 'active' || each.state === 'cancel_pending') && each.confidence >= CONFIDENT);
   return { subscriptions, monthlyTotals: monthlyTotals(paying), lastScan: lastJobRun(db, 'subscriptions') };
 }
 
@@ -213,6 +219,7 @@ export function getDigest(db: Db, id: number | 'latest'): InboxDigest | undefine
     accounts: JSON.parse(String(row.accounts)) as string[],
     shortText: String(row.shortText),
     items: JSON.parse(String(row.items)) as DigestItem[],
+    stats: row.stats === null || row.stats === undefined ? null : (JSON.parse(String(row.stats)) as InboxDigest['stats']),
   };
 }
 
@@ -276,6 +283,7 @@ function proposalView(row: Row): CalendarProposalView {
     description: text(row.description),
     sourceMessageId: text(row.sourceMessageId),
     sourceSubject: text(row.sourceSubject),
+    dueText: text(row.dueText),
     state: row.state as CalendarProposalView['state'],
     approvalId: num(row.approvalId),
     eventId: text(row.eventId),

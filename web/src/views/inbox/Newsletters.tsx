@@ -1,11 +1,18 @@
 import { useState, type FormEvent } from 'react';
 import type { NewsletterSenderRow, SenderState, SendersPage, UnsubscribeMethod } from '../../../../src/dashboard/types';
-import { percent, time } from '../../format';
+import { percent } from '../../format';
 import type { RouteProps } from '../../routes';
 import { Button, DetailsPanel, Drawer, EmptyState, Facts, FilterBar, IconButton, Page, Select, Skeleton, Table, type Column, type Tone } from '../../ui';
 import {
+  accountColumn,
+  AccountBelowMd,
+  Breakable,
+  ConnectGoogle,
   day,
+  ErrorBox,
   LastRun,
+  minuteTime,
+  useInboxSetup,
   LoadMore,
   PendingAnswers,
   RowNote,
@@ -192,19 +199,30 @@ function SenderFacts({ sender }: { sender: NewsletterSenderRow }) {
       layout="stacked"
       items={[
         { label: 'State', value: <StateBadge value={sender.state} tones={STATE_TONE} /> },
-        { label: 'Account', value: sender.account },
-        { label: 'List-Id', value: sender.listId ?? <span className="muted">none</span> },
-        { label: 'From', value: sender.fromAddress },
+        // the title of the panel is cut on one line, so the full name shows here.
+        { label: 'Sender', value: senderName(sender) },
+        { label: 'Account', value: <Breakable text={sender.account} /> },
+        { label: 'List-Id', value: sender.listId ? <Breakable text={sender.listId} /> : <span className="muted">none</span> },
+        { label: 'From', value: <Breakable text={sender.fromAddress} /> },
         { label: 'Mail', value: `${sender.messages} messages, ${sender.read} read (${percent(sender.readRate)})` },
-        { label: 'First and last', value: `${time(sender.firstAt)} to ${time(sender.lastAt)}` },
+        { label: 'First and last', value: `${minuteTime(sender.firstAt)} to ${minuteTime(sender.lastAt)}` },
         { label: 'Unsubscribe', value: METHOD[sender.unsubscribe.method] },
         // the unsubscribe goes only through the approved action, so its link shows as text and is never an anchor that
         // could unsubscribe with one press.
-        sender.unsubscribe.url ? { label: 'Unsubscribe link', value: <code className="inbox-external">{sender.unsubscribe.url}</code> } : null,
+        sender.unsubscribe.url
+          ? {
+              label: 'Unsubscribe link',
+              value: (
+                <code className="inbox-external">
+                  <Breakable text={sender.unsubscribe.url} />
+                </code>
+              ),
+            }
+          : null,
         { label: 'Archived', value: sender.archived },
         { label: 'Label', value: sender.label ?? <span className="muted">none</span> },
         sender.approvalId !== null ? { label: 'Approval', value: <a href="#/approvals">#{sender.approvalId}</a> } : null,
-        { label: 'Unsubscribed', value: time(sender.unsubscribedAt) },
+        { label: 'Unsubscribed', value: minuteTime(sender.unsubscribedAt) },
         sender.error ? { label: 'Error', value: <span className="error-text">{sender.error}</span> } : null,
       ]}
     />
@@ -228,9 +246,11 @@ export function NewslettersPage({ query }: RouteProps) {
   const [selected, setSelected] = useState<number | null>(null);
   const [archiving, setArchiving] = useState<number | null>(null);
   const first = paged.pages[0];
-  // the accounts stay in the select while a new filter loads, so a second choice does not find an empty list.
+  const setup = useInboxSetup();
+  // the accounts stay in the select while a new filter loads, so a second choice does not find an empty list. the
+  // configured accounts are in it too, so the filter offers each account before a sweep found its senders.
   const [accounts, setAccounts] = useState<string[]>([]);
-  const known = first ? [...new Set([...first.accounts, ...(account ? [account] : [])])] : accounts;
+  const known = first ? [...new Set([...setup.accounts, ...first.accounts, ...(account ? [account] : [])])] : accounts;
   if (known.join() !== accounts.join()) setAccounts(known);
   const senders = paged.pages.flatMap((page) => page.senders);
   const sender = senders.find((each) => each.id === selected);
@@ -262,9 +282,11 @@ export function NewslettersPage({ query }: RouteProps) {
         <div className="inbox-name">
           <span>{senderName(row)}</span>
           {row.listId ? <span className="muted small">{row.listId}</span> : null}
+          <AccountBelowMd account={row.account} />
         </div>
       ),
     },
+    accountColumn<NewsletterSenderRow>(),
     { key: 'messages', header: 'Messages', align: 'end', cell: (row) => row.messages },
     { key: 'read', header: 'Read', align: 'end', hideBelow: 'sm', cell: (row) => percent(row.readRate) },
     { key: 'last', header: 'Last', hideBelow: 'md', cell: (row) => <span className="inbox-nowrap">{day(row.lastAt)}</span> },
@@ -285,7 +307,7 @@ export function NewslettersPage({ query }: RouteProps) {
     <Page
       title="Newsletters"
       subtitle={first ? <LastRun label="sweep" last={first.lastSweep} /> : undefined}
-      actions={<RunJob job="newsletters" label="Sweep now" note="Started. The list loads again when the sweep is done." />}
+      actions={<RunJob job="newsletters" label="Sweep now" note="Started. The list loads again when the sweep is done." disabled={setup.state === 'missing'} />}
       toolbar={
         <FilterBar label="newsletter filters">
           <Select label="account" value={account} options={known.length ? known : account ? [account] : []} allLabel="all" onChange={filter('account')} />
@@ -295,25 +317,30 @@ export function NewslettersPage({ query }: RouteProps) {
       }
     >
       {paged.error ? (
-        <p className="error-box">Could not load: {paged.error}</p>
+        <ErrorBox error={paged.error} onRetry={paged.reload} />
       ) : !first ? (
         <Skeleton lines={5} />
+      ) : !senders.length && !first.lastSweep && !account && !state && setup.state === 'missing' ? (
+        <ConnectGoogle what="The sweep lists the senders of bulk mail, so you can unsubscribe or archive them." />
       ) : (
         <>
           <PendingAnswers answers={answers} rows={senders} name={senderName} approvals={approvals} onDecided={reload} clear={clear} />
-          <Table
-            label="newsletter senders"
-            columns={columns}
-            rows={senders}
-            rowKey={(row) => String(row.id)}
-            selected={selected === null ? null : String(selected)}
-            onSelect={(row) => setSelected(row.id === selected ? null : row.id)}
-            empty={
-              <EmptyState icon="mail" title="No newsletters found yet.">
-                {account || state ? 'No sender matches these filters.' : 'The sweep runs each week and lists the senders of bulk mail here. Sweep now to start it.'}
-              </EmptyState>
-            }
-          />
+          {/* the actions sit in the details panel too, so a narrow table drops their column and keeps the rest in view. */}
+          <div className="inbox-table inbox-table-drop-last">
+            <Table
+              label="newsletter senders"
+              columns={columns}
+              rows={senders}
+              rowKey={(row) => String(row.id)}
+              selected={selected === null ? null : String(selected)}
+              onSelect={(row) => setSelected(row.id === selected ? null : row.id)}
+              empty={
+                <EmptyState icon="mail" title="No newsletters found yet.">
+                  {account || state ? 'No sender matches these filters.' : 'The sweep runs each week and lists the senders of bulk mail here. Sweep now to start it.'}
+                </EmptyState>
+              }
+            />
+          </div>
           <LoadMore paged={paged} />
         </>
       )}

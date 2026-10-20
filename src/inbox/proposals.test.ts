@@ -163,6 +163,66 @@ describe('proposeEvent', () => {
   });
 });
 
+describe('the words of the mail on the approval card', () => {
+  const words = 'The mail says: "due Oct 20 at 9am"';
+
+  it('adds the words to the description, and the approved call still matches the row', async () => {
+    const { h, run } = await setup();
+    const id = await proposeEvent(h.ctx, run, bill({ dueText: 'due Oct 20 at 9am' }));
+    const row = proposal(h, id!);
+    expect(row).toMatchObject({ description: `The bill of $82.10 is due.\n\n${words}`, dueText: 'due Oct 20 at 9am', state: 'proposed' });
+    // the card that the owner reads shows the evidence of the date.
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]!.text).toContain('The mail says:');
+    expect(h.sent[0]!.text).toContain('due Oct 20 at 9am');
+    // the approved call carries the same description as the row, so the match check of the tool passes.
+    const reply = await h.approve(Number(row.approvalId));
+    expect(reply).not.toContain('does not match');
+    expect(proposal(h, id!)).toMatchObject({ state: 'created' });
+    const [event] = [...h.google.fake.mailbox('personal').events.values()];
+    expect(event).toMatchObject({ summary: 'Pay the power bill', description: `The bill of $82.10 is due.\n\n${words}` });
+  });
+
+  it('gives the same proposal on a second run, with one approval', async () => {
+    const { h, run } = await setup();
+    const first = await proposeEvent(h.ctx, run, bill({ dueText: 'due Oct 20 at 9am' }));
+    const second = await proposeEvent(h.ctx, run, bill({ dueText: 'due Oct 20 at 9am' }));
+    expect(second).toBe(first);
+    // a second digest whose model copied other words is still the same deadline.
+    expect(await proposeEvent(h.ctx, run, bill({ dueText: 'Oct 20, 9 AM' }))).toBe(first);
+    expect(h.rows('SELECT id FROM inbox_proposals')).toHaveLength(1);
+    expect(h.rows('SELECT id FROM approvals')).toHaveLength(1);
+    expect(h.sent).toHaveLength(1);
+  });
+
+  it('refuses a call whose description lacks the words', async () => {
+    const { h, run } = await setup();
+    const id = await proposeEvent(h.ctx, run, bill({ dueText: 'due Oct 20 at 9am' }));
+    const tool = h.inbox.tools.find((each) => each.name === EVENT_TOOL)!;
+    const row = proposal(h, id!);
+    const input = { proposalId: id!, account: 'personal', kind: 'bill', title: 'Pay the power bill', startAt: String(row.startAt), endAt: String(row.endAt), allDay: false, description: 'The bill of $82.10 is due.' };
+    const output = await tool.run(input, { runId: run.runId, sessionKey: run.sessionKey, timeZone: h.ctx.timeZone, clock: h.ctx.clock, signal: h.ctx.signal });
+    expect(output).toMatchObject({ isError: true });
+    expect(output.content).toContain('does not match');
+    expect(inserts(h)).toEqual([]);
+  });
+
+  it('keeps the words within the limit of the description, and cleans them', async () => {
+    const { h, run } = await setup();
+    const long = await proposeEvent(h.ctx, run, bill({ description: 'x'.repeat(5000), dueText: 'due\nOct 20\u0000 at 9am' }));
+    const description = String(proposal(h, long!).description);
+    expect(description.length).toBeLessThanOrEqual(2000);
+    expect(description.endsWith(`\n\n${words}`)).toBe(true);
+    const bare = await proposeEvent(h.ctx, run, bill({ sourceMessageId: 'm2', description: null, dueText: 'due Oct 20 at 9am' }));
+    expect(proposal(h, bare!).description).toBe(words);
+    // a caller without the words keeps the description as it was.
+    const legacy = await proposeEvent(h.ctx, run, bill({ sourceMessageId: 'm3', dueText: null }));
+    expect(proposal(h, legacy!)).toMatchObject({ description: 'The bill of $82.10 is due.', dueText: null });
+    const empty = await proposeEvent(h.ctx, run, bill({ sourceMessageId: 'm4', dueText: '   ' }));
+    expect(proposal(h, empty!)).toMatchObject({ description: 'The bill of $82.10 is due.', dueText: null });
+  });
+});
+
 describe('a hostile bill mail', () => {
   it('gives a proposal whose card names the taint, and nothing is made before the approval', async () => {
     const { h, run } = await setup();

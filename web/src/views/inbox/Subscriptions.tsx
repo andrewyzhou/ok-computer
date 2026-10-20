@@ -1,10 +1,33 @@
 import { useState } from 'react';
+import type { CadenceSource } from '../../../../src/dashboard/inbox-types';
 import type { SubscriptionRow, SubscriptionsPage as SubscriptionsData, SubscriptionState } from '../../../../src/dashboard/types';
 import { useApi } from '../../api';
-import { percent, time } from '../../format';
+import { percent } from '../../format';
 import type { RouteProps } from '../../routes';
-import { Button, DetailsPanel, EmptyState, Facts, FilterBar, Page, Select, Skeleton, Stat, Stats, Table, type Column, type Tone } from '../../ui';
-import { ApprovalFor, day, ExternalLink, LastRun, PendingAnswers, refreshInbox, RowNote, RunJob, StateBadge, money, setHashQuery, useApprovals, useRowActions, withQuery } from './shared';
+import { Badge, Button, DetailsPanel, EmptyState, Facts, FilterBar, Page, Select, Skeleton, Stat, Stats, Table, type Column, type Tone } from '../../ui';
+import {
+  AccountBadge,
+  accountColumn,
+  ApprovalFor,
+  Breakable,
+  ConnectGoogle,
+  day,
+  ErrorBox,
+  ExternalLink,
+  LastRun,
+  minuteTime,
+  PendingAnswers,
+  refreshInbox,
+  RowNote,
+  RunJob,
+  StateBadge,
+  money,
+  setHashQuery,
+  useApprovals,
+  useInboxSetup,
+  useRowActions,
+  withQuery,
+} from './shared';
 import './inbox.css';
 
 // the paid subscriptions that the scan found in the receipts. cancel waits for the owner's approval, and each step of
@@ -21,6 +44,35 @@ const STATES: Array<{ value: SubscriptionState; label: string }> = [
 
 const STATE_TONE: Record<SubscriptionState, Tone> = { active: 'info', cancel_pending: 'warning', cancelled: 'good', ignored: 'muted' };
 
+// where the cadence comes from, in words.
+export const CADENCE_SOURCE: Record<CadenceSource, string> = {
+  stated: 'stated on the receipt',
+  gaps: 'from the charge dates',
+  both: 'stated and confirmed by the dates',
+  none: 'unknown',
+};
+
+// how sure the finder is that the charge repeats, as a word and a tone: low below 0.5, medium from 0.5 to 0.8, and
+// high from 0.8 up. the percent shows next to the word, so the owner sees the number that the word stands for.
+export function confidenceBand(confidence: number): { label: 'low' | 'medium' | 'high'; tone: Tone } {
+  if (confidence >= 0.8) return { label: 'high', tone: 'good' };
+  if (confidence >= 0.5) return { label: 'medium', tone: 'info' };
+  return { label: 'low', tone: 'warning' };
+}
+
+// a row that the receipts no longer support: the scan gave it confidence 0 and an unknown cadence. a row that the
+// finder keeps never has confidence 0, so a doubtful row stays in view and only a stale one is hidden.
+export const isStale = (row: SubscriptionRow) => row.confidence === 0 && row.cadenceSource === 'none';
+
+export function Confidence({ value }: { value: number }) {
+  const band = confidenceBand(value);
+  return (
+    <Badge tone={band.tone} title={`confidence ${percent(value)}`}>
+      {band.label} {percent(value)}
+    </Badge>
+  );
+}
+
 function SubscriptionFacts({ row, approvals, onDecided }: { row: SubscriptionRow; approvals: ReturnType<typeof useApprovals>; onDecided: () => void }) {
   return (
     <>
@@ -28,18 +80,32 @@ function SubscriptionFacts({ row, approvals, onDecided }: { row: SubscriptionRow
         layout="stacked"
         items={[
           { label: 'State', value: <StateBadge value={row.state} tones={STATE_TONE} /> },
-          { label: 'Account', value: row.account },
           { label: 'Amount', value: `${money(row.amount, row.currency)}, ${row.cadence}` },
-          { label: 'Last charge', value: time(row.lastChargeAt) },
-          { label: 'Next charge', value: time(row.nextChargeAt) },
+          { label: 'Cadence', value: CADENCE_SOURCE[row.cadenceSource] ?? row.cadenceSource },
+          // how sure the finder is comes right after the amount and the cadence, so it is in view without a scroll.
+          { label: 'Confidence', value: <Confidence value={row.confidence} /> },
+          {
+            label: 'Why',
+            value: row.reasons.length ? (
+              <ul className="inbox-reasons" aria-label="reasons">
+                {row.reasons.map((reason, index) => (
+                  <li key={index}>{reason}</li>
+                ))}
+              </ul>
+            ) : (
+              <span className="muted">no reasons given</span>
+            ),
+          },
+          { label: 'Account', value: <Breakable text={row.account} /> },
+          { label: 'Last charge', value: minuteTime(row.lastChargeAt) },
+          { label: 'Next charge', value: minuteTime(row.nextChargeAt) },
           { label: 'Cancel link', value: row.cancelUrl ? <ExternalLink href={row.cancelUrl} /> : <span className="muted">none found</span> },
           row.browserTaskId ? { label: 'Browser task', value: <a href={`#/browser/${encodeURIComponent(row.browserTaskId)}`}>{row.browserTaskId}</a> } : null,
           { label: 'Source', value: row.sourceSubject ?? <span className="muted">no subject</span> },
           { label: 'Source message', value: <code>{row.sourceMessageId}</code> },
           // the finder tells why a row is there: how many receipts it read, and how sure it is that the charge repeats.
           { label: 'Receipts', value: `${row.sourceMessageIds.length} ${row.sourceMessageIds.length === 1 ? 'receipt' : 'receipts'}` },
-          { label: 'Confidence', value: percent(row.confidence) },
-          { label: 'Updated', value: time(row.updatedAt) },
+          { label: 'Updated', value: minuteTime(row.updatedAt) },
         ]}
       />
       {row.approvalId !== null ? (
@@ -63,13 +129,22 @@ export function SubscriptionsPage({ query }: RouteProps) {
   };
   const { answers, act, clear } = useRowActions(reload);
   const [selected, setSelected] = useState<number | null>(null);
+  const setup = useInboxSetup();
+  // a stale row (isStale) found no charge that repeats when its receipts were read again, so it is most likely a
+  // one-time purchase. such rows are hidden until the owner asks for them. the server leaves them out of the monthly
+  // totals too, with every row below confidence 0.5.
+  const [showOnce, setShowOnce] = useState(false);
   // the accounts come from the rows of the first answer without a filter, so a filter does not take its own choice
   // out of the list.
   const [accounts, setAccounts] = useState<string[]>([]);
   const data = loaded.data;
   const rows = data?.subscriptions ?? [];
-  const seen = [...new Set([...accounts, ...rows.map((row) => row.account), ...(account ? [account] : [])])].sort();
+  const seen = [...new Set([...accounts, ...setup.accounts, ...rows.map((row) => row.account), ...(account ? [account] : [])])].sort();
   if (seen.length !== accounts.length) setAccounts(seen);
+  const once = rows.filter(isStale).length;
+  const shown = showOnce ? rows : rows.filter((each) => !isStale(each));
+  // before the first scan the page has nothing to count, so the totals stay away.
+  const scanned = data !== undefined && (data.lastScan !== null || rows.length > 0);
   const row = rows.find((each) => each.id === selected);
   const filter = (key: string) => (value: string) => setHashQuery(PATH, query, { [key]: value });
   const base = (id: number) => `/api/inbox/subscriptions/${id}`;
@@ -103,9 +178,14 @@ export function SubscriptionsPage({ query }: RouteProps) {
         <div className="inbox-name">
           <span>{each.merchant}</span>
           {each.sourceSubject ? <span className="muted small">{each.sourceSubject}</span> : null}
+          <span className="inbox-below-md inbox-cell-badges">
+            <AccountBadge account={each.account} />
+            <Confidence value={each.confidence} />
+          </span>
         </div>
       ),
     },
+    accountColumn<SubscriptionRow>(),
     {
       key: 'amount',
       header: 'Amount',
@@ -114,12 +194,13 @@ export function SubscriptionsPage({ query }: RouteProps) {
         <div className="inbox-amount-cell">
           <span>{money(each.amount, each.currency)}</span>
           <span className="muted small">{each.cadence}</span>
+          {each.nextChargeAt ? <span className="muted small">next {day(each.nextChargeAt)}</span> : null}
         </div>
       ),
     },
-    { key: 'last', header: 'Last charge', hideBelow: 'md', cell: (each) => <span className="inbox-nowrap">{day(each.lastChargeAt)}</span> },
-    { key: 'next', header: 'Next charge', hideBelow: 'sm', cell: (each) => <span className="inbox-nowrap">{day(each.nextChargeAt)}</span> },
-    { key: 'confidence', header: 'Confidence', align: 'end', hideBelow: 'md', cell: (each) => percent(each.confidence) },
+    // the next charge shows under the amount, and the last charge and the source of the cadence show in the details
+    // panel, so the table has room for the account and the confidence next to the details panel.
+    { key: 'confidence', header: 'Confidence', align: 'end', hideBelow: 'md', cell: (each) => <Confidence value={each.confidence} /> },
     { key: 'state', header: 'State', cell: (each) => <StateBadge value={each.state} tones={STATE_TONE} /> },
     { key: 'actions', header: <span className="sr-only">Actions</span>, hideBelow: 'sm', cell: actionsFor },
   ];
@@ -128,42 +209,65 @@ export function SubscriptionsPage({ query }: RouteProps) {
     <Page
       title="Subscriptions"
       subtitle={data ? <LastRun label="scan" last={data.lastScan} /> : undefined}
-      actions={<RunJob job="subscriptions" label="Scan now" note="Started. The table loads again when the scan is done." />}
+      actions={<RunJob job="subscriptions" label="Scan now" note="Started. The table loads again when the scan is done." disabled={setup.state === 'missing'} />}
       toolbar={
         <FilterBar label="subscription filters">
           <Select label="account" value={account} options={accounts} allLabel="all" onChange={filter('account')} />
           <Select label="state" value={state} options={STATES} allLabel="all" onChange={filter('state')} />
+          {once || showOnce ? (
+            <label className="toggle">
+              <input type="checkbox" checked={showOnce} onChange={(event) => setShowOnce(event.target.checked)} />
+              <span>Show rows with no repeating charge</span>
+              <span className="muted">({once})</span>
+            </label>
+          ) : null}
         </FilterBar>
       }
     >
       {loaded.error ? (
-        <p className="error-box">Could not load: {loaded.error}</p>
+        <ErrorBox error={loaded.error} onRetry={loaded.reload} />
       ) : !data ? (
         <Skeleton lines={5} />
+      ) : !scanned && !account && !state && setup.state === 'missing' ? (
+        <ConnectGoogle what="The scan reads the receipts in the mail and lists the paid subscriptions." />
       ) : (
         <>
-          <Stats label="monthly totals">
-            {data.monthlyTotals.length ? (
-              data.monthlyTotals.map((total) => <Stat key={total.currency} label={total.currency} value={money(total.amount, total.currency)} note="estimated per month" />)
-            ) : (
-              <Stat label="Per month" value="-" note="no known amounts yet" />
-            )}
-            <Stat label="Subscriptions" value={rows.length} note={account || state ? 'with these filters' : 'all found'} />
-          </Stats>
+          {scanned ? (
+            <Stats label="monthly totals">
+              {data.monthlyTotals.length ? (
+                data.monthlyTotals.map((total) => <Stat key={total.currency} label={total.currency} value={money(total.amount, total.currency)} note="estimated per month" />)
+              ) : (
+                <Stat label="Per month" value="-" note="no known amounts yet" />
+              )}
+              <Stat
+                label="Subscriptions"
+                value={shown.length}
+                note={once && !showOnce ? `${once} with no repeating charge hidden` : account || state ? 'with these filters' : 'all found'}
+              />
+            </Stats>
+          ) : null}
           <PendingAnswers answers={answers} rows={rows} name={(each) => each.merchant} approvals={approvals} onDecided={reload} clear={clear} />
-          <Table
-            label="subscriptions"
-            columns={columns}
-            rows={rows}
-            rowKey={(each) => String(each.id)}
-            selected={selected === null ? null : String(selected)}
-            onSelect={(each) => setSelected(each.id === selected ? null : each.id)}
-            empty={
-              <EmptyState icon="subscription" title="No subscriptions found yet.">
-                {account || state ? 'No subscription matches these filters.' : 'The scan reads the receipts in the mail and lists the paid subscriptions here.'}
-              </EmptyState>
-            }
-          />
+          {/* the actions sit in the details panel too, so a narrow table drops their column and keeps the confidence in
+              view. */}
+          <div className="inbox-table inbox-table-drop-last">
+            <Table
+              label="subscriptions"
+              columns={columns}
+              rows={shown}
+              rowKey={(each) => String(each.id)}
+              selected={selected === null ? null : String(selected)}
+              onSelect={(each) => setSelected(each.id === selected ? null : each.id)}
+              empty={
+                <EmptyState icon="subscription" title={rows.length ? 'No repeating charges found.' : 'No subscriptions found yet.'}>
+                  {rows.length
+                    ? 'The scan found only charges that do not repeat. Show the rows with no repeating charge to see them.'
+                    : account || state
+                      ? 'No subscription matches these filters.'
+                      : 'The scan reads the receipts in the mail and lists the paid subscriptions here.'}
+                </EmptyState>
+              }
+            />
+          </div>
         </>
       )}
       {row ? (

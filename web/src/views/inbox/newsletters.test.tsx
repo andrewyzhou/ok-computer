@@ -5,7 +5,7 @@ import { seedDashboard } from '../../../../test/seed';
 import { inMain, installEventSource, json, openApp, stubFetch, type StubRoutes } from '../../testing';
 import { setPrefs } from '../../shell/prefs';
 import { keepBlock, unsubscribeBlock } from './Newsletters';
-import { senders as rows, sendersPage, sendersPage2 } from './fixtures';
+import { senders as rows, sendersPage, sendersPage2, googleReady } from './fixtures';
 
 installEventSource();
 
@@ -25,7 +25,7 @@ const senders: StubRoutes = {
 };
 
 async function open(routes: StubRoutes = {}, hash = '#/inbox/newsletters') {
-  const calls = stubFetch(seeded.dashboard, { ...senders, ...routes });
+  const calls = stubFetch(seeded.dashboard, { ...googleReady, ...senders, ...routes });
   openApp(hash);
   await inMain().findByText('Weekly Deals');
   return calls;
@@ -162,7 +162,7 @@ describe('the newsletter senders', () => {
   });
 
   it('shows an empty state when the sweep found no senders', async () => {
-    stubFetch(seeded.dashboard, { 'GET /api/inbox/senders': () => ({ accounts: [], senders: [], nextCursor: null, lastSweep: null }) });
+    stubFetch(seeded.dashboard, { ...googleReady, 'GET /api/inbox/senders': () => ({ accounts: [], senders: [], nextCursor: null, lastSweep: null }) });
     openApp('#/inbox/newsletters');
     expect(await inMain().findByText('No newsletters found yet.')).toBeTruthy();
     expect(inMain().getByText('No sweep yet.')).toBeTruthy();

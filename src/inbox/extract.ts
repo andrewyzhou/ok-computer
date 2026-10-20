@@ -29,6 +29,8 @@ export interface ExtractRequest<T> {
   source: string;
   signal?: AbortSignal;
   logger: Logger;
+  // sees the raw items of a call that worked, before the schema check. the quality check uses it.
+  observe?: (raw: unknown[]) => void;
 }
 
 export interface Extracted<T> {
@@ -57,7 +59,14 @@ export async function extractItems<T>(slots: SlotRunner, request: ExtractRequest
     request.logger.warn('the inbox extraction call failed', { tool: request.tool.name, error: result.error });
     return { items, modelCallId: null, error: result.error, ...(result.aborted ? { aborted: true } : {}) };
   }
-  for (const call of result.response.toolCalls.filter((each) => each.name === request.tool.name)) {
+  const calls = result.response.toolCalls.filter((each) => each.name === request.tool.name);
+  request.observe?.(
+    calls.flatMap((call) => {
+      const list = (call.input as { items?: unknown } | null)?.items;
+      return Array.isArray(list) ? list : [];
+    }),
+  );
+  for (const call of calls) {
     const list = (call.input as { items?: unknown } | null)?.items;
     for (const raw of Array.isArray(list) ? list : []) {
       const parsed = request.item.safeParse(raw);

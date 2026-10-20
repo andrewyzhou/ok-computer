@@ -31,6 +31,16 @@ export interface InboxDeps {
   // the live runs of the app. a job run is in it while it works, so the sweep of stale runs leaves it alone.
   activeRuns?: Set<string>;
   newId?: () => string;
+  // the read-only quality check sees each digest batch here: the inputs as the code built them and the items of the
+  // model as it gave them, before any check. the app sets none.
+  observeDigest?: (batch: DigestBatch) => void;
+}
+
+// one batch of the digest model. items are the raw items of the tool call, which the quality check checks again.
+export interface DigestBatch {
+  account: string;
+  inputs: ReadonlyArray<{ id: number; text: string; sentAt: string }>;
+  items: unknown[];
 }
 
 // the same parts with a fixed id function. every module of src/inbox gets this.

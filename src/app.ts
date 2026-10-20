@@ -567,7 +567,7 @@ export function createApp(deps: AppDeps): App {
       syncHeartbeat(db, config, clock());
       syncPolls(db, entries, clock(), config.timeZone);
       syncGooglePoll(db, config, clock());
-      if (inbox && installInboxJobs(db, config, clock())) logger.info('inbox jobs installed');
+      if (inbox && installInboxJobs(db, config, clock(), logger)) logger.info('inbox jobs installed');
       if (installDeskJobs(db, config, clock())) logger.info('desk jobs installed');
       docComments.start();
       // missed jobs can take minutes, so the start does not wait for them.
