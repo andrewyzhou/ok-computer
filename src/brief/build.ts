@@ -32,7 +32,7 @@ export interface BriefInput {
 }
 
 const SECTION_TITLES: Record<BriefSectionKind, string> = {
-  day: 'Today',
+  day: 'Schedule',
   conflicts: 'Conflicts',
   travel: 'Tight moves',
   invites: 'Invitations to answer',

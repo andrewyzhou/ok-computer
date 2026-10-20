@@ -57,7 +57,7 @@ describe('brief tools', () => {
 
   it('reads the brief of another day, and says when there is none', async () => {
     const { db, call } = setup();
-    expect((await call('brief_read', { day: '2026-10-11' })).content).toBe('Brief of 2026-10-11, built 07:30.\n\nToday\nGoogle is not set up, so the brief has no calendar.');
+    expect((await call('brief_read', { day: '2026-10-11' })).content).toBe('Brief of 2026-10-11, built 07:30.\n\nSchedule\nGoogle is not set up, so the brief has no calendar.');
     expect(await call('brief_read', { day: '2026-10-13' })).toEqual({ content: 'there is no brief for 2026-10-13 yet. it is built each day at 07:30.', untrustedSource: 'brief' });
     const id = briefAutomation(db)!.id;
     updateAutomation(db, id, { enabled: false }, new Date(TODAY_NOW), TODAY_TZ);

@@ -7,7 +7,7 @@ import { Icon } from '../../icons';
 import type { RouteProps } from '../../routes';
 import { Button, ButtonLink, EmptyState, isNotFound, Page, Skeleton } from '../../ui';
 import { calendarHash } from './links';
-import { addDays, BriefSections, Delivery, findItem, isDay, ItemDetails, localDay, ScheduleLine, sourceNotes, SourcesStrip } from './parts';
+import { addDays, BriefSections, Delivery, DeliveryAlert, findItem, isDay, ItemDetails, localDay, ScheduleLine, shortDate, sourceNotes, SourcesStrip } from './parts';
 import './today.css';
 
 // the today page: the stored brief of a day (params.day, or the local today), with each item linked to its source.
@@ -117,6 +117,8 @@ export function TodayPage({ params }: RouteProps) {
     </>
   ) : undefined;
 
+  // another day than today is a brief of that day, so its page is not called today.
+  const title = day === today ? 'Today' : 'Brief';
   if (meta.error) return <Page title="Today" crumbs={[]}><p className="error-box">Could not load: {meta.error}</p></Page>;
   if (day === null || today === null) return <Page title="Today" crumbs={[]}><Skeleton lines={6} /></Page>;
   if (!valid)
@@ -131,11 +133,12 @@ export function TodayPage({ params }: RouteProps) {
   const data = brief.data;
   const scheduleData = schedule.data;
   const first = list.data ? list.data.briefs.length === 0 : list.error !== undefined;
+  const latest = list.data?.briefs[0]?.day ?? null;
   const sections = data?.content.sections ?? [];
 
   return (
     // the empty crumbs keep the header at the name of the group, for today and for each day.
-    <Page title="Today" crumbs={[]} subtitle={longDay(day)} actions={actions}>
+    <Page title={title} crumbs={[]} subtitle={longDay(day)} actions={actions}>
       <div className="today-page">
         <div className="today-bar">
           <DayNav day={day} today={today} />
@@ -143,7 +146,7 @@ export function TodayPage({ params }: RouteProps) {
         </div>
         <RunNote run={run} />
         {missing ? (
-          <EmptyMissing day={day} today={today} first={first} schedule={scheduleData} button={runButton('primary')} />
+          <EmptyMissing day={day} today={today} first={first} latest={latest} schedule={scheduleData} timeZone={timeZone} button={runButton('primary')} />
         ) : brief.error ? (
           <div className="error-box today-error" role="alert">
             <span>Could not load the brief: {brief.error}</span>
@@ -153,6 +156,7 @@ export function TodayPage({ params }: RouteProps) {
           </div>
         ) : data ? (
           <>
+            <DeliveryAlert brief={data} />
             <SourcesStrip sources={data.content.sources} />
             <BriefSections
               sections={sections}
@@ -193,16 +197,60 @@ function RunNote({ run }: { run: RunState }) {
   return null;
 }
 
-// a day with no brief: the first run, a day whose brief comes later, a day that had none, or a brief that is off.
-function EmptyMissing({ day, today, first, schedule, button }: { day: string; today: string; first: boolean; schedule: BriefSchedule | undefined; button: ReactNode }) {
+// the words for the day of the next run, seen from today: today, tomorrow, or a short date.
+function runDay(next: string, today: string, timeZone: string, nextRunAt: string): string {
+  if (next === today) return 'today';
+  if (next === addDays(today, 1)) return 'tomorrow';
+  return `on ${shortDate(nextRunAt, timeZone)}`;
+}
+
+// a day with no brief: the first run, a day whose brief comes later, today when its run already passed, a day that had
+// none, or a brief that is off. the next run of the automation decides what the page promises, so it never says that
+// a brief comes today when the run of today is over.
+function EmptyMissing({
+  day,
+  today,
+  first,
+  latest,
+  schedule,
+  timeZone,
+  button,
+}: {
+  day: string;
+  today: string;
+  first: boolean;
+  latest: string | null;
+  schedule: BriefSchedule | undefined;
+  timeZone: string;
+  button: ReactNode;
+}) {
   const on = schedule?.enabled === true && schedule.time !== null;
-  if (on && first) return <EmptyState icon="today" title={`Your first brief comes at ${schedule.time}.`} action={button}>The brief reads your calendars, the inbox digest and your goals each morning, and sends a short message with a link here.</EmptyState>;
+  const next = on && schedule.nextRunAt ? localDay(schedule.nextRunAt, timeZone) : null;
+  const when = on && next && schedule.nextRunAt ? `${runDay(next, today, timeZone, schedule.nextRunAt)} at ${schedule.time}` : on ? `at ${schedule.time}` : null;
+  const back = latest && latest !== day ? <a href={`#/today/${latest}`}>Open the latest brief</a> : null;
+  if (on && first)
+    return (
+      <EmptyState icon="today" title={`Your first brief comes ${when}.`} action={button}>
+        The brief reads your calendars, the inbox digest and your goals each morning, and sends a short message with a link here.
+      </EmptyState>
+    );
+  // the run of today is over when the next run is on a later day.
+  if (on && day === today && next !== null && next > today)
+    return (
+      <EmptyState icon="today" title="The brief of today did not run." action={button}>
+        It was due at {schedule.time}. Make one now, or wait for the next one {when}.
+      </EmptyState>
+    );
   if (on && day >= today) return <EmptyState icon="today" title={`The brief of ${longDay(day)} comes at ${schedule.time}.`} action={button} />;
   if (schedule && !schedule.enabled && day >= today)
     return (
       <EmptyState icon="today" title="The brief is off." action={button}>
-        Change its time above to turn it on.
+        Use Turn on above to start it.
       </EmptyState>
     );
-  return <EmptyState icon="today" title={`There is no brief for ${longDay(day)}.`} action={day === today ? button : undefined} />;
+  return (
+    <EmptyState icon="today" title={`There is no brief for ${longDay(day)}.`} action={day === today ? button : undefined}>
+      {back ?? (day !== today ? <a href="#/today">Go to today</a> : null)}
+    </EmptyState>
+  );
 }

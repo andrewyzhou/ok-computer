@@ -37,7 +37,7 @@ describe('the today page', () => {
     expect(main.getByText('Monday, October 12')).toBeTruthy();
     const titles = main.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent);
     expect(titles).toEqual(BRIEF_FULL.content.sections.map((section) => section.title));
-    expect(main.getByText('10 events, the first at 07:00.')).toBeTruthy();
+    expect(main.getByText('10 events, the first at 09:00.')).toBeTruthy();
     expect(main.getByText('2 need a reply, 1 bill, 1 package.')).toBeTruthy();
     for (const section of BRIEF_FULL.content.sections) {
       const list = within(main.getByRole('list', { name: section.title }));
@@ -61,7 +61,7 @@ describe('the today page', () => {
     openApp('#/today/2026-10-12');
     const main = inMain();
     expect(await main.findByText('Brief at 07:30 each day · next Tue 13 Oct')).toBeTruthy();
-    expect(await main.findByText('Sent to telegram at 07:30')).toBeTruthy();
+    expect(await main.findByText('Sent to Telegram at 07:30')).toBeTruthy();
     fireEvent.click(main.getByText('Message'));
     expect(main.getByText(/Brief for Mon 12 Oct/).tagName).toBe('PRE');
     expect(main.queryByRole('list', { name: 'missing sources' })).toBeNull();
@@ -71,7 +71,7 @@ describe('the today page', () => {
     stubFetch(null, routes());
     openApp('#/today/2026-10-12');
     const main = inMain();
-    const reading = within(await main.findByRole('list', { name: 'Today' })).getByText('Reading group').closest('a')!;
+    const reading = within(await main.findByRole('list', { name: 'Schedule' })).getByText('Reading group').closest('a')!;
     fireEvent.click(reading);
     expect(reading.getAttribute('aria-current')).toBe('true');
     const panel = details();
@@ -126,7 +126,7 @@ describe('the today page', () => {
     openApp('#/today/2026-10-11');
     const main = inMain();
     const strip = within(await main.findByRole('list', { name: 'missing sources' }));
-    expect(main.queryByRole('list', { name: 'Today' })).toBeNull();
+    expect(main.queryByRole('list', { name: 'Schedule' })).toBeNull();
     expect(strip.getByText('Google is not set up, so the brief has no calendar.')).toBeTruthy();
     // the note of the day says the same as the strip, so it is not drawn twice, and the empty day section is left out.
     expect(main.getAllByText('Google is not set up, so the brief has no calendar.')).toHaveLength(1);
@@ -145,16 +145,20 @@ describe('the today page', () => {
     };
     stubFetch(null, routes({ 'GET /api/briefs/day/:day': () => partial }));
     openApp('#/today/2026-10-12');
-    const strip = within(await inMain().findByRole('list', { name: 'missing sources' }));
-    expect(strip.getByText('The calendar of school could not be read.')).toBeTruthy();
-    expect(strip.getAllByRole('listitem')).toHaveLength(1);
+    // the reason of each calendar shows in the same banner as on the calendar page, with the next step.
+    const banner = await inMain().findByRole('status');
+    const list = within(within(banner).getByRole('list', { name: 'missing calendars' }));
+    expect(list.getAllByRole('listitem').map((each) => each.textContent)).toEqual(['Google did not answer for school.']);
+    expect(within(banner).getByRole('link', { name: 'Open the Google page' }).getAttribute('href')).toBe('#/google');
+    expect(inMain().queryByRole('list', { name: 'missing sources' })).toBeNull();
   });
 
   it('shows the first run with the time of the brief and a button that makes one now', async () => {
     const calls = stubFetch(null, routes({ 'GET /api/briefs/day/:day': () => json({ error: 'brief not found' }, 404), 'GET /api/briefs': () => ({ briefs: [], nextCursor: null }), 'POST /api/brief/run': () => json({ started: true }, 202) }));
     openApp('#/today');
     const main = inMain();
-    expect(await main.findByText('Your first brief comes at 07:30.')).toBeTruthy();
+    // the run of today at 07:30 is over, so the first brief comes tomorrow.
+    expect(await main.findByText('Your first brief comes tomorrow at 07:30.')).toBeTruthy();
     expect(main.queryByRole('alert')).toBeNull();
     fireEvent.click(main.getByRole('button', { name: 'Make a brief now' }));
     expect(await main.findByText('Building the brief…')).toBeTruthy();
@@ -193,5 +197,67 @@ describe('the today page', () => {
     fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
     expect(await main.findByText('Run with Sam')).toBeTruthy();
     expect(main.queryByRole('alert')).toBeNull();
+  });
+
+  it('names a past day as a brief, and links to the latest brief', async () => {
+    stubFetch(null, routes());
+    openApp('#/today/2026-10-01');
+    const main = inMain();
+    expect(await main.findByText('There is no brief for Thursday, October 1.')).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 1, name: 'Brief' })).toBeTruthy();
+    expect((await main.findByRole('link', { name: 'Open the latest brief' })).getAttribute('href')).toBe('#/today/2026-10-12');
+  });
+
+  it('says that the brief of today did not run when its time is over', async () => {
+    stubFetch(null, routes({ 'GET /api/briefs/day/:day': () => json({ error: 'brief not found' }, 404) }));
+    openApp('#/today');
+    const main = inMain();
+    expect(await main.findByText('The brief of today did not run.')).toBeTruthy();
+    expect(main.getByText('It was due at 07:30. Make one now, or wait for the next one tomorrow at 07:30.')).toBeTruthy();
+    expect(main.getAllByRole('button', { name: 'Make a brief now' }).length).toBeGreaterThan(0);
+  });
+
+  it('shows a schedule that could not load as an error', async () => {
+    stubFetch(null, routes({ 'GET /api/brief/schedule': () => json({ error: 'the schedule is gone' }, 500) }));
+    openApp('#/today/2026-10-12');
+    const line = await inMain().findByText(/Could not load the schedule/);
+    expect(line.className).toContain('error-text');
+    expect(line.getAttribute('role')).toBe('alert');
+  });
+
+  it('says at the top when the message did not reach the owner, with the page of the channel', async () => {
+    stubFetch(null, routes({ 'GET /api/briefs/day/:day': () => ({ ...BRIEF_FULL, delivery: { channel: 'telegram', ok: false, error: 'telegram answered 400', at: TODAY_NOW } }) }));
+    openApp('#/today/2026-10-12');
+    const alert = await inMain().findByRole('alert');
+    expect(alert.textContent).toBe('The message of this brief did not reach you on Telegram: telegram answered 400.Check the channel on the Integrations page');
+    expect(within(alert).getByRole('link').getAttribute('href')).toBe('#/integrations');
+    // the banner comes before the first section.
+    const first = inMain().getAllByRole('heading', { level: 2 })[0]!;
+    expect(alert.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('shows the first five items of a long section and the rest on a click, and the whole schedule', async () => {
+    const many = Array.from({ length: 8 }, (_, index) => ({
+      id: `thread:personal:t${index}`,
+      title: `mail ${index}`,
+      detail: null,
+      at: null,
+      account: 'personal',
+      tone: 'critical' as const,
+      source: { kind: 'thread' as const, account: 'personal', threadId: `t${index}`, digestId: 1 },
+    }));
+    const long: Brief = {
+      ...BRIEF_FULL,
+      content: { ...BRIEF_FULL.content, sections: BRIEF_FULL.content.sections.map((section) => (section.kind === 'inbox' ? { ...section, items: many } : section)) },
+    };
+    stubFetch(null, routes({ 'GET /api/briefs/day/:day': () => long }));
+    openApp('#/today/2026-10-12');
+    const main = inMain();
+    const inbox = await main.findByRole('list', { name: 'Inbox' });
+    expect(within(inbox).getAllByRole('link')).toHaveLength(5);
+    expect(within(main.getByRole('list', { name: 'Schedule' })).getAllByRole('link')).toHaveLength(10);
+    fireEvent.click(main.getByRole('button', { name: 'Show 3 more' }));
+    expect(within(main.getByRole('list', { name: 'Inbox' })).getAllByRole('link')).toHaveLength(8);
+    expect(main.queryByRole('button', { name: /Show \d+ more/ })).toBeNull();
   });
 });

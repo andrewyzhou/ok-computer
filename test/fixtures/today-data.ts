@@ -190,7 +190,7 @@ export const BRIEF_CONTENT: BriefContent = {
   sections: [
     {
       kind: 'day',
-      title: 'Today',
+      title: 'Schedule',
       note: '10 events, the first at 09:00.',
       items: [
         eventItem('personal/primary/birthday', "Mom's birthday", 'All day'),
@@ -298,7 +298,7 @@ export const BRIEF_QUIET: Brief = {
     timeZone: TODAY_TZ,
     generatedAt: '2026-10-11T14:30:00.000Z',
     sources: { calendar: 'off', skipped: [], digest: null, desk: false },
-    sections: [{ kind: 'day', title: 'Today', note: 'Google is not set up, so the brief has no calendar.', items: [] }],
+    sections: [{ kind: 'day', title: 'Schedule', note: 'Google is not set up, so the brief has no calendar.', items: [] }],
   },
   delivery: { channel: null, ok: false, error: 'no chat of the owner is known', at: '2026-10-11T14:30:01.000Z' },
 };

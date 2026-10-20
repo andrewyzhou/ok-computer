@@ -48,7 +48,12 @@
   color: var(--warning-ink);
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
+}
+.cal-banner a {
+  color: inherit;
+  font-weight: 600;
 }
 
 /* the legend: a chip for each calendar. a hidden calendar keeps its chip with a hollow dot. */
@@ -84,11 +89,18 @@
   border: 2px solid var(--cal);
 }
 .cal-chip-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* the account is the second part of a chip. it never wraps, and it gives way to the label first. */
 .cal-chip-account {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--muted);
   font-size: var(--text-xs);
 }
@@ -99,6 +111,51 @@
   background: transparent;
 }
 .cal-chip.is-hidden .cal-chip-label {
+  text-decoration: line-through;
+}
+
+/* the key of the marks under the legend. */
+.cal-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: -6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.cal-key li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cal-key-conflict,
+.cal-key-travel {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--critical);
+}
+.cal-key-travel {
+  background: var(--warning);
+}
+.cal-key-swatch {
+  width: 18px;
+  height: 11px;
+  border-radius: 3px;
+  --cal: var(--ink-2);
+}
+.cal-key-swatch.is-tentative {
+  background:
+    repeating-linear-gradient(135deg, color-mix(in srgb, var(--cal) 30%, transparent) 0 3px, transparent 3px 6px),
+    var(--bg-raised);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cal) 55%, transparent);
+}
+.cal-key-swatch.is-proposal {
+  border: 1.5px dashed var(--ink-2);
+}
+.cal-key-declined {
   text-decoration: line-through;
 }
 
@@ -240,8 +297,7 @@ button.cal-dayhead-button:hover {
 }
 .cal-block:focus-visible,
 .cal-bar:focus-visible,
-.cal-more:focus-visible,
-.cal-travel:focus-visible {
+.cal-more:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 1px;
   z-index: 4;
@@ -266,8 +322,19 @@ button.cal-dayhead-button:hover {
   overflow: hidden;
   flex: none;
 }
-.cal-block:has(.cal-mark-conflict) {
+.cal-block.has-conflict,
+.cal-block.has-travel {
   padding-right: 14px;
+}
+.cal-block.has-conflict.has-travel {
+  padding-right: 24px;
+}
+/* one invitation on two calendars: a second stripe in the color of the other calendar. */
+.cal-block.has-copies {
+  box-shadow:
+    0 0 0 1px var(--bg),
+    inset 3px 0 0 var(--cal2);
+  padding-left: 8px;
 }
 .cal-block-time {
   color: var(--ink-2);
@@ -324,7 +391,8 @@ button.cal-dayhead-button:hover {
   border-bottom-right-radius: 0;
 }
 
-/* tentative or not answered: a hatched fill with an outline. */
+/* tentative or not answered: a hatched fill with an outline. the text sits on a solid strip, so the hatch never
+   lowers its contrast. */
 .cal-block.is-tentative,
 .cal-bar.is-tentative {
   background:
@@ -333,6 +401,16 @@ button.cal-dayhead-button:hover {
   box-shadow:
     0 0 0 1px var(--bg),
     inset 0 0 0 1px color-mix(in srgb, var(--cal) 55%, transparent);
+}
+.cal-block.is-tentative .cal-block-title,
+.cal-block.is-tentative .cal-block-time,
+.cal-bar.is-tentative .cal-block-title {
+  background: var(--bg-raised);
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  padding: 0 2px;
+  margin-left: -2px;
 }
 /* declined by the owner: faded, with the title struck through. */
 .cal-block.is-declined,
@@ -368,19 +446,6 @@ button.cal-dayhead-button:hover {
   border-style: solid;
   border-color: var(--ink);
 }
-.cal-block-tag {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
 .cal-mark-conflict {
   position: absolute;
   top: 4px;
@@ -394,6 +459,42 @@ button.cal-dayhead-button:hover {
 .cal-bar .cal-mark-conflict {
   position: static;
   flex: none;
+}
+/* the tight move on the later event: an amber dot in its top corner, left of the conflict dot when it has both. the
+   day view has room for the words. */
+.cal-mark-travel {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--bg-raised);
+}
+.has-conflict .cal-mark-travel {
+  right: 15px;
+}
+.cal-mark-travel.has-words {
+  width: auto;
+  height: 16px;
+  top: 2px;
+  padding: 0 6px;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-pill);
+  background: var(--bg-raised);
+  box-shadow: none;
+  color: var(--warning-ink);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  white-space: nowrap;
+}
+.cal-day .cal-block.has-travel {
+  padding-right: 84px;
+}
+.cal-day .cal-block.has-travel.has-conflict {
+  padding-right: 96px;
 }
 
 .cal-more {
@@ -417,48 +518,28 @@ button.cal-dayhead-button:hover {
   background: var(--bg-active);
 }
 
-/* a tight move sits on the line between the two blocks. */
-.cal-travel {
-  position: absolute;
-  right: 3px;
-  z-index: 950;
-  transform: translateY(-50%);
-  height: 16px;
-  padding: 0 6px;
-  border: 1px solid var(--warning);
-  border-radius: var(--radius-pill);
-  background: var(--bg-raised);
-  color: var(--warning-ink);
-  font: inherit;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 14px;
-  white-space: nowrap;
-  cursor: pointer;
-  max-width: calc(100% - 6px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
+/* the now line runs under the blocks, so it never strikes through their text, and its dot sits over them at the
+   edge of the column. */
 .cal-now {
   position: absolute;
   left: -1px;
   right: 0;
   height: 2px;
   margin-top: -1px;
-  z-index: 960;
+  z-index: 0;
   background: var(--critical);
   pointer-events: none;
 }
-.cal-now::before {
-  content: '';
+.cal-now-dot {
   position: absolute;
-  left: -4px;
-  top: -3px;
+  left: -5px;
   width: 8px;
   height: 8px;
+  margin-top: -4px;
+  z-index: 960;
   border-radius: 50%;
   background: var(--critical);
+  pointer-events: none;
 }
 
 /* the day view has room for longer text. */
@@ -467,11 +548,6 @@ button.cal-dayhead-button:hover {
   font-size: var(--text-sm);
   padding-left: 8px;
   padding-right: 8px;
-}
-.cal-day .cal-travel {
-  right: auto;
-  left: 50%;
-  transform: translate(-50%, -50%);
 }
 
 /* the agenda of a narrow screen. */
@@ -591,10 +667,27 @@ button.cal-dayhead-button:hover {
 }
 
 /* the details of an event. */
+.cal-details-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.cal-detail-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 .cal-detail-chip {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+}
+.cal-notes-more {
+  margin: 6px 0 0;
+  color: var(--muted);
 }
 .cal-text {
   overflow-wrap: anywhere;
@@ -654,5 +747,9 @@ button.cal-dayhead-button:hover {
   .cal-range {
     margin-left: 4px;
     font-size: var(--text-md);
+  }
+  /* a narrow chip shows the label alone. the title of the chip names the account. */
+  .cal-chip-account {
+    display: none;
   }
 }

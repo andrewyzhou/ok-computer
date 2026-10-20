@@ -6,10 +6,11 @@
 // shots.json is an array of { name, hash, width, dark?, devMode?, click?, keys?, wait?, stubs? }:
 // - check each view at width 1440 and at width 390. a width under 500 uses a scale of 2.
 // - click is a playwright selector that the script clicks after the page loads. keys is a key press after it, for
-//   example Meta+k.
+//   example Meta+k. scroll is a selector that the script scrolls into view, for a part far down a long page.
 // - wait is the selector to wait for. the default is the page title in the main area.
 // - stubs maps "GET /api/path" to a json body, for an endpoint that is not built yet or for a state that the seed
-//   does not have, such as an empty list or a failed calendar. the path has no query.
+//   does not have, such as an empty list or a failed calendar. the path has no query. a body of the form
+//   { "status": 500, "json": {...} } answers with that status, for an error state.
 // the script uses the chrome of the system, and prints each page error, each console error and each page that
 // scrolls sideways. the out dir goes under explorations/, which git ignores.
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -27,6 +28,7 @@ type Shot = {
   devMode?: boolean;
   click?: string;
   keys?: string;
+  scroll?: string;
   wait?: string;
   stubs?: Record<string, unknown>;
 };
@@ -54,7 +56,12 @@ for (const shot of shots.filter((each) => !only || each.name.includes(only))) {
     const [method, path] = key.split(' ', 2) as [string, string];
     await page.route(
       (url) => url.pathname === path,
-      (route) => (route.request().method() === method ? route.fulfill({ json: body }) : route.fallback()),
+      (route) => {
+        if (route.request().method() !== method) return route.fallback();
+        const answer = body as { status?: unknown; json?: unknown } | null;
+        const withStatus = answer !== null && typeof answer === 'object' && typeof answer.status === 'number' && 'json' in answer && Object.keys(answer).length === 2;
+        return withStatus ? route.fulfill({ status: answer.status as number, json: answer.json }) : route.fulfill({ json: body });
+      },
     );
   }
   page.on('pageerror', (err) => console.log(`${shot.name}: page error ${err.message}`));
@@ -64,7 +71,8 @@ for (const shot of shots.filter((each) => !only || each.name.includes(only))) {
   await page.waitForTimeout(700);
   if (shot.click) await page.locator(shot.click).first().click();
   if (shot.keys) await page.keyboard.press(shot.keys);
-  if (shot.click || shot.keys) await page.waitForTimeout(500);
+  if (shot.scroll) await page.locator(shot.scroll).first().scrollIntoViewIfNeeded();
+  if (shot.click || shot.keys || shot.scroll) await page.waitForTimeout(500);
   await page.screenshot({ path: join(out, `${shot.name}.png`) });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   if (overflow > 0) console.log(`${shot.name}: the page scrolls sideways by ${overflow}px`);

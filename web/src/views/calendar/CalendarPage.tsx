@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CalendarPage as CalendarData } from '../../../../src/dashboard/calendar-types';
 import type { Meta, StreamMessage } from '../../../../src/dashboard/types';
 import { useApi } from '../../api';
@@ -8,7 +8,7 @@ import { Button, ButtonLink, DetailsPanel, EmptyState, FilterBar, IconButton, Pa
 import { setHashQuery } from '../inbox/shared';
 import type { CalendarMode } from '../today/links';
 import { addDays, dayOf, isDay, mondayOf, rangeTitle } from './grid';
-import { Agenda, EventDetails, Grid, Legend, ProposalDetails, itemsOf, marksOf, useHidden, useNarrow, type Item } from './parts';
+import { Agenda, EventDetails, Grid, itemIs, Legend, MarksKey, MIN_DAY_PX, ProposalDetails, itemsOf, marksOf, useHidden, useNarrow, useWidth, type Item } from './parts';
 import './calendar.css';
 
 // the calendar page: the week or the day of query.day, colored by calendar, with the selected event in the details
@@ -48,7 +48,10 @@ export function CalendarPage({ query }: RouteProps) {
   const days = mode === 'week' ? 7 : 1;
   const data = useApi<CalendarData>(from ? `/api/calendar?from=${from}&days=${days}` : null, refreshCalendar);
   const [hidden, toggle] = useHidden();
-  const narrow = useNarrow();
+  const box = useRef<HTMLDivElement>(null);
+  const width = useWidth(box);
+  // the grid needs room for each day. a narrow screen, or a week that the details panel squeezes, shows the agenda.
+  const narrow = useNarrow() || (width !== undefined && (width - 46) / days < MIN_DAY_PX);
 
   const go = (changes: Record<string, string | null>) => setHashQuery(PATH, query, changes);
   const step = mode === 'week' ? 7 : 1;
@@ -59,7 +62,8 @@ export function CalendarPage({ query }: RouteProps) {
   const items = page ? itemsOf(page, hidden) : [];
   const marks = page ? marksOf(page) : undefined;
   const failed = page ? page.configured && page.skipped.length > 0 && page.calendars.length === 0 : false;
-  const events = items.filter((each) => each.kind === 'event').length;
+  // the count is of calendar entries, so one invitation on two calendars counts on each, as google shows it.
+  const events = items.reduce((count, each) => count + (each.kind === 'event' ? 1 + each.copies.length : 0), 0);
   const toAnswer = page ? page.invites.length : 0;
   const subtitle = page && page.configured && !failed ? `${events ? plural(events, 'event') : 'No events'}${toAnswer ? ` · ${toAnswer} to answer` : ''}` : undefined;
 
@@ -94,7 +98,7 @@ export function CalendarPage({ query }: RouteProps) {
   else if (!page || !marks || !today) body = <Skeleton lines={6} label="Loading the calendar…" />;
   else if (!page.configured)
     body = (
-      <EmptyState icon="calendar" title="Connect Google to see your calendars" action={<ButtonLink href="#/google">Open the Google page</ButtonLink>}>
+      <EmptyState icon="calendar" title="Connect Google to see your calendars" action={<ButtonLink href="#/google" variant="primary">Open the Google page</ButtonLink>}>
         The calendar shows every calendar that you show in Google Calendar, on each account that you connect.
       </EmptyState>
     );
@@ -125,13 +129,15 @@ export function CalendarPage({ query }: RouteProps) {
           <div className="cal-banner" role="status">
             <p>Some calendars are missing:</p>
             <ul className="cal-skipped">
-              {page.skipped.map((each) => (
-                <li key={each.account}>{each.reason}</li>
+              {page.skipped.map((each, index) => (
+                <li key={`${each.account}/${each.calendarId ?? ''}/${index}`}>{each.reason}</li>
               ))}
             </ul>
+            <a href="#/google">Open the Google page</a>
           </div>
         ) : null}
         <Legend calendars={page.calendars} hidden={hidden} onToggle={toggle} />
+        {!empty && !narrow ? <MarksKey /> : null}
         {empty ? (
           <EmptyState icon="calendar" title={mode === 'week' ? 'Nothing on the calendar this week.' : 'Nothing on the calendar this day.'} />
         ) : narrow ? (
@@ -153,14 +159,16 @@ export function CalendarPage({ query }: RouteProps) {
     );
   }
 
-  const chosen: Item | undefined = selected ? items.find((each) => each.key === selected) : undefined;
+  const chosen: Item | undefined = selected ? items.find((each) => itemIs(each, selected)) : undefined;
 
   return (
     <Page title="Calendar" subtitle={subtitle} toolbar={toolbar} width="full">
-      <div className="cal-page">{body}</div>
+      <div className="cal-page" ref={box}>
+        {body}
+      </div>
       {selected && page && marks ? (
         chosen ? (
-          <DetailsPanel title={chosen.title} openKey={chosen.key} onClose={() => select(null)}>
+          <DetailsPanel title={chosen.kind === 'event' ? 'Event' : 'Proposal'} openKey={chosen.key} onClose={() => select(null)}>
             {chosen.kind === 'event' ? <EventDetails item={chosen} page={page} marks={marks} /> : <ProposalDetails item={chosen} page={page} onDecided={data.reload} />}
           </DetailsPanel>
         ) : (

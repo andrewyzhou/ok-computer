@@ -101,6 +101,49 @@ function Item({ item, selected, onSelect }: { item: BriefItem; selected: boolean
   );
 }
 
+// a section other than the schedule shows this many items at first, so the brief stays short and scannable. a button
+// shows the rest.
+export const ITEMS_SHOWN = 5;
+
+// the day section was called today, the same word as the page, so a stored brief of either kind shows it as the
+// schedule.
+export const sectionTitle = (section: BriefSection) => (section.kind === 'day' ? 'Schedule' : section.title);
+
+function SectionItems({
+  section,
+  index,
+  selectedId,
+  onSelect,
+}: {
+  section: BriefSection;
+  index: number;
+  selectedId: string | null;
+  onSelect: (key: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const keys = section.items.map((item) => itemKey(section, index, item));
+  // a selected item stays in view, also when it is past the first ones. one hidden item is not worth a button.
+  const selectedAt = selectedId === null ? -1 : keys.indexOf(selectedId);
+  // the schedule of the day is the one list that the owner reads whole, so it is never cut.
+  const all = open || section.kind === 'day' || section.items.length <= ITEMS_SHOWN + 1;
+  const cut = all ? section.items.length : Math.max(ITEMS_SHOWN, selectedAt + 1);
+  const hiddenCount = section.items.length - cut;
+  return (
+    <>
+      <ul className="today-items" aria-label={sectionTitle(section)}>
+        {section.items.slice(0, cut).map((item, at) => (
+          <Item key={keys[at]} item={item} selected={keys[at] === selectedId} onSelect={() => onSelect(keys[at]!)} />
+        ))}
+      </ul>
+      {hiddenCount > 0 ? (
+        <button type="button" className="link-button today-more" onClick={() => setOpen(true)}>
+          Show {hiddenCount} more
+        </button>
+      ) : null}
+    </>
+  );
+}
+
 // a note that the sources strip already says is not drawn again under its section, and a section with no items and
 // no other note is left out. the index of each section stays the same, so the keys of the items do not change.
 export function BriefSections({
@@ -122,17 +165,10 @@ export function BriefSections({
         return (
           <section key={`${section.kind}:${index}`} className="today-section" aria-labelledby={`today-section-${index}`}>
             <h2 className="today-section-title" id={`today-section-${index}`}>
-              {section.title}
+              {sectionTitle(section)}
             </h2>
             {note ? <p className="today-section-note">{note}</p> : null}
-            {section.items.length ? (
-              <ul className="today-items" aria-label={section.title}>
-                {section.items.map((item) => {
-                  const key = itemKey(section, index, item);
-                  return <Item key={key} item={item} selected={key === selectedId} onSelect={() => onSelect(key)} />;
-                })}
-              </ul>
-            ) : null}
+            {section.items.length ? <SectionItems section={section} index={index} selectedId={selectedId} onSelect={onSelect} /> : null}
           </section>
         );
       })}
@@ -192,31 +228,67 @@ export function ItemDetails({ item, timeZone, onClose }: { item: BriefItem | und
   );
 }
 
-// the notes about the sources that the brief could not read. a missing desk module shows nothing, because the page
+// the notes about the sources that the brief did not read. a missing desk module shows nothing, because the page
 // does not claim that nothing waits.
 export function sourceNotes(sources: BriefSources) {
   const notes: Array<{ key: string; text: string; link?: { href: string; label: string } }> = [];
   if (sources.calendar === 'off') notes.push({ key: 'off', text: 'Google is not set up, so the brief has no calendar.', link: { href: '#/google', label: 'Set up Google' } });
-  else if (sources.calendar === 'partial' || sources.calendar === 'failed') {
-    if (sources.skipped.length) for (const skipped of sources.skipped) notes.push({ key: `skip:${skipped.account}`, text: `The calendar of ${skipped.account} could not be read.` });
-    else notes.push({ key: 'failed', text: 'The calendar could not be read.' });
-  }
   if (sources.digest === null) notes.push({ key: 'digest', text: 'No inbox digest yet.', link: { href: '#/inbox', label: 'Open the inbox' } });
   return notes;
 }
 
+// the calendars that the brief did not read in full, with the reason of each. it looks and reads like the banner of
+// the calendar page, and it names the next step: the google page, where the owner signs in again.
+export function calendarProblems(sources: BriefSources): string[] {
+  if (sources.calendar !== 'partial' && sources.calendar !== 'failed') return [];
+  return sources.skipped.length ? sources.skipped.map((each) => each.reason) : ['The calendar could not be read.'];
+}
+
 export function SourcesStrip({ sources }: { sources: BriefSources }) {
   const notes = sourceNotes(sources);
-  if (!notes.length) return null;
+  const problems = calendarProblems(sources);
   return (
-    <ul className="today-sources" aria-label="missing sources">
-      {notes.map((note) => (
-        <li key={note.key}>
-          <span>{note.text}</span>
-          {note.link ? <a href={note.link.href}>{note.link.label}</a> : null}
-        </li>
-      ))}
-    </ul>
+    <>
+      {problems.length ? (
+        <div className="today-banner" role="status">
+          <p>{sources.calendar === 'failed' ? 'The brief could not read any calendar:' : 'Some calendars are missing from the brief:'}</p>
+          <ul className="today-banner-list" aria-label="missing calendars">
+            {problems.map((reason, index) => (
+              <li key={index}>{reason}</li>
+            ))}
+          </ul>
+          <a href="#/google">Open the Google page</a>
+        </div>
+      ) : null}
+      {notes.length ? (
+        <ul className="today-sources" aria-label="missing sources">
+          {notes.map((note) => (
+            <li key={note.key}>
+              <span>{note.text}</span>
+              {note.link ? <a href={note.link.href}>{note.link.label}</a> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </>
+  );
+}
+
+// the name of a channel as the owner knows it.
+const CHANNELS: Record<string, string> = { telegram: 'Telegram', cli: 'the terminal', slack: 'Slack' };
+export const channelName = (channel: string | null) => (channel === null ? 'the owner' : (CHANNELS[channel] ?? channel));
+
+// a brief that did not reach the owner says so at the top of the page, with the page where the channel is set up.
+export function DeliveryAlert({ brief }: { brief: Brief }) {
+  const delivery = brief.delivery;
+  if (!delivery || delivery.ok) return null;
+  return (
+    <div className="today-banner" role="alert">
+      <p>
+        The message of this brief did not reach you{delivery.channel ? ` on ${channelName(delivery.channel)}` : ''}: {delivery.error ?? 'the message did not go out'}.
+      </p>
+      <a href="#/integrations">Check the channel on the Integrations page</a>
+    </div>
   );
 }
 
@@ -229,7 +301,7 @@ export function Delivery({ brief }: { brief: Brief }) {
           <span className="muted">Not sent yet.</span>
         ) : delivery.ok ? (
           <span>
-            Sent to {delivery.channel ?? 'the owner'} at {clock(delivery.at)}
+            Sent to {channelName(delivery.channel)} at {clock(delivery.at)}
           </span>
         ) : (
           <span className="today-delivery-failed">Not sent: {delivery.error ?? 'the message did not go out'}</span>
@@ -248,7 +320,7 @@ export function ScheduleLine({ schedule, error, timeZone, onSaved }: { schedule:
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState('');
   const [state, setState] = useState<{ busy: boolean; error?: string }>({ busy: false });
-  if (error) return <p className="today-schedule error-text">Could not load the schedule: {error}</p>;
+  if (error) return <p className="today-schedule error-text" role="alert">Could not load the schedule: {error}</p>;
   if (!schedule) return <p className="today-schedule muted">Loading the schedule…</p>;
   const open = () => {
     setValue(schedule.time ?? '07:30');
@@ -278,7 +350,26 @@ export function ScheduleLine({ schedule, error, timeZone, onSaved }: { schedule:
       {schedule.running ? <Badge tone="info">building</Badge> : null}
       {editing ? (
         <form className="today-schedule-form" onSubmit={save}>
-          <input type="time" aria-label="Time of the brief" value={value} required onChange={(event) => setValue(event.target.value)} />
+          {/* a text field keeps the 24-hour clock of the rest of the app, where a time field shows the clock of the
+              browser, such as 07:30 AM. */}
+          <label className="today-schedule-label" htmlFor="today-brief-time">
+            Time of the brief
+          </label>
+          <input
+            id="today-brief-time"
+            type="text"
+            inputMode="numeric"
+            pattern="([01][0-9]|2[0-3]):[0-5][0-9]"
+            placeholder="HH:MM"
+            size={5}
+            aria-describedby="today-brief-time-hint"
+            value={value}
+            required
+            onChange={(event) => setValue(event.target.value)}
+          />
+          <span id="today-brief-time-hint" className="today-schedule-hint">
+            24-hour
+          </span>
           <Button type="submit" size="sm" variant="primary" busy={state.busy}>
             Save
           </Button>

@@ -76,7 +76,13 @@ describe('the calendar week', () => {
   it('draws a block for each event of the week, with the declined talk faded and the conflict on advisor and dentist', async () => {
     const calls = await fullWeek();
     expect(calendarCalls(calls)).toContain('/api/calendar?from=2026-10-12&days=7');
-    for (const event of TODAY_EVENTS) expect(block(event.key), event.key).toBeTruthy();
+    // the club social is one invitation on both accounts, so it is one block with the stripe of the second calendar.
+    for (const event of TODAY_EVENTS) {
+      if (event.key === 'school/primary/social-s') expect(block(event.key), event.key).toBeNull();
+      else expect(block(event.key), event.key).toBeTruthy();
+    }
+    expect(block('personal/primary/social-p')!.className).toContain('has-copies');
+    expect(block('personal/primary/social-p')!.title).toContain('also on school');
     expect(block('school/primary/talk')!.className).toContain('is-declined');
     expect(block('school/primary/reading')!.className).toContain('is-tentative');
     expect(block('personal/primary/focus')!.className).toContain('is-free');
@@ -90,14 +96,17 @@ describe('the calendar week', () => {
     expect(legend.getAllByRole('button').map((each) => each.textContent)).toEqual(['personal', 'school', 'CS 189school']);
    }, 20_000);
 
-  it('puts the tight move marker between the lab and the lecture', async () => {
+  it('puts the tight move marker on the lecture, where the owner has to arrive', async () => {
     await fullWeek();
-    const marker = inMain().getByRole('button', { name: 'Tight move: 5 minutes from Soda Hall 510 to Wheeler 150' });
+    const lecture = block('school/cs189@group.calendar.google.com/lecture')!;
+    const marker = within(lecture).getByRole('img', { name: 'Tight move: 5 minutes from Soda Hall 510 to Wheeler 150' });
     expect(marker.dataset.from).toBe('school/primary/lab');
     expect(marker.dataset.to).toBe('school/cs189@group.calendar.google.com/lecture');
-    expect(marker.closest('[data-day]')!.getAttribute('data-day')).toBe('2026-10-12');
-    // 10:00 is three hours under the first hour of the grid (07:00), at 44 pixels an hour.
-    expect(marker.style.top).toBe(`${3 * 44}px`);
+    expect(lecture.closest('[data-day]')!.getAttribute('data-day')).toBe('2026-10-12');
+    expect(within(block('school/primary/lab')!).queryByRole('img', { name: /Tight move/ })).toBeNull();
+    // the key under the legend explains the marks of the grid.
+    const key = within(inMain().getByRole('list', { name: 'marks' }));
+    expect(key.getAllByRole('listitem').map((each) => each.textContent)).toEqual(['Conflict', 'Tight move', 'Not answered or maybe', 'Proposed, waits for you', 'Declined']);
   });
 
   it('draws proposal 7 as a dashed all-day block on wednesday', async () => {
@@ -275,7 +284,10 @@ describe('the calendar states', () => {
   it('asks to connect google on a first run', async () => {
     await openWeek(() => CALENDAR_OFF);
     expect(await inMain().findByText('Connect Google to see your calendars')).toBeTruthy();
-    expect(inMain().getByRole('link', { name: 'Open the Google page' }).getAttribute('href')).toBe('#/google');
+    const google = inMain().getByRole('link', { name: 'Open the Google page' });
+    expect(google.getAttribute('href')).toBe('#/google');
+    // the one next step of a first run is the main action.
+    expect(google.className).toContain('btn-primary');
     expect(screen.queryByRole('button', { name: 'Previous week' })).toBeNull();
   });
 
@@ -303,6 +315,7 @@ describe('the calendar states', () => {
     await openWeek(() => partial);
     const banner = await inMain().findByRole('status');
     expect(within(banner).getByText('school needs a new sign-in on the Google page.')).toBeTruthy();
+    expect(within(banner).getByRole('link', { name: 'Open the Google page' }).getAttribute('href')).toBe('#/google');
     await waitFor(() => expect(block('personal/primary/dentist')).toBeTruthy());
     expect(block('school/primary/advisor')).toBeNull();
     expect(inMain().getByText('7 events · 1 to answer')).toBeTruthy();
@@ -361,5 +374,32 @@ describe('the calendar agenda', () => {
     const agenda = within(await inMain().findByRole('region', { name: 'agenda' }));
     expect(agenda.getAllByRole('heading').map((each) => each.textContent)).toEqual(['Thu 15 Oct']);
     expect(within(block('personal/primary/dinner')!).getByText('Not answered')).toBeTruthy();
+  });
+});
+
+describe('the details of an event and of a proposal', () => {
+  it('shows the whole title in the body, and both calendars of one invitation on two accounts', async () => {
+    await fullWeek(`${WEEK}&event=${encodeURIComponent('school/primary/social-s')}`);
+    const panel = details();
+    // the link of the second copy opens the one block of the invitation.
+    expect(await panel.findByRole('heading', { name: 'Club social', level: 3 })).toBeTruthy();
+    expect(panel.getByRole('heading', { name: 'Event', level: 2 })).toBeTruthy();
+    expect(panel.getByText('Calendars')).toBeTruthy();
+    expect(panel.getByText('personal')).toBeTruthy();
+    expect(panel.getByText('school')).toBeTruthy();
+    expect(block('personal/primary/social-p')!.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('names a proposal in the header and shows its whole title in the body', async () => {
+    await fullWeek(`${WEEK}&event=proposal%3A7`);
+    const panel = details();
+    expect(await panel.findByRole('heading', { name: 'Problem set 4 due', level: 3 })).toBeTruthy();
+    expect(panel.getByRole('heading', { name: 'Proposal', level: 2 })).toBeTruthy();
+  });
+
+  it('points to google calendar for notes that were cut', async () => {
+    const long = { ...CALENDAR_WEEK.events.find((each) => each.eventId === 'advisor')!, notes: `${'word '.repeat(90).trim()}…` };
+    await openWeek((request) => pageFor(request, { ...CALENDAR_WEEK, events: CALENDAR_WEEK.events.map((each) => (each.key === long.key ? long : each)) }), `${WEEK}&event=${encodeURIComponent(long.key)}`);
+    expect(await details().findByText('The notes go on in Google Calendar.')).toBeTruthy();
   });
 });

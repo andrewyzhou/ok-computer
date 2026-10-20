@@ -226,7 +226,7 @@ describe('buildBrief', () => {
   it('gives only the day section and the note of the missing digest on an empty day', () => {
     const content = buildBrief(input({ events: [], digest: null, proposals: [], delegations: null, goals: [] }));
     expect(content.sections).toEqual([
-      { kind: 'day', title: 'Today', items: [], note: 'No events today.' },
+      { kind: 'day', title: 'Schedule', items: [], note: 'No events today.' },
       { kind: 'inbox', title: 'Inbox', items: [], note: 'No inbox digest yet today.' },
     ]);
   });

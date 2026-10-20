@@ -63,11 +63,52 @@
 .today-schedule-error {
   flex-basis: 100%;
 }
+.today-schedule-label {
+  color: var(--ink-2);
+}
+.today-schedule-hint {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
 
 .today-note {
   margin: 0 0 var(--space-4);
   font-size: var(--text-sm);
   color: var(--ink-2);
+}
+
+/* this file loads after styles.css, so the base color of a line above would win over .error-text of the same weight.
+   a line that is an error keeps the error color. */
+.today-schedule.error-text,
+.today-note.error-text {
+  color: var(--critical-ink);
+}
+
+/* a source that the brief could not read, or a message that did not reach the owner: the same amber banner as the
+   calendar page, with the next step as a link. */
+.today-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 0 0 var(--space-4);
+  padding: 10px 14px;
+  border: 1px solid var(--today-warning);
+  border-radius: var(--radius-md);
+  color: var(--today-warning-ink);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.today-banner p {
+  margin: 0;
+}
+.today-banner-list {
+  margin: 0;
+  padding-left: 18px;
+}
+.today-banner a {
+  color: inherit;
+  font-weight: 600;
 }
 
 .today-error {
@@ -161,15 +202,18 @@
   font-weight: 500;
   overflow-wrap: anywhere;
 }
-.today-tone-critical .today-item-title {
-  color: var(--today-critical-ink);
-}
 .today-item-detail {
   margin-top: 1px;
   font-size: var(--text-sm);
   color: var(--muted);
   overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
+}
+.today-more {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .today-item-badges {
   display: flex;

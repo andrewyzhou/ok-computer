@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import type {
   CalendarConflict,
   CalendarEvent,
@@ -35,10 +35,19 @@ import {
 // agenda of a narrow screen and the details of the selected item. event text comes from the person who sent the
 // invitation, so every field shows as text and never as html.
 
-// an item of the page: an event of a calendar, or a calendar event that the digest proposed.
+// an item of the page: an event of a calendar, or a calendar event that the digest proposed. one invitation on two
+// calendars (the same uid and start) is one item: event is the first copy, and copies holds the others with their
+// colors, so the grid draws one block and the details name each calendar.
 export type Item =
-  | (Span & { kind: 'event'; title: string; color: string; event: CalendarEvent })
+  | (Span & { kind: 'event'; title: string; color: string; event: CalendarEvent; copies: Array<{ event: CalendarEvent; color: string }> })
   | (Span & { kind: 'proposal'; title: string; color: string; proposal: CalendarProposalBlock });
+
+// true when the item is the one that key names: its own key, or the key of one of its copies, which a brief item or
+// an old link can hold.
+export function itemIs(item: Item, key: string | null): boolean {
+  if (key === null) return false;
+  return item.key === key || (item.kind === 'event' && item.copies.some((copy) => copy.event.key === key));
+}
 
 export const proposalKey = (proposal: CalendarProposalBlock) => `proposal:${proposal.proposalId}`;
 
@@ -72,12 +81,24 @@ function proposalItem(proposal: CalendarProposalBlock, timeZone: string): Item {
 }
 
 // the items that the page draws: the events of the calendars that are not hidden, without the cancelled ones, and
-// every proposal.
+// every proposal. copies of one invitation on two accounts join the item of the first copy.
 export function itemsOf(page: CalendarData, hidden: ReadonlySet<string>): Item[] {
   const colors = new Map(page.calendars.map((each) => [each.key, safeColor(each.color)]));
-  const events: Item[] = page.events
-    .filter((each) => each.status !== 'cancelled' && !hidden.has(each.calendarKey))
-    .map((event) => ({ ...event, kind: 'event', title: event.title, color: colors.get(event.calendarKey) ?? safeColor(null), event }));
+  const colorOf = (event: CalendarEvent) => colors.get(event.calendarKey) ?? safeColor(null);
+  const byCopy = new Map<string, Extract<Item, { kind: 'event' }>>();
+  const events: Item[] = [];
+  for (const event of page.events) {
+    if (event.status === 'cancelled' || hidden.has(event.calendarKey)) continue;
+    const copyKey = event.uid === null ? null : `${event.uid}@${Date.parse(event.startAt)}`;
+    const first = copyKey === null ? undefined : byCopy.get(copyKey);
+    if (first) {
+      first.copies.push({ event, color: colorOf(event) });
+      continue;
+    }
+    const item: Extract<Item, { kind: 'event' }> = { ...event, kind: 'event', title: event.title, color: colorOf(event), event, copies: [] };
+    if (copyKey !== null) byCopy.set(copyKey, item);
+    events.push(item);
+  }
   return [...events, ...page.proposals.map((each) => proposalItem(each, page.timeZone))];
 }
 
@@ -107,6 +128,24 @@ export function marksOf(page: CalendarData): Marks {
 // the width where the shell folds the nav into a sheet. below it the page shows the agenda instead of the grid. the
 // test is the same as the one of the shell, and it follows a resize.
 export const AGENDA_BELOW = 760;
+
+// a day column of the week grid narrower than this cannot show a title, for example when the details panel takes room
+// from the page, so the page shows the agenda instead.
+export const MIN_DAY_PX = 100;
+
+// the width of an element, which follows a resize of the page and of the details panel. it is undefined until the
+// first measure, and where the browser cannot measure, so a test sees the grid.
+export function useWidth(ref: RefObject<HTMLElement | null>): number | undefined {
+  const [width, setWidth] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || typeof ResizeObserver !== 'function') return;
+    const observer = new ResizeObserver((entries) => setWidth(entries[0]?.contentRect.width));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+  return width;
+}
 
 export function useNarrow(width = AGENDA_BELOW): boolean {
   const query = `(max-width: ${width - 0.02}px)`;
@@ -171,7 +210,7 @@ export function Legend({ calendars, hidden, onToggle }: { calendars: CalendarInf
             type="button"
             className={shown ? 'cal-chip' : 'cal-chip is-hidden'}
             aria-pressed={shown}
-            title={shown ? `Hide ${calendar.label}` : `Show ${calendar.label}`}
+            title={`${shown ? 'Hide' : 'Show'} ${calendar.label}${calendar.account !== calendar.label ? ` (${calendar.account})` : ''}`}
             style={colorStyle(safeColor(calendar.color))}
             onClick={() => onToggle(calendar.key)}
           >
@@ -182,6 +221,34 @@ export function Legend({ calendars, hidden, onToggle }: { calendars: CalendarInf
         );
       })}
     </div>
+  );
+}
+
+// the key of the marks of the grid, so the owner can read the dot, the hatch, the dashed outline and the struck title
+// without a hover. the agenda says the same in words on each row.
+export function MarksKey() {
+  return (
+    <ul className="cal-key" aria-label="marks">
+      <li>
+        <span className="cal-key-conflict" aria-hidden="true" />
+        Conflict
+      </li>
+      <li>
+        <span className="cal-key-travel" aria-hidden="true" />
+        Tight move
+      </li>
+      <li>
+        <span className="cal-key-swatch is-tentative" aria-hidden="true" />
+        Not answered or maybe
+      </li>
+      <li>
+        <span className="cal-key-swatch is-proposal" aria-hidden="true" />
+        Proposed, waits for you
+      </li>
+      <li>
+        <span className="cal-key-declined">Declined</span>
+      </li>
+    </ul>
   );
 }
 
@@ -221,6 +288,25 @@ function ConflictMark() {
   return <span className="cal-mark-conflict" role="img" aria-label="Conflict" title="Conflict" />;
 }
 
+// a tight move sits in the top corner of the later event, where the owner has to arrive. the day view has room for
+// its words, and the week view shows an amber dot that the key explains.
+function TravelMark({ gap, words }: { gap: TravelGap; words: boolean }) {
+  const label = `Tight move: ${plural(gap.gapMinutes, 'minute')} from ${gap.fromLocation} to ${gap.toLocation}`;
+  return (
+    <span className={words ? 'cal-mark-travel has-words' : 'cal-mark-travel'} role="img" aria-label={label} title={label} data-from={gap.from} data-to={gap.to}>
+      {words ? 'tight move' : null}
+    </span>
+  );
+}
+
+// the words of a block for a screen reader and a hover: a proposal says so, and an invitation on two calendars names
+// the other ones.
+function copiesText(item: Item, page: CalendarData): string {
+  if (item.kind !== 'event' || !item.copies.length) return '';
+  const names = item.copies.map((copy) => page.calendars.find((each) => each.key === copy.event.calendarKey)?.label ?? copy.event.account);
+  return `, also on ${names.join(', ')}`;
+}
+
 interface GridProps {
   page: CalendarData;
   items: Item[];
@@ -249,6 +335,8 @@ function TimedBlock({
   ppm,
   startMinute,
   selected,
+  travel,
+  words,
   onSelect,
 }: {
   block: DayBlock<Item>;
@@ -258,6 +346,8 @@ function TimedBlock({
   ppm: number;
   startMinute: number;
   selected: boolean;
+  travel: TravelGap | undefined;
+  words: boolean;
   onSelect: () => void;
 }) {
   const { item } = block;
@@ -271,8 +361,10 @@ function TimedBlock({
   const lines = Math.floor((height - 6) / LINE_PX);
   const roomLines = Math.min(lines, Math.floor((Math.max(block.room * ppm, 20) - 6) / LINE_PX));
   const conflict = item.kind === 'event' && marks.conflicts.has(item.key);
+  const second = item.kind === 'event' ? item.copies[0]?.color : undefined;
   const style = {
     ...colorStyle(item.color),
+    ...(second ? { '--cal2': second } : {}),
     top: (block.top - startMinute) * ppm,
     height: height - 2,
     left: `calc(${block.left * 100}% + 1px)`,
@@ -283,17 +375,19 @@ function TimedBlock({
   return (
     <button
       type="button"
-      className={`${blockClass(item, 'cal-block')}${selected ? ' is-selected' : ''}${lines < 2 ? ' is-short' : roomLines < 2 ? ' no-time' : ''}`}
+      className={`${blockClass(item, 'cal-block')}${selected ? ' is-selected' : ''}${second ? ' has-copies' : ''}${conflict ? ' has-conflict' : ''}${travel ? ' has-travel' : ''}${lines < 2 ? ' is-short' : roomLines < 2 ? ' no-time' : ''}`}
       style={style}
       data-key={item.key}
       aria-pressed={selected}
-      title={`${item.title}, ${time}`}
+      title={`${item.kind === 'proposal' ? 'Proposed: ' : ''}${item.title}, ${time}${copiesText(item, page)}`}
       onClick={onSelect}
     >
+      {/* the dashed outline shows a proposal, and the key under the legend says so. the word is for a screen reader. */}
+      {item.kind === 'proposal' ? <span className="sr-only">Proposed: </span> : null}
       <span className="cal-block-title">{item.title}</span>
-      {item.kind === 'proposal' ? <span className="cal-block-tag">Proposed</span> : null}
       <span className="cal-block-time">{short}</span>
       {conflict ? <ConflictMark /> : null}
+      {travel ? <TravelMark gap={travel} words={words} /> : null}
     </button>
   );
 }
@@ -307,11 +401,11 @@ function Bar({ bar, page, marks, selected, onSelect }: { bar: AllDayBar<Item>; p
       style={{ ...colorStyle(item.color), gridColumn: `${bar.start + 1} / span ${bar.span}`, gridRow: bar.lane + 1 }}
       data-key={item.key}
       aria-pressed={selected}
-      title={`${item.title}, ${whenOf(item, page.timeZone)}`}
+      title={`${item.kind === 'proposal' ? 'Proposed: ' : ''}${item.title}, ${whenOf(item, page.timeZone)}${copiesText(item, page)}`}
       onClick={onSelect}
     >
+      {item.kind === 'proposal' ? <span className="sr-only">Proposed: </span> : null}
       <span className="cal-block-title">{item.title}</span>
-      {item.kind === 'proposal' ? <span className="cal-block-tag">Proposed</span> : null}
       {item.kind === 'event' && marks.conflicts.has(item.key) ? <ConflictMark /> : null}
     </button>
   );
@@ -352,7 +446,7 @@ export function Grid({ page, items, marks, mode, today, now, selected, onSelect,
           <div className="cal-gutter cal-gutter-label">All day</div>
           <div className="cal-allday-bars" style={{ gridTemplateRows: `repeat(${lanes}, auto)` }}>
             {bars.map((bar) => (
-              <Bar key={bar.item.key} bar={bar} page={page} marks={marks} selected={selected === bar.item.key} onSelect={() => onSelect(bar.item.key)} />
+              <Bar key={bar.item.key} bar={bar} page={page} marks={marks} selected={itemIs(bar.item, selected)} onSelect={() => onSelect(bar.item.key)} />
             ))}
           </div>
         </div>
@@ -369,7 +463,8 @@ export function Grid({ page, items, marks, mode, today, now, selected, onSelect,
           const folded = perDay[index]!;
           const isToday = day === today;
           const nowMinute = isToday ? wallMinutes(now, page.timeZone) : -1;
-          const gaps = page.travelGaps.filter((gap) => visible.has(gap.from) && visible.has(gap.to) && dayOf(Date.parse(gap.at), page.timeZone) === day);
+          // a gap shows on the later event, and only when both events are on the page.
+          const travel = new Map(page.travelGaps.filter((gap) => visible.has(gap.from) && visible.has(gap.to)).map((gap) => [gap.to, gap]));
           return (
             <div key={day} className={isToday ? 'cal-col is-today' : 'cal-col'} style={{ backgroundSize: `100% ${hourPx}px` }} data-day={day}>
               {folded.blocks.map((block, order) => (
@@ -381,7 +476,9 @@ export function Grid({ page, items, marks, mode, today, now, selected, onSelect,
                   marks={marks}
                   ppm={ppm}
                   startMinute={startMinute}
-                  selected={selected === block.item.key}
+                  selected={itemIs(block.item, selected)}
+                  travel={travel.get(block.item.key)}
+                  words={mode === 'day'}
                   onSelect={() => onSelect(block.item.key)}
                 />
               ))}
@@ -403,26 +500,13 @@ export function Grid({ page, items, marks, mode, today, now, selected, onSelect,
                   +{more.items.length} more
                 </button>
               ))}
-              {gaps.map((gap) => {
-                const label = `Tight move: ${plural(gap.gapMinutes, 'minute')} from ${gap.fromLocation} to ${gap.toLocation}`;
-                return (
-                  <button
-                    key={`${gap.from}>${gap.to}`}
-                    type="button"
-                    className="cal-travel"
-                    style={{ top: (wallMinutes(Date.parse(gap.at), page.timeZone) - startMinute) * ppm }}
-                    aria-label={label}
-                    title={label}
-                    data-from={gap.from}
-                    data-to={gap.to}
-                    onClick={() => onSelect(gap.to)}
-                  >
-                    tight move
-                  </button>
-                );
-              })}
+              {/* the now line runs under the blocks, so it never strikes through the text of an event. its dot stays on
+                  top at the edge of the column. */}
               {nowMinute >= startMinute && nowMinute <= endHour * 60 ? (
-                <div className="cal-now" style={{ top: (nowMinute - startMinute) * ppm }} aria-label={`now, ${clockIn(now, page.timeZone)}`} role="img" />
+                <>
+                  <div className="cal-now" style={{ top: (nowMinute - startMinute) * ppm }} aria-label={`now, ${clockIn(now, page.timeZone)}`} role="img" />
+                  <div className="cal-now-dot" style={{ top: (nowMinute - startMinute) * ppm }} aria-hidden="true" />
+                </>
               ) : null}
             </div>
           );
@@ -453,6 +537,7 @@ function AgendaRow({ item, time, marks, selected, onSelect }: { item: Item; time
         <span className="cal-agenda-main">
           <span className="cal-agenda-title">{item.title}</span>
           {item.kind === 'event' && item.event.location ? <span className="cal-agenda-where">{item.event.location}</span> : null}
+          {item.kind === 'event' && item.copies.length ? <span className="cal-agenda-where">{plural(item.copies.length + 1, 'calendar')}</span> : null}
           <span className="cal-agenda-badges">
             <AgendaBadges item={item} marks={marks} />
           </span>
@@ -478,13 +563,13 @@ export function Agenda({ page, items, marks, today, selected, onSelect }: { page
             {bars.length || blocks.length ? (
               <ul className="cal-agenda-list">
                 {bars.map((bar) => (
-                  <AgendaRow key={bar.item.key} item={bar.item} time="All day" marks={marks} selected={selected === bar.item.key} onSelect={() => onSelect(bar.item.key)} />
+                  <AgendaRow key={bar.item.key} item={bar.item} time="All day" marks={marks} selected={itemIs(bar.item, selected)} onSelect={() => onSelect(bar.item.key)} />
                 ))}
                 {blocks.map((block) => {
                   const start = block.clippedStart ? null : clockIn(Date.parse(block.item.startAt), page.timeZone);
                   const end = block.clippedEnd ? null : clockIn(Date.parse(block.item.endAt), page.timeZone);
                   const time = start && end ? `${start}–${end}` : start ? `from ${start}` : end ? `until ${end}` : 'all day';
-                  return <AgendaRow key={block.item.key} item={block.item} time={time} marks={marks} selected={selected === block.item.key} onSelect={() => onSelect(block.item.key)} />;
+                  return <AgendaRow key={block.item.key} item={block.item} time={time} marks={marks} selected={itemIs(block.item, selected)} onSelect={() => onSelect(block.item.key)} />;
                 })}
               </ul>
             ) : (
@@ -584,18 +669,36 @@ function Notes({ marks, item, page }: { marks: Marks; item: Item; page: Calendar
   );
 }
 
+// the full title of the selected item at the top of the details, wrapped, as the today page shows it. the header of
+// the panel has one line, and a long title would be cut there.
+export function DetailsTitle({ title }: { title: string }) {
+  return <h3 className="cal-details-title">{title}</h3>;
+}
+
 export function EventDetails({ item, page, marks }: { item: Extract<Item, { kind: 'event' }>; page: CalendarData; marks: Marks }) {
   const { event } = item;
-  const calendar = page.calendars.find((each) => each.key === event.calendarKey);
+  const calendarOf = (key: string) => page.calendars.find((each) => each.key === key);
   const video = webLink(event.videoUrl, false);
   const open = webLink(event.htmlLink, true);
+  const cut = event.notes?.endsWith('…') === true;
   return (
     <>
+      <DetailsTitle title={item.title} />
       <Notes marks={marks} item={item} page={page} />
       <Facts
         layout="stacked"
         items={[
-          { label: 'Calendar', value: <CalendarChip calendar={calendar} color={item.color} /> },
+          {
+            label: item.copies.length ? 'Calendars' : 'Calendar',
+            value: (
+              <span className="cal-detail-chips">
+                <CalendarChip calendar={calendarOf(event.calendarKey)} color={item.color} />
+                {item.copies.map((copy) => (
+                  <CalendarChip key={copy.event.key} calendar={calendarOf(copy.event.calendarKey)} color={copy.color} />
+                ))}
+              </span>
+            ),
+          },
           { label: 'When', value: whenOf(item, page.timeZone) },
           event.status === 'tentative' ? { label: 'Status', value: <Badge tone="info">tentative</Badge> } : null,
           event.location ? { label: 'Where', value: <span className="cal-text">{event.location}</span> } : null,
@@ -614,7 +717,17 @@ export function EventDetails({ item, page, marks }: { item: Extract<Item, { kind
           { label: 'Organizer', value: event.organizerSelf ? 'You' : <span className="cal-text">{event.organizer ?? 'not given'}</span> },
           event.answer ? { label: 'Your answer', value: <Badge tone={ANSWER_TONE[event.answer] ?? 'muted'}>{ANSWER[event.answer] ?? event.answer}</Badge> } : null,
           event.guests.length ? { label: 'Guests', value: <Guests guests={event.guests} /> } : null,
-          event.notes ? { label: 'Notes', value: <div className="cal-notes-text">{event.notes}</div> } : null,
+          event.notes
+            ? {
+                label: 'Notes',
+                value: (
+                  <div className="cal-notes-text">
+                    {event.notes}
+                    {cut && open ? <p className="cal-notes-more">The notes go on in Google Calendar.</p> : null}
+                  </div>
+                ),
+              }
+            : null,
           event.recurring ? { label: 'Repeats', value: 'This event is one of a series.' } : null,
           event.showsAsFree ? { label: 'Busy', value: 'Shows as free.' } : null,
         ]}
@@ -635,6 +748,7 @@ export function ProposalDetails({ item, page, onDecided }: { item: Extract<Item,
   const approvals = useApprovals();
   return (
     <>
+      <DetailsTitle title={item.title} />
       <p className="cal-proposal-note">The digest proposed this event from your mail. It reaches the calendar only when you approve it.</p>
       <Facts
         layout="stacked"

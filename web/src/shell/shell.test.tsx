@@ -154,12 +154,12 @@ describe('the shell', () => {
     openApp('#/overview');
     const name = await inMain().findByText('check-in: finish essay');
     const details = within(screen.getByRole('complementary', { name: 'details' }));
-    expect(details.getByRole('heading', { name: 'Today' })).toBeTruthy();
+    expect(details.getByRole('heading', { name: 'This day' })).toBeTruthy();
     fireEvent.click(name.closest('tr')!);
     expect(details.getByRole('heading', { name: 'check-in: finish essay' })).toBeTruthy();
     expect(details.getByRole('link', { name: /Open in Automations/ })).toBeTruthy();
     fireEvent.click(details.getByRole('button', { name: 'Close details' }));
-    expect(details.getByRole('heading', { name: 'Today' })).toBeTruthy();
+    expect(details.getByRole('heading', { name: 'This day' })).toBeTruthy();
   });
 
   it('says when a page does not exist', async () => {
