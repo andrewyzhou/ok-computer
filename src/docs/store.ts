@@ -1,4 +1,5 @@
 import type { Result } from '../config/load.js';
+import type { SQLInputValue } from 'node:sqlite';
 import type { Db } from '../db/index.js';
 import type { TaintSource } from '../policy/policy.js';
 import { inTransaction } from '../signals/store.js';
@@ -71,9 +72,12 @@ type Row = Record<string, unknown>;
 export const isDocKind = (value: unknown): value is DocKind => typeof value === 'string' && (DOC_KINDS as readonly string[]).includes(value);
 
 // an http(s) url or a hash of the web app. a hash may not hold a second scheme, so #/x is fine and #javascript: is not.
+// the url parser drops spaces at the ends and tabs and line breaks inside, so a stored href could differ from the url
+// that the parser checked. such an href is refused, and the href that a page gets is the one that was checked.
 export function isSafeHref(href: string): boolean {
   if (href.length === 0 || href.length > HREF_CHARS) return false;
-  if (href.startsWith('#/')) return !/[\u0000-\u001f\u007f\\]/.test(href);
+  if (/[\u0000-\u001f\u007f]/.test(href) || href.trim() !== href) return false;
+  if (href.startsWith('#/')) return !href.includes('\\');
   try {
     const url = new URL(href);
     return url.protocol === 'https:' || url.protocol === 'http:';
@@ -86,7 +90,8 @@ export function isSafeHref(href: string): boolean {
 // store, and the dashboard and the seed get it here.
 function checkFields(fields: { title: string; body: string; links: DocLink[]; note?: string | undefined }): string | undefined {
   if (!fields.title.trim()) return 'give the doc a title';
-  if (fields.title.length > TITLE_CHARS) return `the title has more than ${TITLE_CHARS} characters`;
+  // the store keeps the title trimmed, so the limit counts the trimmed title.
+  if (fields.title.trim().length > TITLE_CHARS) return `the title has more than ${TITLE_CHARS} characters`;
   if (fields.body.length > BODY_CHARS) return `the body has more than ${BODY_CHARS} characters; split it into several docs`;
   if (fields.note !== undefined && fields.note.length > NOTE_CHARS) return `the note has more than ${NOTE_CHARS} characters`;
   if (fields.links.length > LINKS_MAX) return `a doc has at most ${LINKS_MAX} links`;
@@ -99,14 +104,23 @@ function checkFields(fields: { title: string; body: string; links: DocLink[]; no
 
 const str = (value: unknown) => (value === null || value === undefined ? null : String(value));
 
+const UNREADABLE_TAINT: TaintSource = { source: 'a doc version whose taint cannot be read', toolName: 'doc_read', runId: null, toolCallId: '', at: '' };
+
+const isTaintSource = (value: unknown): value is TaintSource =>
+  typeof value === 'object' && value !== null && typeof (value as { source?: unknown }).source === 'string';
+
+// a damaged list still marks the version, so its text is never read as trusted. a list that is not json, a json value
+// that is not a list, and a list with an entry that is not a source all count as damaged.
 function parseTaint(value: unknown): TaintSource[] {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(String(value ?? '[]')) as unknown;
-    return Array.isArray(parsed) ? parsed.filter((each): each is TaintSource => typeof each?.source === 'string') : [];
+    parsed = JSON.parse(String(value ?? '[]'));
   } catch {
-    // a damaged list still marks the version, so its text is never read as trusted.
-    return [{ source: 'a doc version whose taint cannot be read', toolName: 'doc_read', runId: null, toolCallId: '', at: '' }];
+    return [UNREADABLE_TAINT];
   }
+  if (!Array.isArray(parsed)) return [UNREADABLE_TAINT];
+  const sources = parsed.filter(isTaintSource);
+  return sources.length === parsed.length ? sources : [...sources, UNREADABLE_TAINT];
 }
 
 // the full taint of one version, for doc_read. the dashboard shows only the names.
@@ -165,11 +179,29 @@ function toMeta(row: Row): DocVersionMeta {
   };
 }
 
-// the summary columns. chars and comments come from the newest version and the comment table.
-const SUMMARY_SQL = `SELECT d.id, d.title, d.kind, d.version, d.sessionKey, d.createdAt, d.updatedAt,
+// the summary columns. chars and comments come from the newest version and the comment table. d is the docs row and v
+// is its newest version.
+const SUMMARY_COLUMNS = `d.id, d.title, d.kind, d.version, d.sessionKey, d.createdAt, d.updatedAt,
     v.author, v.taint, length(v.body) AS chars,
-    (SELECT count(*) FROM doc_comments c WHERE c.docId = d.id) AS comments
-  FROM docs d JOIN doc_versions v ON v.docId = d.id AND v.version = d.version`;
+    (SELECT count(*) FROM doc_comments c WHERE c.docId = d.id) AS comments`;
+const SUMMARY_FROM = 'FROM docs d JOIN doc_versions v ON v.docId = d.id AND v.version = d.version';
+const SUMMARY_SQL = `SELECT ${SUMMARY_COLUMNS}\n  ${SUMMARY_FROM}`;
+
+export interface SummaryWithBody {
+  summary: DocSummary;
+  // the body of the newest version.
+  body: string;
+}
+
+// the docs that pass a filter, newest updatedAt first and then the higher id, at most limit of them, each with the
+// body of its newest version. the search of fts.ts uses it. where is sql text over d and v that the caller writes, and
+// it never holds text of a user: each value goes in params and is bound by name, for example $q.
+export function summariesWithBody(db: Db, where: string, params: Record<string, SQLInputValue>, limit: number): SummaryWithBody[] {
+  return db
+    .prepare(`SELECT ${SUMMARY_COLUMNS}, v.body AS body\n  ${SUMMARY_FROM}\n  WHERE ${where}\n  ORDER BY d.updatedAt DESC, d.id DESC LIMIT $limit`)
+    .all({ ...params, limit })
+    .map((row) => ({ summary: toSummary(row), body: String(row.body) }));
+}
 
 type VersionFields = Omit<NewDoc, 'links'> & { links: DocLink[] };
 
@@ -243,10 +275,11 @@ export function addVersion(db: Db, docId: number, change: DocChange, now: Date):
     if (same) return { ok: false, error: `the change gives doc #${docId} no new title, kind, body or links` };
     const version = current.version + 1;
     insertVersion(db, docId, version, next, at);
-    db.prepare('UPDATE docs SET title = ?, kind = ?, links = ?, version = ?, updatedAt = ? WHERE id = ?').run(
+    db.prepare('UPDATE docs SET title = ?, kind = ?, links = ?, author = ?, version = ?, updatedAt = ? WHERE id = ?').run(
       next.title.trim(),
       next.kind,
       JSON.stringify(next.links),
+      next.author,
       version,
       at,
       docId,
