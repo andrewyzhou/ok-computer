@@ -8,12 +8,12 @@ import { failed } from '../google/send.js';
 import { requestContext } from '../google/trace.js';
 import { planUnsubscribe, unsubscribeTargets, verifyUnsubscribeHeaders } from '../google/unsubscribe.js';
 import { redact } from '../observability/redact.js';
-import { cleanLine } from '../signals/store.js';
 import { defineTool, errorText, type Tool, type ToolOutput } from '../tools/registry.js';
 import { httpsLink, requestAction, settleApprovals, startBrowserHelp } from './actions.js';
 import type { ActionResult, InboxContext, JobRun } from './context.js';
 import { getMessages, inInbox, isUnread, listMessages, receivedAt } from './gmail.js';
 import { mailSource, markRead } from './run.js';
+import { phase5KeyOf, registrableDomain, senderIdentityOf, unsubscribeChoiceOf, type SenderIdentity } from './senders.js';
 
 // the newsletter sweep: it groups the mail of each account by List-Id or From, counts what the owner read, and finds
 // the unsubscribe method. the owner unsubscribes or archives a sender with an approval. see docs/API.md (m8)
@@ -38,44 +38,40 @@ const STILL_COMES = 'mail still comes more than 7 days after the unsubscribe';
 const SWEEP_HEADERS = ['From', 'List-Id', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'Date', 'Authentication-Results', 'DKIM-Signature'];
 const CHECK_HEADERS = ['From', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'Authentication-Results', 'DKIM-Signature'];
 
-// the longest list id and sender key that a row keeps. the sender writes the List-Id header.
-const KEY_LIMIT = 200;
-
 // the system labels of gmail. an archive must not add one, because the trash and spam hide mail, and the others
 // change what gmail shows to the owner.
 const RESERVED_LABELS = new Set(['INBOX', 'SPAM', 'TRASH', 'UNREAD', 'STARRED', 'IMPORTANT', 'SENT', 'DRAFT', 'CHAT']);
 export const reservedLabel = (name: string) => RESERVED_LABELS.has(name.trim().toUpperCase()) || name.trim().toUpperCase().startsWith('CATEGORY_');
 
-// the quotes of a quoted name are not part of the name.
-const unquoted = (text: string) => cleanLine(text.replace(/"/g, ''), 200);
-
 // the key of the sender of one message, and the parts that the sender row keeps. undefined for a message that is not
-// a list mail (no List-Id and no List-Unsubscribe header) or that has no From address.
+// a list mail (no List-Id and no List-Unsubscribe header) or that has no From address. senderIdentityOf of senders.ts
+// makes the key, so a shared List-Id or a shared no-reply address never puts two senders in one group.
 export function senderOf(message: gmail_v1.Schema$Message): { senderKey: string; listId: string | null; fromAddress: string; displayName: string | null } | undefined {
-  const listHeader = header(message, 'List-Id');
-  if (!listHeader && !header(message, 'List-Unsubscribe')) return undefined;
-  const from = header(message, 'From');
-  const fromAddress = parseFrom(from);
-  if (!fromAddress) return undefined;
-  const bracket = /<([^<>]*)>/.exec(listHeader);
-  const listId = (bracket ? bracket[1]! : listHeader).trim().toLowerCase().slice(0, KEY_LIMIT).trim() || null;
-  // the name of the from header is the text before its address. the list phrase is the text before the list id.
-  const fromName = /^(.*)<[^<>]*>\s*$/.exec(from)?.[1] ?? '';
-  const listName = bracket ? listHeader.slice(0, bracket.index) : '';
-  const displayName = unquoted(fromName) || unquoted(listName) || null;
-  return { senderKey: listId ?? fromAddress, listId, fromAddress, displayName };
+  const identity = senderIdentityOf(message);
+  if (!identity) return undefined;
+  const { senderKey, listId, fromAddress, displayName } = identity;
+  return { senderKey, listId, fromAddress, displayName };
 }
 
 // the method and the url of the List-Unsubscribe header of one message: one_click needs an https target and
 // List-Unsubscribe-Post (rfc 8058), https is an https target without it, mailto is a mailto target only.
 export function unsubscribeOf(message: gmail_v1.Schema$Message): { method: UnsubscribeMethod; url: string | null } {
-  const targets = unsubscribeTargets(header(message, 'List-Unsubscribe'));
-  // a target with a space or one that does not parse is text, not a link, so it is never offered.
-  const https = targets.find((target) => /^https:/i.test(target) && httpsLink(target) !== null);
-  if (https) return { method: /List-Unsubscribe=One-Click/i.test(header(message, 'List-Unsubscribe-Post')) ? 'one_click' : 'https', url: https };
-  const mailto = targets.find((target) => /^mailto:/i.test(target));
-  if (mailto) return { method: 'mailto', url: mailto };
-  return { method: 'none', url: null };
+  return unsubscribeChoiceOf(message);
+}
+
+// the domain of an address under its public suffix.
+const domainOf = (address: string) => registrableDomain(address.slice(address.lastIndexOf('@') + 1));
+
+// a row of phase 5 that holds a choice of the owner or an action: it is not active, or it has an approval or a browser
+// help run. such a row keeps its key, so the choice keeps applying to the mail of its own sender.
+const pinned = (row: { state: unknown; approvalId: unknown; helpSessionKey: unknown }) => row.state !== 'active' || row.approvalId !== null || row.helpSessionKey !== null;
+
+// true when a message belongs to a sender row: its key is the key of the row, or the row is a pinned row with the key
+// that phase 5 gave the message, and the message comes from the from domain of the row. the sweep groups by the same
+// rule, so an archive moves the mail that the row counts and no other.
+function belongsTo(identity: SenderIdentity, row: SenderRecord): boolean {
+  if (identity.senderKey === row.senderKey) return true;
+  return pinned(row) && phase5KeyOf(identity) === row.senderKey && identity.fromDomain === domainOf(row.fromAddress);
 }
 
 // the headers that a dkim signature must cover for each way to unsubscribe.
@@ -159,30 +155,46 @@ export async function sweepNewsletters(ctx: InboxContext, run: JobRun): Promise<
   return { note: notes.length ? notes.join('; ') : `${senders} senders in ${checked.join(', ')}` };
 }
 
+// the most common display name of a group, with a tie going to the newest. a sender that changes its name for one
+// mail keeps the name that it uses most.
+function displayNameOf(byTime: Array<{ sender: SenderIdentity }>): string | null {
+  const seen = new Map<string, { count: number; last: number }>();
+  byTime.forEach((each, index) => {
+    const name = each.sender.displayName;
+    if (name === null) return;
+    const before = seen.get(name);
+    seen.set(name, { count: (before?.count ?? 0) + 1, last: index });
+  });
+  let best: { name: string; count: number; last: number } | undefined;
+  for (const [name, { count, last }] of seen) {
+    if (!best || count > best.count || (count === best.count && last > best.last)) best = { name, count, last };
+  }
+  return best?.name ?? null;
+}
+
 // saveSweep writes the senders and the messages of one account in one transaction, and gives the number of senders
 // that the sweep saw.
 function saveSweep(ctx: InboxContext, run: JobRun, account: string, messages: gmail_v1.Schema$Message[]): number {
-  const groups = new Map<string, Array<{ message: gmail_v1.Schema$Message; sender: NonNullable<ReturnType<typeof senderOf>>; at: string }>>();
-  for (const message of messages) {
-    const sender = senderOf(message);
-    if (!sender || !message.id) continue;
-    const group = groups.get(sender.senderKey) ?? [];
-    group.push({ message, sender, at: receivedAt(message) });
-    groups.set(sender.senderKey, group);
-  }
   const { db } = ctx;
+  const seen: Array<{ message: gmail_v1.Schema$Message; sender: SenderIdentity; at: string }> = [];
+  for (const message of messages) {
+    const sender = senderIdentityOf(message);
+    if (!sender || !message.id) continue;
+    seen.push({ message, sender, at: receivedAt(message) });
+  }
   const now = ctx.clock().toISOString();
   const existing = db.prepare('SELECT id, state, unsubscribedAt FROM inbox_senders WHERE account = ? AND senderKey = ?');
+  const oldRow = db.prepare('SELECT id, fromAddress, state, approvalId, helpSessionKey FROM inbox_senders WHERE account = ? AND senderKey = ?');
   // the upsert never writes the state, the approval, the unsubscribe time, the archive count, the label or the help
   // session. those belong to the actions of the owner.
   const upsert = db.prepare(
-    `INSERT INTO inbox_senders (account, senderKey, listId, fromAddress, displayName, firstAt, lastAt, unsubscribeMethod, unsubscribeUrl, unsubscribeMessageId, runId, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO inbox_senders (account, senderKey, listId, fromAddress, displayName, firstAt, lastAt, unsubscribeMethod, unsubscribeUrl, unsubscribeMessageId, fromDomains, runId, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (account, senderKey) DO UPDATE SET
        listId = excluded.listId, fromAddress = excluded.fromAddress, displayName = excluded.displayName,
        firstAt = MIN(firstAt, excluded.firstAt), lastAt = MAX(lastAt, excluded.lastAt),
        unsubscribeMethod = excluded.unsubscribeMethod, unsubscribeUrl = excluded.unsubscribeUrl, unsubscribeMessageId = excluded.unsubscribeMessageId,
-       runId = excluded.runId, updatedAt = excluded.updatedAt
+       fromDomains = excluded.fromDomains, runId = excluded.runId, updatedAt = excluded.updatedAt
      RETURNING id`,
   );
   const saveMessage = db.prepare(
@@ -190,8 +202,32 @@ function saveSweep(ctx: InboxContext, run: JobRun, account: string, messages: gm
      ON CONFLICT (account, messageId) DO UPDATE SET senderId = excluded.senderId, receivedAt = excluded.receivedAt, unread = excluded.unread, inInbox = excluded.inInbox`,
   );
   const stillComes = db.prepare("UPDATE inbox_senders SET state = 'failed', error = ?, updatedAt = ? WHERE id = ? AND state = 'unsubscribed'");
+  const rename = db.prepare('UPDATE inbox_senders SET senderKey = ?, updatedAt = ? WHERE id = ?');
   db.exec('BEGIN');
   try {
+    // the rows of phase 5 were keyed by the plain list id or the from address. a message whose key changed finds its
+    // old row here. an active row that no action holds and whose mail now has one key is renamed, so its counts and
+    // its history stay. a pinned row keeps its key for the mail of its own from domain. no row is ever deleted.
+    const byOldKey = new Map<string, typeof seen>();
+    for (const each of seen) {
+      const oldKey = phase5KeyOf(each.sender);
+      if (oldKey === each.sender.senderKey) continue;
+      byOldKey.set(oldKey, [...(byOldKey.get(oldKey) ?? []), each]);
+    }
+    for (const [oldKey, group] of byOldKey) {
+      const row = oldRow.get(account, oldKey);
+      if (!row) continue;
+      if (pinned({ state: row.state, approvalId: row.approvalId, helpSessionKey: row.helpSessionKey })) {
+        const domain = domainOf(String(row.fromAddress));
+        for (const each of group) if (each.sender.fromDomain === domain) each.sender = { ...each.sender, senderKey: oldKey };
+        continue;
+      }
+      const keys = new Set(group.map((each) => each.sender.senderKey));
+      const [newKey] = keys;
+      if (keys.size === 1 && newKey !== undefined && !existing.get(account, newKey)) rename.run(newKey, now, Number(row.id));
+    }
+    const groups = new Map<string, typeof seen>();
+    for (const each of seen) groups.set(each.sender.senderKey, [...(groups.get(each.sender.senderKey) ?? []), each]);
     for (const [senderKey, group] of groups) {
       const before = existing.get(account, senderKey);
       // a kept sender left the sweeps: its row and its counts stay as they are.
@@ -210,12 +246,13 @@ function saveSweep(ctx: InboxContext, run: JobRun, account: string, messages: gm
         senderKey,
         newest.sender.listId,
         newest.sender.fromAddress,
-        newest.sender.displayName,
+        displayNameOf(byTime),
         byTime[0]!.at,
         newest.at,
         unsubscribe.method,
         unsubscribe.url,
         withLink?.message.id ?? null,
+        new Set(group.map((each) => each.sender.fromDomain)).size,
         run.runId,
         now,
       );
@@ -233,11 +270,11 @@ function saveSweep(ctx: InboxContext, run: JobRun, account: string, messages: gm
        WHERE account = ?`,
     ).run(account);
     db.exec('COMMIT');
+    return groups.size;
   } catch (err) {
     db.exec('ROLLBACK');
     throw err;
   }
-  return groups.size;
 }
 
 // a header field with a line break could add a header that the owner did not approve.
@@ -386,14 +423,19 @@ export function createNewsletterTools(ctx: InboxContext): Tool[] {
         try {
           ids = await ctx.google.accounts.run(row.account, async (apis) => {
             const refs = await listMessages(apis, q, ARCHIVE_MAX);
-            // senderOf needs List-Unsubscribe too: a sender without a List-Id is a list sender only through it.
+            // senderIdentityOf needs List-Unsubscribe too: a sender without a List-Id is a list sender only through it.
             const messages = await getMessages(
               apis,
               refs.map((each) => each.id),
               { format: 'metadata', headers: ['From', 'List-Id', 'List-Unsubscribe'] },
             );
             // a from: search is fuzzy, so only the mail whose sender is this row moves.
-            const mine = messages.filter((each) => each.id && senderOf(each)?.senderKey === row.senderKey).map((each) => each.id!);
+            const mine = messages
+              .filter((each) => {
+                const identity = each.id ? senderIdentityOf(each) : undefined;
+                return identity !== undefined && belongsTo(identity, row);
+              })
+              .map((each) => each.id!);
             if (!mine.length) return mine;
             let labelId: string | undefined;
             if (input.label !== undefined) {

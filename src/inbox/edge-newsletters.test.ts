@@ -162,3 +162,49 @@ describe('the unsubscribe of a sender that the owner cannot reach', () => {
     expect(merchantKeyOf('Stream Co.')).toBe('streamco');
   });
 });
+
+describe('a hostile sender key', () => {
+  it('cannot join the group of another sender with a "#" in its headers', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    answerSearch(h);
+    const shared = '<a1b2c3.list-id.mailplatform.example>';
+    h.google.fake.deliver('personal', listMail('d1', { from: 'Daily <news@dailybrief.example>', listId: shared, date: '2026-08-01T00:00:00Z' }));
+    h.google.fake.deliver('personal', listMail('t1', { from: 'Jazz via Tickets <noreply@tickets.example>', listId: '', date: '2026-08-01T00:00:00Z' }));
+    // a list id that is the key of the first sender, from a domain that ends like it.
+    h.google.fake.deliver(
+      'personal',
+      listMail('e1', { from: 'Evil <x@a.example#dailybrief.example>', listId: '<a1b2c3.list-id.mailplatform.example#dailybrief.example>', date: '2026-08-01T00:00:00Z' }),
+    );
+    // an address that is the key of the second sender.
+    h.google.fake.deliver('personal', listMail('e2', { from: 'Evil <noreply@tickets.example#jazz>', listId: '', date: '2026-08-01T00:00:00Z' }));
+    await h.run('newsletters');
+    const rows = h.rows('SELECT senderKey, fromAddress, messages FROM inbox_senders ORDER BY senderKey');
+    expect(rows).toHaveLength(4);
+    expect(rows.every((each) => each.messages === 1)).toBe(true);
+    const daily = rows.find((each) => each.fromAddress === 'news@dailybrief.example')!;
+    expect(daily.senderKey).toBe('a1b2c3.list-id.mailplatform.example#dailybrief.example');
+    const id = Number(h.rows('SELECT id FROM inbox_senders WHERE senderKey = ?', String(daily.senderKey))[0]!.id);
+    const result = await requestArchive(h.ctx, id, { olderThanDays: 30 });
+    if (!result.ok) throw new Error(result.error);
+    await h.approve(result.response.approvalId!);
+    const box = h.google.fake.mailbox('personal');
+    expect(box.messages.get('d1')!.labelIds).not.toContain('INBOX');
+    for (const other of ['t1', 'e1', 'e2']) expect(box.messages.get(other)!.labelIds, other).toContain('INBOX');
+  });
+
+  it('keeps a list id longer than 200 characters at 200, and finds the same row in the next sweep', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    answerSearch(h);
+    const long = `<${'a'.repeat(300)}.platform.example>`;
+    h.google.fake.deliver('personal', listMail('l1', { from: 'One <one@first.example>', listId: long }));
+    h.google.fake.deliver('personal', listMail('l2', { from: 'Two <two@second.example>', listId: long }));
+    await h.run('newsletters');
+    await h.run('newsletters');
+    const rows = h.rows('SELECT senderKey, listId, messages FROM inbox_senders');
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(String(row.senderKey).length).toBeLessThanOrEqual(200);
+      expect(row).toMatchObject({ listId: 'a'.repeat(200), messages: 1 });
+    }
+  });
+});

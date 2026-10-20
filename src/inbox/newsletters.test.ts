@@ -88,7 +88,9 @@ describe('the newsletter sweep', () => {
     expect(sender('personal', 'news.shop.example')).toMatchObject({
       listId: 'news.shop.example',
       fromAddress: 'news@shop.example',
-      displayName: 'Shop News',
+      // two of the three mails say "News", so the newer "Shop News" of one mail does not rename the sender.
+      displayName: 'News',
+      fromDomains: 1,
       messages: 3,
       read: 2,
       firstAt: '2026-09-01T10:00:00.000Z',
@@ -457,5 +459,151 @@ describe('a hostile mail', () => {
     expect(row()).toMatchObject({ state: 'failed', error: expect.stringContaining('dkim') });
     expect(h.google.fake.sent).toEqual([]);
     expect(h.google.fake.requests.filter((each) => /drafts\/send|messages\/send/.test(each.path))).toEqual([]);
+  });
+});
+
+describe('the grouping of real list mail', () => {
+  let h: InboxHarness;
+  afterEach(async () => h?.close());
+
+  // a mail platform puts one list id on the mail of two customers.
+  const SHARED = '<a1b2c3.list-id.mailplatform.example>';
+  const OLD_KEY = 'a1b2c3.list-id.mailplatform.example';
+  const DAILY = `${OLD_KEY}#dailybrief.example`;
+  const GARDEN = `${OLD_KEY}#gardenclub.example`;
+  const daily = (id: string, date = '2026-10-01T00:00:00Z', name = 'Daily Brief') => listMail(id, { from: `${name} <news@dailybrief.example>`, listId: SHARED, date });
+  const garden = (id: string, date = '2026-10-02T00:00:00Z') => listMail(id, { from: 'Garden Club <hello@gardenclub.example>', listId: SHARED, date });
+  const senders = () => h.rows('SELECT id, senderKey, fromAddress, fromDomains, messages, state, archived FROM inbox_senders ORDER BY senderKey');
+
+  // a row as phase 5 left it: keyed by the plain list id, with the messages that it counted.
+  function phase5Row(state: string, extra: { unsubscribedAt?: string; approvalId?: number; archived?: number; messages?: string[] } = {}): number {
+    const row = h.ctx.db
+      .prepare(
+        `INSERT INTO inbox_senders (account, senderKey, listId, fromAddress, displayName, firstAt, lastAt, state, unsubscribedAt, approvalId, archived, updatedAt)
+         VALUES ('personal', ?, ?, 'news@dailybrief.example', 'Daily Brief', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', ?, ?, ?, ?, '2026-08-01T00:00:00.000Z') RETURNING id`,
+      )
+      .get(OLD_KEY, OLD_KEY, state, extra.unsubscribedAt ?? null, extra.approvalId ?? null, extra.archived ?? 0)!;
+    const id = Number(row.id);
+    for (const messageId of extra.messages ?? []) {
+      h.ctx.db.prepare("INSERT INTO inbox_sender_messages (account, messageId, senderId, receivedAt, unread, inInbox) VALUES ('personal', ?, ?, '2026-08-01T00:00:00.000Z', 0, 1)").run(messageId, id);
+    }
+    h.ctx.db.prepare('UPDATE inbox_senders SET messages = ?, read = ? WHERE id = ?').run(extra.messages?.length ?? 0, extra.messages?.length ?? 0, id);
+    return id;
+  }
+
+  it('keeps apart two senders that share a list id', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    answerSearch(h);
+    for (const each of [daily('d1'), daily('d2'), garden('g1')]) h.google.fake.deliver('personal', each);
+    await h.run('newsletters');
+    expect(senders()).toEqual([
+      { id: expect.any(Number), senderKey: DAILY, fromAddress: 'news@dailybrief.example', fromDomains: 1, messages: 2, state: 'active', archived: 0 },
+      { id: expect.any(Number), senderKey: GARDEN, fromAddress: 'hello@gardenclub.example', fromDomains: 1, messages: 1, state: 'active', archived: 0 },
+    ]);
+    expect(h.rows('SELECT listId FROM inbox_senders')).toEqual([{ listId: OLD_KEY }, { listId: OLD_KEY }]);
+  });
+
+  it('keeps apart two organisers of one no-reply address', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    answerSearch(h);
+    h.google.fake.deliver('personal', listMail('t1', { from: 'Jazz Night via Tickets <noreply@tickets.example>', listId: '' }));
+    h.google.fake.deliver('personal', listMail('t2', { from: 'Book Fair via Tickets <noreply@tickets.example>', listId: '' }));
+    await h.run('newsletters');
+    expect(h.rows('SELECT senderKey, displayName FROM inbox_senders ORDER BY senderKey')).toEqual([
+      { senderKey: 'noreply@tickets.example#book-fair', displayName: 'Book Fair via Tickets' },
+      { senderKey: 'noreply@tickets.example#jazz-night', displayName: 'Jazz Night via Tickets' },
+    ]);
+  });
+
+  it('renames an active row of phase 5 in place, so its counts and history stay', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    answerSearch(h);
+    const id = phase5Row('active', { archived: 4, messages: ['old1'] });
+    for (const each of [daily('d1'), daily('d2')]) h.google.fake.deliver('personal', each);
+    await h.run('newsletters');
+    expect(senders()).toEqual([{ id, senderKey: DAILY, fromAddress: 'news@dailybrief.example', fromDomains: 1, messages: 3, state: 'active', archived: 4 }]);
+    expect(h.rows('SELECT firstAt FROM inbox_senders')).toEqual([{ firstAt: '2026-08-01T00:00:00.000Z' }]);
+    // the next sweep finds the row by its new key.
+    await h.run('newsletters');
+    expect(senders()).toHaveLength(1);
+  });
+
+  it('does not rename an active row of phase 5 whose mail now has two senders, and never deletes it', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    answerSearch(h);
+    const id = phase5Row('active', { messages: ['old1'] });
+    for (const each of [daily('d1'), garden('g1')]) h.google.fake.deliver('personal', each);
+    await h.run('newsletters');
+    expect(senders().map((each) => [each.id, each.senderKey, each.messages])).toEqual([
+      [id, OLD_KEY, 1],
+      [expect.any(Number), DAILY, 1],
+      [expect.any(Number), GARDEN, 1],
+    ]);
+  });
+
+  it('keeps a kept row of phase 5 with its state and its key, and gives the other sender its own row', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    answerSearch(h);
+    const id = phase5Row('kept', { messages: ['old1'] });
+    for (const each of [daily('d1'), garden('g1')]) h.google.fake.deliver('personal', each);
+    await h.run('newsletters');
+    expect(senders()).toEqual([
+      { id, senderKey: OLD_KEY, fromAddress: 'news@dailybrief.example', fromDomains: 1, messages: 1, state: 'kept', archived: 0 },
+      { id: 2, senderKey: GARDEN, fromAddress: 'hello@gardenclub.example', fromDomains: 1, messages: 1, state: 'active', archived: 0 },
+    ]);
+  });
+
+  it('keeps an unsubscribed row of phase 5 on its key, so the check that the mail stopped still runs', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    answerSearch(h);
+    const id = phase5Row('unsubscribed', { unsubscribedAt: '2026-09-01T00:00:00.000Z', messages: ['old1'] });
+    h.google.fake.deliver('personal', daily('d1', '2026-09-03T00:00:00Z'));
+    h.google.fake.deliver('personal', garden('g1', '2026-10-05T00:00:00Z'));
+    await h.run('newsletters');
+    expect(senders().map((each) => [each.id, each.senderKey, each.messages, each.state])).toEqual([
+      [id, OLD_KEY, 2, 'unsubscribed'],
+      [2, GARDEN, 1, 'active'],
+    ]);
+    // the mail of the other sender does not count against the unsubscribe. the sender's own late mail does.
+    h.google.fake.deliver('personal', daily('d2', '2026-10-06T00:00:00Z'));
+    await h.run('newsletters');
+    expect(h.rows('SELECT state, error FROM inbox_senders WHERE id = ?', id)).toEqual([{ state: 'failed', error: 'mail still comes more than 7 days after the unsubscribe' }]);
+    expect(h.rows('SELECT COUNT(*) AS n FROM inbox_senders WHERE senderKey = ?', DAILY)).toEqual([{ n: 0 }]);
+  });
+
+  it('archives the mail of a "#" key and of a pinned row of phase 5, and no other mail', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    answerSearch(h);
+    const old = phase5Row('failed');
+    for (const each of [daily('d1', '2026-08-01T00:00:00Z'), garden('g1', '2026-08-01T00:00:00Z'), garden('g2', '2026-08-02T00:00:00Z')]) h.google.fake.deliver('personal', each);
+    await h.run('newsletters');
+    const gardenId = Number(h.rows('SELECT id FROM inbox_senders WHERE senderKey = ?', GARDEN)[0]!.id);
+    const box = h.google.fake.mailbox('personal');
+    const one = await requestArchive(h.ctx, gardenId, { olderThanDays: 30 });
+    if (!one.ok) throw new Error(one.error);
+    expect(await h.approve(one.response.approvalId!)).toContain(`archived 2 messages of ${GARDEN} in personal`);
+    expect(box.messages.get('d1')!.labelIds).toContain('INBOX');
+    expect(box.messages.get('g1')!.labelIds).not.toContain('INBOX');
+    const two = await requestArchive(h.ctx, old, { olderThanDays: 30 });
+    if (!two.ok) throw new Error(two.error);
+    expect(await h.approve(two.response.approvalId!)).toContain(`archived 1 messages of ${OLD_KEY} in personal`);
+    expect(box.messages.get('d1')!.labelIds).not.toContain('INBOX');
+    expect(h.rows('SELECT senderKey, archived FROM inbox_senders ORDER BY id')).toEqual([
+      { senderKey: OLD_KEY, archived: 1 },
+      { senderKey: GARDEN, archived: 2 },
+    ]);
+  });
+
+  it('names a sender by the display name that it uses most, with a tie going to the newest', async () => {
+    h = await createInboxHarness({ accounts: ['personal'] });
+    answerSearch(h);
+    h.google.fake.deliver('personal', daily('d1', '2026-10-01T00:00:00Z'));
+    h.google.fake.deliver('personal', daily('d2', '2026-10-02T00:00:00Z'));
+    h.google.fake.deliver('personal', daily('d3', '2026-10-03T00:00:00Z', 'Daily Brief: Election Special'));
+    await h.run('newsletters');
+    expect(h.rows('SELECT displayName FROM inbox_senders')).toEqual([{ displayName: 'Daily Brief' }]);
+    h.google.fake.deliver('personal', daily('d4', '2026-10-04T00:00:00Z', 'Daily Brief: Election Special'));
+    await h.run('newsletters');
+    expect(h.rows('SELECT displayName FROM inbox_senders')).toEqual([{ displayName: 'Daily Brief: Election Special' }]);
   });
 });
