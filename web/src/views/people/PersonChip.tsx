@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { PersonSummary } from '../../../../src/dashboard/people-types';
-import { api } from '../../api';
+import { api, useStream } from '../../api';
 import './people.css';
 
 // the person chip that other views use, for example the event details of the calendar and the chat. it shows the name
@@ -29,17 +29,23 @@ export function initialsOf(nameOrEmail: string): string {
 }
 
 // one lookup for each address, shared by every chip of the page, so twenty chips with one address make one request.
-// a miss or a failure gives null, and the chip stays plain text.
+// a miss or a failure gives null, and the chip stays plain text. only a person that was found stays in the cache: a
+// miss leaves it when its request ends, because a later poll can make the person, and an error before the sign-in
+// can pass. a run of the agent can add people, so its end on the stream empties the cache.
 const lookups = new Map<string, Promise<PersonSummary | null>>();
 
 function lookup(email: string): Promise<PersonSummary | null> {
   const key = email.trim().toLowerCase();
   let found = lookups.get(key);
   if (!found) {
-    found = api<PersonSummary>(`/api/people/lookup?email=${encodeURIComponent(key)}`).then(
+    const request = api<PersonSummary>(`/api/people/lookup?email=${encodeURIComponent(key)}`).then(
       (person) => person,
       () => null,
     );
+    found = request.then((person) => {
+      if (person === null && lookups.get(key) === found) lookups.delete(key);
+      return person;
+    });
     lookups.set(key, found);
   }
   return found;
@@ -52,6 +58,13 @@ export function clearPersonLookups(): void {
 
 export function PersonChip({ email, name, personId, size = 'sm' }: PersonChipProps) {
   const [person, setPerson] = useState<PersonSummary | null | undefined>(undefined);
+  // a chip that found no one asks again after a run of the agent, which may have made the person.
+  const [round, setRound] = useState(0);
+  useStream((message) => {
+    if (message.kind !== 'run') return;
+    lookups.clear();
+    if (person === null) setRound((old) => old + 1);
+  });
   useEffect(() => {
     if (personId !== undefined || !email.trim()) return;
     let current = true;
@@ -59,7 +72,7 @@ export function PersonChip({ email, name, personId, size = 'sm' }: PersonChipPro
     return () => {
       current = false;
     };
-  }, [email, personId]);
+  }, [email, personId, round]);
 
   const shown = person?.name || name || person?.displayName || email;
   const body = (

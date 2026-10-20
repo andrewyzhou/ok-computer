@@ -1,11 +1,16 @@
 /* the classes of the people views and of the person chip. each name starts with people- or person-, and each color
    and size comes from the tokens of styles.css, so the dark theme reaches these parts too. */
 
+/* an address breaks at its <wbr> points after the @ and the dots (Address in names.tsx). break-word splits a part only
+   when it is still too long for the column by itself. */
 .people-name {
   display: flex;
   flex-direction: column;
   min-width: 9rem;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+}
+.people-guess {
+  font-weight: 400;
 }
 .people-name-main {
   font-weight: 500;
@@ -31,6 +36,46 @@
 .people-search input {
   flex: 1;
   min-width: 0;
+}
+
+/* the last column of the table keeps the same room from the edge as the cells keep from each other. */
+.people-table th:last-child,
+.people-table td:last-child {
+  padding-right: 12px;
+}
+
+.people-error,
+.people-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.people-error .error-box {
+  align-self: stretch;
+  overflow-wrap: break-word;
+}
+.people-failed {
+  border: 1px solid var(--critical);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: var(--space-4);
+}
+.people-failed p {
+  margin: 0;
+}
+.people-failed-title {
+  font-weight: 500;
+  color: var(--ink);
+}
+.people-failed .people-backfill {
+  margin: 0;
+}
+.people-failed-error {
+  overflow-wrap: anywhere;
+}
+.people-status-note {
+  margin: 0 0 var(--space-3);
 }
 
 .people-more {
@@ -84,13 +129,21 @@
 }
 .people-emails li {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
   min-width: 0;
 }
+/* the address takes the room and wraps at its break points, so the primary badge stays on its first line. */
 .people-email {
-  overflow-wrap: anywhere;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.people-emails .badge {
+  flex: none;
+}
+.people-other-name {
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 
 .people-list {
@@ -117,6 +170,14 @@
 .people-note-text {
   color: var(--ink);
   overflow-wrap: anywhere;
+}
+/* a long meeting title or subject shows two lines, and its title attribute has the whole text. */
+.people-item-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
 }
 .people-note-text {
   white-space: pre-wrap;
@@ -150,6 +211,19 @@
   min-height: 72px;
   color: var(--ink);
   background: var(--bg);
+}
+.people-field input {
+  min-width: 0;
+  color: var(--ink);
+  background: var(--bg);
+}
+.people-merge-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.people-merge-confirm p {
+  overflow-wrap: anywhere;
 }
 .people-form-row {
   display: flex;

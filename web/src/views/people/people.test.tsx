@@ -42,17 +42,17 @@ const rows = () => table().getAllByRole('row').slice(1);
 const listCalls = (calls: Array<{ method: string; url: string }>) => calls.filter((call) => call.method === 'GET' && call.url.startsWith('/api/people?'));
 
 describe('the people list', () => {
-  it('lists the five people in the order of the server, with the email as the name of a person without one', async () => {
+  it('lists the five people in the order of the server, with a name guessed from the address of a person without one', async () => {
     const calls = await open();
     expect(rows().map((row) => row.querySelector('.people-name-main')?.textContent)).toEqual([
       'Maya Lindqvist',
       'Tomas Okafor',
       'Priya',
-      'k.osei@fabrikam.example',
+      'K Osei (guessed)',
       'Jonas Weber',
     ]);
     expect(within(rows()[0]!).getByText('maya@northwind.example')).toBeTruthy();
-    // the row without a name shows the address once, as its name.
+    // the row without a name shows the guessed name, marked as a guess, and the address once under it.
     expect(within(rows()[3]!).getAllByText('k.osei@fabrikam.example')).toHaveLength(1);
     expect(within(rows()[4]!).getByText('none yet')).toBeTruthy();
     expect(inMain().getByText('5 people')).toBeTruthy();

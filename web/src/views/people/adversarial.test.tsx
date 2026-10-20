@@ -27,11 +27,25 @@ describe('initialsOf with odd text', () => {
 
 describe('the times of the people views', () => {
   it('shows the day of the owner zone, not of utc, near midnight', () => {
+    const now = Date.parse('2026-10-18T16:00:00.000Z');
     setTimeZone('America/Los_Angeles');
-    expect(day('2026-10-18T06:59:00.000Z')).toBe('Oct 17');
-    expect(dayTime('2026-10-18T06:59:00.000Z')).toBe('Oct 17, 23:59');
+    expect(day('2026-10-18T06:59:00.000Z', now)).toBe('Oct 17');
+    expect(dayTime('2026-10-18T06:59:00.000Z', now)).toBe('Oct 17, 23:59');
     setTimeZone('Asia/Tokyo');
-    expect(day('2026-10-17T15:00:00.000Z')).toBe('Oct 18');
+    expect(day('2026-10-17T15:00:00.000Z', now)).toBe('Oct 18');
+  });
+
+  it('adds the year to a day of another year than now, in the owner zone on both sides of new year', () => {
+    const now = Date.parse('2026-10-18T16:00:00.000Z');
+    expect(day('2024-01-02T08:00:00.000Z', now)).toBe('Jan 2, 2024');
+    expect(dayTime('2027-03-01T09:30:00.000Z', now)).toBe('Mar 1, 2027, 09:30');
+    expect(ago('2025-06-01T12:00:00.000Z', now)).toBe('Jun 1, 2025');
+    // 2027-01-01 04:00 utc is still new year's eve of 2026 in los angeles, so it is this year there.
+    setTimeZone('America/Los_Angeles');
+    expect(day('2027-01-01T04:00:00.000Z', now)).toBe('Dec 31');
+    // 2026-12-31 20:00 utc is already 2027 in tokyo.
+    setTimeZone('Asia/Tokyo');
+    expect(day('2026-12-31T20:00:00.000Z', now)).toBe('Jan 1, 2027');
   });
 
   it('shows a dash for a missing time', () => {

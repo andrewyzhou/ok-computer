@@ -17,6 +17,7 @@ import { plural } from '../../format';
 import type { RouteProps } from '../../routes';
 import { useDevMode } from '../../shell/prefs';
 import { Badge, Button, ButtonLink, DetailsPanel, EmptyState, Facts, FilterBar, NotFound, Page, SearchField, Section, Segmented, Skeleton, Table, isNotFound, type Column } from '../../ui';
+import { Address, guessedName } from './names';
 import { ago, day, dayTime } from './when';
 import './people.css';
 
@@ -148,11 +149,58 @@ function BackfillLine({ account }: { account: PeopleAccountStatus }) {
   );
 }
 
+// an error box with a way to try the request again.
+function ErrorWithRetry({ text, onRetry }: { text: string; onRetry: () => void }) {
+  return (
+    <div className="people-error">
+      <p className="error-box" role="alert">
+        {text}
+      </p>
+      <Button size="sm" icon="refresh" onClick={onRetry}>
+        Try again
+      </Button>
+    </div>
+  );
+}
+
+// the accounts whose first read failed, with the error and the way to fix it. a scope that is missing or a sign-in
+// that google refused needs a new sign-in, so the box links to the google page.
+function BackfillFailed({ accounts }: { accounts: PeopleAccountStatus[] }) {
+  return (
+    <div className="people-failed" role="alert">
+      <p className="people-failed-title">
+        {accounts.length === 1 ? `The first read of ${accounts[0]!.account} failed.` : 'The first read of some accounts failed.'} People from{' '}
+        {accounts.length === 1 ? 'it' : 'them'} are missing until it works.
+      </p>
+      <ul className="people-backfill" aria-label="failed backfill">
+        {accounts.map((account) => (
+          <li key={account.account}>
+            <span className="people-account">{account.account}</span>
+            <span className="error-text people-failed-error">{account.error ?? 'no error text'}</span>
+          </li>
+        ))}
+      </ul>
+      <ButtonLink href="#/google" size="sm" icon="google">
+        Reconnect Google
+      </ButtonLink>
+    </div>
+  );
+}
+
 function NameCell({ person }: { person: PersonSummary }) {
+  // a person without a name shows a name guessed from the address, marked as a guess, and the address under it.
+  const guess = person.name ? null : guessedName(person.primaryEmail);
   return (
     <div className="people-name">
-      <span className="people-name-main">{person.displayName}</span>
-      {person.name ? <span className="muted small people-name-email">{person.primaryEmail}</span> : null}
+      <span className="people-name-main">
+        {person.name ?? guess ?? <Address email={person.primaryEmail} />}
+        {guess ? <span className="muted small people-guess"> (guessed)</span> : null}
+      </span>
+      {person.name || guess ? (
+        <span className="muted small people-name-email">
+          <Address email={person.primaryEmail} />
+        </span>
+      ) : null}
       {/* a person without a name has one line, so a phone shows the organization there in place of its column. */}
       {!person.name && person.organization ? <span className="muted small people-narrow">{person.organization}</span> : null}
     </div>
@@ -190,7 +238,9 @@ function Meetings({ meetings, empty }: { meetings: PersonMeetingView[]; empty: s
     <ul className="people-list">
       {meetings.map((meeting) => (
         <li key={`${meeting.account}:${meeting.eventId}`}>
-          <span className="people-item-title">{meeting.title}</span>
+          <span className="people-item-title" title={meeting.title}>
+            {meeting.title}
+          </span>
           <span className="muted small">
             <time dateTime={meeting.startAt}>{dayTime(meeting.startAt)}</time> · {ROLE[meeting.role]}
           </span>
@@ -294,7 +344,9 @@ function ProfileBody({ profile, devMode, onSaved }: { profile: PersonProfile; de
               <ul className="people-emails">
                 {profile.emailDetails.map((each) => (
                   <li key={each.email}>
-                    <span className="people-email">{each.email}</span>
+                    <span className="people-email">
+                      <Address email={each.email} />
+                    </span>
                     {each.isPrimary ? <Badge tone="muted">primary</Badge> : null}
                   </li>
                 ))}
@@ -308,48 +360,35 @@ function ProfileBody({ profile, devMode, onSaved }: { profile: PersonProfile; de
                   <ul className="people-emails">
                     {others.map((each) => (
                       <li key={each.name}>
-                        {each.name} <span className="muted small">({plural(each.count, 'time')})</span>
+                        <span className="people-other-name">
+                          {each.name} <span className="muted small people-nowrap">({plural(each.count, 'time')})</span>
+                        </span>
                       </li>
                     ))}
                   </ul>
                 ),
               }
             : null,
-          { label: 'First contact', value: profile.firstContactAt ? dayTime(profile.firstContactAt) : <span className="muted">none yet</span> },
-          { label: 'Last contact', value: profile.lastContactAt ? dayTime(profile.lastContactAt) : <span className="muted">none yet</span> },
+          {
+            label: 'First contact',
+            value: profile.firstContactAt ? <time dateTime={profile.firstContactAt}>{day(profile.firstContactAt)}</time> : <span className="muted">none yet</span>,
+          },
+          {
+            label: 'Last contact',
+            value: profile.lastContactAt ? <time dateTime={profile.lastContactAt}>{day(profile.lastContactAt)}</time> : <span className="muted">none yet</span>,
+          },
           { label: 'Contact', value: `${plural(profile.mailCount, 'mail')}, ${plural(profile.meetingCount, 'meeting')}` },
         ]}
       />
-      <Section title="Upcoming meetings">
-        <Meetings meetings={profile.upcoming} empty="No meeting planned." />
-      </Section>
-      {profile.recentMeetings.length ? (
-        <Section title="Recent meetings">
-          <Meetings meetings={profile.recentMeetings} empty="" />
-        </Section>
-      ) : null}
-      <Section title="Open threads">
-        {profile.openThreads.length ? (
-          <ul className="people-list">
-            {profile.openThreads.map((thread) => (
-              <li key={`${thread.account}:${thread.threadId}`}>
-                <span className="people-item-title">{thread.subject}</span>
-                <span className="muted small">
-                  <time dateTime={thread.lastAt}>{ago(thread.lastAt)}</time> · {thread.account} · {plural(thread.messages, 'message')}
-                </span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="muted people-none">No thread waits on you.</p>
-        )}
-      </Section>
+      {/* what the owner acts on comes first: the preferences, the notes and the form, and what waits on the person.
+          the lists of meetings and threads follow. */}
       <Section title="Preferences">
         <Notes notes={profile.preferences} empty="No preference yet." devMode={devMode} />
       </Section>
       <Section title="Notes">
         <Notes notes={profile.notes} empty="No note yet." devMode={devMode} />
       </Section>
+      <NoteForm key={profile.id} id={profile.id} onSaved={onSaved} />
       {profile.delegations.length ? (
         <Section title="Delegations">
           <ul className="people-list">
@@ -365,8 +404,115 @@ function ProfileBody({ profile, devMode, onSaved }: { profile: PersonProfile; de
           </ul>
         </Section>
       ) : null}
-      <NoteForm key={profile.id} id={profile.id} onSaved={onSaved} />
+      <Section title="Upcoming meetings">
+        <Meetings meetings={profile.upcoming} empty="No meeting planned." />
+      </Section>
+      <Section title="Open threads">
+        {profile.openThreads.length ? (
+          <ul className="people-list">
+            {profile.openThreads.map((thread) => (
+              <li key={`${thread.account}:${thread.threadId}`}>
+                <span className="people-item-title" title={thread.subject}>
+                  {thread.subject}
+                </span>
+                <span className="muted small">
+                  <time dateTime={thread.lastAt}>{ago(thread.lastAt)}</time> · {thread.account} · {plural(thread.messages, 'message')}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="muted people-none">No thread waits on you.</p>
+        )}
+      </Section>
+      {profile.recentMeetings.length ? (
+        <Section title="Recent meetings">
+          <Meetings meetings={profile.recentMeetings} empty="" />
+        </Section>
+      ) : null}
+      <MergeForm key={`merge-${profile.id}`} profile={profile} onMerged={onSaved} />
     </div>
+  );
+}
+
+// MergeForm joins a second person into this one, when one human shows as two people (for example a work and a
+// personal address). the owner names the other person by an address, sees who it is, and confirms, because a merge
+// cannot be undone from the page.
+function MergeForm({ profile, onMerged }: { profile: PersonProfile; onMerged: () => void }) {
+  const [email, setEmail] = useState('');
+  const [other, setOther] = useState<PersonSummary | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const find = (event: FormEvent) => {
+    event.preventDefault();
+    const address = email.trim();
+    if (!address || busy) return;
+    setBusy(true);
+    setError(undefined);
+    api<PersonSummary>(`/api/people/lookup?email=${encodeURIComponent(address)}`).then(
+      (found) => {
+        setBusy(false);
+        if (found.id === profile.id) setError('That address is already one of this person.');
+        else setOther(found);
+      },
+      (err: Error) => {
+        setBusy(false);
+        setError(isNotFound(err.message) ? 'No person has that address.' : err.message);
+      },
+    );
+  };
+  const merge = () => {
+    if (!other || busy) return;
+    setBusy(true);
+    setError(undefined);
+    send<PersonProfile>(`/api/people/${profile.id}/merge`, 'POST', { otherId: other.id }).then(
+      () => {
+        setBusy(false);
+        setOther(undefined);
+        setEmail('');
+        onMerged();
+      },
+      (err: Error) => {
+        setBusy(false);
+        setError(err.message);
+      },
+    );
+  };
+  return (
+    <form className="people-form people-merge" onSubmit={find} aria-label="merge a duplicate">
+      <label className="people-field">
+        <span>Same person at another address?</span>
+        <input type="email" value={email} maxLength={320} onChange={(event) => (setEmail(event.target.value), setOther(undefined))} placeholder="the other address" />
+      </label>
+      {other ? (
+        <div className="people-merge-confirm">
+          <p className="small">
+            Merge <strong>{other.displayName}</strong> ({plural(other.mailCount, 'mail')}, {plural(other.meetingCount, 'meeting')}) into {profile.displayName}? Its
+            addresses, mail, meetings and notes move here.
+          </p>
+          <div className="people-form-row">
+            <Button size="sm" onClick={() => setOther(undefined)}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" busy={busy} onClick={merge}>
+              Merge
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="people-form-row">
+          <span />
+          <Button type="submit" size="sm" busy={busy} disabled={!email.trim()}>
+            Find
+          </Button>
+        </div>
+      )}
+      {error ? (
+        <p role="alert" className="error-text">
+          {error}
+        </p>
+      ) : null}
+    </form>
   );
 }
 
@@ -383,9 +529,7 @@ function Profile({ id, onClose }: { id: string; onClose: () => void }) {
           <a href="#/people">Back to People</a>
         </NotFound>
       ) : profile.error ? (
-        <p className="error-box" role="alert">
-          Could not load this person: {profile.error}
-        </p>
+        <ErrorWithRetry text={`Could not load this person: ${profile.error}`} onRetry={profile.reload} />
       ) : !profile.data ? (
         <Skeleton lines={6} />
       ) : (
@@ -451,6 +595,14 @@ export function PeoplePage({ params, query }: RouteProps) {
   // with no google account or before the first read there is nothing to search or sort, so the page leaves the bar out.
   const noGoogle = status.data?.configured === false;
   const waiting = firstRun && !q && !list.error && !list.loading && !list.people.length;
+  const failed = status.data?.configured ? status.data.accounts.filter((each) => each.backfill === 'failed') : [];
+  // the failed accounts show above the list, and in place of the "next poll" text when there is no one yet.
+  const failedBox = failed.length && !noGoogle ? <BackfillFailed accounts={failed} /> : null;
+  const statusNote = status.error ? (
+    <p className="muted small people-status-note" role="status">
+      Could not read the state of the first read of your accounts: {status.error}
+    </p>
+  ) : null;
   let body;
   if (noGoogle) {
     body = (
@@ -467,11 +619,7 @@ export function PeoplePage({ params, query }: RouteProps) {
       </EmptyState>
     );
   } else if (list.error) {
-    body = (
-      <p className="error-box" role="alert">
-        Could not load people: {list.error}
-      </p>
-    );
+    body = <ErrorWithRetry text={`Could not load people: ${list.error}`} onRetry={list.reload} />;
   } else if (list.loading) {
     body = <Skeleton lines={6} label="Loading people…" />;
   } else if (!list.people.length && q) {
@@ -500,7 +648,7 @@ export function PeoplePage({ params, query }: RouteProps) {
       </EmptyState>
     );
   } else if (!list.people.length) {
-    body = (
+    body = failedBox ?? (
       <EmptyState icon="people" title="No people yet.">
         People show up here after the next mail or calendar poll.
       </EmptyState>
@@ -550,12 +698,18 @@ export function PeoplePage({ params, query }: RouteProps) {
         )
       }
     >
+      {list.people.length ? failedBox : null}
+      {statusNote}
       {body}
       {id ? (
         <Profile id={id} onClose={close} />
       ) : (
         <DetailsPanel title="People">
-          <p className="muted">Select a person to see their emails, meetings, open threads and notes.</p>
+          <p className="muted">
+            {list.people.length
+              ? 'Select a person to see their emails, meetings, open threads and notes.'
+              : 'A profile shows here once People has someone in it.'}
+          </p>
         </DetailsPanel>
       )}
     </Page>

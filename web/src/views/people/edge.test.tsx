@@ -63,6 +63,58 @@ describe('the states of the people page', () => {
     expect((await inMain().findByRole('alert')).textContent).toBe('Could not load people: the people store is busy');
   });
 
+  it('tries the list again with the button under the error', async () => {
+    let fail = true;
+    open({ 'GET /api/people': () => (fail ? json({ error: 'the people store is busy' }, 500) : peoplePage), 'GET /api/people/status': () => statusDone });
+    await inMain().findByRole('alert');
+    fail = false;
+    fireEvent.click(inMain().getByRole('button', { name: 'Try again' }));
+    expect(await inMain().findByRole('table', { name: 'people' })).toBeTruthy();
+  });
+
+  it('shows a failed first read with its error and a way to reconnect, above the list and in place of the empty text', async () => {
+    const error = 'scope: 403: Request had insufficient authentication scopes.';
+    const status = { ...statusDone, accounts: [statusDone.accounts[0]!, { ...statusDone.accounts[1]!, backfill: 'failed' as const, error }] };
+    open({ 'GET /api/people': () => peoplePage, 'GET /api/people/status': () => status });
+    const box = within(await inMain().findByRole('alert'));
+    expect(box.getByText('The first read of school failed.', { exact: false })).toBeTruthy();
+    expect(box.getByText(error)).toBeTruthy();
+    expect(box.getByRole('link', { name: 'Reconnect Google' }).getAttribute('href')).toBe('#/google');
+    expect(inMain().getByRole('table', { name: 'people' })).toBeTruthy();
+    cleanup();
+
+    open({ 'GET /api/people': () => emptyPage, 'GET /api/people/status': () => ({ ...status, people: 0 }) });
+    expect(await inMain().findByText(error)).toBeTruthy();
+    expect(inMain().queryByText('People show up here after the next mail or calendar poll.')).toBeNull();
+  });
+
+  it('says so in a short line when the status cannot be read', async () => {
+    open({ 'GET /api/people': () => peoplePage, 'GET /api/people/status': () => json({ error: 'the status is busy' }, 500) });
+    expect(await inMain().findByText('Could not read the state of the first read of your accounts: the status is busy')).toBeTruthy();
+    expect(inMain().getByRole('table', { name: 'people' })).toBeTruthy();
+  });
+
+  it('merges a duplicate that the owner names by an address, after a confirm', async () => {
+    let merged: unknown;
+    open(
+      {
+        'GET /api/people': () => peoplePage,
+        'GET /api/people/status': () => statusDone,
+        'GET /api/people/lookup': () => noName,
+        'GET /api/people/:id': () => mayaProfile,
+        'POST /api/people/:id/merge': ({ body }) => ((merged = body), mayaProfile),
+      },
+      '#/people/1',
+    );
+    const form = within(await screen.findByRole('form', { name: 'merge a duplicate' }));
+    fireEvent.change(form.getByRole('textbox'), { target: { value: 'k.osei@fabrikam.example' } });
+    fireEvent.click(form.getByRole('button', { name: 'Find' }));
+    expect(await form.findByText('k.osei@fabrikam.example')).toBeTruthy();
+    expect(merged).toBeUndefined();
+    fireEvent.click(form.getByRole('button', { name: 'Merge' }));
+    await waitFor(() => expect(merged).toEqual({ otherId: 4 }));
+  });
+
   it('says so when the answer has no people list', async () => {
     open({ 'GET /api/people': () => ({ total: 3 }), 'GET /api/people/status': () => statusDone });
     expect((await inMain().findByRole('alert')).textContent).toMatch(/shape that this page does not know/);
@@ -134,6 +186,19 @@ describe('the person chip', () => {
     expect(links[0]!.getAttribute('href')).toBe('#/people/1');
     expect(links[0]!.getAttribute('title')).toBe('maya@northwind.example · Northwind');
     expect(calls.map((call) => call.url)).toEqual(['/api/people/lookup?email=maya%40northwind.example']);
+  });
+
+  it('asks again for an address that was no person, when it shows again', async () => {
+    let found = false;
+    const calls = stubFetch(null, { 'GET /api/people/lookup': () => (found ? maya : json({ error: 'person not found' }, 404)) });
+    const first = render(<PersonChip email="maya@northwind.example" />);
+    await waitFor(() => expect(calls).toHaveLength(1));
+    await new Promise((done) => setTimeout(done, 20));
+    first.unmount();
+    found = true;
+    render(<PersonChip email="maya@northwind.example" />);
+    expect(await screen.findByRole('link', { name: 'Open Maya Lindqvist' })).toBeTruthy();
+    expect(calls).toHaveLength(2);
   });
 
   it('stays plain text for an address that is no person', async () => {
