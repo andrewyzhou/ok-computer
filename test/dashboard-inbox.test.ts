@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { resolveApproval } from '../src/approvals/store.js';
 import type { CalendarProposalView, DigestsPage, DraftView, InboxDigest, SendersPage, SubscriptionsPage } from '../src/dashboard/types.js';
 import { inboxAutomation } from '../src/inbox/inbox.js';
-import { NOW, seedInbox } from './seed-inbox.js';
+import { DIGEST_STATS, NOW, seedInbox } from './seed-inbox.js';
 
 type Dashboard = ReturnType<typeof seedInbox>['dashboard'];
 
@@ -60,6 +60,33 @@ describe('the inbox reads', () => {
       [2, false],
       [1, true],
     ]);
+  });
+
+  it('gives the fields of phase 6: the digest counts, the mail kind, the cadence source, the reasons and the date words', async () => {
+    const { dashboard } = seed();
+    const latest = await get<InboxDigest>(dashboard, '/api/inbox/digests/latest');
+    expect(latest.stats).toEqual(DIGEST_STATS[3]);
+    expect(latest.stats!.accounts.reduce((sum, each) => sum + each.hidden, 0)).toBe(6);
+    expect(latest.items.map((each) => [each.section, each.mail])).toEqual([
+      ['needs_reply', 'person'],
+      ['deadlines', 'person'],
+      ['bills', 'automated'],
+      ['packages', 'automated'],
+    ]);
+    expect((await get<InboxDigest>(dashboard, '/api/inbox/digests/2')).stats).toMatchObject({ accounts: [{ alias: 'personal', capped: true }, { alias: 'school', capped: false }] });
+    // a digest of phase 5 answers null counts and items without a mail kind.
+    const old = await get<InboxDigest>(dashboard, '/api/inbox/digests/1');
+    expect(old.stats).toBeNull();
+    expect('mail' in old.items[0]!).toBe(false);
+
+    const subscriptions = (await get<SubscriptionsPage>(dashboard, '/api/inbox/subscriptions')).subscriptions;
+    expect(subscriptions.find((row) => row.id === 1)).toMatchObject({ cadenceSource: 'both', reasons: ['3 charges about a month apart', 'the receipts say "per month"'] });
+    expect(subscriptions.find((row) => row.id === 6)).toMatchObject({ cadenceSource: 'gaps', reasons: ['2 charges about three months apart'] });
+    expect(subscriptions.find((row) => row.id === 4)).toMatchObject({ cadenceSource: 'none', reasons: [] });
+
+    // the seeded proposals are of phase 5, so their date words are null.
+    const proposals = await get<CalendarProposalView[]>(dashboard, '/api/inbox/proposals');
+    expect(proposals.map((each) => each.dueText)).toEqual([null, null, null, null, null, null]);
   });
 
   it('pages the senders and the digests with the cursor that it gave', async () => {

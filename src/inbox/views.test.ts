@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { LATEST_ITEMS, seedInbox } from '../../test/seed-inbox.js';
+import { DIGEST_STATS, LATEST_ITEMS, seedInbox } from '../../test/seed-inbox.js';
 import type { NewsletterSenderRow, SendersQuery } from '../dashboard/types.js';
 import { decodeCursor, encodeCursor, getDigest, InvalidCursor, listDigests, listDrafts, listProposals, listSenders, listSubscriptions } from './views.js';
 
@@ -122,8 +122,8 @@ describe('listSubscriptions', () => {
       sourceSubject: 'Your Stream Plus receipt',
       sourceMessageIds: ['r-stream-3', 'r-stream-2', 'r-stream-1'],
       confidence: 0.95,
-      cadenceSource: 'none',
-      reasons: [],
+      cadenceSource: 'both',
+      reasons: ['3 charges about a month apart', 'the receipts say "per month"'],
       cancelUrl: 'https://stream.example/cancel',
       state: 'active',
       approvalId: null,
@@ -131,6 +131,15 @@ describe('listSubscriptions', () => {
       updatedAt: '2026-10-18T10:05:00Z',
     });
     expect(page.subscriptions.find((row) => row.id === 5)).toMatchObject({ amount: null, currency: null, cadence: 'unknown', lastChargeAt: null, confidence: 0.3 });
+    // the cadence source and the reasons of phase 6, and the defaults of a row that a scan of phase 5 wrote.
+    expect(page.subscriptions.map((row) => [row.id, row.cadenceSource, row.reasons.length])).toEqual([
+      [1, 'both', 2],
+      [3, 'none', 0],
+      [4, 'none', 0],
+      [6, 'gaps', 1],
+      [2, 'none', 0],
+      [5, 'none', 2],
+    ]);
   });
 
   it('finds the browser task through the help run, or keeps the stored one', () => {
@@ -168,8 +177,12 @@ describe('the digests', () => {
       accounts: ['personal', 'school'],
       shortText: 'One reply, one deadline, one bill and one parcel.',
       items: LATEST_ITEMS,
-      stats: null,
+      stats: DIGEST_STATS[3],
     });
+    expect(getDigest(db, 'latest')!.items.map((each) => each.mail)).toEqual(['person', 'person', 'automated', 'automated']);
+    expect(getDigest(db, 2)!.stats).toEqual(DIGEST_STATS[2]);
+    // a digest of phase 5 has no counts, and its items have no mail kind.
+    expect(getDigest(db, 1)).toMatchObject({ stats: null, items: [expect.not.objectContaining({ mail: expect.anything() })] });
     expect(getDigest(db, 3)?.items.map((each) => each.section)).toEqual(['needs_reply', 'deadlines', 'bills', 'packages']);
     expect(getDigest(db, 2)).toMatchObject({ id: 2, runId: null, items: [] });
     expect(getDigest(db, 9)).toBeUndefined();

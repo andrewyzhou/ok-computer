@@ -183,7 +183,7 @@ describe('the inbox automations', () => {
       'inbox: subscription finder',
     ]);
     const digest = inboxAutomation(db, 'digest')!;
-    expect(digest.schedule).toEqual({ kind: 'cron', expr: '30 7 * * *', tz: TZ });
+    expect(digest.schedule).toEqual({ kind: 'cron', expr: '0 7 * * *', tz: TZ });
     const runJobs = createJobRunner({ db, clock: () => NOW, logger: silentLogger, config: { timeZone: TZ, paths: {} as never }, queue: createRunQueue(), owner: {} as never, agent: {} as never, heartbeat: {} as never, consolidation: {} as never, workshop: {} as never, signal: new AbortController().signal });
     expect(await runJobs(digest)).toEqual({ status: 'skipped', error: 'the inbox jobs need the google integration' });
   });
