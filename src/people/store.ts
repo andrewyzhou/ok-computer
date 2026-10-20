@@ -104,9 +104,10 @@ function atomically<T>(db: Db, work: () => T): T {
 }
 
 // a name of two words or more, compared without case, that exactly one person has: the person that a new address of
-// that name belongs to, when the address is at that person's organization or at a personal domain. otherwise null,
-// and the address makes a new person. a wrong merge joins two people, which is worse than a split, so a name that two
-// people share never attaches.
+// that name belongs to, when the address is at that person's organization and that organization is not a personal
+// domain. otherwise null, and the address makes a new person. a wrong join is worse than a split and cannot be undone,
+// so a name that two people share never attaches, and an address at a personal domain never attaches by name: many
+// people share a common name, and anyone can take an address at gmail. the owner joins those with a merge.
 function attachTarget(db: Db, name: string | null, email: string): number | null {
   if (name === null || name.trim().split(/\s+/).length < 2) return null;
   const rows = withFold(db)
@@ -119,11 +120,11 @@ function attachTarget(db: Db, name: string | null, email: string): number | null
     )
     .all({ name: name.trim() });
   if (rows.length !== 1) return null;
-  const domain = email.slice(email.lastIndexOf('@') + 1);
-  const organization = organizationOf(domain);
+  const organization = organizationOf(email.slice(email.lastIndexOf('@') + 1));
   const target = rows[0]!;
-  if (isPersonalDomain(domain) || (organization !== null && organization.domain === textOrNull(target.organizationDomain))) return count(target.id);
-  return null;
+  const targetDomain = textOrNull(target.organizationDomain);
+  if (organization === null || targetDomain === null || isPersonalDomain(targetDomain)) return null;
+  return organization.domain === targetDomain ? count(target.id) : null;
 }
 
 function recordOne(db: Db, observation: Observation, now: string): Recorded | null {
@@ -231,7 +232,7 @@ function recordOne(db: Db, observation: Observation, now: string): Recorded | nu
 // - the organization: set from the observation when it is not null and the contact is the newest of the person, so
 //   a person who moved to a new company shows the new one. a null organization never clears one.
 // - a new address with a name of two words or more that exactly one person has joins that person (attachTarget),
-//   when it is at that person's organization or at a personal domain.
+//   only when it is at that person's organization. an address at a personal domain never joins by name.
 // - an observation with onlyKnown and a new address writes nothing and gives null.
 export function recordObservation(db: Db, observation: Observation, now: Date): Recorded | null {
   return atomically(db, () => recordOne(db, observation, now.toISOString()));
