@@ -1,5 +1,5 @@
 // the shapes of the autonomy api and of the autonomy store. the page imports them, so this file imports nothing.
-// docs/PHASE6-PLAN.md (track T6) gives the rules, and src/policy/autonomy.ts holds the list of the domains.
+// docs/DESIGN-NEXT.md 13.6 gives the rules, and src/policy/autonomy.ts holds the list of the domains.
 
 // ask: the owner approves each call. review: the reviewer model decides each call, and the owner sees it in the trace.
 // auto: the call runs without a check, and only a domain whose maxLevel is auto allows it. the order of the list is

@@ -2,7 +2,7 @@ import type { AutonomyDomain, AutonomyLevel } from '../dashboard/autonomy-types.
 import { DESK_MAIN_TOOLS, NUDGE_TOOL } from '../desk/names.js';
 import { DOC_WRITE_TOOLS } from '../docs/names.js';
 
-// the trust ladder of phase 6 (docs/PHASE6-PLAN.md, track T6). each domain has one level on top of the policy engine.
+// the trust ladder of phase 6 (docs/DESIGN-NEXT.md 13.6). each domain has one level on top of the policy engine.
 // the default level of each domain gives the same decision as the policy engine gave before the ladder, so nothing
 // gets more freedom until the owner raises a level on the dashboard. the store of the levels is autonomy-store.ts.
 

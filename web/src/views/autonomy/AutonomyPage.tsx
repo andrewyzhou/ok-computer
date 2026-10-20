@@ -17,7 +17,7 @@ import { Button, EmptyState, Page, Section, Skeleton, Table, type Column } from 
 import { changeError, LevelChoice, LevelPill, Legend, RaiseConfirm, rank, TaintNote, When, who } from './parts';
 import './autonomy.css';
 
-// the trust ladder (docs/PHASE6-PLAN.md, track T6). each domain shows its level, and the post of this page is the only
+// the trust ladder (docs/DESIGN-NEXT.md 13.6). each domain shows its level, and the post of this page is the only
 // way to raise one. the agent can lower a level from chat, so the page loads again when a run ends.
 
 const refreshOn = (message: StreamMessage) => message.kind === 'run';
