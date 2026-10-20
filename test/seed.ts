@@ -11,6 +11,7 @@ import { createLogger, silentLogger } from '../src/observability/logger.js';
 import { setChecklist } from '../src/scheduler/heartbeat.js';
 import { handleIn } from '../src/tools/results.js';
 import { createTestApp } from './app-harness.js';
+import { seedDesk } from './seed-desk.js';
 
 export const pdt = (time: string, day = '2026-10-12') => new Date(`${day}T${time}:00-07:00`).toISOString();
 
@@ -117,6 +118,8 @@ export async function seedDashboard(options: Partial<Pick<DashboardDeps, 'token'
   logger.warn('transient model error', { runId: 'run-3' });
   logger.error('model request failed', { runId: 'run-3' });
 
+  // the desk rows of phase 6 t3 (test/seed-desk.ts).
+  seedDesk(t.db, t.clock());
   const dashboard = createDashboard({
     db: t.db,
     config: t.config,

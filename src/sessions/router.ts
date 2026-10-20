@@ -5,6 +5,7 @@ import { parseApprovalButton, type Decision, type ResolvedVia } from '../approva
 import { parseAlwaysButton } from '../approvals/always.js';
 import type { ChannelAdapter, InboundMessage } from '../channels/types.js';
 import type { Db } from '../db/index.js';
+import { DESK_MAIN_TOOLS } from '../desk/names.js';
 import { appendEvent, type EventInput } from '../events/log.js';
 import type { TaintSource } from '../policy/policy.js';
 import { guardDraft } from '../policy/reply.js';
@@ -36,6 +37,7 @@ export const MAIN_TOOLS: readonly string[] = [
   'now',
   'result_read',
   'skill_read',
+  ...DESK_MAIN_TOOLS,
 ];
 export const NO_REPLY = 'NO_REPLY';
 

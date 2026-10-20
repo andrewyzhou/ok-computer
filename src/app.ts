@@ -30,6 +30,7 @@ import { appendToDailyNote, sessionExcerpt } from './memory/daily.js';
 import { createMemoryTools } from './memory/tools.js';
 import { createGoogle, syncGooglePoll, type Google } from './google/google.js';
 import { createInbox, installInboxJobs, type Inbox } from './inbox/inbox.js';
+import { createDesk, DESK_INSTRUCTIONS, installDeskJobs } from './desk/index.js';
 import type { GoogleEndpoints } from './google/accounts.js';
 import { finishDigest, noteFailedDigest, signalDigest, type Digest } from './signals/digest.js';
 import { sessionProfile, type IntegrationEntry } from './integrations/config.js';
@@ -226,6 +227,23 @@ export function createApp(deps: AppDeps): App {
         ...ids,
       })
     : undefined;
+  // the desk of phase 6 t3 needs only the database, so it exists also without google. its follow-up job reads mail
+  // threads and saves nudge drafts only when the google accounts are there.
+  const dashboardUrl = (deps.loginCodes && config.dashboard.publicUrl) || `http://127.0.0.1:${config.dashboard.port}`;
+  const desk = createDesk({
+    db,
+    clock,
+    logger,
+    timeZone: config.timeZone,
+    ...(google ? { google, googleConfig: config.google! } : {}),
+    slots: { call: (...args) => slots.call(...args) },
+    caller: () => caller,
+    owner,
+    deskLink: (id) => `${dashboardUrl}/#/desk?id=${id}`,
+    signal: shutdown.signal,
+    activeRuns,
+    ...ids,
+  });
   // /status shows each google account with the mcp integrations, so the owner can see on the phone that a sign-in works.
   const googleStates = () =>
     google
@@ -310,6 +328,7 @@ export function createApp(deps: AppDeps): App {
       ...integrations.tools,
       ...(google?.tools ?? []),
       ...(inbox?.tools ?? []),
+      ...desk.tools,
     ],
     logger,
     integrations.find,
@@ -344,7 +363,7 @@ export function createApp(deps: AppDeps): App {
       buildStablePrompt({
         workspaceDir: config.paths.workspace,
         timeZone: config.timeZone,
-        ...(sessionKey === MAIN_SESSION ? { memoryPath } : {}),
+        ...(sessionKey === MAIN_SESSION ? { memoryPath, ...(DESK_INSTRUCTIONS ? { extraInstructions: DESK_INSTRUCTIONS } : {}) } : {}),
         ...(sessionTools(sessionKey).includes('skill_read') ? { skillsDir: config.paths.skills } : {}),
         // the heartbeat runs often on a small model, so it gets a light prompt.
         ...(sessionKey.startsWith(HEARTBEAT_PREFIX)
@@ -416,6 +435,7 @@ export function createApp(deps: AppDeps): App {
     workshop: createWorkshop({ db, clock, config, queue, agent, signal: shutdown.signal, ...ids }),
     ...(google ? { sourcePolls: { google: google.poll } } : {}),
     ...(inbox ? { inboxJobs: (job: Parameters<Inbox['runJob']>[0]) => inbox.runJob(job) } : {}),
+    deskJobs: (job) => desk.runJob(job),
     signal: shutdown.signal,
     ...ids,
   });
@@ -538,6 +558,7 @@ export function createApp(deps: AppDeps): App {
       syncPolls(db, entries, clock(), config.timeZone);
       syncGooglePoll(db, config, clock());
       if (inbox && installInboxJobs(db, config, clock())) logger.info('inbox jobs installed');
+      if (installDeskJobs(db, config, clock())) logger.info('desk jobs installed');
       // missed jobs can take minutes, so the start does not wait for them.
       if (deps.background !== false) void scheduler.start().catch((err: unknown) => logger.error('scheduler start failed', { err }));
       // a server can need many seconds to start, so the start does not wait. tool_search reads the stored catalog.

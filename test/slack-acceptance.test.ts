@@ -72,7 +72,8 @@ describe('slack acceptance', () => {
     expect(t.rows('SELECT account, externalId, kind, untrustedSource FROM integration_events')).toEqual([
       { account: 'slack-work', externalId: `${DM_ALICE}:${message.ts}`, kind: 'dm', untrustedSource: 'mcp:slack-work' },
     ]);
-    expect(t.rows('SELECT status, runId, error FROM automation_runs')).toEqual([{ status: 'completed', runId: null, error: null }]);
+    // the desk follow-ups run on the same tick, so the check reads the runs of the poll only.
+    expect(t.rows('SELECT status, runId, error FROM automation_runs WHERE automationId = ?', poll().id)).toEqual([{ status: 'completed', runId: null, error: null }]);
     expect(t.rows('SELECT COUNT(*) AS n FROM model_calls')).toEqual([{ n: 0 }]);
     expect(t.rows('SELECT COUNT(*) AS n FROM runs')).toEqual([{ n: 0 }]);
     expect(fake.calls).toEqual(['slack_read_user_profile', 'slack_search_public_and_private']);

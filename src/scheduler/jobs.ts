@@ -6,7 +6,9 @@ import type { Db } from '../db/index.js';
 import { appendEvent } from '../events/log.js';
 import { checkinPrompt, writeDayResults } from '../goals/routine.js';
 import { getGoal, listGoals, startCheckin } from '../goals/store.js';
+import type { DeskJob } from '../dashboard/desk-types.js';
 import type { InboxJob } from '../dashboard/types.js';
+import { DESK_AUTO_TOOLS } from '../desk/names.js';
 import type { Logger } from '../observability/logger.js';
 import type { TaintSource } from '../policy/policy.js';
 import { sessionTaint } from '../policy/store.js';
@@ -34,6 +36,7 @@ export const AUTOMATION_TOOLS: readonly string[] = [
   'now',
   'result_read',
   'skill_read',
+  ...DESK_AUTO_TOOLS,
 ];
 
 export interface JobDeps {
@@ -54,6 +57,8 @@ export interface JobDeps {
   workshop: (automation: Automation) => Promise<JobResult>;
   // the inbox jobs of phase 5 m8. only an app with a google block has them.
   inboxJobs?: (job: InboxJob) => Promise<JobResult>;
+  // the desk jobs of phase 6 t3.
+  deskJobs?: (job: DeskJob) => Promise<JobResult>;
   signal: AbortSignal;
   newId?: () => string;
 }
@@ -168,6 +173,8 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
       case 'inbox':
         // the config can remove the google block while the automation stays.
         return deps.inboxJobs ? deps.inboxJobs(payload.job) : { status: 'skipped', error: 'the inbox jobs need the google integration' };
+      case 'desk':
+        return deps.deskJobs ? deps.deskJobs(payload.job) : { status: 'skipped', error: 'the desk is not set up in this process' };
     }
   };
 }

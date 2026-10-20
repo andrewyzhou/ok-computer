@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunRow } from '../../src/dashboard/types';
 import { seedDashboard } from '../../test/seed';
+import { tokens } from './format';
 import { setPrefs } from './shell/prefs';
 import { FakeEventSource, inMain, installEventSource, json, openApp as open, stubFetch } from './testing';
 
@@ -286,7 +287,8 @@ describe('the developer pages load against the seeded database', () => {
     setPrefs({ devMode: true });
     open('#/sessions/main');
     expect(await details().findByText('Next request, estimated tokens')).toBeTruthy();
-    expect(await details().findByText(String(view.estimatedTokens))).toBeTruthy();
+    // the page shows a large count as 10.4k, and the tools of each track make the prompt larger.
+    expect(await details().findByText(tokens(view.estimatedTokens))).toBeTruthy();
     expect(details().getByText('system prompt')).toBeTruthy();
   });
 
