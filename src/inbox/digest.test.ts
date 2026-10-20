@@ -192,6 +192,7 @@ describe('runDigest', () => {
         description: 'CS 101 Staff <staff@school.example>: Homework 3 is due Oct 20',
         sourceMessageId: 'm-course',
         sourceSubject: 'Homework 3 is due Oct 20',
+        dueText: null,
       },
       {
         account: 'school',
@@ -203,6 +204,7 @@ describe('runDigest', () => {
         description: 'City Power <bills@power.example>: Your bill of $80.00 is due',
         sourceMessageId: 'm-bill',
         sourceSubject: 'Your bill of $80.00 is due',
+        dueText: null,
       },
     ]);
   });

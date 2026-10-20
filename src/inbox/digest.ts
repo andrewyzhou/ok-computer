@@ -8,16 +8,20 @@ import { sessionTaint } from '../policy/store.js';
 import { MAIN_SESSION } from '../sessions/router.js';
 import { cleanLine } from '../signals/store.js';
 import { headOf } from '../text.js';
-import { localDay, zonedToUtc } from '../time.js';
+import { localDay } from '../time.js';
 import { errorText } from '../tools/registry.js';
 import { wrapIfTainted } from '../tools/untrusted.js';
 import { settleApprovals } from './actions.js';
 import type { InboxContext, JobRun } from './context.js';
+import { checkDue } from './deadlines.js';
 import { checkDrafts, draftReply } from './drafts.js';
 import { extractItems, itemsTool } from './extract.js';
 import { getMessages, listMessages, receivedAt } from './gmail.js';
 import { proposeEvent } from './proposals.js';
 import { mailSource, markRead } from './run.js';
+
+// the due time check moved to deadlines.ts in phase 6. the tests of the digest still import it from here.
+export { parseDue } from './deadlines.js';
 
 // the daily inbox digest: it reads the recent mail of each account, asks a model on the utility slot which mails need
 // a reply, hold a deadline or a bill, or track a package, asks for drafts and calendar proposals, stores the digest
@@ -59,6 +63,10 @@ const TOOL = itemsTool(
     currency: { type: ['string', 'null'], description: 'The currency of a bill as 3 capital letters, or null.' },
     course: { type: 'boolean', description: 'True when the deadline belongs to a course, a class or a school.' },
     title: { type: ['string', 'null'], description: 'A short calendar event title for a deadline or a bill, or null.' },
+    dueText: {
+      type: ['string', 'null'],
+      description: 'The exact words of the mail that state the due date, copied as they are, or null when the mail states no date.',
+    },
   },
   ['section', 'summary'],
 );
@@ -73,6 +81,7 @@ const ITEM = z.object({
   currency: z.string().regex(/^[A-Z]{3}$/).nullish(),
   course: z.boolean().nullish(),
   title: z.string().max(120).nullish(),
+  dueText: z.string().max(300).nullish(),
 });
 type Item = z.infer<typeof ITEM>;
 
@@ -86,33 +95,15 @@ const SYSTEM = [
   '- packages: a shipment or a delivery.',
   'Leave out mail that fits no section. Give at most one item per section for one mail.',
   'Use the id of the mail for each item. Give dueAt with the offset of the mail when it has a time, and an iso date alone when it has none.',
+  'Give dueAt only when the mail states the date, and copy the words that state it into dueText. Never guess a date.',
 ].join('\n');
-
-const DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/i;
-const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
-
-// the due time from the model: a datetime with an offset becomes utc, and a date alone is midnight of that day in
-// the time zone of the app, as an all-day event. a value that does not parse is no due time.
-export function parseDue(value: string | null | undefined, timeZone: string): { at: string; allDay: boolean } | null {
-  if (!value) return null;
-  const text = value.trim();
-  if (DATETIME.test(text)) {
-    const ms = Date.parse(text);
-    return Number.isFinite(ms) ? { at: new Date(ms).toISOString(), allDay: false } : null;
-  }
-  const date = DATE.exec(text);
-  if (!date) return null;
-  // a date such as 2026-02-31 parses to another day, so the check compares the parts.
-  const day = new Date(`${text}T00:00:00Z`);
-  if (!Number.isFinite(day.getTime()) || day.toISOString().slice(0, 10) !== text) return null;
-  return { at: zonedToUtc(text, '00:00', timeZone).toISOString(), allDay: true };
-}
 
 interface Found {
   item: DigestItem;
   allDay: boolean;
   course: boolean;
   title: string | null;
+  dueText: string | null;
   message: gmail_v1.Schema$Message;
 }
 
@@ -153,6 +144,7 @@ export async function runDigest(ctx: InboxContext, run: JobRun): Promise<{ note?
     for (let start = 0; start < messages.length; start += BATCH) {
       const batch = messages.slice(start, start + BATCH);
       const inputs = batch.map((message, index) => ({ id: start + index, text: inputText(message) }));
+      const texts = new Map(inputs.map((each) => [each.id, each.text]));
       const result = await extractItems<Omit<Item, 'id'>>(ctx.slots, {
         slot: 'utility',
         runId: run.runId,
@@ -176,7 +168,7 @@ export async function runDigest(ctx: InboxContext, run: JobRun): Promise<{ note?
         for (const each of items) {
           if (seen.has(each.section)) continue;
           seen.add(each.section);
-          found.push(itemOf(ctx, alias, message, each));
+          found.push(itemOf(ctx, alias, message, each, texts.get(id) ?? ''));
         }
       }
     }
@@ -211,6 +203,7 @@ export async function runDigest(ctx: InboxContext, run: JobRun): Promise<{ note?
           description: `${item.from}: ${item.subject}`,
           sourceMessageId: item.messageId,
           sourceSubject: item.subject,
+          dueText: each.dueText,
         });
       } catch (err) {
         ctx.logger.warn('the inbox calendar proposal failed', { runId: run.runId, messageId: item.messageId, err });
@@ -251,8 +244,9 @@ function inputText(message: gmail_v1.Schema$Message): string {
 
 // the account, the ids, the sender and the subject come from the mail headers, so a model cannot change who wrote a
 // mail. the model gives only the section, the summary and the facts of a bill or a deadline.
-function itemOf(ctx: InboxContext, account: string, message: gmail_v1.Schema$Message, raw: Omit<Item, 'id'>): Found {
-  const due = parseDue(raw.dueAt, ctx.timeZone);
+function itemOf(ctx: InboxContext, account: string, message: gmail_v1.Schema$Message, raw: Omit<Item, 'id'>, text: string): Found {
+  const checked = checkDue({ dueAt: raw.dueAt, dueText: raw.dueText, text, sentAt: receivedAt(message), timeZone: ctx.timeZone });
+  const due = checked.ok ? checked.due : null;
   const bill = raw.section === 'bills';
   const messageId = message.id ?? '';
   return {
@@ -273,6 +267,7 @@ function itemOf(ctx: InboxContext, account: string, message: gmail_v1.Schema$Mes
     allDay: due?.allDay ?? false,
     course: raw.course === true,
     title: raw.title ? cleanLine(raw.title, 120) : null,
+    dueText: due?.dueText ? cleanLine(due.dueText, 200) : null,
     message,
   };
 }

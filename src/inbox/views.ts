@@ -151,6 +151,8 @@ function toSubscription(db: Db, row: Row): SubscriptionRow {
     sourceSubject: text(row.sourceSubject),
     sourceMessageIds: JSON.parse(String(row.sourceMessageIds)) as string[],
     confidence: Number(row.confidence),
+    cadenceSource: row.cadenceSource as SubscriptionRow['cadenceSource'],
+    reasons: JSON.parse(String(row.reasons)) as string[],
     cancelUrl: text(row.cancelUrl),
     state: row.state as SubscriptionState,
     approvalId: num(row.approvalId),
@@ -213,6 +215,7 @@ export function getDigest(db: Db, id: number | 'latest'): InboxDigest | undefine
     accounts: JSON.parse(String(row.accounts)) as string[],
     shortText: String(row.shortText),
     items: JSON.parse(String(row.items)) as DigestItem[],
+    stats: row.stats === null || row.stats === undefined ? null : (JSON.parse(String(row.stats)) as InboxDigest['stats']),
   };
 }
 
@@ -276,6 +279,7 @@ function proposalView(row: Row): CalendarProposalView {
     description: text(row.description),
     sourceMessageId: text(row.sourceMessageId),
     sourceSubject: text(row.sourceSubject),
+    dueText: text(row.dueText),
     state: row.state as CalendarProposalView['state'],
     approvalId: num(row.approvalId),
     eventId: text(row.eventId),

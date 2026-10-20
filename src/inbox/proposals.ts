@@ -19,7 +19,10 @@ export const EVENT_TOOL = 'inbox_create_event';
 
 // a deadline that the digest found. the times are iso with an offset. an all-day event has startAt at midnight in the
 // time zone of the app, and endAt null.
-export type ProposalInput = Pick<CalendarProposalView, 'account' | 'kind' | 'title' | 'startAt' | 'endAt' | 'allDay' | 'description' | 'sourceMessageId' | 'sourceSubject'>;
+// dueText is the words of the mail that state the date, which the digest checked. a caller without them leaves it out.
+export type ProposalInput = Pick<CalendarProposalView, 'account' | 'kind' | 'title' | 'startAt' | 'endAt' | 'allDay' | 'description' | 'sourceMessageId' | 'sourceSubject'> & {
+  dueText?: string | null;
+};
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 // a deadline more than a year ahead is more likely a wrong date than a plan.
@@ -128,8 +131,8 @@ export async function proposeEvent(ctx: InboxContext, run: JobRun, p: ProposalIn
   const description = p.description ? headOf(p.description, DESCRIPTION_LIMIT) : null;
   const inserted = ctx.db
     .prepare(
-      `INSERT INTO inbox_proposals (account, calendarId, kind, title, startAt, endAt, allDay, description, sourceMessageId, sourceSubject, dedupeKey, state, runId, createdAt)
-       VALUES (?, 'primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?)`,
+      `INSERT INTO inbox_proposals (account, calendarId, kind, title, startAt, endAt, allDay, description, sourceMessageId, sourceSubject, dueText, dedupeKey, state, runId, createdAt)
+       VALUES (?, 'primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?)`,
     )
     .run(
       p.account,
@@ -141,6 +144,7 @@ export async function proposeEvent(ctx: InboxContext, run: JobRun, p: ProposalIn
       description,
       p.sourceMessageId,
       p.sourceSubject === null ? null : cleanLine(p.sourceSubject, 500),
+      p.dueText ? cleanLine(p.dueText, 200) : null,
       dedupeKey,
       run.runId,
       now.toISOString(),

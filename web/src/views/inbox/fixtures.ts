@@ -94,6 +94,7 @@ export const digest: InboxDigest = {
       proposalId: null,
     },
   ],
+  stats: null,
 };
 
 export const digests: DigestsPage = {
@@ -165,6 +166,8 @@ function subscription(id: number, values: Partial<SubscriptionRow>): Subscriptio
     sourceSubject: 'Your receipt',
     sourceMessageIds: [`r-${id}`],
     confidence: 0.9,
+    cadenceSource: 'gaps',
+    reasons: [],
     cancelUrl: null,
     state: 'active',
     approvalId: null,
@@ -226,6 +229,7 @@ export function proposal(id: number, values: Partial<CalendarProposalView> = {})
     description: null,
     sourceMessageId: `m-${id}`,
     sourceSubject: 'Homework 6 released',
+    dueText: null,
     state: 'proposed',
     approvalId: null,
     eventId: null,

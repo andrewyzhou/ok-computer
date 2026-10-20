@@ -10,6 +10,9 @@ export interface FakeMessage {
   headers: Record<string, string>;
   snippet?: string;
   body?: string;
+  // the html part of the message. without body the message is html only, as much real mail is. with body the two
+  // parts are the alternatives of one multipart/alternative message.
+  html?: string;
   internalDate?: string;
   // files of the message. each becomes a part with a file name, next to the text part.
   attachments?: Array<{ filename: string; mimeType: string; size: number }>;
@@ -128,22 +131,24 @@ export async function startFakeGoogle(): Promise<FakeGoogle> {
     labelIds: message.labelIds ?? ['INBOX'],
     snippet: message.snippet ?? '',
     internalDate: message.internalDate ?? String(Date.parse(message.headers.Date ?? '2026-10-13T00:00:00Z')),
-    payload: message.attachments?.length
-      ? {
-          mimeType: 'multipart/mixed',
-          headers: Object.entries(message.headers).map(([name, value]) => ({ name, value })),
-          body: { size: 0 },
-          parts: [
-            { mimeType: 'text/plain', filename: '', body: { data: Buffer.from(message.body ?? '').toString('base64url'), size: (message.body ?? '').length } },
-            ...message.attachments.map((file, index) => ({ mimeType: file.mimeType, filename: file.filename, body: { attachmentId: `att${index}`, size: file.size } })),
-          ],
-        }
-      : {
-          mimeType: 'text/plain',
-          headers: Object.entries(message.headers).map(([name, value]) => ({ name, value })),
-          body: { data: Buffer.from(message.body ?? '').toString('base64url'), size: (message.body ?? '').length },
-        },
+    payload: payloadOf(message),
   });
+
+  // the text of a message: a text/plain part, a text/html part, or both as alternatives. files come after the text.
+  const part = (mimeType: string, text: string) => ({ mimeType, filename: '', body: { data: Buffer.from(text).toString('base64url'), size: text.length } });
+  const payloadOf = (message: FakeMessage) => {
+    const headers = Object.entries(message.headers).map(([name, value]) => ({ name, value }));
+    const plain = message.html === undefined || message.body !== undefined ? part('text/plain', message.body ?? '') : undefined;
+    const html = message.html === undefined ? undefined : part('text/html', message.html);
+    const text = plain && html ? { mimeType: 'multipart/alternative', filename: '', body: { size: 0 }, parts: [plain, html] } : (plain ?? html)!;
+    if (!message.attachments?.length) return { ...text, headers };
+    return {
+      mimeType: 'multipart/mixed',
+      headers,
+      body: { size: 0 },
+      parts: [text, ...message.attachments.map((file, index) => ({ mimeType: file.mimeType, filename: file.filename, body: { attachmentId: `att${index}`, size: file.size } }))],
+    };
+  };
 
   const route = async (req: IncomingMessage, res: ServerResponse, url: URL, body: string) => {
     const path = url.pathname;

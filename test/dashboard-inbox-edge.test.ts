@@ -117,7 +117,7 @@ describe('the inbox answers against the contract', () => {
     const digests = await get<DigestsPage>(dashboard, '/api/inbox/digests');
     for (const each of digests.digests) expect(Object.keys(each).sort()).toEqual(['createdAt', 'day', 'id', 'items', 'runId']);
     const latest = await get<InboxDigest>(dashboard, '/api/inbox/digests/latest');
-    expect(Object.keys(latest).sort()).toEqual(['accounts', 'createdAt', 'day', 'id', 'items', 'runId', 'shortText']);
+    expect(Object.keys(latest).sort()).toEqual(['accounts', 'createdAt', 'day', 'id', 'items', 'runId', 'shortText', 'stats']);
     // the items keep the order of the sections.
     const order = ['needs_reply', 'deadlines', 'bills', 'packages'];
     const ranks = latest.items.map((each) => order.indexOf(each.section));

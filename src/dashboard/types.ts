@@ -1,4 +1,7 @@
-// these are the shapes of the dashboard api. the web app imports this file too, so it has no imports.
+// these are the shapes of the dashboard api. the web app imports this file too, so it imports only types, and only
+// from the other type files of src/dashboard, which import nothing.
+
+import type { CadenceSource, DigestStats, MailKind } from './inbox-types.js';
 
 export interface Meta {
   timeZone: string;
@@ -824,6 +827,9 @@ export interface SubscriptionRow {
   sourceMessageIds: string[];
   // 0 to 1: how sure the finder is that the charge repeats. one receipt alone gives a low value.
   confidence: number;
+  // where the cadence comes from, and short sentences that explain the confidence (phase 6 t2).
+  cadenceSource: CadenceSource;
+  reasons: string[];
   cancelUrl: string | null;
   state: SubscriptionState;
   approvalId: number | null;
@@ -856,6 +862,8 @@ export interface DigestItem {
   // the draft reply and the calendar proposal that the job made for the item.
   draftId: number | null;
   proposalId: number | null;
+  // who wrote the mail (phase 6 t2). a digest of phase 5 has no value.
+  mail?: MailKind;
 }
 
 export interface DigestSummary {
@@ -875,6 +883,8 @@ export interface InboxDigest {
   accounts: string[];
   shortText: string;
   items: DigestItem[];
+  // the counts of the digest (phase 6 t2), or null for a digest of phase 5.
+  stats: DigestStats | null;
 }
 
 // newest first. nextCursor is null on the last page.
@@ -918,6 +928,8 @@ export interface CalendarProposalView {
   description: string | null;
   sourceMessageId: string | null;
   sourceSubject: string | null;
+  // the words of the mail that give the date, checked in code (phase 6 t2), or null for a proposal of phase 5.
+  dueText: string | null;
   state: ProposalState;
   approvalId: number | null;
   eventId: string | null;

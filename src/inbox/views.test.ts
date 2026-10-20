@@ -122,6 +122,8 @@ describe('listSubscriptions', () => {
       sourceSubject: 'Your Stream Plus receipt',
       sourceMessageIds: ['r-stream-3', 'r-stream-2', 'r-stream-1'],
       confidence: 0.95,
+      cadenceSource: 'none',
+      reasons: [],
       cancelUrl: 'https://stream.example/cancel',
       state: 'active',
       approvalId: null,
@@ -166,6 +168,7 @@ describe('the digests', () => {
       accounts: ['personal', 'school'],
       shortText: 'One reply, one deadline, one bill and one parcel.',
       items: LATEST_ITEMS,
+      stats: null,
     });
     expect(getDigest(db, 3)?.items.map((each) => each.section)).toEqual(['needs_reply', 'deadlines', 'bills', 'packages']);
     expect(getDigest(db, 2)).toMatchObject({ id: 2, runId: null, items: [] });
@@ -243,6 +246,7 @@ describe('the drafts and the proposals', () => {
       description: 'From the mail "Essay due".',
       sourceMessageId: 'm-essay',
       sourceSubject: 'Essay due',
+      dueText: null,
       state: 'proposed',
       approvalId: 3,
       eventId: null,
