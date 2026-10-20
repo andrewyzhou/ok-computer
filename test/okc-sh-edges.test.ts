@@ -12,7 +12,9 @@ const repo = join(import.meta.dirname, '..');
 const scripts = join(repo, 'scripts');
 const label = 'com.okcomputer.agent';
 const bash = '/bin/bash';
-const which = (name: string) => spawnSync('/bin/sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).stdout.trim();
+// windows has no /bin/sh, and the cases below skip there, so the lookup gives an empty path and does not throw at import.
+const which = (name: string) =>
+  process.platform === 'win32' ? '' : spawnSync('/bin/sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).stdout.trim();
 const realCurl = which('curl');
 
 // the fake agent answers the overview and ends on a shutdown with its token. it ends by itself after a minute.

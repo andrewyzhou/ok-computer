@@ -25,7 +25,9 @@ const scripts = join(repo, 'scripts');
 const label = 'com.okcomputer.agent';
 // macos keeps the bash 3.2 at /bin/bash, and the script must run there.
 const bash = '/bin/bash';
-const which = (name: string) => spawnSync('/bin/sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).stdout.trim();
+// windows has no /bin/sh, and the cases below skip there, so the lookup gives an empty path and does not throw at import.
+const which = (name: string) =>
+  process.platform === 'win32' ? '' : spawnSync('/bin/sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).stdout.trim();
 const realCurl = which('curl');
 const realTail = which('tail');
 

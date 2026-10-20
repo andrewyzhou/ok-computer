@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, posix, resolve, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/load.js';
 import { openDb } from '../db/index.js';
@@ -8,18 +8,20 @@ import { resumeEngines } from '../web/search.js';
 import { hardenProfile, profileBusy, staleLockHint } from './worker.js';
 
 // the usual places of chrome on each platform. a browser login and the browser tests use the first one that exists.
+// each platform joins its paths with its own separator, so the places are right even when the tests ask for another
+// platform than the one they run on.
 export function chromePaths(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): string[] {
   if (platform === 'win32') {
     return [
-      join(env.PROGRAMFILES ?? 'C:/Program Files', 'Google/Chrome/Application/chrome.exe'),
-      join(env['PROGRAMFILES(X86)'] ?? 'C:/Program Files (x86)', 'Google/Chrome/Application/chrome.exe'),
+      win32.join(env.PROGRAMFILES ?? 'C:\\Program Files', 'Google\\Chrome\\Application\\chrome.exe'),
+      win32.join(env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)', 'Google\\Chrome\\Application\\chrome.exe'),
       // a missing folder of the owner would give a relative path, which the check would read against the working folder.
-      ...(env.LOCALAPPDATA ? [join(env.LOCALAPPDATA, 'Google/Chrome/Application/chrome.exe')] : []),
+      ...(env.LOCALAPPDATA ? [win32.join(env.LOCALAPPDATA, 'Google\\Chrome\\Application\\chrome.exe')] : []),
     ];
   }
   if (platform === 'darwin') {
     const app = 'Google Chrome.app/Contents/MacOS/Google Chrome';
-    return [join('/Applications', app), ...(env.HOME ? [join(env.HOME, 'Applications', app)] : [])];
+    return [posix.join('/Applications', app), ...(env.HOME ? [posix.join(env.HOME, 'Applications', app)] : [])];
   }
   // google chrome has no arm64 build for linux, and some distros ship only chromium, so chromium comes after chrome.
   return ['/opt/google/chrome/chrome', '/usr/bin/google-chrome-stable', '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
