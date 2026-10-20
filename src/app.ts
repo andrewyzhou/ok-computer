@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { assistantInstructions } from './agent/assistant-prompt.js';
 import { createDelegateTool, PROFILES, profileOf, SUBAGENT_INSTRUCTIONS } from './agent/delegate.js';
 import { runAgent, type AgentDeps } from './agent/loop.js';
 import { closeStaleWork, interruptedText, repairSession, replyLost } from './agent/recovery.js';
@@ -34,7 +35,7 @@ import { createDocComments, type DocComments } from './docs/comments.js';
 import { createDocTools } from './docs/tools.js';
 import { createGoogle, syncGooglePoll, type Google } from './google/google.js';
 import { createInbox, installInboxJobs, type Inbox } from './inbox/inbox.js';
-import { createDesk, DESK_INSTRUCTIONS, installDeskJobs } from './desk/index.js';
+import { createDesk, installDeskJobs } from './desk/index.js';
 import { createPeopleTools, peopleToolsFor } from './people/tools.js';
 import type { GoogleEndpoints } from './google/accounts.js';
 import { finishDigest, noteFailedDigest, signalDigest, type Digest } from './signals/digest.js';
@@ -391,11 +392,16 @@ export function createApp(deps: AppDeps): App {
     logger,
     config,
     clock,
-    stablePrompt: (sessionKey) =>
-      buildStablePrompt({
+    stablePrompt: (sessionKey) => {
+      // the owner chat and the automations get the instructions of the desk, the docs, the people and the brief, as
+      // one set with only the parts whose tools the session has. the light sessions below get their own.
+      const light = [HEARTBEAT_PREFIX, CONSOLIDATION_PREFIX, WORKSHOP_PREFIX, 'sub:'].some((prefix) => sessionKey.startsWith(prefix));
+      const assistant = light ? '' : assistantInstructions(withIntegrations(sessionKey, sessionTools(sessionKey)));
+      return buildStablePrompt({
         workspaceDir: config.paths.workspace,
         timeZone: config.timeZone,
-        ...(sessionKey === MAIN_SESSION ? { memoryPath, ...(DESK_INSTRUCTIONS ? { extraInstructions: DESK_INSTRUCTIONS } : {}) } : {}),
+        ...(sessionKey === MAIN_SESSION ? { memoryPath } : {}),
+        ...(assistant ? { extraInstructions: assistant } : {}),
         ...(sessionTools(sessionKey).includes('skill_read') ? { skillsDir: config.paths.skills } : {}),
         // the heartbeat runs often on a small model, so it gets a light prompt.
         ...(sessionKey.startsWith(HEARTBEAT_PREFIX)
@@ -407,7 +413,8 @@ export function createApp(deps: AppDeps): App {
         ...(sessionKey.startsWith(WORKSHOP_PREFIX) ? { personaFiles: ['USER.md'], extraInstructions: WORKSHOP_INSTRUCTIONS } : {}),
         // a sub-agent needs no persona and no facts about the owner for its task, so it gets none.
         ...(sessionKey.startsWith('sub:') ? { personaFiles: [], extraInstructions: SUBAGENT_INSTRUCTIONS } : {}),
-      }),
+      });
+    },
     contextLines: (now) => scheduleContext(db, now, config.timeZone),
     activeRuns,
     ...ids,
