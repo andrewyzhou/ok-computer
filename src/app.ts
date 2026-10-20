@@ -403,9 +403,10 @@ export function createApp(deps: AppDeps): App {
         ...(sessionKey === MAIN_SESSION ? { memoryPath } : {}),
         ...(assistant ? { extraInstructions: assistant } : {}),
         ...(sessionTools(sessionKey).includes('skill_read') ? { skillsDir: config.paths.skills } : {}),
-        // the heartbeat runs often on a small model, so it gets a light prompt.
+        // the heartbeat runs often on a small model, so it gets a light prompt. it keeps SOUL.md, because its
+        // notifications go to the owner.
         ...(sessionKey.startsWith(HEARTBEAT_PREFIX)
-          ? { personaFiles: ['USER.md'], extraInstructions: HEARTBEAT_INSTRUCTIONS }
+          ? { personaFiles: ['SOUL.md', 'USER.md'], extraInstructions: HEARTBEAT_INSTRUCTIONS }
           : {}),
         ...(sessionKey.startsWith(CONSOLIDATION_PREFIX)
           ? { personaFiles: ['USER.md'], extraInstructions: CONSOLIDATION_INSTRUCTIONS }

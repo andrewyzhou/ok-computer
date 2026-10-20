@@ -46,11 +46,11 @@ describe('buildStablePrompt', () => {
 
   it('keeps the total of all files under the total cap', () => {
     const big = 'b'.repeat(FILE_CAP);
-    const dir = workspace({ 'AGENTS.md': big, 'SOUL.md': big, 'IDENTITY.md': big, 'USER.md': big });
-    const prompt = buildStablePrompt({ workspaceDir: dir, timeZone: 'UTC' });
+    const dir = workspace({ 'SOUL.md': big, 'AGENTS.md': big, 'USER.md': big, 'MEMORY.md': big });
+    const prompt = buildStablePrompt({ workspaceDir: dir, timeZone: 'UTC', memoryPath: join(dir, 'MEMORY.md') });
     const fileChars = (prompt.match(/b{100,}/g) ?? []).reduce((sum, run) => sum + run.length, 0);
     expect(fileChars).toBe(TOTAL_CAP);
-    expect(prompt).toContain(`## USER.md\n\n[this file was left out because the workspace files are over ${TOTAL_CAP}`);
+    expect(prompt).toContain(`## MEMORY.md\n\n[this file was left out because the workspace files are over ${TOTAL_CAP}`);
   });
 
   it('gives the same text for the same files', () => {

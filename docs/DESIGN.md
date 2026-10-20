@@ -51,8 +51,8 @@ Add a dependency only when it removes real work. Prefer the standard library.
 ok-computer/
   README.md               overview, decisions, TODO (later)
   docs/DESIGN.md          this document
-  workspace/              persona files: AGENTS.md, SOUL.md, IDENTITY.md, and a local USER.md
-    AGENTS.md SOUL.md IDENTITY.md USER.md
+  workspace/              persona files: SOUL.md, AGENTS.md, and a local USER.md
+    SOUL.md AGENTS.md USER.md
   skills/                 skill folders, each with a SKILL.md
   src/
     main.ts               process entry: load config, open db, start channels, scheduler, dashboard
@@ -220,7 +220,7 @@ Decisions from M1:
 
 Built in two parts so prompt caching works:
 
-- **Stable part** (cached): base instructions for OK Computer, the persona files from `workspace/` (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`), `MEMORY.md` (main session only), the skills index, and tool descriptions. Per-file cap 20,000 characters, total cap 60,000; truncated files get a note that tells the model to read the file directly.
+- **Stable part** (cached): base instructions for OK Computer, the persona files from `workspace/` (`SOUL.md`, `AGENTS.md`, `USER.md`), `MEMORY.md` (main session only), the skills index, and tool descriptions. Per-file cap 20,000 characters, total cap 60,000; truncated files get a note that tells the model to read the file directly.
 - **Volatile part**: current time in the owner's time zone, the channel, today's goals with status, and the next three scheduled automations (not the heartbeat). It is not in the system prompt, because a system prompt that changes every run breaks the cache and the thinking blocks. The agent loop records it as a `context` event at the start of each run, and the strategy renders it as a `<context>` text block in that run's user turn.
 
 Tool descriptions travel in the provider's `tools` parameter, not in the stable text.

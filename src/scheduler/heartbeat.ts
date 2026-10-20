@@ -27,7 +27,7 @@ const SYNCED_EVERY = 'heartbeat_synced_every_ms';
 const UNSENT_RUNS = 'heartbeat_unsent_runs';
 const RECENT_LIMIT = 5;
 
-export const HEARTBEAT_INSTRUCTIONS = `This is a heartbeat run. The owner does not see this session. Check the items of the heartbeat checklist against the context that you have. Then call heartbeat_respond one time. Use notify true with a short message only when something needs the owner's attention now. Use notify false in all other cases. Do not repeat a recent notification. After heartbeat_respond, reply NO_REPLY.`;
+export const HEARTBEAT_INSTRUCTIONS = `This is a heartbeat run. The owner does not see this session. Check the items of the heartbeat checklist against the context that you have. Then call heartbeat_respond one time. Use notify true with a short message only when something needs the owner's attention now, and write that message the way SOUL.md says to text. Use notify false in all other cases. Do not repeat a recent notification. After heartbeat_respond, reply NO_REPLY.`;
 
 export function getChecklist(db: Db): string {
   return getSetting<string>(db, CHECKLIST) ?? '';

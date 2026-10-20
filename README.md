@@ -2,7 +2,7 @@
 
 An always-on personal AI agent that lives on your own computer and texts you through the day. Say "OK Computer" and it gets to work: it asks for your daily goals and holds you to them, watches your email, calendar and messages for things you might forget, browses the web for you, and does bigger jobs (inbox and subscription cleanup) on request. Anything that sends, pays, deletes or unsubscribes waits for your tap.
 
-It runs on your machine, so your data stays with you. Its persona files (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, and a local, gitignored `USER.md`) live in [workspace/](workspace/). The full system design is in [docs/DESIGN.md](docs/DESIGN.md).
+It runs on your machine, so your data stays with you. Its persona files (`SOUL.md` for who it is, `AGENTS.md` for how the job runs, and a local, gitignored `USER.md`) live in [workspace/](workspace/). The full system design is in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Decisions so far
 

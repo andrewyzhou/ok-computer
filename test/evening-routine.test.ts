@@ -51,7 +51,7 @@ describe('the evening goals routine', () => {
     // the reminder at 21:00 stops without a model call, and the essay check-in runs at the same time.
     await t.at(pdt('21:00'));
     expect(t.printed()).toContain('okc> Is the essay done?');
-    expect(JSON.stringify(t.model.calls[4]!.messages.at(-1))).toContain('Check in on goal #1 \\"finish essay\\" (ETA 21:00)');
+    expect(JSON.stringify(t.model.calls[4]!.messages.at(-1))).toContain('check in on goal #1 \\"finish essay\\" (ETA 21:00)');
     await t.say('not yet, give me until 21:30');
     expect(t.printed()).toContain('okc> OK, I will check again at 21:30.');
 

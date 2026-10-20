@@ -10,14 +10,14 @@ const INSTALLED = 'goals_routine_installed';
 const RESULTS_WRITTEN = 'goals_results_written';
 
 export const ASK_PROMPT =
-  "It is time for the evening goals question. Ask the owner for today's three goals and an ETA for each. Keep it short and friendly. When the owner answers, save the goals with goals_set.";
+  "It's evening. Ask what they want to get done tomorrow, in one short line. Don't ask for times or a number of goals. When they answer, save it for that day with goals_set and pick a sensible time for anything they didn't time.";
 
 export const REMIND_PROMPT =
-  "The owner has not shared today's goals. Send one short line that they can share them if they want; do not mention earlier reminders.";
+  "They haven't sent tomorrow's plan yet. Send one short, easy line about it. Don't call it a reminder and don't bring up the earlier message.";
 
 export function checkinPrompt(goal: Goal, timeZone: string): string {
   const eta = goal.eta ? ` (ETA ${localTime(new Date(goal.eta), timeZone)})` : '';
-  return `Check in on goal #${goal.id} "${goal.title}"${eta} in one line. Record the answer with goal_update: done, a new eta if the owner gives one, or dropped. Do not ask for a reason.`;
+  return `Time to check in on goal #${goal.id} "${goal.title}"${eta}. Ask in a few words, the way a person would, and call it by what it is, not its number. Record the answer with goal_update: done, a new ETA if they give one, or dropped. Don't ask why.`;
 }
 
 export const dailyCron = (time: string) => {
