@@ -1,9 +1,10 @@
+import type { DigestStats } from '../../../../src/dashboard/inbox-types';
 import type { DigestItem, DigestSection, DigestsPage, InboxDigest } from '../../../../src/dashboard/types';
 import { useApi } from '../../api';
 import { longDay, time } from '../../format';
 import type { RouteProps } from '../../routes';
 import { Badge, ButtonLink, Count, DetailsPanel, EmptyState, isNotFound, NotFound, Page, Section, Skeleton } from '../../ui';
-import { LoadMore, money, refreshInbox, RunJob, usePaged, withQuery } from './shared';
+import { AccountBadge, LoadMore, money, refreshInbox, RunJob, usePaged, withQuery } from './shared';
 import './inbox.css';
 
 // the daily digest of the inbox: the mail that needs a reply, the deadlines, the bills and the packages, with links
@@ -21,7 +22,9 @@ function Item({ item }: { item: DigestItem }) {
     <li className="inbox-item">
       <div className="inbox-item-head">
         <strong className="inbox-item-from">{item.from}</strong>
-        <Badge tone="muted">{item.account}</Badge>
+        <AccountBadge account={item.account} />
+        {/* a deadline, a bill or a package that a machine sent says so, so the owner knows that no person wrote it. */}
+        {item.mail === 'automated' && item.section !== 'needs_reply' ? <Badge tone="muted">automated</Badge> : null}
       </div>
       <p className="inbox-item-subject">{item.subject}</p>
       <p className="inbox-item-summary">{item.summary}</p>
@@ -35,9 +38,41 @@ function Item({ item }: { item: DigestItem }) {
   );
 }
 
+// the accounts that the digest read, with the mail it hid, an account that had more mail than the read limit, and an
+// account that it could not read. a digest of phase 5 has no stats and shows none of this.
+function Coverage({ stats }: { stats: DigestStats }) {
+  const hidden = stats.accounts.reduce((sum, account) => sum + account.hidden, 0);
+  return (
+    <div className="inbox-coverage">
+      <ul className="inbox-coverage-list" aria-label="accounts in this digest">
+        {stats.accounts.map((account) => (
+          <li key={account.alias} className="inbox-coverage-item" data-testid={`coverage-${account.alias}`}>
+            <AccountBadge account={account.alias} />
+            {account.error !== null ? (
+              <span className="error-text">Not read: {account.error}</span>
+            ) : (
+              <>
+                <span>{account.capped ? `${account.read} of ${account.listed} read` : `${account.read} read`}</span>
+                <span className="muted">{account.hidden} hidden</span>
+                {account.capped ? (
+                  <Badge tone="warning" title={`The digest read only the newest ${account.read} of ${account.listed} messages.`}>
+                    more mail than the limit
+                  </Badge>
+                ) : null}
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="inbox-coverage-hidden">{hidden === 1 ? '1 automated or list mail hidden' : `${hidden} automated or list mails hidden`}</p>
+    </div>
+  );
+}
+
 function DigestBody({ digest }: { digest: InboxDigest }) {
   return (
     <>
+      {digest.stats ? <Coverage stats={digest.stats} /> : null}
       {SECTIONS.map((section) => {
         const items = digest.items.filter((item) => item.section === section.id);
         return (

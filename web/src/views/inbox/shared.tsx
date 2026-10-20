@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import type { ApprovalRow, InboxActionResponse, InboxJob, StreamMessage } from '../../../../src/dashboard/types';
 import { api, send, useApi, type Loaded } from '../../api';
 import { time } from '../../format';
-import { ApprovalCard, Badge, Button, type Tone } from '../../ui';
+import { ApprovalCard, Badge, Button, type Column, type Tone } from '../../ui';
 
 // the parts that the five inbox views share: the reload rule, the hash query, the paging of a list, the money of a
 // row, the run of a job and the approval that an action waits for.
@@ -106,6 +106,33 @@ export function day(iso: string | null | undefined): string {
 // new words.
 export function StateBadge({ value, tones, labels }: { value: string; tones: Record<string, Tone>; labels?: Record<string, string> }) {
   return <Badge tone={tones[value] ?? 'muted'}>{labels?.[value] ?? value.replace(/_/g, ' ')}</Badge>;
+}
+
+// the account of a row, as the api names it. the owner has more than one account, so each row says which one it came
+// from, also when only one account is configured. a long name is cut with an ellipsis, and the title holds all of it.
+export function AccountBadge({ account }: { account: string }) {
+  return (
+    <span className="inbox-account" data-account={account}>
+      <Badge tone="muted" title={`account ${account}`}>
+        <span className="inbox-account-text">{account}</span>
+      </Badge>
+    </span>
+  );
+}
+
+// the account under the name of a row. it shows only below md, where the account column of the table is hidden, so
+// each width shows the account once.
+export function AccountBelowMd({ account }: { account: string }) {
+  return (
+    <span className="inbox-below-md">
+      <AccountBadge account={account} />
+    </span>
+  );
+}
+
+// the account column of a table. it hides below md, where AccountBelowMd takes its place.
+export function accountColumn<T extends { account: string }>(): Column<T> {
+  return { key: 'account', header: 'Account', hideBelow: 'md', cell: (row) => <AccountBadge account={row.account} /> };
 }
 
 export function RunLink({ runId, children }: { runId: string | null; children?: ReactNode }) {

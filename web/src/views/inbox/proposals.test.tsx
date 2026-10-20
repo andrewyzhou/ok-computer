@@ -108,4 +108,15 @@ describe('the calendar proposals', () => {
     openApp('#/inbox/proposals');
     expect(await inMain().findByText('No proposals wait for you.')).toBeTruthy();
   });
+
+  it('shows the words of the mail that give the date in the details, and nothing when there are none', async () => {
+    const withText = [proposal(31, { title: 'Homework 6 due', dueText: 'due on Friday, October 24 at 11:59 pm' }), proposal(32, { title: 'Club dues' })];
+    stubFetch(seeded.dashboard, { 'GET /api/inbox/proposals': () => withText });
+    openApp('#/inbox/proposals?id=31');
+    const panel = within(document.querySelector('.details') as HTMLElement);
+    expect(await panel.findByText('The mail says: “due on Friday, October 24 at 11:59 pm”')).toBeTruthy();
+    location.hash = '#/inbox/proposals?id=32';
+    await panel.findByRole('heading', { name: 'Club dues' });
+    expect(panel.queryByText(/The mail says/)).toBeNull();
+  });
 });

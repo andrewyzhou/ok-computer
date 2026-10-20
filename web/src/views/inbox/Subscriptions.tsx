@@ -1,10 +1,11 @@
 import { useState } from 'react';
+import type { CadenceSource } from '../../../../src/dashboard/inbox-types';
 import type { SubscriptionRow, SubscriptionsPage as SubscriptionsData, SubscriptionState } from '../../../../src/dashboard/types';
 import { useApi } from '../../api';
 import { percent, time } from '../../format';
 import type { RouteProps } from '../../routes';
-import { Button, DetailsPanel, EmptyState, Facts, FilterBar, Page, Select, Skeleton, Stat, Stats, Table, type Column, type Tone } from '../../ui';
-import { ApprovalFor, day, ExternalLink, LastRun, PendingAnswers, refreshInbox, RowNote, RunJob, StateBadge, money, setHashQuery, useApprovals, useRowActions, withQuery } from './shared';
+import { Badge, Button, DetailsPanel, EmptyState, Facts, FilterBar, Page, Select, Skeleton, Stat, Stats, Table, type Column, type Tone } from '../../ui';
+import { AccountBadge, accountColumn, ApprovalFor, day, ExternalLink, LastRun, PendingAnswers, refreshInbox, RowNote, RunJob, StateBadge, money, setHashQuery, useApprovals, useRowActions, withQuery } from './shared';
 import './inbox.css';
 
 // the paid subscriptions that the scan found in the receipts. cancel waits for the owner's approval, and each step of
@@ -21,6 +22,31 @@ const STATES: Array<{ value: SubscriptionState; label: string }> = [
 
 const STATE_TONE: Record<SubscriptionState, Tone> = { active: 'info', cancel_pending: 'warning', cancelled: 'good', ignored: 'muted' };
 
+// where the cadence comes from, in words.
+export const CADENCE_SOURCE: Record<CadenceSource, string> = {
+  stated: 'stated on the receipt',
+  gaps: 'from the charge dates',
+  both: 'stated and confirmed by the dates',
+  none: 'unknown',
+};
+
+// how sure the finder is that the charge repeats, as a word and a tone: low below 0.5, medium from 0.5 to 0.8, and
+// high from 0.8 up. the percent shows next to the word, so the owner sees the number that the word stands for.
+export function confidenceBand(confidence: number): { label: 'low' | 'medium' | 'high'; tone: Tone } {
+  if (confidence >= 0.8) return { label: 'high', tone: 'good' };
+  if (confidence >= 0.5) return { label: 'medium', tone: 'info' };
+  return { label: 'low', tone: 'warning' };
+}
+
+export function Confidence({ value }: { value: number }) {
+  const band = confidenceBand(value);
+  return (
+    <Badge tone={band.tone} title={`confidence ${percent(value)}`}>
+      {band.label} {percent(value)}
+    </Badge>
+  );
+}
+
 function SubscriptionFacts({ row, approvals, onDecided }: { row: SubscriptionRow; approvals: ReturnType<typeof useApprovals>; onDecided: () => void }) {
   return (
     <>
@@ -30,6 +56,7 @@ function SubscriptionFacts({ row, approvals, onDecided }: { row: SubscriptionRow
           { label: 'State', value: <StateBadge value={row.state} tones={STATE_TONE} /> },
           { label: 'Account', value: row.account },
           { label: 'Amount', value: `${money(row.amount, row.currency)}, ${row.cadence}` },
+          { label: 'Cadence', value: CADENCE_SOURCE[row.cadenceSource] ?? row.cadenceSource },
           { label: 'Last charge', value: time(row.lastChargeAt) },
           { label: 'Next charge', value: time(row.nextChargeAt) },
           { label: 'Cancel link', value: row.cancelUrl ? <ExternalLink href={row.cancelUrl} /> : <span className="muted">none found</span> },
@@ -38,7 +65,19 @@ function SubscriptionFacts({ row, approvals, onDecided }: { row: SubscriptionRow
           { label: 'Source message', value: <code>{row.sourceMessageId}</code> },
           // the finder tells why a row is there: how many receipts it read, and how sure it is that the charge repeats.
           { label: 'Receipts', value: `${row.sourceMessageIds.length} ${row.sourceMessageIds.length === 1 ? 'receipt' : 'receipts'}` },
-          { label: 'Confidence', value: percent(row.confidence) },
+          { label: 'Confidence', value: <Confidence value={row.confidence} /> },
+          {
+            label: 'Why',
+            value: row.reasons.length ? (
+              <ul className="inbox-reasons" aria-label="reasons">
+                {row.reasons.map((reason, index) => (
+                  <li key={index}>{reason}</li>
+                ))}
+              </ul>
+            ) : (
+              <span className="muted">no reasons given</span>
+            ),
+          },
           { label: 'Updated', value: time(row.updatedAt) },
         ]}
       />
@@ -63,6 +102,9 @@ export function SubscriptionsPage({ query }: RouteProps) {
   };
   const { answers, act, clear } = useRowActions(reload);
   const [selected, setSelected] = useState<number | null>(null);
+  // a row with confidence 0 found no charge that repeats, so it is most likely a one-time purchase. such rows are
+  // hidden until the owner asks for them. the monthly totals come from the server and do not change with this.
+  const [showOnce, setShowOnce] = useState(false);
   // the accounts come from the rows of the first answer without a filter, so a filter does not take its own choice
   // out of the list.
   const [accounts, setAccounts] = useState<string[]>([]);
@@ -70,6 +112,8 @@ export function SubscriptionsPage({ query }: RouteProps) {
   const rows = data?.subscriptions ?? [];
   const seen = [...new Set([...accounts, ...rows.map((row) => row.account), ...(account ? [account] : [])])].sort();
   if (seen.length !== accounts.length) setAccounts(seen);
+  const once = rows.filter((each) => each.confidence === 0).length;
+  const shown = showOnce ? rows : rows.filter((each) => each.confidence !== 0);
   const row = rows.find((each) => each.id === selected);
   const filter = (key: string) => (value: string) => setHashQuery(PATH, query, { [key]: value });
   const base = (id: number) => `/api/inbox/subscriptions/${id}`;
@@ -103,9 +147,14 @@ export function SubscriptionsPage({ query }: RouteProps) {
         <div className="inbox-name">
           <span>{each.merchant}</span>
           {each.sourceSubject ? <span className="muted small">{each.sourceSubject}</span> : null}
+          <span className="inbox-below-md inbox-cell-badges">
+            <AccountBadge account={each.account} />
+            <Confidence value={each.confidence} />
+          </span>
         </div>
       ),
     },
+    accountColumn<SubscriptionRow>(),
     {
       key: 'amount',
       header: 'Amount',
@@ -114,12 +163,13 @@ export function SubscriptionsPage({ query }: RouteProps) {
         <div className="inbox-amount-cell">
           <span>{money(each.amount, each.currency)}</span>
           <span className="muted small">{each.cadence}</span>
+          {each.nextChargeAt ? <span className="muted small">next {day(each.nextChargeAt)}</span> : null}
         </div>
       ),
     },
-    { key: 'last', header: 'Last charge', hideBelow: 'md', cell: (each) => <span className="inbox-nowrap">{day(each.lastChargeAt)}</span> },
-    { key: 'next', header: 'Next charge', hideBelow: 'sm', cell: (each) => <span className="inbox-nowrap">{day(each.nextChargeAt)}</span> },
-    { key: 'confidence', header: 'Confidence', align: 'end', hideBelow: 'md', cell: (each) => percent(each.confidence) },
+    // the next charge shows under the amount, and the last charge and the source of the cadence show in the details
+    // panel, so the table has room for the account and the confidence next to the details panel.
+    { key: 'confidence', header: 'Confidence', align: 'end', hideBelow: 'md', cell: (each) => <Confidence value={each.confidence} /> },
     { key: 'state', header: 'State', cell: (each) => <StateBadge value={each.state} tones={STATE_TONE} /> },
     { key: 'actions', header: <span className="sr-only">Actions</span>, hideBelow: 'sm', cell: actionsFor },
   ];
@@ -133,6 +183,13 @@ export function SubscriptionsPage({ query }: RouteProps) {
         <FilterBar label="subscription filters">
           <Select label="account" value={account} options={accounts} allLabel="all" onChange={filter('account')} />
           <Select label="state" value={state} options={STATES} allLabel="all" onChange={filter('state')} />
+          {once || showOnce ? (
+            <label className="toggle">
+              <input type="checkbox" checked={showOnce} onChange={(event) => setShowOnce(event.target.checked)} />
+              <span>Show rows with no repeating charge</span>
+              <span className="muted">({once})</span>
+            </label>
+          ) : null}
         </FilterBar>
       }
     >
@@ -148,19 +205,27 @@ export function SubscriptionsPage({ query }: RouteProps) {
             ) : (
               <Stat label="Per month" value="-" note="no known amounts yet" />
             )}
-            <Stat label="Subscriptions" value={rows.length} note={account || state ? 'with these filters' : 'all found'} />
+            <Stat
+              label="Subscriptions"
+              value={shown.length}
+              note={once && !showOnce ? `${once} with no repeating charge hidden` : account || state ? 'with these filters' : 'all found'}
+            />
           </Stats>
           <PendingAnswers answers={answers} rows={rows} name={(each) => each.merchant} approvals={approvals} onDecided={reload} clear={clear} />
           <Table
             label="subscriptions"
             columns={columns}
-            rows={rows}
+            rows={shown}
             rowKey={(each) => String(each.id)}
             selected={selected === null ? null : String(selected)}
             onSelect={(each) => setSelected(each.id === selected ? null : each.id)}
             empty={
-              <EmptyState icon="subscription" title="No subscriptions found yet.">
-                {account || state ? 'No subscription matches these filters.' : 'The scan reads the receipts in the mail and lists the paid subscriptions here.'}
+              <EmptyState icon="subscription" title={rows.length ? 'No repeating charges found.' : 'No subscriptions found yet.'}>
+                {rows.length
+                  ? 'The scan found only charges that do not repeat. Show the rows with no repeating charge to see them.'
+                  : account || state
+                    ? 'No subscription matches these filters.'
+                    : 'The scan reads the receipts in the mail and lists the paid subscriptions here.'}
               </EmptyState>
             }
           />

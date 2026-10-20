@@ -290,3 +290,85 @@
 .inbox-nowrap {
   white-space: nowrap;
 }
+
+/* the account of a row. the badge never grows wider than its cell, and a long name ends in an ellipsis. */
+.inbox-account {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+}
+.inbox-account .badge {
+  max-width: 100%;
+  min-width: 0;
+}
+.inbox-account-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inbox-name .inbox-below-md,
+.inbox-cell-badges {
+  margin-top: 4px;
+}
+/* the account under the name shows only where the account column is hidden. the table hides that column below
+   1100px, so this shows below the same width. */
+.inbox-below-md {
+  display: none;
+}
+@media (max-width: 1099.98px) {
+  .inbox-below-md {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    max-width: 100%;
+  }
+}
+
+/* the accounts that one digest read, with the mail it hid and the accounts it could not read. */
+.inbox-coverage {
+  margin-bottom: var(--space-2);
+}
+.inbox-coverage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.inbox-coverage-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+/* the badges line up, so the counts of the accounts start at the same place. */
+.inbox-coverage-item > .inbox-account {
+  min-width: 76px;
+}
+.inbox-coverage-item .error-text {
+  overflow-wrap: anywhere;
+}
+.inbox-coverage-hidden {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.inbox-reasons {
+  margin: 0;
+  padding-left: 1.2em;
+}
+.inbox-reasons li + li {
+  margin-top: 4px;
+}
+.inbox-due-text {
+  margin: 0 0 var(--space-2);
+  padding: 10px 12px;
+  background: var(--bg-sunken);
+  border-radius: var(--radius-md);
+  overflow-wrap: anywhere;
+}
