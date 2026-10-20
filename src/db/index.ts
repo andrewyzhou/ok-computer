@@ -10,6 +10,12 @@ export function openDb(path: string, migrationsDir = MIGRATIONS_DIR): Db {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+  // with the default synchronous mode each commit flushes the wal to disk. a flush on windows took about 5 ms on an
+  // idle disk and much longer on a busy one, against well under 0.1 ms on macos, so a poll that writes a row for each
+  // request and each mail spent seconds on flushes. in wal mode, normal flushes at each checkpoint instead. the
+  // database stays whole after a crash of the app or of the system, and only the last commits before a power loss can
+  // be lost.
+  if (process.platform === 'win32') db.exec('PRAGMA synchronous = NORMAL;');
   migrate(db, migrationsDir);
   return db;
 }
