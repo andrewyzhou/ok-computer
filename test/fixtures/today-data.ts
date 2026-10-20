@@ -191,7 +191,7 @@ export const BRIEF_CONTENT: BriefContent = {
     {
       kind: 'day',
       title: 'Today',
-      note: '10 events, the first at 07:00.',
+      note: '10 events, the first at 09:00.',
       items: [
         eventItem('personal/primary/birthday', "Mom's birthday", 'All day'),
         eventItem('personal/primary/run', 'Run with Sam', '07:00 to 07:45 · Memorial Glade'),
@@ -209,7 +209,7 @@ export const BRIEF_CONTENT: BriefContent = {
       kind: 'conflicts',
       title: 'Conflicts',
       note: null,
-      items: [eventItem('school/primary/advisor', 'Advisor 1:1 overlaps Dentist', '14:15 to 14:30', 'critical')],
+      items: [{ ...eventItem('school/primary/advisor', 'Advisor 1:1 overlaps Dentist', '14:15 to 14:30', 'critical'), id: 'conflict:school/primary/advisor|personal/primary/dentist' }],
     },
     {
       kind: 'travel',
@@ -275,7 +275,7 @@ export const BRIEF_FULL: Brief = {
   createdAt: TODAY_NOW,
   shortText: [
     'Brief for Mon 12 Oct',
-    '10 events, first at 07:00 Run with Sam.',
+    '10 events, first at 09:00 Lab meeting.',
     '1 conflict, 1 tight move, 2 invitations to answer.',
     '3 deadlines this week. Inbox: 2 need a reply, 1 bill, 1 package.',
     '2 delegations, 2 goals.',
@@ -292,7 +292,7 @@ export const BRIEF_QUIET: Brief = {
   day: '2026-10-11',
   runId: 'run-brief-1',
   createdAt: '2026-10-11T14:30:00.000Z',
-  shortText: 'Brief for Sun 11 Oct\nNo events today.\nhttp://127.0.0.1:7777/#/today/2026-10-11',
+  shortText: 'Brief for Sun 11 Oct\nNo calendar: Google is not set up.\nhttp://127.0.0.1:7777/#/today/2026-10-11',
   content: {
     day: '2026-10-11',
     timeZone: TODAY_TZ,

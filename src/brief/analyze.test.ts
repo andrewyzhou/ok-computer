@@ -144,10 +144,13 @@ describe('eventsOfDay', () => {
 });
 
 describe('findConflicts', () => {
+  // an accepted meeting with other people.
+  const accepted = { answer: 'accepted' as const, organizerSelf: false, organizer: 'lee@example.com' };
+
   it('gives each pair of three events that overlap each other', () => {
-    const a = ev('a', '2026-10-12T09:00:00Z', '2026-10-12T11:00:00Z');
-    const b = ev('b', '2026-10-12T09:30:00Z', '2026-10-12T10:30:00Z');
-    const c = ev('c', '2026-10-12T10:00:00Z', '2026-10-12T12:00:00Z');
+    const a = ev('a', '2026-10-12T09:00:00Z', '2026-10-12T11:00:00Z', accepted);
+    const b = ev('b', '2026-10-12T09:30:00Z', '2026-10-12T10:30:00Z', accepted);
+    const c = ev('c', '2026-10-12T10:00:00Z', '2026-10-12T12:00:00Z', accepted);
     expect(findConflicts([c, b, a])).toEqual([
       { a: a.key, b: b.key, startAt: b.startAt, endAt: b.endAt },
       { a: a.key, b: c.key, startAt: c.startAt, endAt: a.endAt },
@@ -156,9 +159,25 @@ describe('findConflicts', () => {
   });
 
   it('takes the lower key as a when two events start at the same time', () => {
-    const y = ev('y', '2026-10-12T09:00:00Z', '2026-10-12T10:00:00Z');
+    const y = ev('y', '2026-10-12T09:00:00Z', '2026-10-12T10:00:00Z', accepted);
     const x = ev('x', '2026-10-12T09:00:00Z', '2026-10-12T09:30:00Z');
     expect(findConflicts([y, x])).toEqual([{ a: x.key, b: y.key, startAt: x.startAt, endAt: x.endAt }]);
+  });
+
+  it('never counts two time blocks of the owner alone, and counts a block against a meeting', () => {
+    const sleep = ev('sleep', '2026-10-12T07:00:00Z', '2026-10-12T15:00:00Z');
+    const exercise = ev('exercise', '2026-10-12T14:30:00Z', '2026-10-12T15:30:00Z');
+    expect(findConflicts([sleep, exercise])).toEqual([]);
+    // a block that the owner made with a guest is a meeting too.
+    const call = ev('call', '2026-10-12T15:00:00Z', '2026-10-12T15:30:00Z', {
+      guests: [{ name: null, email: 'sam@example.com', answer: 'accepted', organizer: false, optional: false, self: false }],
+    });
+    const section = ev('section', '2026-10-12T15:15:00Z', '2026-10-12T16:00:00Z', accepted);
+    expect(findConflicts([sleep, exercise, call, section]).map((each) => `${each.a}|${each.b}`)).toEqual([
+      'personal/primary/exercise|personal/primary/call',
+      'personal/primary/call|personal/primary/section',
+      'personal/primary/exercise|personal/primary/section',
+    ]);
   });
 
   it('does not count events that touch', () => {

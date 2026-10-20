@@ -324,3 +324,117 @@ describe('the desk module as the brief reads it', () => {
     for (const load of cases) expect(await readDelegations({} as never, end, load)).toBeNull();
   });
 });
+
+describe('the findings of the review of the today track', () => {
+  it('gives one conflict for an invitation that is on two accounts', () => {
+    const invite = ev('sync', '2026-10-12T09:00:00-07:00', '2026-10-12T10:00:00-07:00', { answer: 'accepted', organizerSelf: false });
+    const copy = { ...invite, key: 'school/primary/sync', account: 'school', calendarKey: 'school/primary' };
+    const other = ev('lunch', '2026-10-12T09:30:00-07:00', '2026-10-12T10:30:00-07:00');
+    expect(findConflicts([invite, copy, other])).toHaveLength(1);
+    expect(buildBrief(input({ events: [invite, copy, other] })).sections.find((s) => s.kind === 'conflicts')?.items).toHaveLength(1);
+  });
+
+  it('gives a travel gap only between events that are back to back', () => {
+    const a = ev('a', '2026-10-12T09:00:00-07:00', '2026-10-12T10:00:00-07:00', { location: 'Soda Hall' });
+    const b = ev('b', '2026-10-12T10:05:00-07:00', '2026-10-12T10:08:00-07:00', { location: 'Soda Hall' });
+    const c = ev('c', '2026-10-12T10:12:00-07:00', '2026-10-12T11:00:00-07:00', { location: 'Evans Hall' });
+    expect(findTravelGaps([a, b, c]).map((g) => `${g.from}>${g.to}`)).toEqual(['personal/primary/b>personal/primary/c']);
+  });
+
+  it('finds no conflict with an event of no length', () => {
+    const a = ev('a', '2026-10-12T09:00:00-07:00', '2026-10-12T10:00:00-07:00');
+    const point = ev('p', '2026-10-12T09:30:00-07:00', '2026-10-12T09:30:00-07:00');
+    expect(findConflicts([a, point])).toEqual([]);
+  });
+
+  it('shows the day of a goal eta after midnight, and survives an eta it cannot read', () => {
+    const late = buildBrief(input({ goals: [{ id: 1, day: '2026-10-12', title: 'g', eta: '2026-10-13T01:00:00-07:00', status: 'open', completedAt: null, note: null }] }));
+    expect(late.sections.find((s) => s.kind === 'goals')!.items[0]!.detail).not.toBe('by 01:00');
+    expect(late.sections.find((s) => s.kind === 'goals')!.items[0]!.detail).toBe('by Tue 01:00');
+    expect(() => buildBrief(input({ goals: [{ id: 1, day: '2026-10-12', title: 'g', eta: 'soon', status: 'open', completedAt: null, note: null }] }))).not.toThrow();
+  });
+
+  it('never counts two time blocks of the owner alone as a conflict, and counts a block against a meeting', () => {
+    const sleep = ev('sleep', '2026-10-12T00:00:00-07:00', '2026-10-12T08:00:00-07:00');
+    const exercise = ev('exercise', '2026-10-12T07:30:00-07:00', '2026-10-12T08:30:00-07:00');
+    expect(findConflicts([sleep, exercise])).toEqual([]);
+    const meeting = ev('meeting', '2026-10-12T08:00:00-07:00', '2026-10-12T09:00:00-07:00', { answer: 'accepted', organizerSelf: false, organizer: 'lee@example.com' });
+    expect(findConflicts([sleep, exercise, meeting]).map((each) => [each.a, each.b])).toEqual([[exercise.key, meeting.key]]);
+  });
+
+  it('gives one conflict item for each pair when one event overlaps two others', () => {
+    const block = ev('block', '2026-10-12T09:00:00-07:00', '2026-10-12T14:00:00-07:00');
+    const meet = (id: string, start: string, end: string) => ev(id, start, end, { answer: 'accepted', organizerSelf: false, organizer: 'lee@example.com' });
+    const one = meet('one', '2026-10-12T10:00:00-07:00', '2026-10-12T11:00:00-07:00');
+    const two = meet('two', '2026-10-12T12:00:00-07:00', '2026-10-12T13:00:00-07:00');
+    const items = sectionOf(buildBrief(input({ events: [block, one, two] })), 'conflicts')!.items;
+    expect(items.map((each) => each.title)).toEqual(['block overlaps one', 'block overlaps two']);
+    expect(items.map((each) => each.source)).toEqual([
+      { kind: 'event', key: block.key, day: block.startDay },
+      { kind: 'event', key: block.key, day: block.startDay },
+    ]);
+    expect(briefText(buildBrief(input({ events: [block, one, two] })), LINK)).toContain('2 conflicts');
+  });
+
+  it('names the first event that starts after the build, not a sleep block from midnight', () => {
+    const sleep = ev('sleep', '2026-10-12T00:00:00-07:00', '2026-10-12T07:00:00-07:00', { title: 'sleep' });
+    const run = ev('run', '2026-10-12T07:30:00-07:00', '2026-10-12T08:00:00-07:00', { title: 'exercise' });
+    const brief = buildBrief(input({ events: [sleep, run] }));
+    expect(sectionOf(brief, 'day')!.note).toBe('2 events, the first at 07:30.');
+    expect(briefText(brief, LINK).split('\n')[1]).toBe('2 events, first at 07:30 exercise.');
+    // a brief built late in the day, after every event, still names the first one of the day.
+    const late = buildBrief(input({ events: [sleep, run], now: new Date('2026-10-12T20:00:00-07:00') }));
+    expect(sectionOf(late, 'day')!.note).toBe('2 events, the first at 00:00.');
+  });
+
+  it('says that google is off in the telegram text, and not that there are no events', () => {
+    const brief = buildBrief(input({ sources: { calendar: 'off', skipped: [], digest: null, desk: false } }));
+    expect(briefText(brief, LINK).split('\n')[1]).toBe('No calendar: Google is not set up.');
+  });
+
+  it('counts each event of a calendar of deadlines as a deadline', () => {
+    const budget = ev('budget', '2026-10-14T00:00:00-07:00', '2026-10-15T00:00:00-07:00', {
+      title: 'pay credit card + budget',
+      allDay: true,
+      startDay: '2026-10-14',
+      endDay: '2026-10-14',
+      showsAsFree: true,
+      deadlineCalendar: true,
+    });
+    const other = ev('journal', '2026-10-14T00:00:00-07:00', '2026-10-15T00:00:00-07:00', { title: 'monthly journal', allDay: true, startDay: '2026-10-14', endDay: '2026-10-14' });
+    expect(sectionOf(buildBrief(input({ events: [budget, other] })), 'deadlines')?.items.map((each) => each.title)).toEqual(['pay credit card + budget']);
+  });
+
+  it('treats one place written two ways as one place, and a placeholder as no place', () => {
+    const at = (id: string, start: string, end: string, location: string) => ev(id, `2026-10-12T${start}:00-07:00`, `2026-10-12T${end}:00-07:00`, { location });
+    expect(findTravelGaps([at('a', '09:00', '10:00', 'The Gateway, 2300 Hearst Ave, Berkeley…'), at('b', '10:00', '11:00', '2300 Hearst Ave, Berkeley, CA')])).toEqual([]);
+    expect(findTravelGaps([at('a', '09:00', '10:00', 'Cory 540AB'), at('b', '10:00', '11:00', 'Cory Hall')])).toEqual([]);
+    expect(findTravelGaps([at('a', '09:00', '10:00', 'VLSB'), at('b', '10:00', '11:00', 'Valley Life Sciences Building')])).toEqual([]);
+    expect(findTravelGaps([at('a', '03:00', '04:00', '???'), at('b', '04:00', '05:00', 'the glade')])).toEqual([]);
+    expect(findTravelGaps([at('a', '09:00', '10:00', 'TBD'), at('b', '10:00', '11:00', 'Soda Hall')])).toEqual([]);
+    // two different halls are two places, and a room in each is too.
+    expect(findTravelGaps([at('a', '09:00', '10:00', 'Room 101, Soda Hall'), at('b', '10:00', '11:00', 'Room 202, Evans Hall')])).toHaveLength(1);
+  });
+
+  it('keeps one travel gap for each later event when two events end before it', () => {
+    const block = ev('block', '2026-10-12T09:00:00-07:00', '2026-10-12T10:00:00-07:00', { location: 'VLSB' });
+    const meeting = ev('meeting', '2026-10-12T09:30:00-07:00', '2026-10-12T10:00:00-07:00', { location: 'Valley Life Sciences Building', answer: 'accepted', organizerSelf: false });
+    const glade = ev('glade', '2026-10-12T10:05:00-07:00', '2026-10-12T11:00:00-07:00', { location: 'Memorial Glade' });
+    expect(findTravelGaps([block, meeting, glade]).map((each) => each.to)).toEqual([glade.key]);
+  });
+
+  it('leaves a meeting of a shared calendar that does not invite the owner out of the travel gaps', () => {
+    const own = ev('own', '2026-10-12T09:00:00-07:00', '2026-10-12T10:00:00-07:00', { location: 'Soda Hall' });
+    const theirs = ev('theirs', '2026-10-12T10:05:00-07:00', '2026-10-12T11:00:00-07:00', {
+      location: 'Evans Hall',
+      calendarId: 'colleague@example.com',
+      organizerSelf: false,
+      guests: [{ name: null, email: 'colleague@example.com', answer: 'accepted', organizer: false, optional: false, self: false }],
+    });
+    expect(findTravelGaps([own, theirs])).toEqual([]);
+  });
+
+  it('notes a missing digest when google is set up', () => {
+    expect(sectionOf(buildBrief(input()), 'inbox')).toEqual({ kind: 'inbox', title: 'Inbox', items: [], note: 'No inbox digest yet today.' });
+  });
+});

@@ -101,7 +101,8 @@ describe('buildBrief', () => {
 
   it('describes the events of the day', () => {
     const day = sectionOf(buildBrief(input()), 'day')!;
-    expect(day.note).toBe('10 events, the first at 07:00.');
+    // the brief is built at 07:30, so the run that started at 07:00 is not the first event.
+    expect(day.note).toBe('10 events, the first at 09:00.');
     const byId = new Map(day.items.map((item) => [item.id, item]));
     expect(byId.get('event:personal/primary/birthday')).toMatchObject({ detail: 'All day', at: TODAY_DAY, tone: null });
     expect(byId.get('event:personal/primary/run')).toMatchObject({
@@ -122,7 +123,7 @@ describe('buildBrief', () => {
     const content = buildBrief(input());
     expect(sectionOf(content, 'conflicts')!.items).toEqual([
       {
-        id: 'event:school/primary/advisor',
+        id: 'conflict:school/primary/advisor|personal/primary/dentist',
         title: 'Advisor 1:1 overlaps Dentist',
         detail: '14:15 to 14:30',
         at: at(TODAY_DAY, '14:00'),
@@ -183,10 +184,13 @@ describe('buildBrief', () => {
     ]);
   });
 
-  it('says when the digest is of the day before, and leaves the inbox out without a digest', () => {
+  it('says when the digest is of the day before, and says so when there is no digest', () => {
     const old = buildBrief(input({ digest: { ...DIGEST, day: '2026-10-11' } }));
     expect(sectionOf(old, 'inbox')!.note).toBe('2 need a reply, 1 bill, 1 package. From the digest of 2026-10-11.');
-    expect(sectionOf(buildBrief(input({ digest: null })), 'inbox')).toBeUndefined();
+    // with google set up, the owner can tell "nothing needs you" from "the inbox was not read".
+    expect(sectionOf(buildBrief(input({ digest: null })), 'inbox')).toEqual({ kind: 'inbox', title: 'Inbox', items: [], note: 'No inbox digest yet today.' });
+    // without google there is no inbox to read, so the section is left out.
+    expect(sectionOf(buildBrief(input({ digest: null, sources: { calendar: 'off', skipped: [], digest: null, desk: false } })), 'inbox')).toBeUndefined();
   });
 
   it('leaves the delegations out for null and for an empty list', () => {
@@ -219,9 +223,12 @@ describe('buildBrief', () => {
     ]);
   });
 
-  it('gives only the day section on an empty day', () => {
+  it('gives only the day section and the note of the missing digest on an empty day', () => {
     const content = buildBrief(input({ events: [], digest: null, proposals: [], delegations: null, goals: [] }));
-    expect(content.sections).toEqual([{ kind: 'day', title: 'Today', items: [], note: 'No events today.' }]);
+    expect(content.sections).toEqual([
+      { kind: 'day', title: 'Today', items: [], note: 'No events today.' },
+      { kind: 'inbox', title: 'Inbox', items: [], note: 'No inbox digest yet today.' },
+    ]);
   });
 
   it('explains a calendar that is off, failed or partial', () => {
@@ -230,7 +237,12 @@ describe('buildBrief', () => {
     const failed = buildBrief(input({ events: [], sources: { calendar: 'failed', skipped: [{ account: 'personal', reason: 'x' }], digest: null, desk: true } }));
     expect(sectionOf(failed, 'day')!.note).toBe('The calendars could not be read.');
     const partial = buildBrief(input({ sources: { calendar: 'partial', skipped: [{ account: 'school', reason: 'x' }], digest: null, desk: true } }));
-    expect(sectionOf(partial, 'day')!.note).toBe('10 events, the first at 07:00. The calendar of school could not be read.');
+    expect(sectionOf(partial, 'day')!.note).toBe('10 events, the first at 09:00. The calendar of school could not be read.');
+    // one calendar of an account that was read in part gives its own reason.
+    const cut = buildBrief(
+      input({ sources: { calendar: 'partial', skipped: [{ account: 'school', calendarId: 'c', reason: 'school: Only the first 1000 events of the calendar c are shown.' }], digest: null, desk: true } }),
+    );
+    expect(sectionOf(cut, 'day')!.note).toBe('10 events, the first at 09:00. school: Only the first 1000 events of the calendar c are shown.');
   });
 
   it('shows one invitation on two accounts once in each section', () => {
@@ -239,7 +251,7 @@ describe('buildBrief', () => {
     const content = buildBrief(input({ events: [...TODAY_EVENTS, copy] }));
     expect(ids(content, 'day')!.filter((id) => id.includes('reading'))).toHaveLength(1);
     expect(ids(content, 'invites')!.filter((id) => id.includes('reading'))).toHaveLength(1);
-    expect(ids(content, 'conflicts')).toEqual(['event:school/primary/advisor']);
+    expect(ids(content, 'conflicts')).toEqual(['conflict:school/primary/advisor|personal/primary/dentist']);
   });
 
   it('reads the day in another time zone', () => {
@@ -260,7 +272,7 @@ describe('briefText', () => {
     expect(lines[0]).toBe('Brief for Mon 12 Oct');
     expect(lines.at(-1)).toBe(LINK);
     expect(lines.slice(1, -1)).toEqual([
-      '10 events, first at 07:00 Run with Sam.',
+      '10 events, first at 09:00 Lab meeting.',
       '1 conflict, 1 tight move, 2 invitations to answer.',
       '3 deadlines this week. Inbox: 2 need a reply, 1 bill, 1 package.',
       '2 delegations, 2 goals.',
@@ -275,10 +287,10 @@ describe('briefText', () => {
 
   it('cuts a long first title and keeps the text under the limit', () => {
     const long = 'x'.repeat(900);
-    const events = TODAY_EVENTS.map((event) => (event.eventId === 'run' ? { ...event, title: long } : event));
+    const events = TODAY_EVENTS.map((event) => (event.eventId === 'lab' ? { ...event, title: long } : event));
     const text = briefText(buildBrief(input({ events })), LINK);
     expect(text.length).toBeLessThanOrEqual(SHORT_TEXT_LIMIT);
-    expect(text.split('\n')[1]).toBe(`10 events, first at 07:00 ${'x'.repeat(60)}.`);
+    expect(text.split('\n')[1]).toBe(`10 events, first at 09:00 ${'x'.repeat(60)}.`);
     expect(text).not.toContain('Dentist');
   });
 
@@ -290,6 +302,6 @@ describe('briefText', () => {
     expect(lines[0]).toBe('Brief for Mon 12 Oct');
     expect(lines.at(-1)).toBe(link);
     expect(lines.length).toBeLessThan(6);
-    expect(lines[1]).toBe('10 events, first at 07:00 Run with Sam.');
+    expect(lines[1]).toBe('10 events, first at 09:00 Lab meeting.');
   });
 });

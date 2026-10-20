@@ -44,6 +44,10 @@ const SECTION_TITLES: Record<BriefSectionKind, string> = {
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
+// the note of the inbox section when google is set up but there is no digest to read, so the owner can tell "nothing
+// needs you" from "the inbox was not read".
+export const NO_DIGEST = 'No inbox digest yet today.';
+
 // the times and days of one brief, all in its time zone.
 interface BriefClock {
   day: string;
@@ -78,10 +82,10 @@ export function buildBrief(input: BriefInput): BriefContent {
     section('travel', travelItems(events, byKey, clock)),
     section('invites', inviteItems(events, input.now, clock)),
     section('deadlines', deadlines),
-    inbox ? section('inbox', inbox.items, inbox.note) : section('inbox', []),
+    inbox ? section('inbox', inbox.items, inbox.note) : section('inbox', [], input.sources.calendar !== 'off' ? NO_DIGEST : null),
     section('delegations', delegationItems(input.delegations ?? [], clock)),
     section('goals', goalItems(input.goals, clock)),
-  ].filter((each) => each.kind === 'day' || each.items.length > 0);
+  ].filter((each) => each.kind === 'day' || each.items.length > 0 || (each.kind === 'inbox' && each.note !== null));
 
   return { day, timeZone, generatedAt: input.now.toISOString(), sections, sources: input.sources };
 }
@@ -125,16 +129,20 @@ function dayNote(today: CalendarEvent[], sources: BriefSources, clock: BriefCloc
     else note = today.length === 1 ? `${count}, at ${hhmm(first.startAt, clock)}.` : `${count}, the first at ${hhmm(first.startAt, clock)}.`;
   }
   if (sources.calendar === 'partial') {
-    const accounts = [...new Set(sources.skipped.map((each) => each.account))];
+    // an account that was not read at all, then each calendar that was read only in part, with its reason.
+    const accounts = [...new Set(sources.skipped.filter((each) => each.calendarId === undefined).map((each) => each.account))];
     if (accounts.length > 0) note += ` The calendar of ${listWords(accounts)} could not be read.`;
+    for (const each of sources.skipped) if (each.calendarId !== undefined) note += ` ${each.reason.replace(/\.?$/, '.')}`;
   }
   return note;
 }
 
-// the first timed event that starts on the day. an event from the night before that runs into the day is not the
-// first event of the day.
+// the first timed event that starts on the day at or after the time of the build, so a brief at 07:30 does not point
+// at a sleep block from midnight. when nothing starts later, it is the first timed event that starts on the day. an
+// event from the night before that runs into the day is never the first event of the day.
 function firstTimed(today: CalendarEvent[], clock: BriefClock): CalendarEvent | undefined {
-  return today.find((event) => !event.allDay && Date.parse(event.startAt) >= clock.dayStart);
+  const timed = today.filter((event) => !event.allDay && Date.parse(event.startAt) >= clock.dayStart);
+  return timed.find((event) => Date.parse(event.startAt) >= clock.now) ?? timed[0];
 }
 
 function conflictItems(events: CalendarEvent[], byKey: Map<string, CalendarEvent>, clock: BriefClock): BriefItem[] {
@@ -145,7 +153,9 @@ function conflictItems(events: CalendarEvent[], byKey: Map<string, CalendarEvent
     if (!(start < clock.dayEnd && end > clock.dayStart)) continue;
     const a = byKey.get(conflict.a)!;
     const b = byKey.get(conflict.b)!;
-    items.push(eventItem(a, `${a.title} overlaps ${b.title}`, `${hhmm(conflict.startAt, clock)} to ${hhmm(conflict.endAt, clock)}`, 'critical'));
+    // one event can overlap several others, so each pair has its own id. the source stays the first event.
+    const item = eventItem(a, `${a.title} overlaps ${b.title}`, `${hhmm(conflict.startAt, clock)} to ${hhmm(conflict.endAt, clock)}`, 'critical');
+    items.push({ ...item, id: `conflict:${conflict.a}|${conflict.b}` });
   }
   return items;
 }
@@ -193,7 +203,8 @@ function deadlineItems(input: BriefInput, events: CalendarEvent[], clock: BriefC
     }
   }
 
-  const visible = events.filter((event) => event.status !== 'cancelled' && event.answer !== 'declined' && /\b(due|deadline)\b/i.test(event.title));
+  // an event is a deadline when its title says so, or when it is on a calendar of deadlines.
+  const visible = events.filter((event) => event.status !== 'cancelled' && event.answer !== 'declined' && (event.deadlineCalendar === true || /\b(due|deadline)\b/i.test(event.title)));
   for (const event of dedupeCopies(visible)) {
     const start = Date.parse(event.startAt);
     const end = Math.max(Date.parse(event.endAt), start + 1);
@@ -360,12 +371,16 @@ function goalItems(goals: GoalRow[], clock: BriefClock): BriefItem[] {
     .filter((goal) => goal.status !== 'dropped')
     .map((goal) => {
       const done = goal.status === 'done';
-      const detail = done ? 'done' : goal.eta ? `by ${hhmm(goal.eta, clock)}` : null;
+      // an eta that cannot be read counts as no eta, and one on another day than the goal names that day.
+      const eta = goal.eta && Number.isFinite(Date.parse(goal.eta)) ? goal.eta : null;
+      const etaDay = eta ? localDay(new Date(eta), clock.timeZone) : null;
+      const by = eta ? (etaDay === clock.day ? hhmm(eta, clock) : `${weekdayOf(etaDay!)} ${hhmm(eta, clock)}`) : null;
+      const detail = done ? 'done' : by ? `by ${by}` : null;
       return {
         id: `goal:${goal.id}`,
         title: goal.title,
         detail,
-        at: done ? goal.completedAt : goal.eta,
+        at: done ? goal.completedAt : eta,
         account: null,
         tone: null,
         source: { kind: 'goal', goalId: goal.id },
@@ -449,14 +464,18 @@ export function briefText(content: BriefContent, link: string): string {
   return [first, ...middle, link].join('\n');
 }
 
-// the line about the events of the day. the title of the first event is the only outside text of the message.
+// the line about the events of the day. the title of the first event is the only outside text of the message. the
+// first event is the first one that starts at or after the time of the build, as on the page.
 function dayLine(content: BriefContent): string {
   const day = content.sections.find((each) => each.kind === 'day');
   const items = day?.items ?? [];
+  if (content.sources.calendar === 'off') return 'No calendar: Google is not set up.';
   if (content.sources.calendar === 'failed') return 'The calendars could not be read.';
   if (items.length === 0) return 'No events today.';
   const dayStart = zonedToUtc(content.day, '00:00', content.timeZone).getTime();
-  const timed = items.find((item) => item.at !== null && !DATE_ONLY.test(item.at) && Date.parse(item.at) >= dayStart);
+  const builtAt = Date.parse(content.generatedAt);
+  const startsOnDay = items.filter((item) => item.at !== null && !DATE_ONLY.test(item.at) && Date.parse(item.at) >= dayStart);
+  const timed = startsOnDay.find((item) => Date.parse(item.at!) >= builtAt) ?? startsOnDay[0];
   const events = plural(items.length, 'event', 'events');
   if (!timed) return `${events}.`;
   const title = cleanLine(timed.title, 60);
