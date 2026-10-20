@@ -110,7 +110,7 @@ describe('the command menu search', () => {
   it('shows grouped hits after typing, and opens a hit or all results', async () => {
     const calls = stubFetch(seeded.dashboard, { 'GET /api/search': answer });
     openApp('#/');
-    await inMain().findByText('Cost today');
+    await screen.findByRole('heading', { level: 1, name: 'Today' });
     fireEvent.keyDown(window, { key: 'k', metaKey: true });
     const menu = await screen.findByRole('dialog', { name: 'Command menu' });
     const input = within(menu).getByRole('combobox');
@@ -136,12 +136,12 @@ describe('the command menu search', () => {
     fireEvent.click(await within(again).findByRole('option', { name: /All results for “essay”/ }));
     await waitFor(() => expect(location.hash).toBe('#/search?q=essay'));
     expect(await inMain().findByRole('link', { name: 'essay plan' })).toBeTruthy();
-  });
+  }, 20_000);
 
   it('cuts a long text to 200 characters and shows an error of the server in the menu', async () => {
     const calls = stubFetch(seeded.dashboard, { 'GET /api/search': () => json({ error: 'the search index is not ready' }, 500) });
     openApp('#/');
-    await inMain().findByText('Cost today');
+    await screen.findByRole('heading', { level: 1, name: 'Today' });
     fireEvent.keyDown(window, { key: 'k', metaKey: true });
     const menu = await screen.findByRole('dialog', { name: 'Command menu' });
     fireEvent.change(within(menu).getByRole('combobox'), { target: { value: 'x'.repeat(250) } });

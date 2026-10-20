@@ -117,7 +117,7 @@ describe('the trace waterfall', () => {
     expect(raw.textContent).toContain('"role":"user"');
     const body = (await (await fetch('/api/model-calls/1')).json()) as { request: unknown };
     expect(raw.textContent).toBe(JSON.stringify(body.request));
-    expect(inspector().getByText(/40 tools offered/)).toBeTruthy();
+    expect(inspector().getByText(/42 tools offered/)).toBeTruthy();
     expect(screen.getByTestId('span-model:1').closest('tr')!.getAttribute('aria-current')).toBe('true');
   });
 

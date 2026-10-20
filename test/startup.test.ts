@@ -62,10 +62,10 @@ describe('the start of the app after a stop', () => {
     await t.app.start();
     await t.at(pdt('09:01', '2026-10-13'));
     expect(getApproval(t.db, 1)!.status).toBe('expired');
-    expect(listEvents(t.db, 'main').at(-1)).toMatchObject({
-      type: 'system_event',
-      payload: { text: 'Approval #1 (send x) expired after 24 hours without an answer. The tool did not run.' },
-    });
+    // the morning brief of 07:30 also puts its copy in the session, so the note is not always the last event.
+    expect(listEvents(t.db, 'main').filter((event) => event.type === 'system_event').map((event) => event.payload.text)).toContain(
+      'Approval #1 (send x) expired after 24 hours without an answer. The tool did not run.',
+    );
     await t.app.stop();
   });
 });

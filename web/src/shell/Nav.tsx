@@ -9,7 +9,7 @@ import { GROUP_ICONS, routeHref } from './model';
 export function Rail({ sections, current, onSearch }: { sections: NavSection[]; current: RouteDef | undefined; onSearch: () => void }) {
   return (
     <div className="rail">
-      <a className="rail-brand" href="#/" aria-label="ok computer, overview">
+      <a className="rail-brand" href="#/" aria-label="ok computer, today">
         ok
       </a>
       <ul className="rail-list">

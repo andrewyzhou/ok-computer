@@ -13,6 +13,7 @@ import { handleIn } from '../src/tools/results.js';
 import { createTestApp } from './app-harness.js';
 import { seedDesk } from './seed-desk.js';
 import { seedDocs } from './docs-seed.js';
+import { fakeToday, seedBriefRows } from './seed-today.js';
 
 export const pdt = (time: string, day = '2026-10-12') => new Date(`${day}T${time}:00-07:00`).toISOString();
 
@@ -123,12 +124,15 @@ export async function seedDashboard(options: Partial<Pick<DashboardDeps, 'token'
 
   // the desk rows of phase 6 t3 (test/seed-desk.ts).
   seedDesk(t.db, t.clock());
+  seedBriefRows(t.db);
+
   const dashboard = createDashboard({
     db: t.db,
     config: t.config,
     clock: t.clock,
     logger: silentLogger,
-    app: t.app,
+    // the today pages (phase 6 t1) read the fixture week and briefs of test/seed-today.ts.
+    app: { ...t.app, today: fakeToday() },
     webDir: join(t.dataDir, 'no-web'),
     ...options,
   });

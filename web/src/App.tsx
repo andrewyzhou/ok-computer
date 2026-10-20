@@ -58,7 +58,7 @@ export function App() {
         <RouteView key={pageKeyOf(match)} match={match} />
       ) : (
         <EmptyState icon="search" title="This page does not exist.">
-          <a href="#/">Go to the overview</a>
+          <a href="#/">Go to today</a>
         </EmptyState>
       )}
     </Shell>

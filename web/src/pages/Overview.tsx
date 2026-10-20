@@ -122,7 +122,7 @@ function OverviewBody({ data }: { data: OverviewData }) {
           <AutomationFacts automation={automation} />
         </DetailsPanel>
       ) : (
-        <DetailsPanel title="Today">
+        <DetailsPanel title="This day">
           <Facts
             layout="stacked"
             items={[

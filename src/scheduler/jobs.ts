@@ -61,6 +61,8 @@ export interface JobDeps {
   inboxJobs?: (job: InboxJob) => Promise<JobResult>;
   // the desk jobs of phase 6 t3.
   deskJobs?: (job: DeskJob) => Promise<JobResult>;
+  // the morning brief of phase 6 t1 (src/brief).
+  brief?: () => Promise<JobResult>;
   signal: AbortSignal;
   newId?: () => string;
 }
@@ -177,6 +179,8 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
         return deps.inboxJobs ? deps.inboxJobs(payload.job) : { status: 'skipped', error: 'the inbox jobs need the google integration' };
       case 'desk':
         return deps.deskJobs ? deps.deskJobs(payload.job) : { status: 'skipped', error: 'the desk is not set up in this process' };
+      case 'brief':
+        return deps.brief ? deps.brief() : { status: 'skipped', error: 'this process does not build the brief' };
     }
   };
 }

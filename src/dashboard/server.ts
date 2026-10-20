@@ -43,7 +43,9 @@ import { mountAutonomy } from './autonomy.js';
 import { googleRoutes } from './google.js';
 import { integrationDetail, summaryOf } from './integrations.js';
 import { createSessions, LOCAL_SESSION_MS, LOGIN_PAGE, REMOTE_SESSION_MS, type LoginCodes } from './login.js';
+import { mountBrief } from './brief.js';
 import { mountBrowser } from './browser.js';
+import { mountCalendar } from './calendar.js';
 import { mountChat } from './chat.js';
 import { mountChats } from './chats.js';
 import { mountDeploy } from './deploy.js';
@@ -64,7 +66,7 @@ export interface DashboardDeps {
   config: Config;
   clock: Clock;
   logger: Logger;
-  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google' | 'rules' | 'chat' | 'inbox' | 'sandbox' | 'secretVault' | 'docs'>;
+  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google' | 'rules' | 'chat' | 'inbox' | 'sandbox' | 'secretVault' | 'docs' | 'today'>;
   // with a token, every api request must give it. the browser gives it in the query, because EventSource has no
   // headers.
   token?: string;
@@ -379,6 +381,8 @@ export function createDashboard(deps: DashboardDeps): Hono {
   mountDesk(server, deps);
   mountDocs(server, deps);
   mountPeople(server, deps);
+  mountBrief(server, deps);
+  mountCalendar(server, deps);
 
   server.all('/api/*', (c) => notFound(c, 'api route'));
   if (existsSync(join(webDir, 'index.html'))) {

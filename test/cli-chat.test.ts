@@ -63,6 +63,8 @@ describe('cli chat through the full loop', () => {
       'automations_update',
       'autonomy_levels',
       'autonomy_lower',
+      'brief_read',
+      'brief_set_time',
       'browser_allow_domain',
       'browser_back',
       'browser_click',

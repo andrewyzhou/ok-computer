@@ -27,6 +27,9 @@ export const payloadSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('inbox'), job: z.enum(['newsletters', 'subscriptions', 'digest']) }),
   // a job of the desk (phase 6 t3) that runs in code: the follow-ups of the delegations that wait on someone.
   z.object({ type: z.literal('desk'), job: z.enum(['followups']) }),
+  // the morning brief of phase 6 t1. it runs in code, reads the calendars, the inbox digest, the delegations and the
+  // goals, stores the brief and sends the owner a short message. it changes nothing.
+  z.object({ type: z.literal('brief') }),
 ]);
 export type Payload = z.infer<typeof payloadSchema>;
 

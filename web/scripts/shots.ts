@@ -6,7 +6,7 @@
 // shots.json is an array of { name, hash, width, dark?, devMode?, click?, keys?, wait?, stubs?, height? }:
 // - check each view at width 1440 and at width 390. a width under 500 uses a scale of 2.
 // - click is a playwright selector that the script clicks after the page loads. keys is a key press after it, for
-//   example Meta+k.
+//   example Meta+k. scroll is a selector that the script scrolls into view, for a part far down a long page.
 // - wait is the selector to wait for. the default is the page title in the main area.
 // - height sets the height of the window, for a page that is longer than the default window. the main area scrolls
 //   inside the shell, so a full-page shot of the document would not show more.
@@ -29,6 +29,7 @@ type Shot = {
   devMode?: boolean;
   click?: string;
   keys?: string;
+  scroll?: string;
   wait?: string;
   stubs?: Record<string, unknown>;
   height?: number;
@@ -73,7 +74,8 @@ for (const shot of shots.filter((each) => !only || each.name.includes(only))) {
   await page.waitForTimeout(700);
   if (shot.click) await page.locator(shot.click).first().click();
   if (shot.keys) await page.keyboard.press(shot.keys);
-  if (shot.click || shot.keys) await page.waitForTimeout(500);
+  if (shot.scroll) await page.locator(shot.scroll).first().scrollIntoViewIfNeeded();
+  if (shot.click || shot.keys || shot.scroll) await page.waitForTimeout(500);
   await page.screenshot({ path: join(out, `${shot.name}.png`) });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   if (overflow > 0) console.log(`${shot.name}: the page scrolls sideways by ${overflow}px`);
