@@ -11,7 +11,7 @@ afterEach(async () => {
   h = undefined;
 });
 
-const OWNER = 'Andrew <personal@example.com>';
+const OWNER = 'Owner <personal@example.com>';
 const DANA = 'Dana Park <dana@landlord.example>';
 const iso = (h: DeskHarness, ms: number) => new Date(h.now().getTime() + ms).toISOString();
 

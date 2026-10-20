@@ -95,7 +95,7 @@ describe('purchases', () => {
 
   it('leaves a plain sign-up and a search in browser submits', () => {
     expect(domainOf('browser_submit', { url: 'https://example.com/signup', button: 'Sign up', fields: { email: 'owner@example.com' } })).toBe('browser_submits');
-    expect(domainOf('browser_submit', { url: 'https://example.com/search', button: 'Search', fields: { q: 'weather in Berkeley' } })).toBe('browser_submits');
+    expect(domainOf('browser_submit', { url: 'https://example.com/search', button: 'Search', fields: { q: 'weather in Northgate' } })).toBe('browser_submits');
   });
 });
 

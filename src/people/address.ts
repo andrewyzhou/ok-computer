@@ -213,7 +213,7 @@ export function organizationOf(domain: string): Organization | null {
 }
 
 // the name of an organization from its domain label: each part between hyphens with a capital, for example
-// "Hudson Trading" for hudson-trading. the label has no word breaks of its own, so "primeintellect" stays one word.
+// "Globex Labs" for globex-labs. the label has no word breaks of its own, so "acmeworks" stays one word.
 function organizationName(label: string): string {
   return label
     .split('-')

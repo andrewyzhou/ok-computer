@@ -403,9 +403,9 @@ describe('the findings of the review of the today track', () => {
 
   it('treats one place written two ways as one place, and a placeholder as no place', () => {
     const at = (id: string, start: string, end: string, location: string) => ev(id, `2026-10-12T${start}:00-07:00`, `2026-10-12T${end}:00-07:00`, { location });
-    expect(findTravelGaps([at('a', '09:00', '10:00', 'The Gateway, 2300 Hearst Ave, Berkeley…'), at('b', '10:00', '11:00', '2300 Hearst Ave, Berkeley, CA')])).toEqual([]);
-    expect(findTravelGaps([at('a', '09:00', '10:00', 'Cory 540AB'), at('b', '10:00', '11:00', 'Cory Hall')])).toEqual([]);
-    expect(findTravelGaps([at('a', '09:00', '10:00', 'VLSB'), at('b', '10:00', '11:00', 'Valley Life Sciences Building')])).toEqual([]);
+    expect(findTravelGaps([at('a', '09:00', '10:00', 'The Annex, 100 Maple Ave, Rivertown…'), at('b', '10:00', '11:00', '100 Maple Ave, Rivertown, CA')])).toEqual([]);
+    expect(findTravelGaps([at('a', '09:00', '10:00', 'Elm 210B'), at('b', '10:00', '11:00', 'Elm Hall')])).toEqual([]);
+    expect(findTravelGaps([at('a', '09:00', '10:00', 'RSB'), at('b', '10:00', '11:00', 'River Science Building')])).toEqual([]);
     expect(findTravelGaps([at('a', '03:00', '04:00', '???'), at('b', '04:00', '05:00', 'the glade')])).toEqual([]);
     expect(findTravelGaps([at('a', '09:00', '10:00', 'TBD'), at('b', '10:00', '11:00', 'Soda Hall')])).toEqual([]);
     // two different halls are two places, and a room in each is too.

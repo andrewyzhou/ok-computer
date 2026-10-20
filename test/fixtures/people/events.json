@@ -9,7 +9,7 @@
     "attendees": [
       { "email": "jane.doe@acme.com", "displayName": "Jane Doe", "organizer": true, "responseStatus": "accepted" },
       { "email": "owner@example.com", "self": true, "responseStatus": "accepted" },
-      { "email": "bob@berkeley.edu", "responseStatus": "declined" },
+      { "email": "bob@northgate.edu", "responseStatus": "declined" },
       { "email": "room-4@resource.calendar.google.com", "displayName": "Room 4", "resource": true, "responseStatus": "accepted" },
       { "email": "Carol@gmail.com", "displayName": "'Carol Diaz'", "responseStatus": "needsAction" }
     ]

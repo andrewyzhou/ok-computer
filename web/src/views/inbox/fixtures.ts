@@ -255,8 +255,8 @@ export const proposals: CalendarProposalView[] = [
 ];
 
 // the five accounts of the owner, by the aliases that the api gives, for the account labels of each list and the
-// coverage of the digest (phase 6 t2). school had more mail than the read limit, and hkn could not be read.
-export const ACCOUNTS = ['a06', 'yurun', 'a581', 'school', 'hkn'];
+// coverage of the digest (phase 6 t2). school had more mail than the read limit, and club could not be read.
+export const ACCOUNTS = ['personal', 'work', 'side', 'school', 'club'];
 
 export const fiveDigest: InboxDigest = {
   id: 9,
@@ -264,10 +264,10 @@ export const fiveDigest: InboxDigest = {
   runId: 'run-5',
   createdAt: '2026-10-20T14:00:00.000Z',
   accounts: ACCOUNTS,
-  shortText: 'Inbox, Tuesday: 2 need a reply, 2 deadlines, 1 bill ($18.00), 1 package. hkn was not read.',
+  shortText: 'Inbox, Tuesday: 2 need a reply, 2 deadlines, 1 bill ($18.00), 1 package. club was not read.',
   items: [
     { ...digest.items[0]!, account: 'school', messageId: 'f-1', mail: 'person' },
-    { ...digest.items[1]!, account: 'yurun', messageId: 'f-2', mail: 'person' },
+    { ...digest.items[1]!, account: 'work', messageId: 'f-2', mail: 'person' },
     {
       ...digest.items[2]!,
       account: 'school',
@@ -279,7 +279,7 @@ export const fiveDigest: InboxDigest = {
     },
     {
       ...digest.items[2]!,
-      account: 'a581',
+      account: 'side',
       messageId: 'f-4',
       from: 'Club treasurer',
       subject: 'Dues for the fall term',
@@ -288,16 +288,16 @@ export const fiveDigest: InboxDigest = {
       proposalId: 21,
       mail: 'person',
     },
-    { ...digest.items[3]!, account: 'a06', messageId: 'f-5', from: 'Phone plan', subject: 'Your bill is ready', amount: 18, mail: 'automated' },
-    { ...digest.items[4]!, account: 'a06', messageId: 'f-6', mail: 'automated' },
+    { ...digest.items[3]!, account: 'personal', messageId: 'f-5', from: 'Phone plan', subject: 'Your bill is ready', amount: 18, mail: 'automated' },
+    { ...digest.items[4]!, account: 'personal', messageId: 'f-6', mail: 'automated' },
   ],
   stats: {
     accounts: [
-      { alias: 'a06', listed: 64, read: 64, capped: false, person: 3, list: 30, automated: 31, hidden: 58, error: null },
-      { alias: 'yurun', listed: 12, read: 12, capped: false, person: 2, list: 6, automated: 4, hidden: 9, error: null },
-      { alias: 'a581', listed: 9, read: 9, capped: false, person: 1, list: 5, automated: 3, hidden: 7, error: null },
+      { alias: 'personal', listed: 64, read: 64, capped: false, person: 3, list: 30, automated: 31, hidden: 58, error: null },
+      { alias: 'work', listed: 12, read: 12, capped: false, person: 2, list: 6, automated: 4, hidden: 9, error: null },
+      { alias: 'side', listed: 9, read: 9, capped: false, person: 1, list: 5, automated: 3, hidden: 7, error: null },
       { alias: 'school', listed: 240, read: 100, capped: true, person: 12, list: 51, automated: 37, hidden: 80, error: null },
-      { alias: 'hkn', listed: 0, read: 0, capped: false, person: 0, list: 0, automated: 0, hidden: 0, error: 'the sign-in of this account has expired' },
+      { alias: 'club', listed: 0, read: 0, capped: false, person: 0, list: 0, automated: 0, hidden: 0, error: 'the sign-in of this account has expired' },
     ],
     droppedDates: 1,
   },
@@ -314,11 +314,11 @@ export const fiveDigests: DigestsPage = {
 export const fiveSendersPage: SendersPage = {
   accounts: ACCOUNTS,
   senders: [
-    sender(11, { account: 'a06', displayName: 'Weekly Deals', messages: 48, read: 1, readRate: 0.02 }),
-    sender(12, { account: 'yurun', displayName: 'Weekly Deals', messages: 12, read: 3, readRate: 0.25 }),
+    sender(11, { account: 'personal', displayName: 'Weekly Deals', messages: 48, read: 1, readRate: 0.02 }),
+    sender(12, { account: 'work', displayName: 'Weekly Deals', messages: 12, read: 3, readRate: 0.25 }),
     sender(13, { account: 'school', displayName: 'Campus Events', messages: 31, read: 12, readRate: 0.39, unsubscribe: { method: 'none', url: null } }),
-    sender(14, { account: 'a581', displayName: 'Daily Brief', messages: 22, read: 20, readRate: 0.91, state: 'kept' }),
-    sender(15, { account: 'hkn', displayName: 'Chapter news', messages: 8, read: 6, readRate: 0.75, unsubscribe: { method: 'mailto', url: 'mailto:leave@chapter.example.org' } }),
+    sender(14, { account: 'side', displayName: 'Daily Brief', messages: 22, read: 20, readRate: 0.91, state: 'kept' }),
+    sender(15, { account: 'club', displayName: 'Chapter news', messages: 8, read: 6, readRate: 0.75, unsubscribe: { method: 'mailto', url: 'mailto:leave@chapter.example.org' } }),
   ],
   nextCursor: null,
   lastSweep: { runId: 'run-5', at: '2026-10-19T13:00:00.000Z' },
@@ -329,7 +329,7 @@ export const fiveSendersPage: SendersPage = {
 export const fiveSubscriptionsPage: SubscriptionsPage = {
   subscriptions: [
     subscription(21, {
-      account: 'a06',
+      account: 'personal',
       merchant: 'Streamly',
       amount: 15.49,
       confidence: 0.9,
@@ -339,7 +339,7 @@ export const fiveSubscriptionsPage: SubscriptionsPage = {
       sourceSubject: 'Your Streamly receipt',
     }),
     subscription(22, {
-      account: 'yurun',
+      account: 'work',
       merchant: 'Cloud Notes',
       amount: 96,
       cadence: 'yearly',
@@ -349,7 +349,7 @@ export const fiveSubscriptionsPage: SubscriptionsPage = {
       sourceSubject: 'Thanks for renewing',
     }),
     subscription(23, {
-      account: 'a581',
+      account: 'side',
       merchant: 'Gym Plus',
       amount: 42,
       confidence: 0.3,
@@ -370,7 +370,7 @@ export const fiveSubscriptionsPage: SubscriptionsPage = {
       sourceSubject: 'Your order',
     }),
     subscription(25, {
-      account: 'hkn',
+      account: 'club',
       merchant: 'Event Tickets',
       amount: 12,
       cadence: 'unknown',
@@ -386,19 +386,19 @@ export const fiveSubscriptionsPage: SubscriptionsPage = {
 };
 
 export const fiveDrafts: DraftView[] = [
-  draft(51, { account: 'yurun', to: ['sam@example.com'], subject: 'Re: Dinner next week?' }),
+  draft(51, { account: 'work', to: ['sam@example.com'], subject: 'Re: Dinner next week?' }),
   draft(52, { account: 'school', subject: 'Re: Office hours moved to Thursday' }),
-  draft(53, { account: 'a581', to: ['treasurer@club.example.org'], subject: 'Re: Dues for the fall term' }),
-  draft(54, { account: 'a06', to: ['support@shop.example.com'], subject: 'Re: Your return' }),
-  draft(55, { account: 'hkn', to: ['officers@chapter.example.org'], subject: 'Re: Meeting notes' }),
+  draft(53, { account: 'side', to: ['treasurer@club.example.org'], subject: 'Re: Dues for the fall term' }),
+  draft(54, { account: 'personal', to: ['support@shop.example.com'], subject: 'Re: Your return' }),
+  draft(55, { account: 'club', to: ['officers@chapter.example.org'], subject: 'Re: Meeting notes' }),
 ];
 
 export const fiveProposals: CalendarProposalView[] = [
   proposal(31, { account: 'school', title: 'Homework 6 due', dueText: 'due on Friday, October 24 at 11:59 pm' }),
-  proposal(32, { account: 'a581', kind: 'other', title: 'Club dues', startAt: '2026-10-31', endAt: null, allDay: true, dueText: 'by October 31', sourceSubject: 'Dues for the fall term' }),
-  proposal(33, { account: 'a06', kind: 'bill', title: 'Pay the phone bill ($18.00)', startAt: '2026-10-28', endAt: null, allDay: true, sourceSubject: 'Your bill is ready' }),
-  proposal(34, { account: 'yurun', kind: 'other', title: 'Reply to Sam', sourceSubject: 'Dinner next week?' }),
-  proposal(35, { account: 'hkn', kind: 'other', title: 'Chapter meeting', sourceSubject: 'Meeting notes' }),
+  proposal(32, { account: 'side', kind: 'other', title: 'Club dues', startAt: '2026-10-31', endAt: null, allDay: true, dueText: 'by October 31', sourceSubject: 'Dues for the fall term' }),
+  proposal(33, { account: 'personal', kind: 'bill', title: 'Pay the phone bill ($18.00)', startAt: '2026-10-28', endAt: null, allDay: true, sourceSubject: 'Your bill is ready' }),
+  proposal(34, { account: 'work', kind: 'other', title: 'Reply to Sam', sourceSubject: 'Dinner next week?' }),
+  proposal(35, { account: 'club', kind: 'other', title: 'Chapter meeting', sourceSubject: 'Meeting notes' }),
 ];
 
 // the answer of /api/google when the integration is set up and an account is signed in. the inbox pages show their

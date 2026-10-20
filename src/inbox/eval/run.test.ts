@@ -192,8 +192,8 @@ describe('runInboxEval', () => {
   });
 
   it('checks only the accounts that it is given', async () => {
-    const report = await run(['newsletters'], { accounts: ['hkn'] });
-    expect(report.accounts.map((each) => each.alias)).toEqual(['hkn']);
+    const report = await run(['newsletters'], { accounts: ['club'] });
+    expect(report.accounts.map((each) => each.alias)).toEqual(['club']);
     expect(report.digest).toBeNull();
     expect(report.newsletters?.messages).toBeGreaterThan(0);
   });
@@ -283,12 +283,12 @@ describe('runInboxEval', () => {
   });
 
   it('reports an account that it cannot read, and reads the others', async () => {
-    copy.prepare("UPDATE google_accounts SET status = 'needs_auth' WHERE alias = 'hkn'").run();
+    copy.prepare("UPDATE google_accounts SET status = 'needs_auth' WHERE alias = 'club'").run();
     const report = await run(['digest']);
-    const hkn = report.accounts.find((each) => each.alias === 'hkn')!;
-    expect(hkn).toMatchObject({ read: false });
-    expect(hkn.error).toMatch(/sign in again/);
-    expect(report.accounts.filter((each) => each.read).map((each) => each.alias)).toEqual(['a06', 'yurun', 'a581', 'school']);
-    expect(report.failures).toContain('hkn: the account could not be read');
+    const club = report.accounts.find((each) => each.alias === 'club')!;
+    expect(club).toMatchObject({ read: false });
+    expect(club.error).toMatch(/sign in again/);
+    expect(report.accounts.filter((each) => each.read).map((each) => each.alias)).toEqual(['personal', 'work', 'side', 'school']);
+    expect(report.failures).toContain('club: the account could not be read');
   });
 });

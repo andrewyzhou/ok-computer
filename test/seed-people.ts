@@ -9,7 +9,7 @@ import type { Db } from '../src/db/index.js';
 // people (id name organization mail meetings first last next):
 //   1 Maya Lindqvist   Northwind (northwind.example)  3 mail 1 meeting   09-02 10-17  10-21 (no open thread: the owner wrote last)
 //   2 Tomas Okafor     none (a personal domain)       2 mail 0 meetings  10-10 10-16  none   (one open thread)
-//   3 Priya            Berkeley (berkeley.edu)        1 mail 1 meeting   10-01 10-14  10-22, and a cancelled one on 10-20
+//   3 Priya            Northgate (northgate.edu)      1 mail 1 meeting   10-01 10-14  10-22, and a cancelled one on 10-20
 //   4 null name        Fabrikam (fabrikam.example)    2 mail 0 meetings  10-12 10-12  none   (shows its address)
 //   5 Jonas Weber      none                           0 mail 0 meetings  null  null   10-25 (only an upcoming meeting)
 // person 1 has two addresses (maya@northwind.example, the primary, and maya.lindqvist@gmail.com) and two names
@@ -41,7 +41,7 @@ export function seedPeople(db: Db): void {
   const person = db.prepare('INSERT INTO people (id, name, nameSource, organization, organizationDomain, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)');
   person.run(1, 'Maya Lindqvist', 'header', 'Northwind', 'northwind.example', at('09-02'), at('10-17'));
   person.run(2, 'Tomas Okafor', 'header', null, null, at('10-10'), at('10-16'));
-  person.run(3, 'Priya', 'owner', 'Berkeley', 'berkeley.edu', at('10-01'), at('10-14'));
+  person.run(3, 'Priya', 'owner', 'Northgate', 'northgate.edu', at('10-01'), at('10-14'));
   person.run(4, null, 'header', 'Fabrikam', 'fabrikam.example', at('10-12'), at('10-12'));
   person.run(5, 'Jonas Weber', 'header', null, null, at('10-15'), at('10-15'));
 
@@ -49,7 +49,7 @@ export function seedPeople(db: Db): void {
   email.run('maya@northwind.example', 1, 1, at('09-02'), at('10-17'));
   email.run('maya.lindqvist@gmail.com', 1, 0, at('09-20'), at('09-20'));
   email.run('tomas.okafor@gmail.com', 2, 1, at('10-10'), at('10-16'));
-  email.run('praman@berkeley.edu', 3, 1, at('10-01'), at('10-14'));
+  email.run('praman@northgate.edu', 3, 1, at('10-01'), at('10-14'));
   email.run('k.osei@fabrikam.example', 4, 1, at('10-12'), at('10-12'));
   email.run('jonas.weber@outlook.com', 5, 1, at('10-15'), at('10-15'));
 

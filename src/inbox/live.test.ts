@@ -12,10 +12,10 @@ describe('026_inbox_live.sql', () => {
   it('adds the columns with defaults, so a row of phase 5 stays valid', () => {
     const db = openDb(':memory:');
     db.prepare("INSERT INTO inbox_digests (day, createdAt, shortText) VALUES ('2026-10-19', ?, 'x')").run(NOW);
-    db.prepare("INSERT INTO inbox_receipts (account, messageId, readAt) VALUES ('a06', 'm1', ?)").run(NOW);
-    db.prepare("INSERT INTO inbox_subscriptions (account, merchantKey, merchant, sourceMessageId, updatedAt) VALUES ('a06', 'k', 'K', 'm1', ?)").run(NOW);
+    db.prepare("INSERT INTO inbox_receipts (account, messageId, readAt) VALUES ('personal', 'm1', ?)").run(NOW);
+    db.prepare("INSERT INTO inbox_subscriptions (account, merchantKey, merchant, sourceMessageId, updatedAt) VALUES ('personal', 'k', 'K', 'm1', ?)").run(NOW);
     db.prepare("INSERT INTO inbox_proposals (account, kind, title, startAt, dedupeKey, createdAt) VALUES ('school', 'course', 't', ?, 'd', ?)").run(NOW, NOW);
-    db.prepare("INSERT INTO inbox_senders (account, senderKey, fromAddress, firstAt, lastAt, updatedAt) VALUES ('hkn', 'k', 'a@b.example', ?, ?, ?)").run(NOW, NOW, NOW);
+    db.prepare("INSERT INTO inbox_senders (account, senderKey, fromAddress, firstAt, lastAt, updatedAt) VALUES ('club', 'k', 'a@b.example', ?, ?, ?)").run(NOW, NOW, NOW);
     expect(db.prepare('SELECT stats FROM inbox_digests').get()).toEqual({ stats: null });
     expect(db.prepare('SELECT parser, senderDomain, kind, statedCadence, amountInText FROM inbox_receipts').get()).toEqual({
       parser: 0,
@@ -31,22 +31,22 @@ describe('026_inbox_live.sql', () => {
 
   it('refuses a value outside the checks', () => {
     const db = openDb(':memory:');
-    expect(() => db.prepare("INSERT INTO inbox_receipts (account, messageId, readAt, kind) VALUES ('a06', 'm1', ?, 'gift')").run(NOW)).toThrow(/CHECK/);
-    expect(() => db.prepare("INSERT INTO inbox_receipts (account, messageId, readAt, statedCadence) VALUES ('a06', 'm2', ?, 'daily')").run(NOW)).toThrow(/CHECK/);
+    expect(() => db.prepare("INSERT INTO inbox_receipts (account, messageId, readAt, kind) VALUES ('personal', 'm1', ?, 'gift')").run(NOW)).toThrow(/CHECK/);
+    expect(() => db.prepare("INSERT INTO inbox_receipts (account, messageId, readAt, statedCadence) VALUES ('personal', 'm2', ?, 'daily')").run(NOW)).toThrow(/CHECK/);
     expect(() =>
-      db.prepare("INSERT INTO inbox_subscriptions (account, merchantKey, merchant, sourceMessageId, updatedAt, cadenceSource) VALUES ('a06', 'k', 'K', 'm1', ?, 'guess')").run(NOW),
+      db.prepare("INSERT INTO inbox_subscriptions (account, merchantKey, merchant, sourceMessageId, updatedAt, cadenceSource) VALUES ('personal', 'k', 'K', 'm1', ?, 'guess')").run(NOW),
     ).toThrow(/CHECK/);
   });
 
   it('the views give the new fields', () => {
     const db = openDb(':memory:');
-    const stats = { accounts: [{ alias: 'a06', listed: 3, read: 3, capped: false, person: 1, list: 1, automated: 1, hidden: 2, error: null }], droppedDates: 1 };
+    const stats = { accounts: [{ alias: 'personal', listed: 3, read: 3, capped: false, person: 1, list: 1, automated: 1, hidden: 2, error: null }], droppedDates: 1 };
     db.prepare("INSERT INTO inbox_digests (day, createdAt, shortText, stats) VALUES ('2026-10-19', ?, 'x', ?)").run(NOW, JSON.stringify(stats));
     db.prepare("INSERT INTO inbox_digests (day, createdAt, shortText) VALUES ('2026-10-18', ?, 'y')").run(NOW);
     expect(getDigest(db, 1)?.stats).toEqual(stats);
     expect(getDigest(db, 2)?.stats).toBeNull();
     db.prepare(
-      "INSERT INTO inbox_subscriptions (account, merchantKey, merchant, sourceMessageId, updatedAt, cadenceSource, reasons) VALUES ('a06', 'k', 'K', 'm1', ?, 'both', '[\"3 charges a month apart\"]')",
+      "INSERT INTO inbox_subscriptions (account, merchantKey, merchant, sourceMessageId, updatedAt, cadenceSource, reasons) VALUES ('personal', 'k', 'K', 'm1', ?, 'both', '[\"3 charges a month apart\"]')",
     ).run(NOW);
     expect(listSubscriptions(db, {}).subscriptions[0]).toMatchObject({ cadenceSource: 'both', reasons: ['3 charges a month apart'] });
     db.prepare("INSERT INTO inbox_proposals (account, kind, title, startAt, dedupeKey, createdAt, dueText) VALUES ('school', 'course', 't', ?, 'd', ?, 'due Friday, October 24')").run(NOW, NOW);
@@ -57,13 +57,13 @@ describe('026_inbox_live.sql', () => {
 describe('the account helpers', () => {
   it('cover every account of the config in its order, with the address of the sign-in first', () => {
     const db = openDb(':memory:');
-    const config = { accounts: [{ alias: 'a06' }, { alias: 'school', email: 'Owner@School.example.edu' }, { alias: 'hkn' }] };
-    db.prepare("INSERT INTO google_accounts (alias, email, updatedAt) VALUES ('a06', 'Owner.A06@example.com', ?), ('hkn', NULL, ?)").run(NOW, NOW);
+    const config = { accounts: [{ alias: 'personal' }, { alias: 'school', email: 'Owner@School.example.edu' }, { alias: 'club' }] };
+    db.prepare("INSERT INTO google_accounts (alias, email, updatedAt) VALUES ('personal', 'Owner.Personal@example.com', ?), ('club', NULL, ?)").run(NOW, NOW);
     expect(inboxAccounts(db, config)).toEqual([
-      { alias: 'a06', email: 'owner.a06@example.com' },
+      { alias: 'personal', email: 'owner.personal@example.com' },
       { alias: 'school', email: 'owner@school.example.edu' },
-      { alias: 'hkn', email: null },
+      { alias: 'club', email: null },
     ]);
-    expect([...ownerAddresses(db, config)].sort()).toEqual(['owner.a06@example.com', 'owner@school.example.edu']);
+    expect([...ownerAddresses(db, config)].sort()).toEqual(['owner.personal@example.com', 'owner@school.example.edu']);
   });
 });

@@ -6,7 +6,7 @@ import { inboxForBrief } from './brief.js';
 
 // the inbox part of the morning brief, read from the digests that the 07:00 job wrote.
 
-const ALIASES = ['a06', 'yurun', 'a581', 'school', 'hkn'];
+const ALIASES = ['personal', 'work', 'side', 'school', 'club'];
 
 const item = (section: DigestItem['section'], account: string, id: string, extra: Partial<DigestItem> = {}): DigestItem => ({
   section,
@@ -53,19 +53,19 @@ function addDigest(db: Db, day: string, items: DigestItem[], options: { accounts
 describe('inboxForBrief', () => {
   it('gives the newest digest of the day, sorted into the sections in the stored order', () => {
     const db = openDb(':memory:');
-    addDigest(db, '2026-10-19', [item('bills', 'a06', 'old-bill')]);
-    addDigest(db, '2026-10-20', [item('packages', 'a06', 'first-run')], { createdAt: '2026-10-20T14:00:00.000Z' });
+    addDigest(db, '2026-10-19', [item('bills', 'personal', 'old-bill')]);
+    addDigest(db, '2026-10-20', [item('packages', 'personal', 'first-run')], { createdAt: '2026-10-20T14:00:00.000Z' });
     const stats: DigestStats = { accounts: ALIASES.map((alias, index) => account(alias, index)), droppedDates: 1 };
     const id = addDigest(
       db,
       '2026-10-20',
       [
         item('needs_reply', 'school', 'r1', { draftId: 4 }),
-        item('needs_reply', 'yurun', 'r2'),
+        item('needs_reply', 'work', 'r2'),
         item('deadlines', 'school', 'd1', { dueAt: '2026-10-24', proposalId: 7 }),
-        item('bills', 'a581', 'b1', { amount: 64.2, currency: 'USD', dueAt: '2026-10-25T00:00:00Z' }),
-        item('packages', 'hkn', 'p1'),
-        item('packages', 'a06', 'p2'),
+        item('bills', 'side', 'b1', { amount: 64.2, currency: 'USD', dueAt: '2026-10-25T00:00:00Z' }),
+        item('packages', 'club', 'p1'),
+        item('packages', 'personal', 'p2'),
       ],
       { stats, createdAt: '2026-10-20T14:01:00.000Z' },
     );
@@ -74,11 +74,11 @@ describe('inboxForBrief', () => {
     expect(brief.needsReply.map((each) => each.messageId)).toEqual(['r1', 'r2']);
     expect(brief.deadlines.map((each) => each.messageId)).toEqual(['d1']);
     expect(brief.packages.map((each) => [each.account, each.messageId])).toEqual([
-      ['hkn', 'p1'],
-      ['a06', 'p2'],
+      ['club', 'p1'],
+      ['personal', 'p2'],
     ]);
     expect(brief.bills[0]).toEqual({
-      account: 'a581',
+      account: 'side',
       messageId: 'b1',
       threadId: 't-b1',
       from: 'Someone <someone@example.com>',
@@ -96,13 +96,13 @@ describe('inboxForBrief', () => {
   it('links each item to its draft, its proposal or its digest', () => {
     const db = openDb(':memory:');
     const id = addDigest(db, '2026-10-20', [
-      item('needs_reply', 'a06', 'with-draft', { draftId: 3 }),
-      item('needs_reply', 'a06', 'without-draft'),
+      item('needs_reply', 'personal', 'with-draft', { draftId: 3 }),
+      item('needs_reply', 'personal', 'without-draft'),
       item('deadlines', 'school', 'with-proposal', { proposalId: 9 }),
-      item('bills', 'a581', 'bill-with-proposal', { proposalId: 10 }),
+      item('bills', 'side', 'bill-with-proposal', { proposalId: 10 }),
       item('deadlines', 'school', 'deadline-alone'),
       // a draft wins over a proposal.
-      item('needs_reply', 'hkn', 'both', { draftId: 5, proposalId: 11 }),
+      item('needs_reply', 'club', 'both', { draftId: 5, proposalId: 11 }),
     ]);
     const brief = inboxForBrief(db, '2026-10-20')!;
     const links = Object.fromEntries([...brief.needsReply, ...brief.deadlines, ...brief.bills].map((each) => [each.messageId, each.link]));
@@ -118,9 +118,9 @@ describe('inboxForBrief', () => {
 
   it('gives the newest older digest as stale when the day has none, and never a later one', () => {
     const db = openDb(':memory:');
-    addDigest(db, '2026-10-17', [item('bills', 'a06', 'oldest')]);
-    const older = addDigest(db, '2026-10-18', [item('bills', 'a06', 'older')]);
-    addDigest(db, '2026-10-21', [item('bills', 'a06', 'later')]);
+    addDigest(db, '2026-10-17', [item('bills', 'personal', 'oldest')]);
+    const older = addDigest(db, '2026-10-18', [item('bills', 'personal', 'older')]);
+    addDigest(db, '2026-10-21', [item('bills', 'personal', 'later')]);
     const brief = inboxForBrief(db, '2026-10-20')!;
     expect(brief).toMatchObject({ digestId: older, day: '2026-10-18', stale: true });
     expect(brief.bills.map((each) => each.messageId)).toEqual(['older']);
@@ -137,33 +137,33 @@ describe('inboxForBrief', () => {
   it('counts the hidden mail and lists the accounts that the digest could not read from its counts', () => {
     const db = openDb(':memory:');
     const stats: DigestStats = {
-      accounts: [account('a06', 3), account('yurun', 0, 'the yurun google account needs the owner to sign in again on the dashboard.'), account('a581', 4), account('school', 2), account('hkn', 0, 'the mail could not be read')],
+      accounts: [account('personal', 3), account('work', 0, 'the work google account needs the owner to sign in again on the dashboard.'), account('side', 4), account('school', 2), account('club', 0, 'the mail could not be read')],
       droppedDates: 0,
     };
-    addDigest(db, '2026-10-20', [], { accounts: ['a06', 'a581', 'school'], stats });
-    expect(inboxForBrief(db, '2026-10-20')).toMatchObject({ hidden: 9, unread: ['yurun', 'hkn'], accounts: ['a06', 'a581', 'school'] });
+    addDigest(db, '2026-10-20', [], { accounts: ['personal', 'side', 'school'], stats });
+    expect(inboxForBrief(db, '2026-10-20')).toMatchObject({ hidden: 9, unread: ['work', 'club'], accounts: ['personal', 'side', 'school'] });
     // an account that the config has and the counts do not name was not read either.
-    expect(inboxForBrief(db, '2026-10-20', [...ALIASES, 'new'])!.unread).toEqual(['yurun', 'hkn', 'new']);
+    expect(inboxForBrief(db, '2026-10-20', [...ALIASES, 'new'])!.unread).toEqual(['work', 'club', 'new']);
   });
 
   it('reads a digest of phase 5 without counts', () => {
     const db = openDb(':memory:');
     // the items of phase 5 have no mail kind, and a very old item may lack the ids of its draft and its proposal.
-    const old = { ...item('needs_reply', 'a06', 'r1') } as Partial<DigestItem>;
+    const old = { ...item('needs_reply', 'personal', 'r1') } as Partial<DigestItem>;
     delete old.draftId;
     delete old.proposalId;
-    const id = addDigest(db, '2026-10-20', [old as DigestItem, item('bills', 'school', 'b1', { proposalId: 2 })], { accounts: ['a06', 'school'], stats: null });
+    const id = addDigest(db, '2026-10-20', [old as DigestItem, item('bills', 'school', 'b1', { proposalId: 2 })], { accounts: ['personal', 'school'], stats: null });
     const brief = inboxForBrief(db, '2026-10-20')!;
     expect(brief).toMatchObject({ stale: false, hidden: 0, unread: [] });
     expect(brief.needsReply[0]).toMatchObject({ draftId: null, proposalId: null, link: `#/inbox/digests/${id}` });
     expect(brief.bills[0]!.link).toBe('#/inbox/proposals?id=2');
     // with the configured aliases, the accounts that the digest did not read are unread.
-    expect(inboxForBrief(db, '2026-10-20', ALIASES)!.unread).toEqual(['yurun', 'a581', 'hkn']);
+    expect(inboxForBrief(db, '2026-10-20', ALIASES)!.unread).toEqual(['work', 'side', 'club']);
   });
 
   it('only reads', () => {
     const db = openDb(':memory:');
-    addDigest(db, '2026-10-20', [item('bills', 'a06', 'b1')]);
+    addDigest(db, '2026-10-20', [item('bills', 'personal', 'b1')]);
     const before = db.prepare('SELECT * FROM inbox_digests').all();
     const changes = db.prepare('SELECT total_changes() AS n').get();
     inboxForBrief(db, '2026-10-20', ALIASES);

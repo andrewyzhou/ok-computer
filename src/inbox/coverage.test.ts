@@ -7,7 +7,7 @@ import { fakeResponse, toolStep } from '../models/fake.js';
 // the inbox jobs on the five accounts of the owner. each job reads every account, an account that needs a sign-in is
 // skipped with a note while the others still run, and a job fails only when no account could be read.
 
-const ALIASES = ['a06', 'yurun', 'a581', 'school', 'hkn'];
+const ALIASES = ['personal', 'work', 'side', 'school', 'club'];
 const LIST = 'GET /gmail/v1/users/me/messages';
 
 let h: InboxHarness | undefined;
@@ -85,14 +85,14 @@ describe('the inbox jobs on five accounts', () => {
 
     it(`the ${job} job skips an account that needs a sign-in, with a note, and reads the others`, async () => {
       h = await setup();
-      h.google.db.prepare("UPDATE google_accounts SET status = 'needs_auth' WHERE alias = 'yurun'").run();
+      h.google.db.prepare("UPDATE google_accounts SET status = 'needs_auth' WHERE alias = 'work'").run();
       const from = h.google.fake.requests.length;
       const result = await h.run(job);
       expect(result.status).toBe('completed');
-      expect(result.error).toContain('yurun');
+      expect(result.error).toContain('work');
       expect(result.error).toMatch(/sign in/);
-      expect(listed(h, from)).toEqual(ALIASES.filter((alias) => alias !== 'yurun'));
-      expect(h.google.fake.requests.slice(from).some((each) => aliasOf(each.authorization) === 'yurun')).toBe(false);
+      expect(listed(h, from)).toEqual(ALIASES.filter((alias) => alias !== 'work'));
+      expect(h.google.fake.requests.slice(from).some((each) => aliasOf(each.authorization) === 'work')).toBe(false);
     });
 
     it(`the ${job} job completes when only one account could be read, and fails when none could`, async () => {
@@ -101,8 +101,8 @@ describe('the inbox jobs on five accounts', () => {
       h.google.fake.fault({ route: LIST, status: 400, times: 4 });
       const partly = await h.run(job);
       expect(partly.status).toBe('completed');
-      for (const alias of ['a06', 'yurun', 'a581', 'school']) expect(partly.error).toContain(alias);
-      expect(partly.error).not.toMatch(/hkn/);
+      for (const alias of ['personal', 'work', 'side', 'school']) expect(partly.error).toContain(alias);
+      expect(partly.error).not.toMatch(/club/);
 
       h.google.fake.clearFaults();
       h.google.fake.fault({ route: LIST, status: 400 });

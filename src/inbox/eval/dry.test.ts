@@ -15,14 +15,14 @@ import { dryContext, liveDatabaseReason, MODELS_OFF, repoRoots, type DryContext 
 const CLIENT = 'fake-client.apps.googleusercontent.com';
 
 function configOf(raw: Record<string, unknown> = {}): Config {
-  const parsed = parseConfig({ google: { clientId: CLIENT, accounts: [{ alias: 'a06' }, { alias: 'school' }] }, ...raw });
+  const parsed = parseConfig({ google: { clientId: CLIENT, accounts: [{ alias: 'personal' }, { alias: 'school' }] }, ...raw });
   if (!parsed.ok) throw new Error(parsed.error);
   return parsed.value;
 }
 
 // accounts that never reach google. the tests of the dry context make no request.
 const offline: GoogleAccounts = {
-  aliases: ['a06', 'school'],
+  aliases: ['personal', 'school'],
   run: async () => {
     throw new Error('offline');
   },
@@ -124,7 +124,7 @@ describe('the dry context', () => {
   it('refuses and records a draft tool call', async () => {
     const dry = open();
     const run = startRun(dry.ctx, 'digest', 'utility');
-    const { output, approvalId } = await callTool(dry.ctx, run, DRAFT_TOOL, { account: 'a06', sourceMessageId: 'm1', threadId: 't1', to: ['a@b.example'], subject: 'Re: x', body: 'hi' });
+    const { output, approvalId } = await callTool(dry.ctx, run, DRAFT_TOOL, { account: 'personal', sourceMessageId: 'm1', threadId: 't1', to: ['a@b.example'], subject: 'Re: x', body: 'hi' });
     expect(output.isError).toBe(true);
     expect(output.effect).toBe('none');
     expect(approvalId).toBeNull();
@@ -181,8 +181,8 @@ describe('the read-only view of the check', () => {
     const calendar = Object.freeze({ events: Object.freeze({ list: () => Promise.resolve({ data: {} }) }) });
     const accounts: GoogleAccounts = { ...offline, run: (_alias, fn) => fn({ gmail, calendar } as never) };
     const view = readOnlyGoogle(accounts);
-    await view.accounts.run('a06', (apis) => apis.gmail.users.messages.list({ userId: 'me' }));
-    await expect(view.accounts.run('a06', (apis) => apis.gmail.users.messages.modify({ userId: 'me', id: 'm1' }))).rejects.toBeInstanceOf(ReadOnlyRefused);
+    await view.accounts.run('personal', (apis) => apis.gmail.users.messages.list({ userId: 'me' }));
+    await expect(view.accounts.run('personal', (apis) => apis.gmail.users.messages.modify({ userId: 'me', id: 'm1' }))).rejects.toBeInstanceOf(ReadOnlyRefused);
     expect(calls).toEqual(['list on its object']);
     expect(view.refused).toEqual(['gmail.users.messages.modify']);
   });

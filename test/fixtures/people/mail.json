@@ -7,7 +7,7 @@
     "payload": {
       "headers": [
         { "name": "From", "value": "\"Doe, Jane\" <Jane.Doe@mail.eu.acme.com>" },
-        { "name": "To", "value": "Owner <owner@example.com>, Bob Stone <bob@berkeley.edu>" },
+        { "name": "To", "value": "Owner <owner@example.com>, Bob Stone <bob@northgate.edu>" },
         { "name": "Cc", "value": "carol@gmail.com (Carol Diaz), Jane.Doe@mail.eu.acme.com" },
         { "name": "Subject", "value": "  Lunch\n next   week? " },
         { "name": "Date", "value": "Sun, 19 Oct 2025 18:53:20 +0000" }
@@ -23,7 +23,7 @@
       "headers": [
         { "name": "from", "value": "Owner <OWNER@example.com>" },
         { "name": "to", "value": "Jane Doe <jane.doe@mail.eu.acme.com>" },
-        { "name": "cc", "value": "bob@berkeley.edu, noreply@acme.com" },
+        { "name": "cc", "value": "bob@northgate.edu, noreply@acme.com" },
         { "name": "subject", "value": "Re: Lunch next week?" }
       ]
     }
@@ -71,7 +71,7 @@
     "threadId": "t-5",
     "labelIds": ["DRAFT"],
     "internalDate": "1760900000000",
-    "payload": { "headers": [{ "name": "From", "value": "owner@example.com" }, { "name": "To", "value": "bob@berkeley.edu" }] }
+    "payload": { "headers": [{ "name": "From", "value": "owner@example.com" }, { "name": "To", "value": "bob@northgate.edu" }] }
   },
   "noDate": {
     "id": "m-nodate",

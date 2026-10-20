@@ -8,8 +8,8 @@ import { insideFolder, realPath } from './dry.js';
 // precision and the accuracy rates, which are null without it. the file looks like this:
 //
 //   {
-//     "messages": { "a06:18c2f0a1b2c3d4e5": { "needsReply": true, "kind": "person", "due": "2026-10-24" } },
-//     "subscriptions": { "a06:streamly": { "merchant": "Streamly", "amount": 15.49, "currency": "USD", "cadence": "monthly" } }
+//     "messages": { "personal:18c2f0a1b2c3d4e5": { "needsReply": true, "kind": "person", "due": "2026-10-24" } },
+//     "subscriptions": { "personal:streamly": { "merchant": "Streamly", "amount": 15.49, "currency": "USD", "cadence": "monthly" } }
 //   }
 //
 // a message key is <account>:<gmail message id>, and a subscription key is <account>:<merchant key>. due null says that
