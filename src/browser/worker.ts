@@ -109,6 +109,8 @@ export interface ActTab {
   allowlist: ReadonlySet<string>;
   // the number of the last snapshot. its refs carry it, for example s3e12.
   snapshot: number;
+  // the time that a navigation of the page may take, which is longer than the time of an action.
+  navigationMs: number;
   // the form data set of an approved submit while it runs, else undefined.
   setSubmit(form: ApprovedForm | undefined): void;
   // waits for the request of the approved form, and then until the page sends no more data for settleMs. it stops
@@ -987,6 +989,7 @@ export function createBrowserWorker(deps: BrowserDeps): BrowserWorker {
         action(page, {
           allowlist: tab.allowlist,
           snapshot: tab.snapshot,
+          navigationMs: t.navigation,
           setSubmit: (form) => {
             tab.submit = form;
             if (!form) return;
