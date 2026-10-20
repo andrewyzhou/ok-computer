@@ -173,11 +173,16 @@ describe.skipIf(!hasChrome())('browser worker with chrome', { timeout: 60_000 },
     site.hits.length = 0;
     const page = await h.run('browser_open', { url: site.url('shop.test', '/scripts') });
     await h.run('browser_click', { ref: refOf(page.content, /button "Options body"/) });
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    await h.run('browser_snapshot', {});
+    // the page sends the request after the click. a slow machine sends it later, so the test takes snapshots until a
+    // step records the block, and does not guess a wait.
+    const wanted = { url: site.url('evil.test', '/opt'), reason: expect.stringContaining('send data (OPTIONS)') };
+    const blocked = () => h.steps().flatMap((step) => (step.blockedRequests ? JSON.parse(String(step.blockedRequests)) : []));
+    for (let tries = 0; tries < 25 && !blocked().some((each: { url: string; reason: string }) => each.url === wanted.url); tries++) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await h.run('browser_snapshot', {});
+    }
     expect(site.hitsOn('evil.test')).toEqual([]);
-    const blocked = h.steps().flatMap((step) => (step.blockedRequests ? JSON.parse(String(step.blockedRequests)) : []));
-    expect(blocked).toContainEqual({ url: site.url('evil.test', '/opt'), reason: expect.stringContaining('send data (OPTIONS)') });
+    expect(blocked()).toContainEqual(wanted);
   });
 
   it('presses the button of a dialog form, which sends nothing, with a click', async () => {
