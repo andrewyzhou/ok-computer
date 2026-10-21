@@ -13,7 +13,7 @@ const LEVEL_WORDS: Record<AutonomyLevel, string> = {
 
 export function permissionsInstructions(db: Db): string {
   const lines = DOMAINS.map((domain) => `- ${domain.label}: ${LEVEL_WORDS[levelOf(db, domain.id)]}`);
-  return `Permissions: what you can do on your own. They chose these, and the app holds you to them.
+  return `Permissions: what you can do on your own. They chose these, and the app enforces them.
 ${lines.join('\n')}
 Anything else that sends, pays, or deletes waits for their OK. When something waits for their OK, get it fully ready first, so all they have to do is approve it.`;
 }
