@@ -7,7 +7,13 @@ The owner should never edit a JSON file, or paste a long token, to use the app. 
 ## 0. Rules for every track
 
 - The rules of phases 5 and 6 stay: the trace is complete, history is append-only, the code stays model-provider-neutral, safety lives in code, sending mail stays off, and anything that sends, pays, deletes or unsubscribes waits for the owner. **No tool can move money.**
-- **Secrets** live only in the system keyring (or in `.env` for the ones the owner already put there). They never go in the database, in logs or in API answers. The redactor registers each new secret.
+- **Secrets** live only in the configured `SecretStore` (`src/secrets/`: the system keyring on a desktop, AWS Secrets Manager on the server), or in `.env` for the ones the owner already put there. They never go in the database, in logs or in API answers. The redactor registers each new secret. Never call the keyring directly.
+- **Built for the server.** The agent will move to one always-on AWS host (the phase 5 M7 deploy: Docker, Secrets Manager, Litestream, Tailscale), and the owner's machines become screens. So every connect flow must work when the dashboard is reached at `dashboard.publicUrl`, for example a Tailscale https name, and not only on loopback:
+  - OAuth redirect URIs come from the public URL when it is set;
+  - Plaid Link runs in the browser that views the dashboard;
+  - nothing assumes that the browser and the agent are on the same machine.
+  
+  Test each flow with a public URL and with loopback.
 - **Ownership:**
   - API types go in `src/dashboard/<area>-types.ts`, import-free;
   - routes go in `src/dashboard/<area>.ts`, mounted with one line;
