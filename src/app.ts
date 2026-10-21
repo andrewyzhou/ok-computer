@@ -37,6 +37,9 @@ import { createGoogle, syncGooglePoll, type Google } from './google/google.js';
 import { createInbox, installInboxJobs, type Inbox } from './inbox/inbox.js';
 import { createDesk, installDeskJobs } from './desk/index.js';
 import { createPeopleTools, peopleToolsFor } from './people/tools.js';
+import type { PlaidDeps } from './plaid/context.js';
+import { createPlaid, type Plaid } from './plaid/index.js';
+import { installPlaidSync } from './plaid/install.js';
 import type { GoogleEndpoints } from './google/accounts.js';
 import { finishDigest, noteFailedDigest, signalDigest, type Digest } from './signals/digest.js';
 import { sessionProfile, type IntegrationEntry } from './integrations/config.js';
@@ -118,6 +121,9 @@ export interface AppDeps {
   web?: WebOptions;
   // the code sandbox runs only when this is set. main.ts sets it, and a test gives fakes.
   sandbox?: SandboxOptions;
+  // PLAID_CLIENT_ID and PLAID_SECRET of .env (track s3). tests give a fake plaid client in plaidClient.
+  plaidEnv?: { clientId?: string; secret?: string };
+  plaidClient?: PlaidDeps['client'];
 }
 
 export interface App {
@@ -143,6 +149,8 @@ export interface App {
   // the owner's comments on the docs (phase 6 t4). the dashboard adds them, and each goes to the main session.
   docs: Pick<DocComments, 'add'>;
   secretVault?: SecretVault;
+  // the bank of track s3 (src/plaid). it exists without credentials too, and then says that no bank is linked.
+  plaid: Plaid;
 }
 
 // a run ends at its timeout. the margin covers the end of the run itself, so a live run is never closed as stale.
@@ -326,6 +334,23 @@ export function createApp(deps: AppDeps): App {
     activeRuns,
     ...ids,
   });
+  // the bank of track s3. the access tokens need a store that lasts, so it uses the store of the secrets block, also
+  // when no integration needs one.
+  const plaid = createPlaid({
+    db,
+    clock,
+    logger,
+    timeZone: config.timeZone,
+    config: config.plaid,
+    secrets: deps.secretVault?.store ?? secrets,
+    env: deps.plaidEnv ?? {},
+    owner,
+    dashboardUrl: dashboardUrl.replace(/\/+$/, ''),
+    replan,
+    signal: shutdown.signal,
+    ...(deps.plaidClient ? { client: deps.plaidClient } : {}),
+    ...ids,
+  });
   const builtIn = [
     nowTool,
     ...createGoalTools({ db, replan }),
@@ -342,6 +367,7 @@ export function createApp(deps: AppDeps): App {
     ...sandbox.tools,
     ...createDocTools({ db, dashboardUrl }),
     ...today.tools,
+    ...plaid.tools,
   ];
   // a profile names built-in tools and google tools. a name that this app does not have is left out.
   const registered = new Set([...builtIn, ...(google?.tools ?? [])].map((tool) => tool.name));
@@ -476,6 +502,7 @@ export function createApp(deps: AppDeps): App {
     ...(inbox ? { inboxJobs: (job: Parameters<Inbox['runJob']>[0]) => inbox.runJob(job) } : {}),
     deskJobs: (job) => desk.runJob(job),
     brief: () => today.runBrief(),
+    plaidJobs: (job) => plaid.runJob(job),
     signal: shutdown.signal,
     ...ids,
   });
@@ -600,6 +627,7 @@ export function createApp(deps: AppDeps): App {
       if (installDeskJobs(db, config, clock())) logger.info('desk jobs installed');
       docComments.start();
       if (installBrief(db, config, clock())) logger.info('morning brief installed');
+      if (installPlaidSync(db, config, clock())) logger.info('bank sync installed');
       // missed jobs can take minutes, so the start does not wait for them.
       if (deps.background !== false) void scheduler.start().catch((err: unknown) => logger.error('scheduler start failed', { err }));
       // a server can need many seconds to start, so the start does not wait. tool_search reads the stored catalog.
@@ -624,6 +652,7 @@ export function createApp(deps: AppDeps): App {
     today,
     sandbox,
     docs: docComments,
+    plaid,
     ...(deps.secretVault ? { secretVault: deps.secretVault } : {}),
     // without compaction hooks the strategy only renders. it does not call a model or append an event.
     contextView: (sessionKey) =>

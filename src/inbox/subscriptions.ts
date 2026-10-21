@@ -1,6 +1,7 @@
 import type { gmail_v1 } from '@googleapis/gmail';
 import { z } from 'zod';
-import type { SubscriptionState } from '../dashboard/types.js';
+import type { BankStreamView, SubscriptionAlert } from '../dashboard/plaid-types.js';
+import type { SubscriptionRow, SubscriptionState } from '../dashboard/types.js';
 import { fromAddress, header } from '../google/mime.js';
 import { requestContext } from '../google/trace.js';
 import { cleanLine } from '../signals/store.js';
@@ -545,4 +546,17 @@ export function ignoreSubscription(ctx: InboxContext, subscriptionId: number): A
   if (row.state === 'cancel_pending') return { ok: false, status: 409, error: notActive(row) };
   ctx.db.prepare("UPDATE inbox_subscriptions SET state = 'ignored', updatedAt = ? WHERE id = ?").run(ctx.clock().toISOString(), subscriptionId);
   return { ok: true, response: { status: 'done', approvalId: null, message: `the subscription of ${row.merchant} is hidden` } };
+}
+
+// the merge with the bank (track s3 of docs/CONNECT-PLAN.md): one row for each real subscription, with its source. a
+// stream of the bank and a receipt row of the same merchant key, with a matching cadence and an amount within 10
+// percent in one currency, are one row with source both: the row of the receipts keeps its id, its actions and its
+// cancel help, and gets the bank part and a higher confidence. a stream with no receipt row is a row of its own with
+// source bank and the key bank:<id>. a receipt row with no stream keeps source receipt. listSubscriptions of views.ts
+// calls this, and src/plaid/alerts.ts reads its rows.
+export function mergeSubscriptions(receipts: readonly SubscriptionRow[], streams: readonly BankStreamView[], alerts: readonly SubscriptionAlert[]): SubscriptionRow[] {
+  void receipts;
+  void streams;
+  void alerts;
+  throw new Error('not built');
 }

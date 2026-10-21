@@ -54,6 +54,7 @@ const SOURCE_WORDS: Record<BriefSource['kind'], string> = {
   proposal: 'calendar proposal',
   delegation: 'delegation',
   goal: 'goal',
+  subscription: 'subscription',
 };
 
 const TONE_WORDS = { warning: 'needs you', critical: 'urgent' } as const;

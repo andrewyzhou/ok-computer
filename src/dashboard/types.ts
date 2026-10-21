@@ -2,6 +2,7 @@
 // from the other type files of src/dashboard, which import nothing.
 
 import type { CadenceSource, DigestStats, MailKind } from './inbox-types.js';
+import type { SubscriptionAlert, SubscriptionBankRef, SubscriptionSource, SubscriptionsBankSummary } from './plaid-types.js';
 
 export interface Meta {
   timeZone: string;
@@ -840,6 +841,14 @@ export interface SubscriptionRow {
   // the browser task that helps with the cancellation, when one ran.
   browserTaskId: string | null;
   updatedAt: string;
+  // the merge with the bank (track s3, src/inbox/subscriptions.ts). key is unique on the page: receipt:<id> for a row
+  // of the receipts (source receipt or both) and bank:<id> for a stream with no receipt (source bank). a bank row has
+  // the id of its plaid_streams row as id, an empty account and an empty sourceMessageId, so the page picks its
+  // actions by source. a row of the receipts alone has no bank part. the fields are optional until the merge is built.
+  key?: string;
+  source?: SubscriptionSource;
+  bank?: SubscriptionBankRef | null;
+  alerts?: SubscriptionAlert[];
 }
 
 // the monthly totals are estimates from the cadence, one per currency. a row with an unknown cadence or no amount is
@@ -848,6 +857,9 @@ export interface SubscriptionsPage {
   subscriptions: SubscriptionRow[];
   monthlyTotals: Array<{ currency: string; amount: number }>;
   lastScan: { runId: string | null; at: string } | null;
+  // the bank part of the page (track s3), and the open alerts of every row.
+  bank?: SubscriptionsBankSummary;
+  alerts?: SubscriptionAlert[];
 }
 
 export type DigestSection = 'needs_reply' | 'deadlines' | 'bills' | 'packages';

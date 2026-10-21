@@ -125,6 +125,7 @@ async function main(): Promise<void> {
     integrations: integrations.value,
     ...(integrations.value.length || config.google || vault.backend !== 'keyring' ? { secrets: vault.store } : {}),
     secretVault: vault,
+    plaidEnv: { ...(secrets.plaidClientId ? { clientId: secrets.plaidClientId } : {}), ...(secrets.plaidSecret ? { secret: secrets.plaidSecret } : {}) },
     connectIntegrations: !chatMode,
     background: !chatMode,
     ...(loginCodes ? { loginCodes } : {}),

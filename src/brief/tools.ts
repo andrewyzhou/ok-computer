@@ -31,6 +31,8 @@ export function sourceText(source: BriefSource): string {
       return `delegation ${source.delegationId}`;
     case 'goal':
       return `goal ${source.goalId}`;
+    case 'subscription':
+      return `subscription ${source.key}, alert ${source.alertId}`;
   }
 }
 

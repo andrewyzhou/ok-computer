@@ -30,5 +30,7 @@ export function sourceHash(source: BriefSource): string {
       return `#/desk?id=${source.delegationId}`;
     case 'goal':
       return '#/goals';
+    case 'subscription':
+      return `#/inbox/subscriptions?key=${encodeURIComponent(source.key)}`;
   }
 }

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { googleConfigSchema } from '../google/config.js';
+import { plaidConfigSchema } from '../plaid/config.js';
 import { DEFAULT_SECRET_STORE, secretFileExposedIn, secretStoreConfigSchema } from '../secrets/config.js';
 
 export const SLOTS = ['main', 'heartbeat', 'utility', 'batch', 'consolidation', 'compaction'] as const;
@@ -148,6 +149,9 @@ export const configSchema = z.strictObject({
     .prefault({}),
   // the google integration is off without this block. see docs/setup/google.md.
   google: googleConfigSchema.optional(),
+  // the bank through plaid (track s3). every field has a default, and the bank stays unlinked until the owner links one.
+  // see docs/setup/plaid.md.
+  plaid: plaidConfigSchema.prefault({}),
   // the place that keeps the secrets. a desktop uses the keyring, and a server uses a file or aws secrets manager.
   // see docs/setup/aws.md.
   secrets: secretStoreConfigSchema.prefault(DEFAULT_SECRET_STORE),

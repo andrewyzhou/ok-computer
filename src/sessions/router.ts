@@ -7,6 +7,7 @@ import type { ChannelAdapter, InboundMessage } from '../channels/types.js';
 import type { Db } from '../db/index.js';
 import { DESK_MAIN_TOOLS } from '../desk/names.js';
 import { DOC_TOOLS } from '../docs/names.js';
+import { PLAID_TOOLS } from '../plaid/names.js';
 import { appendEvent, type EventInput } from '../events/log.js';
 import type { TaintSource } from '../policy/policy.js';
 import { guardDraft } from '../policy/reply.js';
@@ -42,6 +43,7 @@ export const MAIN_TOOLS: readonly string[] = [
   'skill_read',
   ...DESK_MAIN_TOOLS,
   ...DOC_TOOLS,
+  ...PLAID_TOOLS,
 ];
 export const NO_REPLY = 'NO_REPLY';
 

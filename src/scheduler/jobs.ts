@@ -63,6 +63,8 @@ export interface JobDeps {
   deskJobs?: (job: DeskJob) => Promise<JobResult>;
   // the morning brief of phase 6 t1 (src/brief).
   brief?: () => Promise<JobResult>;
+  // the bank jobs of track s3 (src/plaid).
+  plaidJobs?: (job: 'sync') => Promise<JobResult>;
   signal: AbortSignal;
   newId?: () => string;
 }
@@ -181,6 +183,8 @@ export function createJobRunner(deps: JobDeps): (automation: Automation) => Prom
         return deps.deskJobs ? deps.deskJobs(payload.job) : { status: 'skipped', error: 'the desk is not set up in this process' };
       case 'brief':
         return deps.brief ? deps.brief() : { status: 'skipped', error: 'this process does not build the brief' };
+      case 'plaid':
+        return deps.plaidJobs ? deps.plaidJobs(payload.job) : { status: 'skipped', error: 'this process does not sync the bank' };
     }
   };
 }

@@ -54,6 +54,7 @@ import { mountDocs } from './docs.js';
 import { readBody } from './http.js';
 import { mountInbox } from './inbox.js';
 import { mountPeople } from './people.js';
+import { mountPlaid } from './plaid.js';
 import { mountSandbox } from './sandbox.js';
 import { mountSearch } from './search.js';
 import { mountSpans } from './spans.js';
@@ -66,7 +67,7 @@ export interface DashboardDeps {
   config: Config;
   clock: Clock;
   logger: Logger;
-  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google' | 'rules' | 'chat' | 'inbox' | 'sandbox' | 'secretVault' | 'docs' | 'today'>;
+  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google' | 'rules' | 'chat' | 'inbox' | 'sandbox' | 'secretVault' | 'docs' | 'today' | 'plaid'>;
   // with a token, every api request must give it. the browser gives it in the query, because EventSource has no
   // headers.
   token?: string;
@@ -383,6 +384,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
   mountPeople(server, deps);
   mountBrief(server, deps);
   mountCalendar(server, deps);
+  mountPlaid(server, deps);
 
   server.all('/api/*', (c) => notFound(c, 'api route'));
   if (existsSync(join(webDir, 'index.html'))) {

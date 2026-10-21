@@ -35,6 +35,9 @@ export interface Secrets {
   dashboardToken?: string;
   // the owner id is not a secret, but it comes from .env with the token.
   telegramOwnerId?: string;
+  // the client id and the secret of plaid (track s3). a pair in the keyring wins over these.
+  plaidClientId?: string;
+  plaidSecret?: string;
 }
 
 export function loadSecrets(env: NodeJS.ProcessEnv = process.env): Secrets {
@@ -45,6 +48,8 @@ export function loadSecrets(env: NodeJS.ProcessEnv = process.env): Secrets {
     telegramBotToken: env.TELEGRAM_BOT_TOKEN || undefined,
     dashboardToken: env.DASHBOARD_TOKEN || undefined,
     telegramOwnerId: env.TELEGRAM_OWNER_ID || undefined,
+    plaidClientId: env.PLAID_CLIENT_ID || undefined,
+    plaidSecret: env.PLAID_SECRET || undefined,
   };
 }
 

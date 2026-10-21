@@ -45,6 +45,7 @@ const SECTION_TITLES: Record<BriefSectionKind, string> = {
   inbox: 'Inbox',
   delegations: 'Delegations',
   goals: 'Goals',
+  money: 'Money',
 };
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;

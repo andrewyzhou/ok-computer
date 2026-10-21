@@ -3,7 +3,8 @@
 
 // the sections of a brief, in the order of the page. a section with no items is left out, except day, which says that
 // the calendar is empty.
-export type BriefSectionKind = 'day' | 'conflicts' | 'travel' | 'invites' | 'deadlines' | 'inbox' | 'delegations' | 'goals';
+// money is the section of the subscription alerts (track s3 of docs/CONNECT-PLAN.md).
+export type BriefSectionKind = 'day' | 'conflicts' | 'travel' | 'invites' | 'deadlines' | 'inbox' | 'delegations' | 'goals' | 'money';
 
 // the thing an item is about. the page makes a link of it (web/src/views/today/links.ts), so each item opens its source.
 // an event names the key of CalendarEvent and the day of its start. a thread names the mail of a digest item.
@@ -14,7 +15,9 @@ export type BriefSource =
   | { kind: 'draft'; draftId: number }
   | { kind: 'proposal'; proposalId: number }
   | { kind: 'delegation'; delegationId: number }
-  | { kind: 'goal'; goalId: number };
+  | { kind: 'goal'; goalId: number }
+  // a subscription alert names the key of its merged row (SubscriptionRow.key) and the id of the alert.
+  | { kind: 'subscription'; key: string; alertId: number };
 
 // one line of a brief. title is short. detail is the second line, or null. at is the time that the item is about (the
 // start of an event, a due time), or null. tone marks an item that needs the owner (warning) or is late (critical).
