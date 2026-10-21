@@ -1,5 +1,7 @@
 import type { Transport } from '@modelcontextprotocol/client';
 import { z } from 'zod';
+import { notBuilt } from '../connectors/not-built.js';
+import type { ApplyResult } from '../connectors/types.js';
 import type { Db } from '../db/index.js';
 import type { BlobStore } from '../observability/blobs.js';
 import type { Logger } from '../observability/logger.js';
@@ -96,6 +98,11 @@ export interface Integrations {
   // storeClient saves a pre-registered oauth client (for example a slack app) under the clientRef of its entry. the app
   // writes the json itself, because a terminal drops the quotes of json that it gives to cmdkey.
   storeClient(id: string, client: { client_id: string; client_secret?: string }): Promise<{ stored: true } | { error: string }>;
+  // apply takes the new list of entries from the connections hub. it starts a new entry, stops a removed one and
+  // replaces a changed one without a restart where it can, and says when a change needs one restart.
+  apply(entries: IntegrationEntry[]): Promise<ApplyResult>;
+  // forget stops an integration and deletes its oauth tokens and its registered client from the keyring.
+  forget(id: string): Promise<void>;
 }
 
 export function createIntegrations(deps: IntegrationsDeps): Integrations {
@@ -429,6 +436,8 @@ export function createIntegrations(deps: IntegrationsDeps): Integrations {
       logger.info('oauth client stored', { integration: id, clientRef: ref });
       return { stored: true };
     },
+    apply: () => notBuilt('the hot apply of integrations'),
+    forget: () => notBuilt('forget of an integration'),
     connect(id) {
       // a second press of Connect while the first one runs joins it. a second attempt would stop the first one before
       // its sign-in link exists.

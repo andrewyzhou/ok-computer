@@ -199,7 +199,7 @@ describe('the nav order and the parents of detail pages', () => {
     const labels = (group: string) => navSections(false).find((section) => section.group === group)?.items.map((route) => route.label);
     expect(labels('today')).toEqual(['Today']);
     expect(labels('agent')).toEqual(['Overview', 'Goals', 'Memory', 'Automations', 'Signals', 'Approvals', 'Autonomy']);
-    expect(labels('connections')).toEqual(['Google', 'Integrations', 'Browser']);
+    expect(labels('connections')).toEqual(['Connections', 'Google', 'Integrations', 'Browser']);
   });
 
   it('gives each detail page the nav item of its list', () => {

@@ -48,6 +48,7 @@ import { mountBrowser } from './browser.js';
 import { mountCalendar } from './calendar.js';
 import { mountChat } from './chat.js';
 import { mountChats } from './chats.js';
+import { mountConnectors } from './connectors.js';
 import { mountDeploy } from './deploy.js';
 import { mountDesk } from './desk.js';
 import { mountDocs } from './docs.js';
@@ -66,7 +67,7 @@ export interface DashboardDeps {
   config: Config;
   clock: Clock;
   logger: Logger;
-  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google' | 'rules' | 'chat' | 'inbox' | 'sandbox' | 'secretVault' | 'docs' | 'today'>;
+  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google' | 'rules' | 'chat' | 'inbox' | 'sandbox' | 'secretVault' | 'docs' | 'today' | 'connectors'>;
   // with a token, every api request must give it. the browser gives it in the query, because EventSource has no
   // headers.
   token?: string;
@@ -74,6 +75,9 @@ export interface DashboardDeps {
   codes?: LoginCodes;
   // okc stop asks the app to stop with this token. without it, the dashboard has no shutdown request.
   shutdown?: { token: string; stop(): void };
+  // the restart button of the connections page stops the app gracefully, and its supervisor starts it again. without
+  // it, nothing supervises the process, and the page says to run okc restart instead.
+  restart?: () => void;
   pollMs?: number;
   webDir?: string;
 }
@@ -383,6 +387,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
   mountPeople(server, deps);
   mountBrief(server, deps);
   mountCalendar(server, deps);
+  mountConnectors(server, deps);
 
   server.all('/api/*', (c) => notFound(c, 'api route'));
   if (existsSync(join(webDir, 'index.html'))) {

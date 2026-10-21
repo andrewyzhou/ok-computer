@@ -7,6 +7,7 @@ import { redact, registerSecret } from '../observability/redact.js';
 import type { Clock } from '../time.js';
 import { errorText } from '../tools/registry.js';
 import type { HttpEntry } from './config.js';
+import { notBuilt } from '../connectors/not-built.js';
 import { normalizeTokenErrors } from './oauth-errors.js';
 import { CredentialStoreError, type SecretStore } from './secrets.js';
 
@@ -75,6 +76,9 @@ export interface OAuth {
   // callback finishes a flow. it is the handler of the loopback server, and tests call it without the server.
   callback(url: URL, finish: (integrationId: string) => Transport | undefined): Promise<{ status: number; integrationId?: string; text: string }>;
   listen(finish: (integrationId: string) => Transport | undefined, onDone: (integrationId: string) => void): Promise<void>;
+  // forget deletes the tokens and the registered client of an integration from the keyring, and drops its flows and
+  // the copies in memory. a client that the owner stored under clientRef stays.
+  forget(integrationId: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -490,6 +494,7 @@ export function createOAuth(deps: OAuthDeps): OAuth {
       else askingAgain.delete(id);
     },
     closeIfIdle: closeWhenIdle,
+    forget: () => notBuilt('forget of oauth tokens'),
     pendingUrl(id) {
       // the sdk also makes a flow when a sign-in stops in a call or a start that the owner did not begin. the callback
       // does not listen then, so its link would end in a refused connection after the consent. the page shows Connect

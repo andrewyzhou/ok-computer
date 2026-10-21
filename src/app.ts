@@ -41,6 +41,8 @@ import type { GoogleEndpoints } from './google/accounts.js';
 import { finishDigest, noteFailedDigest, signalDigest, type Digest } from './signals/digest.js';
 import { sessionProfile, type IntegrationEntry } from './integrations/config.js';
 import { createIntegrations, type Integrations, type IntegrationsDeps } from './integrations/integrations.js';
+import { createHub, integrationEntries } from './connectors/wire.js';
+import type { Connectors } from './connectors/service.js';
 import { createOAuth } from './integrations/oauth.js';
 import { syncPolls } from './integrations/polls.js';
 import { createMemorySecretStore, type SecretStore } from './integrations/secrets.js';
@@ -133,6 +135,8 @@ export interface App {
   // the policy rules that the caller uses now. "always allow" adds to this list while the app runs.
   rules: readonly Rule[];
   integrations: Integrations;
+  // the connections hub (docs/CONNECT-PLAN.md, track S2): the Connect buttons of the dashboard.
+  connectors: Connectors;
   google?: Google;
   // the web chat of the dashboard. it exists when the web channel is one of the channels.
   chat?: WebChat;
@@ -172,7 +176,7 @@ export function createApp(deps: AppDeps): App {
   const owner = createOwnerMessenger({ db, channels, logger, clock, ...(preferred ? { preferred } : {}) });
   const ids = deps.newId ? { newId: deps.newId } : {};
   const blobs = createBlobStore(db, join(config.paths.data, 'blobs'), clock);
-  const entries = deps.integrations ?? [];
+  const entries = integrationEntries({ db, clock, logger, file: deps.integrations ?? [] });
   const secrets = deps.secrets ?? createMemorySecretStore();
   const oauth = entries.some((entry) => entry.kind === 'mcp-http' && entry.auth?.type === 'oauth')
     ? createOAuth({ db, clock, logger, secrets })
@@ -242,6 +246,18 @@ export function createApp(deps: AppDeps): App {
   // the dashboard accepts the public name only with a token, and the sign-in codes exist only then. without them, a
   // link to the public name gets a 403.
   const dashboardUrl = (deps.loginCodes && config.dashboard.publicUrl) || `http://127.0.0.1:${config.dashboard.port}`;
+  // the connections hub manages the connections of the Connect buttons, next to the entries of the file.
+  const hub = createHub({
+    db,
+    clock,
+    logger,
+    secrets,
+    integrations,
+    ...(oauth ? { oauth } : {}),
+    ...(google ? { google } : {}),
+    file: deps.integrations ?? [],
+    dashboardUrl,
+  });
   const desk = createDesk({
     db,
     clock,
@@ -342,6 +358,7 @@ export function createApp(deps: AppDeps): App {
     ...sandbox.tools,
     ...createDocTools({ db, dashboardUrl }),
     ...today.tools,
+    ...hub.tools,
   ];
   // a profile names built-in tools and google tools. a name that this app does not have is left out.
   const registered = new Set([...builtIn, ...(google?.tools ?? [])].map((tool) => tool.name));
@@ -619,6 +636,7 @@ export function createApp(deps: AppDeps): App {
       await sandbox.stop();
     },
     integrations,
+    connectors: hub.connectors,
     ...(google ? { google } : {}),
     ...(inbox ? { inbox } : {}),
     today,
