@@ -42,7 +42,8 @@ import {
 import { mountAutonomy } from './autonomy.js';
 import { googleRoutes } from './google.js';
 import { integrationDetail, summaryOf } from './integrations.js';
-import { createSessions, LOCAL_SESSION_MS, LOGIN_PAGE, REMOTE_SESSION_MS, type LoginCodes } from './login.js';
+import { createSessions, LOCAL_SESSION_MS, REMOTE_SESSION_MS, type LoginCodes } from './login.js';
+import { mountLoginCode } from './login-code.js';
 import { mountBrief } from './brief.js';
 import { mountBrowser } from './browser.js';
 import { mountCalendar } from './calendar.js';
@@ -56,17 +57,22 @@ import { mountInbox } from './inbox.js';
 import { mountPeople } from './people.js';
 import { mountSandbox } from './sandbox.js';
 import { mountSearch } from './search.js';
+import { mountSignIn } from './signin.js';
+import { remoteHostOf, signInHost } from './signin-host.js';
 import { mountSpans } from './spans.js';
 import { isDay, limitOf } from './params.js';
 import { createFeed } from './stream.js';
 import type { ContextView, MemoryFile, Meta } from './types.js';
+import { createSignIn } from '../signin/index.js';
+import { REMEMBER_MS } from '../signin/limits.js';
+import { renderLoginPage } from '../signin/page.js';
 
 export interface DashboardDeps {
   db: Db;
   config: Config;
   clock: Clock;
   logger: Logger;
-  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google' | 'rules' | 'chat' | 'inbox' | 'sandbox' | 'secretVault' | 'docs' | 'today'>;
+  app: Pick<App, 'contextView' | 'resolveApproval' | 'scheduler' | 'integrations' | 'google' | 'rules' | 'chat' | 'inbox' | 'sandbox' | 'secretVault' | 'docs' | 'today' | 'codeCourier'>;
   // with a token, every api request must give it. the browser gives it in the query, because EventSource has no
   // headers.
   token?: string;
@@ -121,8 +127,10 @@ export function createDashboard(deps: DashboardDeps): Hono {
   const remoteSessions = createSessions(clock, REMOTE_SESSION_MS);
   // tailscale serve forwards the requests of the tailnet name. that name is accepted only with a token, so the
   // dashboard is never open on the tailnet without one.
-  const remoteHost = deps.token && config.dashboard.publicUrl ? new URL(config.dashboard.publicUrl).hostname : undefined;
+  const remoteHost = remoteHostOf(config, deps.token);
   if (config.dashboard.publicUrl && !deps.token) logger.warn('dashboard.publicUrl is ignored, because DASHBOARD_TOKEN is not set');
+  // the stored sessions and the codes by text of track s1 (src/signin/). they exist only with a token.
+  const signIn = deps.token ? createSignIn({ db, clock, token: deps.token, ...(app.codeCourier ? { courier: app.codeCourier } : {}) }) : undefined;
 
   // a web page in the browser can send requests to a loopback port. the host check stops dns rebinding, and the
   // json check makes the browser ask for cors permission before a write, which this server never gives.
@@ -131,7 +139,7 @@ export function createDashboard(deps: DashboardDeps): Hono {
     if (!LOOPBACK.has(host) && host !== remoteHost) return c.text('forbidden', 403);
     if (c.req.path.startsWith('/api/')) {
       // the login and the shutdown come before a sign-in. each checks its own code or token.
-      const open = c.req.path === '/api/login' || c.req.path === '/api/shutdown';
+      const open = c.req.path === '/api/login' || c.req.path === '/api/login/code' || c.req.path === '/api/shutdown';
       const given = c.req.header('authorization')?.replace(/^Bearer /, '') ?? c.req.query('token');
       const cookie = getCookie(c, SESSION_COOKIE);
       const signedIn = (given !== undefined && same(given, deps.token)) || (host === remoteHost ? remoteSessions : localSessions).valid(cookie);
@@ -149,7 +157,11 @@ export function createDashboard(deps: DashboardDeps): Hono {
 
   // the owner signs in one time with a code or the token. the token then never goes into a url, a bookmark or the
   // history.
-  server.get('/login', (c) => (deps.token ? c.html(LOGIN_PAGE) : c.redirect('/')));
+  server.get('/login', (c) => {
+    if (!signIn) return c.redirect('/');
+    const host = signInHost(c.req.url, remoteHost);
+    return c.html(renderLoginPage({ host, textCode: signIn.textCode(), rememberDays: REMEMBER_MS[host] / 86_400_000 }));
+  });
 
   // windows has no signal that okc can send to the hidden agent, and a forced stop skips the end of the runs. so okc
   // asks here first. the token is in a file in the data folder, which only the owner's account can read.
@@ -383,6 +395,8 @@ export function createDashboard(deps: DashboardDeps): Hono {
   mountPeople(server, deps);
   mountBrief(server, deps);
   mountCalendar(server, deps);
+  mountLoginCode(server, deps, signIn);
+  mountSignIn(server, deps, signIn);
 
   server.all('/api/*', (c) => notFound(c, 'api route'));
   if (existsSync(join(webDir, 'index.html'))) {

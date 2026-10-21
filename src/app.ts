@@ -67,6 +67,8 @@ import { AUTOMATION_TOOLS, createJobRunner } from './scheduler/jobs.js';
 import { createScheduler, type Scheduler, type SetTimer } from './scheduler/scheduler.js';
 import { createAutomationTools } from './scheduler/tools.js';
 import { createCommands, signInLink } from './sessions/commands.js';
+import { createTelegramCourier } from './signin/courier.js';
+import type { CodeCourier } from './signin/types.js';
 import { createOwnerMessenger } from './sessions/owner.js';
 import { createRunQueue } from './sessions/queue.js';
 import { createRouter, MAIN_SESSION, MAIN_TOOLS } from './sessions/router.js';
@@ -143,6 +145,8 @@ export interface App {
   // the owner's comments on the docs (phase 6 t4). the dashboard adds them, and each goes to the main session.
   docs: Pick<DocComments, 'add'>;
   secretVault?: SecretVault;
+  // the way a sign-in code by text reaches the owner (track s1): the owner's private telegram chat.
+  codeCourier: CodeCourier;
 }
 
 // a run ends at its timeout. the margin covers the end of the run itself, so a live run is never closed as stale.
@@ -625,6 +629,7 @@ export function createApp(deps: AppDeps): App {
     sandbox,
     docs: docComments,
     ...(deps.secretVault ? { secretVault: deps.secretVault } : {}),
+    codeCourier: createTelegramCourier({ channels, ownerIds, logger }),
     // without compaction hooks the strategy only renders. it does not call a model or append an event.
     contextView: (sessionKey) =>
       strategy.build({
