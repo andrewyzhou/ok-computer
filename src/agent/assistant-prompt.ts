@@ -1,6 +1,7 @@
 import { BRIEF_INSTRUCTIONS } from '../brief/prompt.js';
 import { DESK_INSTRUCTIONS } from '../desk/prompt.js';
 import { DOCS_INSTRUCTIONS } from '../docs/prompt.js';
+import { GOALS_INSTRUCTIONS } from '../goals/prompt.js';
 import { PEOPLE_INSTRUCTIONS } from '../people/prompt.js';
 
 // the instructions of phase 6 about how the agent works for the owner, as one set. each track keeps its part next to
@@ -11,6 +12,7 @@ export const ASSISTANT_OPENING = `The parts below cover specific tools. SOUL.md 
 
 // the parts in the order of the prompt, each with the tool that a session must have for it.
 const PARTS: ReadonlyArray<{ tool: string; text: string }> = [
+  { tool: 'goals_set', text: GOALS_INSTRUCTIONS },
   { tool: 'delegation_create', text: DESK_INSTRUCTIONS },
   { tool: 'doc_write', text: DOCS_INSTRUCTIONS },
   { tool: 'person_note', text: PEOPLE_INSTRUCTIONS },

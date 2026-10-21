@@ -51,6 +51,7 @@ import type { ModelClient, ModelRequest } from './models/types.js';
 import { createBlobStore } from './observability/blobs.js';
 import type { Logger } from './observability/logger.js';
 import { BUILTIN_RULES, type Rule } from './policy/policy.js';
+import { permissionsInstructions } from './policy/permissions-prompt.js';
 import { guardReply } from './policy/reply.js';
 import { createReviewer } from './policy/reviewer.js';
 import { createSandbox, type Sandbox, type SandboxOptions } from './sandbox/sandbox.js';
@@ -396,7 +397,10 @@ export function createApp(deps: AppDeps): App {
       // the owner chat and the automations get the instructions of the desk, the docs, the people and the brief, as
       // one set with only the parts whose tools the session has. the light sessions below get their own.
       const light = [HEARTBEAT_PREFIX, CONSOLIDATION_PREFIX, WORKSHOP_PREFIX, 'sub:'].some((prefix) => sessionKey.startsWith(prefix));
-      const assistant = light ? '' : assistantInstructions(withIntegrations(sessionKey, sessionTools(sessionKey)));
+      // the permissions follow the trust ladder, so a change on the dashboard reaches the next prompt.
+      const assistant = light
+        ? ''
+        : [assistantInstructions(withIntegrations(sessionKey, sessionTools(sessionKey))), permissionsInstructions(db)].filter(Boolean).join('\n\n');
       return buildStablePrompt({
         workspaceDir: config.paths.workspace,
         timeZone: config.timeZone,
